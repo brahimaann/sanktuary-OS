@@ -30,7 +30,8 @@ export type AppType =
   | 'profile'
   | 'planner'
   | 'tracks'
-  | 'timeline';
+  | 'timeline'
+  | 'business';
 
 export interface WindowInstance {
   id: string;

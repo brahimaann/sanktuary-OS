@@ -1,7 +1,7 @@
 // Regression + security tests for the file API and boards, against temp data and a fake Clerk.
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { createHmac } from 'node:crypto';
+import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ const clerk = http
   .createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     const m = req.url.match(/^\/users\/user_(\w+)/);
-    if (m) return res.end(JSON.stringify({ id: `user_${m[1]}`, username: m[1] }));
+    if (m) return res.end(JSON.stringify({ id: `user_${m[1]}`, username: m[1], two_factor_enabled: m[1] === 'alice' }));
     if (req.url.startsWith('/users')) return res.end(JSON.stringify(USERS.map((u) => ({ id: `user_${u}`, username: u }))));
     res.statusCode = 404;
     res.end('{}');
@@ -36,7 +36,7 @@ const rel = drive.slice(3).split('\\').join('/');
 writeFileSync(
   join(dir, 'data', 'config.json'),
   JSON.stringify({
-    admins: ['alice'],
+    admins: ['alice', 'dave'], // dave: an admin without two-step verification
     drives: { d: { name: 'D', enabled: true }, off: { name: 'Off', enabled: false } },
     spaces: [
       { id: 'view', name: 'View', drive: 'd', path: `${rel}/team`, everyone: 'view', access: {} },
@@ -58,6 +58,15 @@ writeFileSync(
   }),
 );
 
+// Clerk-style session tokens (RS256), for the parts that insist on a real sign-in token (business portal)
+const jwtKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const jwt = (u, extra = {}) => {
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const body = `${enc({ alg: 'RS256', typ: 'JWT', kid: 'test' })}.${enc({ sub: `user_${u}`, iat: now, nbf: now - 5, exp: now + 600, ...extra })}`;
+  return `${body}.${createSign('RSA-SHA256').update(body).sign(jwtKeys.privateKey, 'base64url')}`;
+};
+
 const srv = spawn(process.execPath, [SERVER], {
   env: {
     ...process.env,
@@ -65,6 +74,7 @@ const srv = spawn(process.execPath, [SERVER], {
     DATA_DIR: join(dir, 'data'),
     CLERK_SECRET_KEY: SECRET,
     CLERK_API_URL: 'http://127.0.0.1:3197',
+    CLERK_JWT_KEY: jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }),
     SITE_ORIGINS: '',
   },
 });
@@ -398,6 +408,87 @@ try {
   check('only https links', (await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { link: 'ftp://x' })).status === 400);
   check('carol cannot delete it', [403, 404].includes((await call('carol', `/api/timeline/${shoot.id}`, 'DELETE')).status)); // 404 once it's private
   check('owner deletes it', (await call('bob', `/api/timeline/${shoot.id}`, 'DELETE')).status === 200);
+
+  // Business portal: admins only, real token only, two-step required, everything audited, vault stays off the tunnel
+  const biz = async (u, path, method = 'GET', body, headers = {}, raw = false) => {
+    const r = await fetch(B + '/api/business' + path, {
+      method,
+      headers: { ...(u ? { authorization: `Bearer ${typeof u === 'string' ? jwt(u) : u.token}` } : {}), ...headers },
+      body: raw ? body : body && JSON.stringify(body),
+    });
+    return { status: r.status, text: await r.text() };
+  };
+  const bj = async (...a) => {
+    const r = await biz(...a);
+    return { status: r.status, body: r.status === 200 ? JSON.parse(r.text) : r.text };
+  };
+  check('portal: the site cookie alone is refused', (await call('alice', '/api/business/overview')).status === 401);
+  check('portal: a forged token is refused', (await biz({ token: jwt('alice').slice(0, -4) + 'AAAA' }, '/overview')).status === 401);
+  check('portal: non-admins are refused', (await biz('bob', '/overview')).status === 403);
+  const noTwoStep = await biz('dave', '/overview');
+  check('portal: admin without two-step is told to turn it on', noTwoStep.status === 428 && /two-step/.test(noTwoStep.text));
+  check(
+    'portal: a session that skipped the second step is refused',
+    (await biz({ token: jwt('alice', { fva: [2, -1] }) }, '/overview')).status === 428,
+  );
+  check('portal: alice (admin + two-step) gets in', (await biz('alice', '/overview')).status === 200);
+  const client = (await bj('alice', '/clients', 'POST', { name: 'Twin Cities Barber Co', email: 'hi@example.com' })).body;
+  check('client added', client.status === 'Lead' && client.name === 'Twin Cities Barber Co');
+  const job = (await bj('alice', '/jobs', 'POST', { title: 'Logo + website', client: client.id, amount: '1500' })).body;
+  check('job added with amount', job.amount === 1500 && job.client === client.id);
+  check('job needs a real client', (await biz('alice', '/jobs', 'POST', { title: 'x', client: 'nope' })).status === 400);
+  const inv1 = (
+    await bj('alice', '/invoices', 'POST', {
+      client: client.id,
+      items: [
+        { desc: 'Logo', qty: 1, rate: 600 },
+        { desc: 'Site', qty: 1, rate: 900 },
+      ],
+    })
+  ).body;
+  const inv2 = (await bj('alice', '/invoices', 'POST', { client: client.id })).body;
+  const year = new Date().toLocaleDateString('en-CA').slice(0, 4);
+  check('invoices are numbered per year', inv1.number === `INV-${year}-001` && inv2.number === `INV-${year}-002`);
+  check(
+    'bad amounts refused',
+    (await biz('alice', `/invoices/${inv2.id}`, 'PATCH', { items: [{ desc: 'x', qty: 'lots', rate: 1 }] })).status === 400,
+  );
+  await biz('alice', `/invoices/${inv1.id}`, 'PATCH', { status: 'Sent', due: '2000-01-01' });
+  const over = (await bj('alice', '/overview')).body;
+  check('overview: owed and overdue', over.owed === 1500 && over.overdue.some((o) => o.number === inv1.number));
+  await biz('alice', `/invoices/${inv1.id}`, 'PATCH', { status: 'Paid' });
+  const paid = (await bj('alice', `/invoices/${inv1.id}`)).body;
+  check('paying stamps the date', paid.paidOn === new Date().toLocaleDateString('en-CA'));
+  check('overview: paid this year', (await bj('alice', '/overview')).body.paidThisYear === 1500);
+  const doc = (await bj('alice', `/docs?name=contract.pdf&client=${client.id}&vault=1`, 'PUT', '%PDF-1.4 contract', {}, true)).body;
+  check('document stored', doc.size === 17 && doc.vault === true);
+  check('vault opens off the tunnel (Tailscale / on the PC)', (await biz('alice', `/docs/${doc.id}/file`)).text === '%PDF-1.4 contract');
+  check(
+    'vault refused through the public tunnel',
+    (await biz('alice', `/docs/${doc.id}/file`, 'GET', undefined, { 'cf-ray': 'abc-MSP' })).status === 403,
+  );
+  await biz('alice', `/docs/${doc.id}`, 'PATCH', { vault: false });
+  check(
+    'normal documents open through the tunnel',
+    (await biz('alice', `/docs/${doc.id}/file`, 'GET', undefined, { 'cf-ray': 'abc-MSP' })).status === 200,
+  );
+  check(
+    'removing keeps the record hidden, not destroyed',
+    (await biz('alice', `/clients/${client.id}`, 'DELETE')).status === 200 &&
+      existsSync(join(dir, 'data', 'business', 'files', `${doc.id}.pdf`)),
+  );
+  const auditLog = JSON.parse((await biz('alice', '/audit')).text);
+  check(
+    'every access is audited',
+    [
+      'opened the portal',
+      'added client',
+      'uploaded to the vault',
+      'opened document',
+      'was refused a vault document over the internet',
+    ].every((a) => auditLog.some((e) => e.action === a && e.user === 'alice')),
+  );
+  check('audit records the route', auditLog.some((e) => e.via === 'internet') && auditLog.some((e) => e.via === 'tailscale/local'));
 
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });

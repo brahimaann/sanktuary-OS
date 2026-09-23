@@ -115,6 +115,16 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
 ];
 
 // Only shown to admins (see useMe)
+// Admins only too; the server additionally requires two-step verification
+const BUSINESS_ICON: DesktopIconDef = {
+  id: 'business',
+  title: 'Business',
+  icon: '/images/icons/my-documents-folder-32x32.png',
+  appType: 'business',
+  width: 860,
+  height: 600,
+};
+
 const ADMIN_ICON: DesktopIconDef = {
   id: 'admin-panel',
   title: 'Admin Panel',
@@ -231,7 +241,7 @@ export const Desktop: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds, vfsIcons]);
 
-  const allIcons = [...DEFAULT_ICONS, ...(me?.admin ? [ADMIN_ICON] : []), ...vfsIcons];
+  const allIcons = [...DEFAULT_ICONS, ...(me?.admin ? [ADMIN_ICON, BUSINESS_ICON] : []), ...vfsIcons];
 
   // Marquee Selection Logic / Clicking background
   const handlePointerDown = (e: React.PointerEvent) => {

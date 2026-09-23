@@ -138,6 +138,14 @@ function sessionTokens(req, url) {
   ].filter(Boolean);
 }
 
+// CLERK_JWT_KEY (Clerk dashboard > API keys > JWT public key) lets tokens be checked without a call to Clerk;
+// without it, Clerk's published keys are fetched as before.
+const clerkVerifyOptions = () => ({
+  secretKey: process.env.CLERK_SECRET_KEY,
+  jwtKey: process.env.CLERK_JWT_KEY || undefined,
+  authorizedParties: SITE_ORIGINS.length ? SITE_ORIGINS : undefined,
+});
+
 async function currentUser(req, url, cfg) {
   const asUser = async (sub) => {
     const username = await usernameOf(sub);
@@ -145,10 +153,7 @@ async function currentUser(req, url, cfg) {
   };
   for (const token of sessionTokens(req, url)) {
     try {
-      const { sub } = await verifyToken(token, {
-        secretKey: process.env.CLERK_SECRET_KEY,
-        authorizedParties: SITE_ORIGINS.length ? SITE_ORIGINS : undefined,
-      });
+      const { sub } = await verifyToken(token, clerkVerifyOptions());
       return await asUser(sub);
     } catch (err) {
       if (err instanceof HttpError) throw err;
@@ -1433,6 +1438,251 @@ async function timelineAlerts() {
 }
 setInterval(() => timelineAlerts().catch(console.error), 3.6e6).unref();
 
+// ── /api/business: the private business portal — data/business/ ──
+// Clients, jobs, invoices and documents, for admins only, and only with:
+//   • a real Clerk session token in the Authorization header (the long-lived site cookie isn't enough),
+//   • two-step verification switched on for the account (and not skipped this session, when Clerk says so).
+// Every request is written to data/business/audit.jsonl. Documents marked "vault" only open when the request
+// did not come through the public Cloudflare tunnel (i.e. over Tailscale, or on the PC itself).
+const BIZ = () => join(DATA, 'business');
+const BIZ_KINDS = {
+  clients: { text: { name: 100, company: 100, email: 200, phone: 50, notes: 4000 }, status: ['Lead', 'Active', 'Past'] },
+  jobs: { text: { title: 150, notes: 4000 }, status: ['Quote', 'In progress', 'Delivered', 'Paid', 'Cancelled'] },
+  invoices: { text: { notes: 2000, billTo: 500 }, status: ['Draft', 'Sent', 'Paid', 'Void'] },
+};
+const twoStep = new Map(); // clerk user id -> { on, at }
+let bizDb = null;
+let bizSaved = Promise.resolve();
+const loadBiz = async () =>
+  (bizDb ??= await readJson('business/business.json', { clients: {}, jobs: {}, invoices: {}, docs: {}, nextInvoice: {} }));
+const saveBiz = () =>
+  (bizSaved = bizSaved
+    .then(() => mkdir(BIZ(), { recursive: true }).then(() => saveJson('business/business.json', bizDb)))
+    .catch(console.error));
+const viaTunnel = (req) => !!req.headers['cf-ray']; // Cloudflare adds this to everything it forwards
+const money = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) / 100 : fail(400, 'Amounts must be numbers'));
+
+async function businessUser(req, url) {
+  const cfg = await loadConfig();
+  const token = req.headers.authorization?.replace(/^Bearer /, '') || fail(401, 'Sign in to open the business portal');
+  let claims;
+  try {
+    claims = await verifyToken(token, clerkVerifyOptions());
+  } catch {
+    fail(401, 'Your sign-in expired. Sign in again.');
+  }
+  const username = await usernameOf(claims.sub);
+  if (!cfg.admins.includes(username)) fail(403, 'The business portal is for admins only');
+  let t = twoStep.get(claims.sub);
+  if (!t || Date.now() - t.at > 5 * 60_000) {
+    const r = await clerk(`/users/${claims.sub}`);
+    t = { on: r.ok && !!(await r.json()).two_factor_enabled, at: Date.now() };
+    twoStep.set(claims.sub, t);
+  }
+  if (!t.on)
+    fail(428, 'Turn on two-step verification first: Account settings > Security > add an authenticator app. Then sign out and back in.');
+  if (Array.isArray(claims.fva) && claims.fva[1] === -1)
+    fail(428, 'Sign out and back in with your two-step code to open the business portal.');
+  return { username, admin: true };
+}
+
+async function audit(req, user, action, what = '') {
+  await mkdir(BIZ(), { recursive: true });
+  const entry = {
+    at: new Date().toISOString(),
+    user: user.username,
+    action,
+    what,
+    ip: req.headers['cf-connecting-ip'] || req.socket.remoteAddress,
+    via: viaTunnel(req) ? 'internet' : 'tailscale/local',
+  };
+  await appendFile(join(BIZ(), 'audit.jsonl'), JSON.stringify(entry) + '\n');
+}
+
+async function businessApi(req, res, url) {
+  const user = await businessUser(req, url);
+  const db = await loadBiz();
+  const [, , , kind, id, sub] = url.pathname.split('/'); // /api/business/<clients|jobs|invoices|docs|overview|audit>/<id>/<file>
+  const me = user.username;
+
+  if (req.method === 'GET' && kind === 'overview') {
+    await audit(req, user, 'opened the portal');
+    const inv = Object.values(db.invoices).filter((i) => !i.deleted);
+    const total = (i) => i.items.reduce((n, it) => n + it.qty * it.rate, 0);
+    const today = localDate();
+    const year = today.slice(0, 4);
+    return json(res, {
+      owed: inv.filter((i) => i.status === 'Sent').reduce((n, i) => n + total(i), 0),
+      overdue: inv
+        .filter((i) => i.status === 'Sent' && i.due && i.due < today)
+        .map((i) => ({ id: i.id, number: i.number, due: i.due, total: total(i), client: i.client })),
+      paidThisYear: inv.filter((i) => i.status === 'Paid' && (i.paidOn || '').startsWith(year)).reduce((n, i) => n + total(i), 0),
+      activeJobs: Object.values(db.jobs).filter((j) => !j.deleted && ['Quote', 'In progress', 'Delivered'].includes(j.status)).length,
+      clients: Object.values(db.clients).filter((c) => !c.deleted && c.status !== 'Past').length,
+      viaTunnel: viaTunnel(req),
+    });
+  }
+  if (req.method === 'GET' && kind === 'audit') {
+    const lines = (await readFile(join(BIZ(), 'audit.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean);
+    return json(
+      res,
+      lines
+        .slice(-300)
+        .map((l) => JSON.parse(l))
+        .reverse(),
+    );
+  }
+
+  if (kind === 'settings') {
+    // What goes at the top and bottom of an invoice
+    db.settings ||= { name: '', address: '', email: '', payment: '' };
+    if (req.method === 'PATCH') {
+      const input = await jsonBody(req);
+      for (const [k, max] of Object.entries({ name: 100, address: 500, email: 200, payment: 1000 }))
+        if (input[k] !== undefined) db.settings[k] = String(input[k] ?? '').slice(0, max);
+      saveBiz();
+      await audit(req, user, 'changed invoice details');
+    }
+    return json(res, db.settings);
+  }
+  if (kind === 'docs') return businessDocs(req, res, url, user, db, id, sub);
+
+  const spec = BIZ_KINDS[kind] || fail(404, 'Unknown section');
+  const coll = db[kind];
+  if (req.method === 'GET' && !id) {
+    await audit(req, user, `listed ${kind}`);
+    return json(
+      res,
+      Object.values(coll).filter((x) => !x.deleted),
+    );
+  }
+  const apply = (x, input) => {
+    for (const [k, max] of Object.entries(spec.text)) if (input[k] !== undefined) x[k] = String(input[k] ?? '').slice(0, max);
+    if (input.status !== undefined) x.status = spec.status.includes(input.status) ? input.status : fail(400, 'Bad status');
+    if (input.client !== undefined)
+      x.client = input.client && db.clients[input.client] ? input.client : input.client ? fail(400, 'No such client') : null;
+    if (kind === 'jobs') {
+      if (input.amount !== undefined) x.amount = money(input.amount || 0);
+      if (input.due !== undefined) x.due = dateOrNull(input.due);
+    }
+    if (kind === 'invoices') {
+      if (input.job !== undefined) x.job = input.job && db.jobs[input.job] ? input.job : null;
+      for (const k of ['issued', 'due', 'paidOn']) if (input[k] !== undefined) x[k] = dateOrNull(input[k]);
+      if (input.items !== undefined)
+        x.items = (Array.isArray(input.items) ? input.items : []).slice(0, 50).map((it) => ({
+          desc: String(it?.desc || '').slice(0, 300),
+          qty: money(it?.qty ?? 1),
+          rate: money(it?.rate ?? 0),
+        }));
+      if (x.status === 'Paid' && !x.paidOn) x.paidOn = localDate();
+    }
+  };
+
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const x = { id: randomUUID().slice(0, 10), status: spec.status[0], client: null, created: new Date().toISOString(), createdBy: me };
+    for (const k of Object.keys(spec.text)) x[k] = '';
+    if (kind === 'invoices') {
+      // Numbered per year: INV-2026-001, INV-2026-002...
+      const year = localDate().slice(0, 4);
+      db.nextInvoice[year] = (db.nextInvoice[year] || 0) + 1;
+      Object.assign(x, {
+        number: `INV-${year}-${String(db.nextInvoice[year]).padStart(3, '0')}`,
+        items: [],
+        issued: localDate(),
+        due: null,
+        paidOn: null,
+        job: null,
+      });
+    }
+    if (kind === 'jobs') Object.assign(x, { amount: 0, due: null });
+    apply(x, input);
+    if (kind === 'clients' && !x.name.trim()) fail(400, 'Give the client a name');
+    if (kind === 'jobs' && !x.title.trim()) fail(400, 'Give the job a title');
+    coll[x.id] = x;
+    saveBiz();
+    await audit(req, user, `added ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    return json(res, x);
+  }
+  const x = (coll[id] && !coll[id].deleted && coll[id]) || fail(404, 'Not found');
+  if (req.method === 'GET') {
+    await audit(req, user, `opened ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    return json(res, x);
+  }
+  if (req.method === 'PATCH') {
+    apply(x, await jsonBody(req));
+    x.updated = new Date().toISOString();
+    saveBiz();
+    await audit(req, user, `changed ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    return json(res, x);
+  }
+  if (req.method === 'DELETE') {
+    x.deleted = new Date().toISOString(); // kept in the file, hidden: nothing here is ever really deleted
+    saveBiz();
+    await audit(req, user, `removed ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    return json(res, { ok: true });
+  }
+  fail(405, 'Not allowed');
+}
+
+/** Contracts, briefs, receipts... stored on the PC itself (data/business/files), never on a USB space. */
+async function businessDocs(req, res, url, user, db, id, sub) {
+  const q = url.searchParams;
+  if (req.method === 'GET' && !id) {
+    await audit(req, user, 'listed documents');
+    return json(
+      res,
+      Object.values(db.docs).filter((d) => !d.deleted),
+    );
+  }
+  if (req.method === 'PUT' && !id) {
+    // One request per file (contracts and receipts are small; Cloudflare's 100 MB cap applies)
+    const name = safeName(q.get('name'));
+    const d = {
+      id: randomUUID().slice(0, 12),
+      name,
+      client: q.get('client') && db.clients[q.get('client')] ? q.get('client') : null,
+      vault: q.get('vault') === '1',
+      size: 0,
+      added: new Date().toISOString(),
+      addedBy: user.username,
+    };
+    await mkdir(join(BIZ(), 'files'), { recursive: true });
+    const file = join(BIZ(), 'files', d.id + extname(name).toLowerCase());
+    await pipeline(req, createWriteStream(file));
+    d.size = (await stat(file)).size;
+    db.docs[d.id] = d;
+    saveBiz();
+    await audit(req, user, `uploaded${d.vault ? ' to the vault' : ''}`, name);
+    return json(res, d);
+  }
+  const d = (db.docs[id] && !db.docs[id].deleted && db.docs[id]) || fail(404, 'No such document');
+  const file = join(BIZ(), 'files', d.id + extname(d.name).toLowerCase());
+  if (req.method === 'GET' && sub === 'file') {
+    if (d.vault && viaTunnel(req)) {
+      await audit(req, user, 'was refused a vault document over the internet', d.name);
+      fail(403, 'Vault documents only open over Tailscale. Turn Tailscale on and use the Tailscale address.');
+    }
+    await audit(req, user, 'opened document', d.name);
+    return stream(req, res, q, file);
+  }
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    if (input.vault !== undefined) d.vault = !!input.vault;
+    if (input.client !== undefined) d.client = input.client && db.clients[input.client] ? input.client : null;
+    saveBiz();
+    await audit(req, user, 'changed document', d.name);
+    return json(res, d);
+  }
+  if (req.method === 'DELETE') {
+    d.deleted = new Date().toISOString(); // file kept on disk
+    saveBiz();
+    await audit(req, user, 'removed document', d.name);
+    return json(res, { ok: true });
+  }
+  fail(405, 'Not allowed');
+}
+
 /** What the file window and Profile need to show about a project. */
 const projectView = (p, me) => ({
   kind: p.kind,
@@ -2339,6 +2589,7 @@ const routes = [
   ['/api/push', pushApi],
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
+  ['/api/business', businessApi],
   ['/s/', publicShare],
 ];
 
