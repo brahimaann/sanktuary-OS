@@ -293,6 +293,22 @@ async function files(req, res, url) {
     log('renamed', { to: q.get('rename') });
     return json(res, { ok: true });
   }
+  if (req.method === 'POST' && q.has('move')) {
+    // Drag and drop into another folder of the same space. ?move=<folder, "/"-separated; "" = the space's top>
+    need('upload');
+    if (target === root) fail(400, "Can't move the space itself");
+    const dest = resolve(root, ...q.get('move').split('/').filter(Boolean).map(safeName));
+    if (!inside(root, dest) || inside(target, dest)) fail(400, "Can't move a folder into itself");
+    if (!(await stat(dest).catch(() => null))?.isDirectory()) fail(404, 'No such folder');
+    if (RANK[space.rights] < RANK.edit && !(await ownsAll(space, target, user.username)))
+      fail(403, 'You can only move things you added. Ask an admin to move this.');
+    const to = join(dest, basename(target));
+    if (existsSync(to)) fail(409, `There's already a "${basename(target)}" in that folder`);
+    await rename(target, to);
+    await moveOwners(space, target, to);
+    log('moved', { to: relative(root, to).split(sep).join('/') });
+    return json(res, { ok: true });
+  }
   if (req.method === 'POST' && q.has('restore')) {
     need('edit');
     const version = join(root, '.sk-versions', rel, safeName(q.get('restore')));
@@ -383,14 +399,16 @@ async function zipFolder(res, dir, name, transfer) {
   if (!(await stat(dir).catch(() => null))?.isDirectory()) fail(404, 'Not a folder');
   const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
   if (!items.length) fail(404, 'This folder is empty');
+  const size = await folderSize(dir); // the zip's size is only known at the end; this is close enough for a progress bar
   const tar = spawn(TAR, ['--format', 'zip', '--options', 'zip:compression=store', '--exclude', '.sk-*', '-cf', '-', '-C', dir, ...items]);
   tar.stderr.resume();
   res.on('close', () => tar.kill());
   res.writeHead(200, {
     'content-type': 'application/zip',
     'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name + '.zip')}`,
+    'x-total-bytes': size,
   });
-  transfer('downloaded folder (zip)', await folderSize(dir));
+  transfer('downloaded folder (zip)', size);
   return pipeline(tar.stdout, res);
 }
 

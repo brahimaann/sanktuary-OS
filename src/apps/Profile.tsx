@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useAuth, UserButton } from '@clerk/react';
+import { useAuth } from '@clerk/react';
+import AccountButton from '../components/AccountButton';
 import { useWindowManager } from '../wm/manager';
 import { useApi, useMe } from '../utils/api';
 import { liveUser } from '../utils/live';
@@ -151,7 +152,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             />
           </div>
           <div title="Account, access code and sign out">
-            <UserButton />
+            <AccountButton />
           </div>
         </div>
         {FIELDS.map(([k, label, hint]) => (

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { UserButton, useAuth } from '@clerk/react';
+import { createPortal } from 'react-dom';
+import { useAuth } from '@clerk/react';
+import AccountButton from '../components/AccountButton';
 import { useWindowManager } from '../wm/manager';
 import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
@@ -70,6 +72,38 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     }
   });
   const uploadRef = useRef<HTMLInputElement>(null);
+  const [hist, setHist] = useState<{ back: string[][]; fwd: string[][] }>({ back: [], fwd: [] });
+  const [xfer, setXfer] = useState<Transfer | null>(null);
+  const [over, setOver] = useState<string | null>(null); // drop target under the dragged item
+  const [ghost, setGhost] = useState<{ name: string; isDir: boolean; x: number; y: number } | null>(null);
+  const touchDrag = useRef<{ name: string; isDir: boolean; x: number; y: number; timer: number; active: boolean } | null>(null);
+  const skipClick = useRef(false);
+
+  // Explorer-style history: Back/Forward walk it, any other navigation starts a new branch
+  const go = (to: string[]) => {
+    setHist((h) => ({ back: [...h.back, path], fwd: [] }));
+    setPath(to);
+  };
+  const goBack = () => {
+    const to = hist.back[hist.back.length - 1];
+    if (!to) return;
+    setHist({ back: hist.back.slice(0, -1), fwd: [path, ...hist.fwd] });
+    setPath(to);
+  };
+  const goForward = () => {
+    const [to, ...rest] = hist.fwd;
+    if (!to) return;
+    setHist({ back: [...hist.back, path], fwd: rest });
+    setPath(to);
+  };
+
+  // While a finger drags a file, stop the page from scrolling under it
+  useEffect(() => {
+    if (!ghost) return;
+    const stop = (e: TouchEvent) => e.preventDefault();
+    document.addEventListener('touchmove', stop, { passive: false });
+    return () => document.removeEventListener('touchmove', stop);
+  }, [!!ghost]);
 
   const url = (parts: string[]) => fileUrl(app, parts);
   const can = (level: Rights) => RANK[rights] >= RANK[level];
@@ -111,7 +145,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   };
 
   const open = (e: Entry) => {
-    if (e.isDir) return setPath([...path, e.name]);
+    if (e.isDir) return go([...path, e.name]);
     openWindow({
       id: `preview-${app}-${[...path, e.name].join('/')}`,
       title: e.name,
@@ -156,10 +190,12 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     const total = items.reduce((n, u) => n + u.file.size, 0) || 1;
     const sent = new Map<string, number>(); // bytes sent per in-flight chunk, for one combined progress figure
     let filesDone = 0;
+    const started = Date.now();
     const progress = () => {
       const bytes = [...sent.values()].reduce((a, b) => a + b, 0);
-      setStatus(`Uploading ${filesDone}/${items.length} done — ${Math.floor((bytes / total) * 100)}%`);
+      setXfer({ label: `Uploading ${filesDone}/${items.length}`, done: bytes, total, started });
     };
+    progress();
     try {
       // Several files at once, and several chunks of each big file at once: one connection through
       // Cloudflare is often throttled, parallel ones fill the line.
@@ -176,12 +212,113 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         filesDone++;
         progress();
       });
-      setStatus('');
+      setStatus(`Uploaded ${items.length} file(s) in ${duration((Date.now() - started) / 1000)}.`);
     } catch (err) {
       setStatus(`Upload stopped: ${(err as Error).message}`);
     }
+    setXfer(null);
     setBusy(false);
     load();
+  };
+
+  // Downloads stream straight to disk with progress where the browser allows picking a save location
+  // (Chrome/Edge on a computer); elsewhere the browser's own download takes over. Folders come as a .zip.
+  const download = async (e: Entry) => {
+    const name = e.isDir ? `${e.name}.zip` : e.name;
+    const href = `${url([...path, e.name])}?${e.isDir ? 'zip' : 'download'}`;
+    const pick = (window as unknown as { showSaveFilePicker?: (o: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
+    if (!pick) return void window.open(`${href}&t=${await getToken()}`, '_blank');
+    let handle: FileSystemFileHandle;
+    try {
+      handle = await pick({ suggestedName: name });
+    } catch {
+      return; // cancelled
+    }
+    setBusy(true);
+    const started = Date.now();
+    try {
+      const res = await call(href, 'GET');
+      const total = Number(res.headers.get('x-total-bytes') || res.headers.get('content-length')) || 0;
+      const out = await handle.createWritable();
+      const reader = res.body!.getReader();
+      let done = 0;
+      for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+        await out.write(chunk.value);
+        done += chunk.value.length;
+        setXfer({ label: `Downloading ${name}`, done, total, started });
+      }
+      await out.close();
+      setStatus(`Downloaded ${name} (${formatSize(done)}) in ${duration((Date.now() - started) / 1000)}.`);
+    } catch (err) {
+      setStatus(`Download stopped: ${(err as Error).message}`);
+    }
+    setXfer(null);
+    setBusy(false);
+  };
+
+  /** Move an item (from this or another window onto the same space) into the folder `dest`. */
+  const move = async (from: { dir: string[]; name: string }, dest: string[]) => {
+    if (dest.join('/') === from.dir.join('/') || dest.join('/') === [...from.dir, from.name].join('/')) return;
+    try {
+      await call(`${url([...from.dir, from.name])}?move=${encodeURIComponent(dest.join('/'))}`, 'POST');
+      setStatus(`Moved ${from.name} to ${[name, ...dest].join('\\')}`);
+      load();
+    } catch (err) {
+      setStatus((err as Error).message);
+    }
+  };
+
+  /** Makes a folder row (or the Up button) accept dragged items, by mouse or by finger. */
+  const dropProps = (dest: string[]) => {
+    const key = JSON.stringify(dest);
+    return {
+      'data-drop': key,
+      onDragOver: (ev: React.DragEvent) => {
+        if (!ev.dataTransfer.types.includes(DRAG_FILE)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        setOver(key);
+      },
+      onDragLeave: () => setOver(null),
+      onDrop: (ev: React.DragEvent) => {
+        const raw = ev.dataTransfer.getData(DRAG_FILE);
+        if (!raw) return; // files from the computer: let the window upload them
+        ev.preventDefault();
+        ev.stopPropagation();
+        setOver(null);
+        const d = JSON.parse(raw);
+        if (d.app !== app) return setStatus("Moving between spaces isn't supported: download, then upload.");
+        move(d, dest);
+      },
+    };
+  };
+
+  // Touch: hold an item for half a second, then drag it onto a folder or Up
+  const touchMove = (ev: React.PointerEvent) => {
+    const d = touchDrag.current;
+    if (!d) return;
+    if (!d.active) {
+      if (Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 8) {
+        clearTimeout(d.timer); // it's a scroll, not a drag
+        touchDrag.current = null;
+      }
+      return;
+    }
+    setOver(document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-drop]')?.dataset.drop ?? null);
+    setGhost({ name: d.name, isDir: d.isDir, x: ev.clientX, y: ev.clientY });
+  };
+  const touchEnd = (ev: React.PointerEvent) => {
+    const d = touchDrag.current;
+    touchDrag.current = null;
+    if (!d) return;
+    clearTimeout(d.timer);
+    if (!d.active) return;
+    skipClick.current = true;
+    setGhost(null);
+    setOver(null);
+    const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-drop]')?.dataset.drop;
+    if (ev.type === 'pointerup' && target) move({ dir: path, name: d.name }, JSON.parse(target));
+    else setStatus('');
   };
 
   const onDrop = async (e: React.DragEvent) => {
@@ -279,29 +416,68 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   if (!isSignedIn) return <LogOn name={name} />;
 
   const rowProps = (e: Entry) => ({
-    onClick: () => (isTouch ? open(e) : setSelected(e.name)),
+    onClick: () => {
+      if (skipClick.current) return void (skipClick.current = false); // the tap that ended a finger drag
+      isTouch ? open(e) : setSelected(e.name);
+    },
     onDoubleClick: () => open(e),
-    draggable: true,
+    draggable: !isTouch,
     onDragStart: (ev: React.DragEvent) =>
       ev.dataTransfer.setData(DRAG_FILE, JSON.stringify({ app, dir: path, name: e.name, isDir: e.isDir })),
+    onDragEnd: () => setOver(null),
+    onPointerDown: (ev: React.PointerEvent) => {
+      if (ev.pointerType !== 'touch' || !can('upload')) return;
+      const d = { name: e.name, isDir: e.isDir, x: ev.clientX, y: ev.clientY, active: false, timer: 0 };
+      d.timer = window.setTimeout(() => {
+        d.active = true;
+        setSelected(e.name);
+        setGhost({ name: e.name, isDir: e.isDir, x: d.x, y: d.y });
+        setStatus('Drag onto a folder or Up to move it.');
+        navigator.vibrate?.(15);
+      }, 450);
+      touchDrag.current = d;
+    },
+    onContextMenu: (ev: React.MouseEvent) => isTouch && ev.preventDefault(), // no long-press menu on phones
+    ...(e.isDir ? dropProps([...path, e.name]) : {}),
+    style: {
+      ...(selected === e.name ? selectedStyle : {}),
+      ...(e.isDir && over === JSON.stringify([...path, e.name]) ? dropHover : {}),
+      WebkitTouchCallout: 'none',
+    } as React.CSSProperties,
   });
+  const nav = (label: string, dir: 'left' | 'right' | 'up', off: boolean, onClick: () => void, extra = {}) => (
+    <button style={{ ...button, display: 'flex', alignItems: 'center', gap: 3 }} disabled={off} onClick={onClick} {...extra}>
+      <Arrow dir={dir} off={off} />
+      {label}
+    </button>
+  );
 
   return (
     <div
       style={shell}
       onDragOver={(e) => {
         e.preventDefault();
-        if (can('upload')) setDragging(true);
+        if (can('upload') && e.dataTransfer.types.includes('Files')) setDragging(true);
       }}
       onDragLeave={(e) => {
         if (e.currentTarget === e.target) setDragging(false);
       }}
-      onDrop={(e) => (can('upload') ? onDrop(e) : e.preventDefault())}
+      onDrop={(e) => (can('upload') && e.dataTransfer.types.includes('Files') ? onDrop(e) : e.preventDefault())}
     >
       <div style={toolbar}>
-        <button style={button} disabled={!path.length} onClick={() => setPath(path.slice(0, -1))}>
-          Up
-        </button>
+        {nav('Back', 'left', !hist.back.length, goBack)}
+        {nav('Forward', 'right', !hist.fwd.length, goForward)}
+        {nav('Up', 'up', !path.length, () => go(path.slice(0, -1)), {
+          ...(path.length ? dropProps(path.slice(0, -1)) : {}),
+          style: {
+            ...button,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            ...(path.length && over === JSON.stringify(path.slice(0, -1)) ? dropHover : {}),
+          },
+        })}
+        <div style={sep} />
         {can('upload') && (
           <button style={button} disabled={busy} onClick={() => uploadRef.current?.click()}>
             Upload...
@@ -322,14 +498,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             Delete
           </button>
         )}
-        <button
-          style={button}
-          disabled={!pick}
-          title="Folders download as a .zip"
-          onClick={async () =>
-            pick && window.open(`${url([...path, pick.name])}?${pick.isDir ? 'zip' : 'download'}&t=${await getToken()}`, '_blank')
-          }
-        >
+        <button style={button} disabled={!pick || busy} title="Folders download as a .zip" onClick={() => pick && download(pick)}>
           Download
         </button>
         <button style={button} disabled={!pick || pick.isDir} onClick={showVersions}>
@@ -355,13 +524,13 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           }}
         />
         <div style={{ flex: 1 }} />
-        <UserButton />
+        <AccountButton />
       </div>
       <div style={address}>
         <span style={{ color: '#444', marginRight: 6 }}>Address</span>
         <div style={addressBox}>\\SANKTUARY\{[name, ...path].join('\\')}</div>
       </div>
-      <div style={{ ...listBox, position: 'relative' }}>
+      <div style={{ ...listBox, position: 'relative' }} onPointerMove={touchMove} onPointerUp={touchEnd} onPointerCancel={touchEnd}>
         {view === 'list' ? (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -375,7 +544,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             </thead>
             <tbody>
               {entries.map((e) => (
-                <tr key={e.name} {...rowProps(e)} style={selected === e.name ? selectedStyle : undefined}>
+                <tr key={e.name} {...rowProps(e)}>
                   <td style={td}>
                     <img
                       src={fileIcon(e.name, e.isDir)}
@@ -393,7 +562,12 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         ) : (
           <div style={grid}>
             {entries.map((e) => (
-              <div key={e.name} {...rowProps(e)} style={tile} title={e.name}>
+              <div
+                key={e.name}
+                {...rowProps(e)}
+                style={{ ...tile, ...(e.isDir && over === JSON.stringify([...path, e.name]) ? dropHover : {}) }}
+                title={e.name}
+              >
                 <div style={thumbBox}>
                   {!e.isDir && hasThumb(e.name) && token ? (
                     <img
@@ -477,11 +651,87 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           </div>
         )}
       </div>
+      {ghost &&
+        createPortal(
+          <div style={{ ...dragGhost, left: ghost.x + 14, top: ghost.y + 14 }}>
+            <img src={fileIcon(ghost.name, ghost.isDir)} alt="" style={{ width: 16, height: 16 }} />
+            {ghost.name}
+          </div>,
+          document.body,
+        )}
+      {xfer && <ProgressBar t={xfer} />}
       <div style={statusBar}>
         {status ||
           `${entries.length} object(s) · ${{ none: '', view: 'view only', upload: 'you can upload and delete your own files', edit: 'full edit' }[rights]}${quota ? ` · ${formatSize(quota.used)} of ${formatSize(quota.quota)} used` : ''} — ${isTouch ? 'tap' : 'double-click'} to open${can('upload') ? ' · drag files here to upload' : ''}`}
       </div>
     </div>
+  );
+};
+
+interface Transfer {
+  label: string;
+  done: number;
+  total: number; // 0 = unknown
+  started: number;
+}
+
+/** "45 sec", "3 min", "1 h 20 min" */
+const duration = (sec: number) =>
+  sec < 60
+    ? `${Math.max(1, Math.round(sec))} sec`
+    : sec < 5400
+      ? `${Math.round(sec / 60)} min`
+      : `${Math.floor(sec / 3600)} h ${Math.round((sec % 3600) / 60)} min`;
+
+/** Win98 copy-dialog style progress: segmented navy bar, percentage, speed and time left. */
+const ProgressBar: React.FC<{ t: Transfer }> = ({ t }) => {
+  const secs = (Date.now() - t.started) / 1000;
+  const speed = secs > 0.5 ? t.done / secs : 0;
+  const pct = t.total ? Math.min(100, Math.floor((t.done / t.total) * 100)) : null;
+  const left = speed && t.total ? (t.total - t.done) / speed : null;
+  return (
+    <div style={{ padding: '3px 4px 0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {t.label}
+          {pct !== null ? ` — ${pct}%` : ''}
+        </span>
+        <span style={{ whiteSpace: 'nowrap' }}>
+          {formatSize(t.done)}
+          {t.total ? ` of ${formatSize(t.total)}` : ''}
+          {speed ? ` · ${formatSize(speed)}/s` : ''}
+          {left !== null ? ` · about ${duration(left)} left` : ' · estimating...'}
+        </span>
+      </div>
+      <div style={{ height: 16, background: '#fff', border: '2px inset #808080', padding: 1 }}>
+        <div
+          style={{
+            height: '100%',
+            width: `${pct ?? 100}%`,
+            background:
+              pct === null
+                ? 'repeating-linear-gradient(90deg, #000080 0 8px, transparent 8px 10px) 0 0 / 40px 100%'
+                : 'repeating-linear-gradient(90deg, #000080 0 8px, transparent 8px 10px)',
+            transition: 'width 0.3s',
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+/** Win98 toolbar arrow; disabled ones are grey with the white etched shadow. */
+const Arrow: React.FC<{ dir: 'left' | 'right' | 'up'; off?: boolean }> = ({ dir, off }) => {
+  const shape = <path d="M0 6.5 L6.5 0 L6.5 4 L13 4 L13 9 L6.5 9 L6.5 13 Z" />;
+  return (
+    <svg width="14" height="14" viewBox="-0.5 -0.5 14 14" style={{ transform: `rotate(${{ left: 0, right: 180, up: 90 }[dir]}deg)` }}>
+      {off && (
+        <g fill="#fff" transform="translate(1 1)">
+          {shape}
+        </g>
+      )}
+      <g fill={off ? '#808080' : '#000'}>{shape}</g>
+    </svg>
   );
 };
 
@@ -619,6 +869,28 @@ const th: React.CSSProperties = {
 };
 const td: React.CSSProperties = { padding: isTouch ? '8px 6px' : '1px 6px', whiteSpace: 'nowrap', cursor: 'default', userSelect: 'none' };
 const selectedStyle: React.CSSProperties = { background: '#000080', color: '#fff' };
+const dropHover: React.CSSProperties = { outline: '2px dotted #000080', outlineOffset: -2, background: '#c8d0ff' };
+const sep: React.CSSProperties = {
+  width: 2,
+  alignSelf: 'stretch',
+  margin: '2px 2px',
+  borderLeft: '1px solid #808080',
+  borderRight: '1px solid #fff',
+};
+const dragGhost: React.CSSProperties = {
+  position: 'fixed',
+  zIndex: 100000,
+  pointerEvents: 'none',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 6px',
+  background: '#000080',
+  color: '#fff',
+  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontSize: 11,
+  opacity: 0.85,
+};
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, padding: 8 };
 const tile: React.CSSProperties = {
   display: 'flex',

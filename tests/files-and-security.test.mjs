@@ -30,6 +30,7 @@ writeFileSync(join(drive, 'team', 'evil.html'), '<script>alert(1)</script>');
 writeFileSync(join(drive, 'team', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 writeFileSync(join(drive, 'team', 'pic.png'), Buffer.from('89504e47', 'hex'));
 writeFileSync(join(drive, 'team', 'old.txt'), 'was on the drive before Sanktuary');
+writeFileSync(join(drive, 'team', 'loose.txt'), 'also already there');
 const letter = drive.slice(0, 2); // e.g. C:
 const rel = drive.slice(3).split('\\').join('/');
 writeFileSync(
@@ -134,6 +135,17 @@ try {
   await up('bob', 'up', 'renamed-me.txt', 'r');
   await call('bob', '/api/files/ed/renamed-me.txt?rename=renamed.txt', 'POST');
   check('rename keeps ownership', (await call('bob', '/api/files/up/renamed.txt', 'DELETE')).status === 200);
+
+  // Drag-and-drop moves
+  await up('bob', 'up', 'mv.txt', 'm');
+  check('upload: can move own file into a folder', (await call('bob', '/api/files/up/mv.txt?move=docs', 'POST')).status === 200);
+  check('moved file landed', readFileSync(join(drive, 'team', 'docs', 'mv.txt'), 'utf8') === 'm');
+  check('move keeps ownership', (await call('bob', '/api/files/up/docs/mv.txt?move=', 'POST')).status === 200);
+  check("upload: cannot move others' files", (await call('bob', '/api/files/up/pic.png?move=docs', 'POST')).status === 403);
+  check('edit: can move anything', (await call('bob', '/api/files/ed/loose.txt?move=docs', 'POST')).status === 200);
+  check('cannot move a folder into itself', (await call('alice', '/api/files/ed/docs?move=docs', 'POST')).status === 400);
+  check('move cannot escape the space', (await call('alice', '/api/files/ed/mv.txt?move=..', 'POST')).status === 400);
+  check('move onto an existing name -> 409', (await call('alice', '/api/files/ed/docs/song.txt?move=docs', 'POST')).status === 409);
 
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
