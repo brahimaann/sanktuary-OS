@@ -4,7 +4,7 @@ import { useWindowManager } from '../wm/manager';
 import { useBoard } from '../utils/useBoard';
 import { DRAG_FILE } from '../utils/refs';
 import { dialog } from '../utils/dialog';
-import { fileIcon, fileKind } from './fileTypes';
+import { fileIcon, fileKind, needsConversion } from './fileTypes';
 import { LogOn, fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 
 /**
@@ -285,7 +285,8 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
 
   const addTeamFile = async (ref: { app: string; dir: string[]; name: string }, at: { x: number; y: number }) => {
     const src = fileUrl(ref.app, [...ref.dir, ref.name]);
-    if (fileKind(ref.name) === 'image') add({ type: 'image', ...at, ...(await imageSize(src)), src, name: ref.name, ref });
+    const shown = needsConversion(ref.name) ? `${src}?preview` : src; // PSD/TIFF: the server's converted image
+    if (fileKind(ref.name) === 'image') add({ type: 'image', ...at, ...(await imageSize(shown)), src: shown, name: ref.name, ref });
     else add({ type: 'file', ...at, w: 240, h: fileKind(ref.name) === 'audio' ? 110 : 64, name: ref.name, ref, src });
   };
 
