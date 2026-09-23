@@ -209,6 +209,57 @@ try {
     JSON.parse((await call('carol', '/api/projects?space=view&path=Song%20B')).text).following === true,
   );
 
+  // Share links for people without an account
+  const mk = async (u, space, path, opts) => {
+    const r = await call(u, '/api/links', 'POST', { space, path, days: 7, download: true, ...opts });
+    return { status: r.status, link: r.status === 200 ? JSON.parse(r.text) : null };
+  };
+  const anon = (path, init) => fetch(B + path, init);
+  check('view rights cannot make public links', (await mk('carol', 'view', 'docs')).status === 403);
+  const { link: open } = await mk('bob', 'up', 'docs');
+  check('link token is long and random', /^\/s\/[\w-]{32}$/.test(open.url));
+  check('public page loads without an account', (await anon(open.url)).status === 200);
+  check('public page is not indexed', (await anon(open.url)).headers.get('x-robots-tag')?.includes('noindex'));
+  const openInfo = await (await anon(`${open.url}/info`)).json();
+  check('link shows what was shared', openInfo.name === 'docs' && openInfo.isDir && !openInfo.locked);
+  check(
+    'link lists its folder',
+    (await (await anon(`${open.url}/list`)).json()).some((e) => e.name === 'song.txt'),
+  );
+  check('link streams a file', (await (await anon(`${open.url}/file?path=song.txt`)).text()) === 'v2');
+  check('link cannot escape its folder', (await anon(`${open.url}/file?path=..%2Fpic.png`)).status === 400);
+  check('link hides Sanktuary folders', (await anon(`${open.url}/list?path=.sk-versions`)).status === 400);
+  await anon(`${open.url}/file?path=song.txt&download`);
+  const counted = JSON.parse((await call('bob', '/api/links?space=up&path=docs')).text)[0];
+  check('views and downloads counted', counted.views >= 1 && counted.downloads === 1);
+  check('others cannot see link stats', JSON.parse((await call('carol', '/api/links?space=view&path=docs')).text).length === 0);
+  check('carol cannot turn off bob’s link', (await call('carol', `/api/links/${open.token}`, 'DELETE')).status === 403);
+  check('creator turns it off', (await call('bob', `/api/links/${open.token}`, 'DELETE')).status === 200);
+  check('turned-off link is gone', (await anon(`${open.url}/info`)).status === 410);
+
+  const { link: viewOnly } = await mk('bob', 'up', 'docs', { download: false });
+  check('download off: can still stream', (await anon(`${viewOnly.url}/file?path=song.txt`)).status === 200);
+  check('download off: no download', (await anon(`${viewOnly.url}/file?path=song.txt&download`)).status === 403);
+  check('download off: no zip', (await anon(`${viewOnly.url}/zip`)).status === 403);
+
+  const { link: locked } = await mk('bob', 'up', 'docs/song.txt', { password: 'hunter22' });
+  const lockedInfo = await (await anon(`${locked.url}/info`)).json();
+  check('password link hides its contents', lockedInfo.locked && lockedInfo.name === 'Protected link');
+  check('password link blocks files', (await anon(`${locked.url}/file`)).status === 401);
+  check('wrong password refused', (await anon(`${locked.url}/unlock`, { method: 'POST', body: '{"password":"nope"}' })).status === 403);
+  const ok = await anon(`${locked.url}/unlock`, { method: 'POST', body: '{"password":"hunter22"}' });
+  const linkCookie = ok.headers.get('set-cookie').split(';')[0];
+  check(
+    'right password unlocks',
+    ok.status === 200 && (await (await anon(`${locked.url}/file`, { headers: { cookie: linkCookie } })).text()) === 'v2',
+  );
+  for (let i = 0; i < 10; i++) await anon(`${locked.url}/unlock`, { method: 'POST', body: '{"password":"guess"}' });
+  check(
+    'password guessing is rate-limited',
+    (await anon(`${locked.url}/unlock`, { method: 'POST', body: '{"password":"hunter22"}' })).status === 429,
+  );
+  check('made-up token -> 404', (await anon('/s/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/info')).status === 404);
+
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
   const zipBytes = Buffer.from(await zip.arrayBuffer());

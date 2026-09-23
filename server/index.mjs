@@ -9,7 +9,7 @@
 import http from 'node:http';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
@@ -572,7 +572,7 @@ async function assertUnlocked(space, abs, username, around = true) {
       fail(423, `${p.name} is checked out by ${p.lock.user}. You can view and download it, but not change it until it's checked back in.`);
 }
 
-/** Project records follow renames and moves, and go when the project is deleted. */
+/** Project records and share links follow renames and moves; deleting ends them. */
 async function moveProjects(space, from, to) {
   const all = await loadProjects();
   const [a, b] = [ownerKey(space, from), to && ownerKey(space, to)];
@@ -587,6 +587,21 @@ async function moveProjects(space, from, to) {
       delete all[k];
     }
   saveProjects();
+  const fromD = relative(space.driveRoot, from).split(sep).join('/');
+  for (const l of Object.values(await loadLinks()))
+    if (
+      l.drive === space.drive &&
+      (l.dpath.toLowerCase() === fromD.toLowerCase() || l.dpath.toLowerCase().startsWith(fromD.toLowerCase() + '/'))
+    ) {
+      if (!to)
+        l.revoked = true; // deleted: the link stops working
+      else {
+        const toD = relative(space.driveRoot, to).split(sep).join('/');
+        if (l.dpath.length === fromD.length) l.name = basename(to);
+        l.dpath = toD + l.dpath.slice(fromD.length);
+      }
+    }
+  saveLinks();
 }
 
 // Files a project points at that aren't inside it, i.e. what would come up "missing" on someone else's computer.
@@ -794,6 +809,190 @@ async function projectsApi(req, res, url) {
     return json(res, { ok: true, ...projectView(p, me) });
   }
   fail(400, 'Unknown project action');
+}
+
+// ── Share links: sanktuary.studio/s/<token> for people without an account — data/links.json ──
+// 192-bit random tokens, optional expiry and password (scrypt), revocable, downloads on or off. Views and
+// downloads are counted; only whoever made the link, the item's owner and admins can see the counts.
+// A link points at drive + path, so it survives spaces being rearranged and follows renames/moves.
+let links = null;
+let linksSaved = Promise.resolve();
+const loadLinks = async () => (links ??= await readJson('links.json', {}));
+const saveLinks = () => (linksSaved = linksSaved.then(() => saveJson('links.json', links)).catch(console.error));
+const hashPassword = (pw, salt = randomBytes(16).toString('hex')) => `${salt}:${scryptSync(pw, salt, 32).toString('hex')}`;
+const passwordOk = (pw, stored) => {
+  const [salt, hash] = stored.split(':');
+  return timingSafeEqual(scryptSync(String(pw), salt, 32), Buffer.from(hash, 'hex'));
+};
+const LINK_DAYS = [1, 7, 30, 90, 0]; // 0 = never expires
+const unlockTries = new Map(); // "<token>|<ip>" -> { n, since }
+
+async function canManageLink(l, user) {
+  return user.admin || l.createdBy === user.username || (await loadOwners())[`${l.drive}|${l.dpath.toLowerCase()}`] === user.username;
+}
+const linkView = (token, l) => ({
+  token,
+  url: `/s/${token}`,
+  name: l.name,
+  isDir: l.isDir,
+  createdBy: l.createdBy,
+  created: l.created,
+  expires: l.expires,
+  password: !!l.password,
+  download: l.download,
+  revoked: !!l.revoked,
+  views: l.views,
+  downloads: l.downloads,
+  lastOpened: l.lastOpened || null,
+});
+
+async function linksApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const status = await loadStatus();
+  const all = await loadLinks();
+  const token = url.pathname.split('/')[3];
+
+  if (token && req.method === 'DELETE') {
+    const l = all[token] || fail(404, 'No such link');
+    if (!(await canManageLink(l, user))) fail(403, 'Only whoever made the link, the owner or an admin can turn it off');
+    l.revoked = true;
+    saveLinks();
+    return json(res, linkView(token, l));
+  }
+  if (req.method === 'GET' && url.searchParams.has('mine')) {
+    const list = [];
+    for (const [t, l] of Object.entries(all)) if (await canManageLink(l, user)) list.push(linkView(t, l));
+    return json(res, list.reverse());
+  }
+
+  const q = req.method === 'POST' ? await jsonBody(req) : Object.fromEntries(url.searchParams);
+  const space = spacesFor(user, cfg, status).find((s) => s.id === q.space) || fail(404, 'No such space');
+  if (!space.online) fail(503, 'Drive offline');
+  const { root, abs } = locateIn(space, q.path);
+  if (abs === root) fail(400, 'Share a folder or file inside the space');
+  const key = `${space.drive}|${relative(space.driveRoot, abs).split(sep).join('/').toLowerCase()}`;
+
+  if (req.method === 'GET') {
+    const list = [];
+    for (const [t, l] of Object.entries(all))
+      if (`${l.drive}|${l.dpath.toLowerCase()}` === key && (await canManageLink(l, user))) list.push(linkView(t, l));
+    return json(res, list.reverse());
+  }
+  if (req.method === 'POST') {
+    if (RANK[space.rights] < RANK.upload) fail(403, 'You need upload rights in this space to share it outside the team');
+    const s = (await stat(abs).catch(() => null)) || fail(404, 'Not found');
+    const days = LINK_DAYS.includes(Number(q.days)) ? Number(q.days) : fail(400, 'Bad expiry');
+    const password = String(q.password || '');
+    if (password && password.length < 4) fail(400, 'Use a password of at least 4 characters');
+    const t = randomBytes(24).toString('base64url');
+    all[t] = {
+      drive: space.drive,
+      dpath: relative(space.driveRoot, abs).split(sep).join('/'),
+      name: basename(abs),
+      isDir: s.isDirectory(),
+      createdBy: user.username,
+      created: new Date().toISOString(),
+      expires: days ? new Date(Date.now() + days * 864e5).toISOString() : null,
+      password: password ? hashPassword(password) : null,
+      download: !!q.download,
+      views: 0,
+      downloads: 0,
+    };
+    saveLinks();
+    logActivity(user, 'made a share link for', { space: space.id, spaceName: space.name, path: relative(root, abs).split(sep).join('/') });
+    return json(res, linkView(t, all[t]));
+  }
+  fail(405, 'Not allowed');
+}
+
+// Public side. Everything under /s/<token> is reachable without an account, so every request re-checks the
+// link (exists, not revoked, not expired, unlocked if it has a password) and keeps paths inside it.
+const SHARE_PAGE = new URL('./share.html', import.meta.url);
+async function publicShare(req, res, url) {
+  res.setHeader('x-robots-tag', 'noindex, nofollow');
+  res.setHeader('referrer-policy', 'no-referrer'); // the token is in the URL
+  const [, , token = '', action = ''] = url.pathname.split('/'); // /s/<token>/<info|unlock|list|file|zip|thumb>
+  if (!action) {
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-security-policy':
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'",
+    });
+    return pipeline(createReadStream(SHARE_PAGE), res);
+  }
+  const l = (/^[\w-]{32}$/.test(token) && (await loadLinks())[token]) || fail(404, 'This link does not exist');
+  if (l.revoked) fail(410, 'This link has been turned off');
+  if (l.expires && Date.parse(l.expires) < Date.now()) fail(410, 'This link has expired');
+  const cookieName = `sk_link_${token.slice(0, 10)}`;
+  const pass = l.password ? createHmac('sha256', process.env.CLERK_SECRET_KEY).update(`${token}:${l.password}`).digest('base64url') : null;
+  const unlocked = !l.password || (req.headers.cookie || '').split(/;\s*/).includes(`${cookieName}=${pass}`);
+  const saved = () => saveLinks();
+
+  if (action === 'info') {
+    if (unlocked) {
+      l.views++;
+      l.lastOpened = new Date().toISOString();
+      saved();
+    }
+    // A password-protected link shows nothing about what it holds until it's unlocked
+    if (!unlocked)
+      return json(res, { name: 'Protected link', locked: true, sharedBy: l.createdBy, expires: l.expires, download: l.download });
+    return json(res, { name: l.name, isDir: l.isDir, download: l.download, locked: false, sharedBy: l.createdBy, expires: l.expires });
+  }
+  if (action === 'unlock' && req.method === 'POST') {
+    const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+    const k = `${token}|${ip}`;
+    const t = unlockTries.get(k);
+    const tries = t && Date.now() - t.since < 15 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 10) fail(429, 'Too many wrong passwords. Try again in 15 minutes.');
+    if (!l.password || !passwordOk((await jsonBody(req)).password || '', l.password)) {
+      unlockTries.set(k, { ...tries, n: tries.n + 1 });
+      fail(403, 'Wrong password');
+    }
+    unlockTries.delete(k);
+    const secure = /https/.test(req.headers['cf-visitor'] || '') ? '; Secure' : '';
+    res.setHeader('set-cookie', `${cookieName}=${pass}; Path=/s/${token}; HttpOnly; SameSite=Lax; Max-Age=${12 * 3600}${secure}`);
+    return json(res, { ok: true });
+  }
+  if (!unlocked) fail(401, 'This link needs a password');
+
+  const cfg = await loadConfig();
+  const driveRoot = driveDir(cfg, await loadStatus(), l.drive) || fail(503, 'The drive this is on is offline right now. Try again later.');
+  const base = resolve(driveRoot, ...l.dpath.split('/'));
+  if (!existsSync(base)) fail(404, 'This item no longer exists');
+  const parts = String(url.searchParams.get('path') || '')
+    .split('/')
+    .filter(Boolean);
+  if (parts.some((p) => /[:\x00-\x1f]/.test(p) || p === '..' || HIDDEN.test(p)) || (!l.isDir && parts.length)) fail(400, 'Bad path');
+  const target = resolve(base, ...parts);
+  if (!inside(base, target)) fail(400, 'Bad path');
+  const who = { username: `link by ${l.createdBy}` };
+  const transfer = (action, bytes) => logTransfer(req, who, action, { name: 'Share link' }, [l.name, ...parts].join('/'), bytes);
+
+  if (action === 'list') {
+    if (!l.isDir) fail(400, 'Not a folder');
+    return json(res, await listDir(target));
+  }
+  if (action === 'thumb') return thumb(res, target);
+  if (action === 'zip') {
+    if (!l.download || !l.isDir) fail(403, 'Downloads are turned off for this link');
+    l.downloads++;
+    saved();
+    return zipFolder(res, target, basename(target), transfer);
+  }
+  if (action === 'file') {
+    const q = url.searchParams;
+    const inlineOk = SAFE_INLINE.test(MIME[extname(target).toLowerCase()] || '');
+    if ((q.has('download') || !inlineOk) && !l.download) fail(403, 'Downloads are turned off for this link');
+    if (q.has('download') && !/^bytes=[1-9]/.test(req.headers.range || '')) {
+      l.downloads++;
+      saved();
+    }
+    return stream(req, res, q, target, transfer);
+  }
+  fail(404, 'Not found');
 }
 
 /** What the file window and Profile need to show about a project. */
@@ -1681,6 +1880,8 @@ const routes = [
   ['/api/comments', comments],
   ['/api/activity', activity],
   ['/api/projects', projectsApi],
+  ['/api/links', linksApi],
+  ['/s/', publicShare],
 ];
 
 http

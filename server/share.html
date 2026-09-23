@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Shared from Sanktuary</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      :root {
+        --face: #c0c0c0;
+        --navy: #000080;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #008080;
+        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+        font-size: 13px;
+        color: #000;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 24px 12px;
+      }
+      .win {
+        width: min(760px, 100%);
+        background: var(--face);
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: 1px 1px 0 #000;
+      }
+      .title {
+        background: linear-gradient(90deg, var(--navy), #1084d0);
+        color: #fff;
+        font-weight: 700;
+        padding: 4px 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .title img {
+        width: 16px;
+        height: 16px;
+        image-rendering: pixelated;
+      }
+      .body {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .meta {
+        color: #333;
+      }
+      .inset {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+      }
+      button,
+      .btn {
+        font: inherit;
+        padding: 4px 12px;
+        min-height: 28px;
+        background: var(--face);
+        color: #000;
+        text-decoration: none;
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset -1px -1px #808080;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+      }
+      button:active,
+      .btn:active {
+        border-color: #000 #fff #fff #000;
+        box-shadow: inset 1px 1px #808080;
+      }
+      input {
+        font: inherit;
+        padding: 4px;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+      }
+      .crumbs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+      }
+      .crumbs a {
+        color: var(--navy);
+      }
+      .list {
+        max-height: 50vh;
+        overflow: auto;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-bottom: 1px solid #eee;
+        cursor: default;
+      }
+      .row:hover {
+        background: #e8e8ff;
+      }
+      .row.sel {
+        background: var(--navy);
+        color: #fff;
+      }
+      .row .n {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row .s {
+        color: #666;
+        white-space: nowrap;
+      }
+      .row.sel .s {
+        color: #ddd;
+      }
+      .viewer {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+      }
+      .viewer img,
+      .viewer video {
+        max-width: 100%;
+        max-height: 60vh;
+      }
+      .viewer audio {
+        width: 100%;
+      }
+      .viewer iframe {
+        width: 100%;
+        height: 60vh;
+        border: 0;
+      }
+      .err {
+        color: #a00000;
+      }
+      .foot {
+        color: #fff;
+        text-align: center;
+        margin-top: 10px;
+        font-size: 11px;
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="width: min(760px, 100%)">
+      <div class="win">
+        <div class="title"><img src="/images/icons/network-16x16.png" alt="" /><span id="t">Sanktuary</span></div>
+        <div class="body" id="app">Loading...</div>
+      </div>
+      <div class="foot">Shared from Sanktuary · sanktuary.studio</div>
+    </div>
+    <script>
+      const token = location.pathname.split('/')[2];
+      const base = `/s/${token}`;
+      const app = document.getElementById('app');
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+      const size = (b) =>
+        b < 1024
+          ? `${b} B`
+          : b < 1048576
+            ? `${(b / 1024).toFixed(0)} KB`
+            : b < 1073741824
+              ? `${(b / 1048576).toFixed(1)} MB`
+              : `${(b / 1073741824).toFixed(2)} GB`;
+      const kind = (n) => {
+        const e = n.split('.').pop().toLowerCase();
+        if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'aif', 'aiff'].includes(e)) return 'audio';
+        if (['mp4', 'm4v', 'mov', 'webm'].includes(e)) return 'video';
+        if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(e)) return 'image';
+        if (['tif', 'tiff', 'psd'].includes(e)) return 'preview';
+        if (e === 'pdf') return 'pdf';
+        if (['txt', 'md', 'csv', 'lrc'].includes(e)) return 'text';
+        return 'file';
+      };
+      const icon = (n, dir) =>
+        dir
+          ? '/images/icons/folder-16x16.png'
+          : {
+              audio: '/images/icons/media-player-16x16.png',
+              video: '/images/icons/video-16x16.png',
+              image: '/images/icons/paint-16x16.png',
+            }[kind(n)] || '/images/icons/document-16x16.png';
+      let info = null;
+      let path = [];
+      let selected = null;
+
+      const q = (extra = {}) => new URLSearchParams({ path: path.join('/'), ...extra }).toString();
+      async function get(url, opts) {
+        const r = await fetch(url, opts);
+        if (!r.ok) throw Object.assign(new Error((await r.text()) || `Error ${r.status}`), { status: r.status });
+        return r.headers.get('content-type')?.includes('json') ? r.json() : r.text();
+      }
+      const fail = (e) => (app.innerHTML = `<div class="err"><b>${esc(e.message)}</b></div>`);
+
+      async function start() {
+        try {
+          info = await get(`${base}/info`);
+        } catch (e) {
+          return fail(e);
+        }
+        document.getElementById('t').textContent = info.name;
+        document.title = `${info.name} · Sanktuary`;
+        if (info.locked) return askPassword();
+        info.isDir ? folder() : single();
+      }
+
+      function header(extra = '') {
+        return `<div class="meta">Shared by <b>${esc(info.sharedBy)}</b>${info.expires ? ` · link expires ${new Date(info.expires).toLocaleString()}` : ''}${
+          info.download ? '' : ' · view only'
+        }</div>${extra}`;
+      }
+
+      function askPassword(msg = '') {
+        app.innerHTML = `${header()}<form id="pw" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          This link needs a password:
+          <input type="password" id="p" autocomplete="off" autofocus style="flex:1;min-width:160px"><button>OK</button></form>
+          ${msg ? `<div class="err">${esc(msg)}</div>` : ''}`;
+        document.getElementById('pw').onsubmit = async (e) => {
+          e.preventDefault();
+          try {
+            await get(`${base}/unlock`, { method: 'POST', body: JSON.stringify({ password: document.getElementById('p').value }) });
+            start();
+          } catch (err) {
+            askPassword(err.message);
+          }
+        };
+      }
+
+      function viewer(name) {
+        const src = `${base}/file?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}`;
+        const k = kind(name);
+        const dl = info.download ? `<a class="btn" href="${src}&download">Download ${esc(name)}</a>` : '';
+        const media =
+          k === 'audio'
+            ? `<audio controls autoplay src="${src}"></audio>`
+            : k === 'video'
+              ? `<video controls playsinline src="${src}"></video>`
+              : k === 'image'
+                ? `<img src="${src}" alt="">`
+                : k === 'preview'
+                  ? `<img src="${base}/thumb?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}" alt="">`
+                  : k === 'pdf'
+                    ? `<iframe src="${src}"></iframe>`
+                    : k === 'text'
+                      ? `<iframe src="${src}" style="height:40vh;background:#fff"></iframe>`
+                      : `<div>No preview for this kind of file.${info.download ? '' : ' Downloads are turned off for this link.'}</div>`;
+        return `<div class="viewer inset">${media}${dl}</div>`;
+      }
+
+      function single() {
+        app.innerHTML = header(viewer(info.name));
+      }
+
+      async function folder() {
+        let list;
+        try {
+          list = await get(`${base}/list?${q()}`);
+        } catch (e) {
+          return fail(e);
+        }
+        list.sort((a, b) => b.isDir - a.isDir || a.name.localeCompare(b.name, undefined, { numeric: true }));
+        const crumbs = [info.name, ...path]
+          .map((p, i) => (i === path.length ? `<b>${esc(p)}</b>` : `<a href="#" data-up="${i}">${esc(p)}</a>`))
+          .join(' \\ ');
+        app.innerHTML =
+          header() +
+          `<div class="crumbs">${crumbs}${info.download ? `<span style="flex:1"></span><a class="btn" href="${base}/zip?${q()}">Download all (.zip)</a>` : ''}</div>` +
+          `<div class="inset list">${
+            list
+              .map(
+                (e, i) =>
+                  `<div class="row${selected === e.name ? ' sel' : ''}" data-i="${i}"><img src="${icon(e.name, e.isDir)}" alt="" width="16" height="16"><span class="n">${esc(e.name)}</span><span class="s">${e.isDir ? '' : size(e.size)}</span></div>`,
+              )
+              .join('') || '<div class="row">This folder is empty.</div>'
+          }</div>` +
+          (selected ? viewer(selected) : '');
+        app.querySelectorAll('[data-up]').forEach((a) =>
+          a.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            path = path.slice(0, Number(a.dataset.up));
+            selected = null;
+            folder();
+          }),
+        );
+        app.querySelectorAll('[data-i]').forEach((row) =>
+          row.addEventListener('click', () => {
+            const e = list[Number(row.dataset.i)];
+            if (e.isDir) path = [...path, e.name];
+            selected = e.isDir ? null : e.name;
+            folder();
+          }),
+        );
+      }
+      start();
+    </script>
+  </body>
+</html>
