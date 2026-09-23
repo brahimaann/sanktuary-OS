@@ -583,7 +583,8 @@ function staticFile(req, res, url) {
   let file = normalize(join(DIST, decodeURIComponent(url.pathname)));
   if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
-  res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream' });
+  const page = file.endsWith('index.html'); // always re-check the page so browsers pick up new builds
+  res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', ...(page ? { 'cache-control': 'no-cache' } : {}) });
   return pipeline(createReadStream(file), res);
 }
 

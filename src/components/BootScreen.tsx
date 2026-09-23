@@ -75,7 +75,7 @@ const HERCULES_LINES = [
 ];
 
 type BootStage = 'BIOS' | 'HERCULES' | 'MAINFRAME_LINK';
-type DialogueState = 'ASK_NAME' | 'ASK_PASSWORD' | 'VERIFYING' | 'ASK_BOOT' | 'BOOTING' | 'DONE';
+type DialogueState = 'ASK_NAME' | 'ASK_PASSWORD' | 'ASK_CODE' | 'VERIFYING' | 'ASK_BOOT' | 'BOOTING' | 'DONE';
 
 const ASK_PASSWORD_LINES = [
   `TEAM OPERATORS: ENTER YOUR ACCESS CODE.`,
@@ -86,7 +86,7 @@ const ASK_PASSWORD_LINES = [
 export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
   const [stage, setStage] = useState<BootStage>('BIOS');
   const { isSignedIn } = useAuth();
-  const teamLogin = useTeamLogin();
+  const { login: teamLogin, verify: teamVerify } = useTeamLogin();
   const [biosVisibleCount, setBiosVisibleCount] = useState(0);
   const [herculesVisibleCount, setHerculesVisibleCount] = useState(0);
 
@@ -306,7 +306,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
       }
       setDialogueState('VERIFYING');
       setMainframeHistory(prev => [...prev, `VERIFYING OPERATOR CLEARANCE...`]);
-      teamLogin(getCookie('hq_os_username') || '', cleanInput).then((error) => {
+      teamLogin(getCookie('hq_os_username') || '', cleanInput).then(({ error, needCode }) => {
         if (error) {
           setMainframeHistory(prev => [
             ...prev,
@@ -315,6 +315,31 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
             ` `,
           ]);
           setDialogueState('ASK_PASSWORD');
+        } else if (needCode) {
+          setMainframeHistory(prev => [...prev, `*** ${needCode.toUpperCase()}`, ` `]);
+          setPromptLabel('VERIFICATION CODE: ');
+          setDialogueState('ASK_CODE');
+        } else {
+          setMainframeHistory(prev => [...prev, `*** OPERATOR VERIFIED... OK`, `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`, ...askBoot]);
+          setPromptLabel('===> ');
+          setDialogueState('ASK_BOOT');
+        }
+        setTimeout(() => inputRef.current?.focus(), 50);
+      });
+    } else if (dialogueState === 'ASK_CODE') {
+      const askBoot = [` `, `INITIATE GRAPHICAL WORKSPACE INTERFACE? (Y/N):`];
+      if (!cleanInput) {
+        setMainframeHistory(prev => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
+        setPromptLabel('===> ');
+        setDialogueState('ASK_BOOT');
+        return;
+      }
+      setDialogueState('VERIFYING');
+      setMainframeHistory(prev => [...prev, `CONFIRMING DEVICE...`]);
+      teamVerify(cleanInput).then((error) => {
+        if (error) {
+          setMainframeHistory(prev => [...prev, `*** ERROR: CODE REJECTED. ${error.toUpperCase()}`, `*** TRY AGAIN, OR PRESS ENTER FOR GUEST ACCESS.`, ` `]);
+          setDialogueState('ASK_CODE');
         } else {
           setMainframeHistory(prev => [...prev, `*** OPERATOR VERIFIED... OK`, `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`, ...askBoot]);
           setPromptLabel('===> ');

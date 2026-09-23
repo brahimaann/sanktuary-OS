@@ -310,16 +310,24 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
 
 /** Win98 "Enter Network Password" style log-on dialog. */
 export const LogOn: React.FC<{ name: string }> = ({ name }) => {
-  const teamLogin = useTeamLogin();
+  const { login, verify } = useTeamLogin();
   const [nickname, setNickname] = useState(getCookie('hq_os_username') || '');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [needCode, setNeedCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    setError((await teamLogin(nickname.trim(), password)) || '');
+    if (needCode) {
+      setError((await verify(code)) || '');
+    } else {
+      const r = await login(nickname.trim(), password);
+      setError(r.error || '');
+      setNeedCode(r.needCode || '');
+    }
     setBusy(false);
   };
 
@@ -333,10 +341,16 @@ export const LogOn: React.FC<{ name: string }> = ({ name }) => {
         </div>
       </div>
       <label style={field}>Operator ID:<input style={inputBox} value={nickname} onChange={(e) => setNickname(e.target.value)} autoComplete="username" autoCapitalize="none" autoFocus /></label>
-      <label style={field}>Access code:<input style={inputBox} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
+      <label style={field}>Access code:<input style={inputBox} type="password" value={password} disabled={!!needCode} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
+      {needCode && (
+        <>
+          <div style={{ color: '#000080' }}>{needCode}</div>
+          <label style={field}>Code:<input style={inputBox} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" inputMode="numeric" autoFocus /></label>
+        </>
+      )}
       {error && <div style={{ color: '#a00000' }}>{error}</div>}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button style={button} type="submit" disabled={busy || !nickname.trim() || !password}>{busy ? 'Checking...' : 'OK'}</button>
+        <button style={button} type="submit" disabled={busy || !nickname.trim() || !password || (!!needCode && !code.trim())}>{busy ? 'Checking...' : needCode ? 'Confirm' : 'OK'}</button>
       </div>
     </form>
   );
