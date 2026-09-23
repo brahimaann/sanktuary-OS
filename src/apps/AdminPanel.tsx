@@ -48,6 +48,7 @@ interface Health {
   tunnel: Check;
   publicSite: Check;
   watcher: { ok: boolean; lastSeen: string | null };
+  deploy: { at: string; ok: boolean; commit: string; message: string } | null;
 }
 
 const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups'] as const;
@@ -445,6 +446,11 @@ const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => 
       health?.watcher.lastSeen
         ? `last report ${new Date(health.watcher.lastSeen).toLocaleTimeString()}`
         : 'no reports: is the scheduled task running?',
+    ],
+    [
+      'Auto-deploy (GitHub main)',
+      health?.deploy ? health.deploy.ok : null,
+      health?.deploy ? `${health.deploy.message.split(/\r?\n/)[0]} · ${new Date(health.deploy.at).toLocaleString()}` : 'no deploys yet',
     ],
     [
       'Docker',

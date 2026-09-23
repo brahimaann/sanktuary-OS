@@ -762,6 +762,7 @@ async function health() {
     tunnel,
     publicSite,
     watcher: { ok: !!status && Date.now() - Date.parse(status.updated) < 3 * 60_000, lastSeen: status?.updated || null },
+    deploy: await readJson('deploy.json', null),
     host: os.hostname(),
   };
 }

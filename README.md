@@ -47,15 +47,13 @@ npm run format:check
 npx tsc --noEmit      # type check
 ```
 
-## Updating
+## Updating (auto-deploy)
 
-```
-npm install
-npm run build
-```
-then restart the server: Task Scheduler → "Sanktuary OS server" → End, then Run
-(or it restarts within a minute if the process is killed).
+Push to `main` on GitHub. Within ~2 minutes the server PC runs `ops/deploy.ps1` (scheduled task
+**"Sanktuary OS auto-deploy"**): `git pull --ff-only`, `npm install` (site + server), `npm test`, build into
+`dist-next/`, swap it in, restart the server. If any step fails, the current site stays live.
+See `data/deploy.log`, or **Admin Panel → Health → Auto-deploy**.
 
 Tunnel: `docker compose up -d` in this folder.
 
-Don't move this folder without updating the two scheduled tasks and the paths in `drive-watch.ps1` / `sanktuary-backup.ps1`.
+Don't move this folder without updating the three scheduled tasks and the paths in `ops/` (see `ops/README.md`).
