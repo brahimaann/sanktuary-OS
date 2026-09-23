@@ -128,6 +128,7 @@ export const Taskbar: React.FC = () => {
         style={{ borderStyle: 'solid', borderColor: '#808080 #fff #fff #808080' }}
       >
         <TeamsTray />
+        <ProjectsTray />
         {isPplsStoryRunning && (
           <button
             onClick={handlePagerClick}
@@ -315,6 +316,38 @@ export const Taskbar: React.FC = () => {
   );
 };
 export default Taskbar;
+
+/** Folder in the tray when a project you follow changes (or it's your turn). Click opens My Projects in your profile. */
+const ProjectsTray: React.FC = () => {
+  const { openWindow } = useWindowManager();
+  const [news, setNews] = useState<{ n: number; last: string; turn: boolean }>({ n: 0, last: '', turn: false });
+  useLiveEvent('notify', (x: { text: string; turn?: boolean }) => {
+    setNews((s) => ({ n: s.n + 1, last: x.text, turn: s.turn || !!x.turn }));
+    new Audio('/audio/NOTIFY.WAV').play().catch(() => {});
+  });
+  if (!news.n) return null;
+  return (
+    <button
+      onClick={() => {
+        setNews({ n: 0, last: '', turn: false });
+        openWindow({
+          id: 'profile-me',
+          title: 'My Profile',
+          icon: '/images/icons/my-documents-16x16.png',
+          appType: 'profile',
+          appProps: {},
+          width: 420,
+          height: 520,
+        });
+      }}
+      title={news.last}
+      className="mr-2 cursor-pointer border-none bg-transparent outline-none flex items-center gap-1"
+    >
+      <img src="/images/icons/folder-16x16.png" alt="" style={{ width: 16, height: 16 }} />
+      <b style={{ color: news.turn ? '#000080' : undefined }}>{news.turn ? '★' : news.n}</b>
+    </button>
+  );
+};
 
 /** Envelope in the tray when a Teams message arrives while its chat window isn't in front. Click opens Teams. */
 const TeamsTray: React.FC = () => {

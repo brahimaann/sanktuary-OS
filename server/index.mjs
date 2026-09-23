@@ -11,9 +11,10 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { appendFile, cp, mkdir, readdir, readFile, rename, stat, statfs, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { gunzipSync } from 'node:zlib';
 import { verifyToken } from '@clerk/backend';
 import sharp from 'sharp';
 import { initializeCanvas, readPsd } from 'ag-psd';
@@ -259,15 +260,28 @@ async function files(req, res, url) {
   const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
   const q = url.searchParams;
 
-  const transfer = (action, bytes, path = rel) => logTransfer(req, user, action, space, path.split(sep).join('/'), bytes);
+  // Downloads of projects say why: view only / playground copy / check-out
+  const purpose = { view: ' (view only)', playground: ' (playground copy)', checkout: ' (checked out)' }[q.get('purpose')] || '';
+  const transfer = (action, bytes, path = rel) => logTransfer(req, user, action + purpose, space, path.split(sep).join('/'), bytes);
   if (req.method === 'GET') {
     need('view');
-    if (q.has('list'))
+    if (q.has('list')) {
+      const all = await loadProjects();
+      const entries = await listDir(target);
+      for (const e of entries) {
+        const abs = join(target, e.name);
+        const p = all[ownerKey(space, abs)];
+        const kind = p?.kind || (await projectKind(abs, e.isDir));
+        if (kind) e.project = p ? projectView(p, user.username) : { kind, status: 'Not started', lock: null, turn: null, queue: [] };
+      }
+      const lock = Object.entries(all).find(([k, p]) => p.lock && (ownerKey(space, target) + '/').startsWith(k + '/'))?.[1];
       return json(res, {
         rights: space.rights,
-        entries: await listDir(target),
+        entries,
+        lockedBy: lock && lock.lock.user !== user.username ? { user: lock.lock.user, project: lock.name } : null,
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
+    }
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))), transfer);
     if (q.has('thumb')) return thumb(res, target);
@@ -277,6 +291,17 @@ async function files(req, res, url) {
   }
   const log = (action, extra = {}) =>
     space.id !== 'me' && logActivity(user, action, { space: space.id, spaceName: space.name, path: rel.split(sep).join('/'), ...extra });
+  if (req.method === 'PUT' && q.has('stage')) {
+    // Check-in upload: goes to a hidden staging folder beside the project; POST /api/projects?action=checkin swaps it in
+    const { abs: proj } = locateIn(space, q.get('project'));
+    if ((await loadProjects())[ownerKey(space, proj)]?.lock?.user !== user.username)
+      fail(423, 'Check the project out before checking it in');
+    if (!/^[\w-]{8,64}$/.test(q.get('stage')) || !inside(proj, target) || proj === root) fail(400, 'Bad check-in upload');
+    const stageDir = join(dirname(proj), `.sk-checkin-${q.get('stage')}`);
+    const staged = target === proj ? join(stageDir, basename(proj)) : join(stageDir, relative(proj, target));
+    return upload(req, res, q, { status, space, root, target: staged, need, log, user, transfer, staged: true });
+  }
+  if (req.method !== 'GET') await assertUnlocked(space, target, user.username);
   if (req.method === 'POST' && q.has('mkdir')) {
     need('upload');
     await mkdir(target);
@@ -290,6 +315,7 @@ async function files(req, res, url) {
     if (existsSync(to)) fail(409, 'Already exists');
     await rename(target, to);
     await moveOwners(space, target, to);
+    await moveProjects(space, target, to);
     log('renamed', { to: q.get('rename') });
     return json(res, { ok: true });
   }
@@ -304,8 +330,10 @@ async function files(req, res, url) {
       fail(403, 'You can only move things you added. Ask an admin to move this.');
     const to = join(dest, basename(target));
     if (existsSync(to)) fail(409, `There's already a "${basename(target)}" in that folder`);
+    await assertUnlocked(space, dest, user.username, false); // moving into a folder that merely contains one is fine
     await rename(target, to);
     await moveOwners(space, target, to);
+    await moveProjects(space, target, to);
     log('moved', { to: relative(root, to).split(sep).join('/') });
     return json(res, { ok: true });
   }
@@ -327,6 +355,7 @@ async function files(req, res, url) {
     const bin = join(root, '.sk-trash', stamp(), rel); // recoverable: nothing is ever really deleted
     await mkdir(dirname(bin), { recursive: true });
     await rename(target, bin);
+    await moveProjects(space, target, null);
     log('deleted');
     return json(res, { ok: true });
   }
@@ -412,6 +441,373 @@ async function zipFolder(res, dir, name, transfer) {
   return pipeline(tar.stdout, res);
 }
 
+// ── Projects: check-out / check-in, turns and followers — data/projects.json ──
+// A project is a folder holding an Ableton / FL Studio / Premiere / After Effects project file, or a single
+// Photoshop / Illustrator file. Checking out locks it: everyone can still view and download it, nobody else can
+// change it. Checking in uploads the new version to a hidden staging folder, checks it, then swaps it in and
+// keeps the old one in .sk-versions. The next person in the queue then gets a turn to claim it.
+// Keyed like owners.json (drive + path) so every space over the same folder agrees.
+const PROJECT_FILES = {
+  '.als': 'Ableton Live',
+  '.flp': 'FL Studio',
+  '.prproj': 'Premiere Pro',
+  '.aep': 'After Effects',
+  '.aepx': 'After Effects',
+};
+const PROJECT_SINGLE = { '.psd': 'Photoshop', '.psb': 'Photoshop', '.ai': 'Illustrator' };
+const STATUSES = ['Not started', 'In progress', 'In review', 'Done'];
+const TURN_HOURS = 24;
+const REMIND_HOURS = 48;
+let projects = null;
+let projectsSaved = Promise.resolve();
+const loadProjects = async () => (projects ??= await readJson('projects.json', {}));
+const saveProjects = () => (projectsSaved = projectsSaved.then(() => saveJson('projects.json', projects)).catch(console.error));
+
+/** "Ableton Live", "Photoshop"... or null if this isn't a project. */
+async function projectKind(abs, isDir) {
+  if (!isDir) return PROJECT_SINGLE[extname(abs).toLowerCase()] || null;
+  for (const n of await readdir(abs).catch(() => []))
+    if (PROJECT_FILES[extname(n).toLowerCase()]) return PROJECT_FILES[extname(n).toLowerCase()];
+  return null;
+}
+
+/** The project's record, created on first use. */
+async function projectAt(space, abs) {
+  const all = await loadProjects();
+  const key = ownerKey(space, abs);
+  if (!all[key]) {
+    const s = (await stat(abs).catch(() => null)) || fail(404, 'Not found');
+    const kind =
+      (await projectKind(abs, s.isDirectory())) ||
+      fail(400, "This isn't a project (no Ableton, FL Studio, Premiere or After Effects file inside, or not a PSD/AI file)");
+    all[key] = {
+      kind,
+      name: basename(abs),
+      drive: space.drive,
+      dpath: relative(space.driveRoot, abs).split(sep).join('/'),
+      status: 'Not started',
+      lock: null,
+      turn: null,
+      queue: [],
+      followers: [],
+      history: [],
+    };
+  }
+  return all[key];
+}
+
+const pushHistory = (p, user, action, note) =>
+  (p.history = [{ at: new Date().toISOString(), user, action, ...(note ? { note } : {}) }, ...p.history].slice(0, 100));
+
+/** Where this project shows up for a member: { space, dir, name, isDir } in a space they can see, or null. */
+function locate(username, p, cfg, status) {
+  const admin = cfg.admins.includes(username);
+  for (const s of spacesFor({ username, admin }, cfg, status)) {
+    if (s.drive !== p.drive) continue;
+    const sub = s.sub.split(/[\\/]/).filter(Boolean);
+    const parts = p.dpath.split('/');
+    if (sub.every((x, i) => x.toLowerCase() === parts[i]?.toLowerCase()) && parts.length > sub.length) {
+      const rel = parts.slice(sub.length);
+      return { space: s.id, spaceName: s.name, rights: s.rights, dir: rel.slice(0, -1), name: rel[rel.length - 1] };
+    }
+  }
+  return null;
+}
+
+/** Tell everyone attached to a project (followers, queue, holder) what happened, except whoever did it. */
+async function notifyProject(p, actor, text) {
+  const [cfg, status] = [await loadConfig(), await loadStatus()];
+  for (const u of new Set([...p.followers, ...p.queue, p.lock?.user, p.turn?.user].filter(Boolean)))
+    if (u !== actor) {
+      const at = locate(u, p, cfg, status);
+      if (at) await notify(u, text, { project: p.name, where: at });
+    }
+}
+
+/** Offer the project to the next person in the queue, if anyone is waiting. */
+async function passTurn(p) {
+  const next = p.queue.shift();
+  p.turn = next ? { user: next, until: new Date(Date.now() + TURN_HOURS * 3.6e6).toISOString() } : null;
+  if (next) {
+    const at = locate(next, p, await loadConfig(), await loadStatus());
+    if (at)
+      await notify(next, `It's your turn on ${p.name}. Check it out within ${TURN_HOURS} hours or it passes to the next person.`, {
+        project: p.name,
+        where: at,
+        turn: true,
+      });
+  }
+}
+
+/** Unclaimed turns expire; long-held locks get a reminder. Runs hourly and whenever a project is looked at. */
+async function tickProject(p) {
+  if (p.turn && Date.parse(p.turn.until) < Date.now()) {
+    pushHistory(p, p.turn.user, "didn't claim their turn");
+    const at = locate(p.turn.user, p, await loadConfig(), await loadStatus());
+    if (at) await notify(p.turn.user, `Your turn on ${p.name} ran out.`, { project: p.name, where: at });
+    await passTurn(p);
+    saveProjects();
+  }
+  if (p.lock && !p.lock.reminded && Date.now() - Date.parse(p.lock.at) > REMIND_HOURS * 3.6e6) {
+    p.lock.reminded = true;
+    const at = locate(p.lock.user, p, await loadConfig(), await loadStatus());
+    if (at)
+      await notify(
+        p.lock.user,
+        `You've had ${p.name} checked out for over ${REMIND_HOURS} hours. Check it in (or release it) so others can work on it.`,
+        { project: p.name, where: at },
+      );
+    saveProjects();
+  }
+}
+setInterval(async () => {
+  for (const p of Object.values(await loadProjects())) await tickProject(p).catch(console.error);
+}, 3.6e6).unref();
+
+/** Refuse changes inside a project someone else has checked out (or, with around, to a folder holding one). */
+async function assertUnlocked(space, abs, username, around = true) {
+  const k = ownerKey(space, abs);
+  for (const [pk, p] of Object.entries(await loadProjects()))
+    if (p.lock && p.lock.user !== username && (k === pk || k.startsWith(pk + '/') || (around && pk.startsWith(k + '/'))))
+      fail(423, `${p.name} is checked out by ${p.lock.user}. You can view and download it, but not change it until it's checked back in.`);
+}
+
+/** Project records follow renames and moves, and go when the project is deleted. */
+async function moveProjects(space, from, to) {
+  const all = await loadProjects();
+  const [a, b] = [ownerKey(space, from), to && ownerKey(space, to)];
+  for (const k of Object.keys(all))
+    if (k === a || k.startsWith(a + '/')) {
+      if (b)
+        all[b + k.slice(a.length)] = {
+          ...all[k],
+          name: k === a ? basename(to) : all[k].name,
+          dpath: relative(space.driveRoot, to).split(sep).join('/') + all[k].dpath.slice(relative(space.driveRoot, from).length),
+        };
+      delete all[k];
+    }
+  saveProjects();
+}
+
+// Files a project points at that aren't inside it, i.e. what would come up "missing" on someone else's computer.
+// Reliable for Ableton and Premiere (paths in gzipped XML); best effort for FL Studio, After Effects,
+// Photoshop linked smart objects and Illustrator linked images (paths inside binary files).
+const MEDIA_REF =
+  /(?:[A-Za-z]:[\\/]|\/(?:Users|Volumes)\/)[^\x00-\x1f"<>|*?]{1,300}?\.(?:wav|aiff?|mp3|flac|ogg|m4a|rx2|rex|mid|mp4|mov|mxf|avi|m4v|png|jpe?g|tiff?|psd|psb|ai|eps|pdf|svg|gif|exr|dng|cr[23]|nef|arw)(?![\w])/gi;
+const LIBRARY = /Ableton|Core Library|Program Files|Image-Line|FL Studio|Native Instruments|Splice/i; // everyone has their own copy
+const SCAN_MAX = 300 * 1024 ** 2;
+
+async function missingFiles(dir) {
+  const all = (await readdir(dir, { recursive: true, withFileTypes: true })).filter((e) => e.isFile());
+  const have = new Set(all.map((e) => e.name.toLowerCase()));
+  const missing = new Set();
+  for (const e of all) {
+    const ext = extname(e.name).toLowerCase();
+    if (!PROJECT_FILES[ext] && !PROJECT_SINGLE[ext]) continue;
+    const file = join(e.parentPath, e.name);
+    if ((await stat(file)).size > SCAN_MAX) continue;
+    let buf = await readFile(file);
+    if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf); // .als and .prproj are gzipped XML
+    for (const text of [buf.toString('latin1'), buf.toString('utf16le'), buf.subarray(1).toString('utf16le')])
+      for (const [ref] of text.matchAll(MEDIA_REF)) {
+        const name = ref.split(/[\\/]/).pop();
+        if (!LIBRARY.test(ref) && !have.has(name.toLowerCase())) missing.add(name);
+      }
+  }
+  return [...missing].slice(0, 50);
+}
+
+// ── Notifications: data/notifications/<user>.jsonl, shown in Profile > My Projects and the tray ──
+async function notify(username, text, extra = {}) {
+  if (!/^[\w.-]{1,64}$/.test(username)) return;
+  const n = { id: randomUUID().slice(0, 12), at: new Date().toISOString(), text, ...extra };
+  await mkdir(join(DATA, 'notifications'), { recursive: true });
+  await appendFile(join(DATA, 'notifications', `${username}.jsonl`), JSON.stringify(n) + '\n');
+  emit('notify', n, (u) => u.username === username);
+}
+
+/** Resolve "a/b/c" inside a space, refusing anything that escapes it. */
+function locateIn(space, relPath) {
+  const root = resolve(space.root);
+  const parts = String(relPath || '')
+    .split('/')
+    .filter(Boolean);
+  if (parts.some((p) => /[:\x00-\x1f]/.test(p) || p === '..')) fail(400, 'Bad path');
+  const abs = resolve(root, ...parts);
+  if (!inside(root, abs)) fail(400, 'Bad path');
+  return { root, abs };
+}
+
+// ── /api/projects ──────────────────────────────────────────────────────
+async function projectsApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const status = await loadStatus();
+  const q = url.searchParams;
+
+  if (req.method === 'GET' && q.has('notifications')) {
+    const lines = (await readFile(join(DATA, 'notifications', `${user.username}.jsonl`), 'utf8').catch(() => ''))
+      .split('\n')
+      .filter(Boolean);
+    return json(
+      res,
+      lines
+        .slice(-50)
+        .map((l) => JSON.parse(l))
+        .reverse(),
+    );
+  }
+  if (req.method === 'GET' && q.has('mine')) {
+    const list = [];
+    for (const p of Object.values(await loadProjects())) {
+      const u = user.username;
+      const owner = (await loadOwners())[`${p.drive}|${p.dpath.toLowerCase()}`] === u;
+      if (!(owner || p.followers.includes(u) || p.queue.includes(u) || p.lock?.user === u || p.turn?.user === u)) continue;
+      const at = locate(u, p, cfg, status);
+      if (!at) continue;
+      await tickProject(p);
+      list.push({ ...projectView(p, u), owner, at });
+    }
+    return json(res, list);
+  }
+
+  const space = spacesFor(user, cfg, status).find((s) => s.id === q.get('space')) || fail(404, 'No such space');
+  if (!space.online) fail(503, 'Drive offline');
+  const { root, abs } = locateIn(space, q.get('path'));
+  if (abs === root) fail(400, 'Pick a project');
+  const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
+  need('view');
+  const p = await projectAt(space, abs);
+  await tickProject(p);
+  if (req.method === 'GET') return json(res, { ...projectView(p, user.username), history: p.history });
+
+  const action = q.get('action');
+  const me = user.username;
+  const owner = (await loadOwners())[ownerKey(space, abs)] === me;
+  const note = String(q.get('note') || '').slice(0, 300);
+  const done = async (text) => {
+    saveProjects();
+    if (text) await notifyProject(p, me, text);
+    return json(res, projectView(p, me));
+  };
+
+  if (action === 'follow' || action === 'unfollow') {
+    p.followers = p.followers.filter((u) => u !== me).concat(action === 'follow' ? [me] : []);
+    return done();
+  }
+  need('upload');
+  if (action === 'checkout') {
+    if (p.lock) fail(409, `Already checked out by ${p.lock.user}`);
+    if (p.turn && p.turn.user !== me)
+      fail(409, `It's ${p.turn.user}'s turn until ${new Date(p.turn.until).toLocaleString()}. Join the queue to go next.`);
+    await assertUnlocked(space, abs, me); // nothing inside or around it is checked out by someone else
+    p.lock = { user: me, at: new Date().toISOString() };
+    p.turn = null;
+    p.queue = p.queue.filter((u) => u !== me);
+    if (!p.followers.includes(me)) p.followers.push(me);
+    pushHistory(p, me, 'checked out', note);
+    return done(`${me} checked out ${p.name}.`);
+  }
+  if (action === 'queue') {
+    if (!p.lock && !p.turn) fail(409, 'Nobody has it: check it out instead');
+    if (p.lock?.user === me || p.turn?.user === me) fail(409, "You're already up");
+    if (!p.queue.includes(me)) p.queue.push(me);
+    if (!p.followers.includes(me)) p.followers.push(me);
+    pushHistory(p, me, 'joined the queue');
+    return done();
+  }
+  if (action === 'unqueue') {
+    p.queue = p.queue.filter((u) => u !== me);
+    if (p.turn?.user === me) {
+      pushHistory(p, me, 'passed on their turn');
+      await passTurn(p);
+    }
+    return done();
+  }
+  if (action === 'status') {
+    if (p.lock?.user !== me && !owner && !user.admin)
+      fail(403, 'Only whoever has it checked out, its owner or an admin can change the status');
+    p.status = STATUSES.includes(q.get('status')) ? q.get('status') : fail(400, 'Bad status');
+    pushHistory(p, me, `set the status to ${p.status}`, note);
+    return done(`${p.name} is now "${p.status}"${note ? `: ${note}` : ''} (${me}).`);
+  }
+  if (action === 'release') {
+    if (!p.lock) fail(409, "It isn't checked out");
+    const forced = p.lock.user !== me;
+    if (forced && !owner && !user.admin) fail(403, "Only its owner or an admin can release someone else's check-out");
+    const was = p.lock.user;
+    p.lock = null;
+    pushHistory(p, me, forced ? `force-released ${was}'s check-out` : 'released it without changes', note);
+    if (forced) {
+      const at = locate(was, p, cfg, status);
+      if (at)
+        await notify(was, `${me} released your check-out of ${p.name}. Your local changes weren't uploaded.`, {
+          project: p.name,
+          where: at,
+        });
+    }
+    await passTurn(p);
+    return done(forced ? `${me} released ${was}'s check-out of ${p.name}.` : `${p.name} is free again (${me} released it).`);
+  }
+  if (action === 'checkin') {
+    if (p.lock?.user !== me) fail(423, 'Check it out before checking it in');
+    const stage = q.get('stage') || '';
+    if (!/^[\w-]{8,64}$/.test(stage)) fail(400, 'Bad check-in');
+    const stageDir = join(dirname(abs), `.sk-checkin-${stage}`);
+    if (!existsSync(stageDir)) fail(400, 'Nothing was uploaded for this check-in');
+    const isDir = (await stat(abs)).isDirectory();
+    const staged = (await readdir(stageDir, { recursive: true, withFileTypes: true })).filter((e) => e.isFile());
+    if (staged.some((e) => e.name.startsWith('.sk-upload-'))) fail(409, "Some files haven't finished uploading. Try the check-in again.");
+    if (staged.length !== Number(q.get('files')))
+      fail(409, `Only ${staged.length} of ${q.get('files')} files arrived. Try the check-in again.`);
+    const incoming = isDir ? stageDir : join(stageDir, basename(abs));
+    if (isDir && !(await projectKind(stageDir, true)))
+      fail(400, `There's no ${p.kind} project file at the top of what you picked. Pick the project folder itself.`);
+    if (!isDir && !existsSync(incoming)) fail(400, `Upload ${p.name} itself`);
+    if (!q.has('force')) {
+      const missing = await missingFiles(stageDir);
+      if (missing.length) return json(res, { ok: false, missing });
+    }
+    // Swap: current version into .sk-versions, staged one into place (undone if the second step fails)
+    const versions = join(root, '.sk-versions', relative(root, abs));
+    await mkdir(versions, { recursive: true });
+    const old = join(versions, stamp() + (isDir ? '' : extname(abs)));
+    try {
+      await rename(abs, old);
+    } catch {
+      fail(409, "Some of the project's files are open right now (maybe someone is previewing them). Try again in a minute.");
+    }
+    try {
+      await rename(incoming, abs);
+    } catch (err) {
+      await rename(old, abs);
+      throw err;
+    }
+    if (!isDir) await rm(stageDir, { recursive: true, force: true });
+    p.lock = null;
+    pushHistory(p, me, 'checked in a new version', note);
+    const text = `${me} checked in a new version of ${p.name}${note ? `: ${note}` : '.'}`;
+    await notifyProject(p, me, text);
+    await passTurn(p);
+    saveProjects();
+    logActivity(user, 'checked in', { space: space.id, spaceName: space.name, path: relative(root, abs).split(sep).join('/'), text: note });
+    return json(res, { ok: true, ...projectView(p, me) });
+  }
+  fail(400, 'Unknown project action');
+}
+
+/** What the file window and Profile need to show about a project. */
+const projectView = (p, me) => ({
+  kind: p.kind,
+  name: p.name,
+  status: p.status,
+  lock: p.lock && { user: p.lock.user, at: p.lock.at },
+  turn: p.turn,
+  queue: p.queue,
+  following: p.followers.includes(me),
+  followers: p.followers.length,
+});
+
 /** Is path p the folder root or somewhere under it? (A drive root like G:\ already ends in a separator.) */
 const inside = (root, p) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
@@ -455,7 +851,7 @@ const MAX_CHUNK = 95 * 1024 ** 2;
 const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
 const BIG_BUFFER = { highWaterMark: 1024 * 1024 }; // 1 MB disk reads/writes instead of 64 KB
 
-async function upload(req, res, q, { status, space, root, target, need, log, user, transfer }) {
+async function upload(req, res, q, { status, space, root, target, need, log, user, transfer, staged }) {
   need(q.get('replace') ? 'edit' : 'upload');
   const id = q.get('upload') || '';
   const chunk = Number(q.get('chunk') || 0);
@@ -486,6 +882,11 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   uploads.delete(id);
 
   let name = target.split(sep).pop();
+  if (staged) {
+    await rename(part, target); // check-in files land exactly where they belong in the staging folder
+    transfer('uploaded (check-in)', size, relative(root, target));
+    return json(res, { ok: true, name });
+  }
   if (q.get('replace')) await keepVersion(root, target);
   else name = freeName(dir, name);
   await rename(part, join(dir, name));
@@ -1279,6 +1680,7 @@ const routes = [
   ['/api/profiles', profiles],
   ['/api/comments', comments],
   ['/api/activity', activity],
+  ['/api/projects', projectsApi],
 ];
 
 http

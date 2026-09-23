@@ -10,6 +10,7 @@ import { RANK, Rights } from '../utils/api';
 import { dialog } from '../utils/dialog';
 import { DRAG_FILE, Ref } from '../utils/refs';
 import ShareDialog from './ShareDialog';
+import ProjectPanel, { ProjectInfo } from './ProjectPanel';
 
 interface TeamFilesProps {
   app: string; // space id from the admin panel ("me" = personal space)
@@ -22,6 +23,7 @@ interface Entry {
   isDir: boolean;
   size: number;
   modified: string;
+  project?: ProjectInfo; // Ableton / FL / Premiere / AE folder, or a PSD / AI file
 }
 
 interface Upload {
@@ -78,6 +80,8 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   const [ghost, setGhost] = useState<{ name: string; isDir: boolean; x: number; y: number } | null>(null);
   const touchDrag = useRef<{ name: string; isDir: boolean; x: number; y: number; timer: number; active: boolean } | null>(null);
   const skipClick = useRef(false);
+  const [projectFor, setProjectFor] = useState<{ entry: Entry; mode: 'info' | 'download' } | null>(null);
+  const [lockedBy, setLockedBy] = useState<{ user: string; project: string } | null>(null);
 
   // Explorer-style history: Back/Forward walk it, any other navigation starts a new branch
   const go = (to: string[]) => {
@@ -126,6 +130,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     const data = await res.json();
     const list: Entry[] = data.entries;
     setRights(data.rights);
+    setLockedBy(data.lockedBy);
     setQuota(data.quota ? { used: data.used, quota: data.quota } : null);
     list.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name, undefined, { numeric: true }));
     setEntries(list);
@@ -169,11 +174,13 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       xhr.send(body);
     });
 
-  const uploadAll = async (items: Upload[]) => {
-    if (!items.length || busy) return;
+  /** Uploads files here, or with stage: into a project's check-in staging (rel is then relative to the project). */
+  const uploadAll = async (items: Upload[], stage?: { id: string; project: string[] }): Promise<boolean> => {
+    if (!items.length || busy) return false;
     // Same name already here? Editors choose: replace (old one kept as a version) or keep both.
     const clashes = items.filter((u) => u.rel.length === 1 && entries.some((e) => !e.isDir && e.name === u.rel[0]));
     if (
+      !stage &&
       clashes.length &&
       can('edit') &&
       (await dialog.confirm(
@@ -202,7 +209,9 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       await pool(items, PARALLEL_FILES, async ({ file, rel, replace }) => {
         const id = crypto.randomUUID();
         const chunks = Math.max(1, Math.ceil(file.size / CHUNK));
-        const base = `${url([...path, ...rel])}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${replace ? '&replace=1' : ''}`;
+        const at = stage ? url([...stage.project, ...rel]) : url([...path, ...rel]);
+        const extra = stage ? `&stage=${stage.id}&project=${encodeURIComponent(stage.project.join('/'))}` : replace ? '&replace=1' : '';
+        const base = `${at}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${extra}`;
         await pool([...Array(chunks).keys()], PARALLEL_CHUNKS, (c) =>
           putChunk(`${base}&chunk=${c}`, file.slice(c * CHUNK, (c + 1) * CHUNK), (loaded) => {
             sent.set(`${id}:${c}`, loaded);
@@ -215,25 +224,38 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       setStatus(`Uploaded ${items.length} file(s) in ${duration((Date.now() - started) / 1000)}.`);
     } catch (err) {
       setStatus(`Upload stopped: ${(err as Error).message}`);
+      setXfer(null);
+      setBusy(false);
+      return false;
     }
     setXfer(null);
     setBusy(false);
     load();
+    return true;
   };
 
   // Downloads stream straight to disk with progress where the browser allows picking a save location
   // (Chrome/Edge on a computer); elsewhere the browser's own download takes over. Folders come as a .zip.
-  const download = async (e: Entry) => {
+  // before() runs once the save location is picked (the picker needs the click, so it has to come first),
+  // e.g. to lock a project for check-out; returning false stops the download.
+  const download = async (e: Entry, purpose?: 'view' | 'playground' | 'checkout', before?: () => Promise<boolean>) => {
     const name = e.isDir ? `${e.name}.zip` : e.name;
-    const href = `${url([...path, e.name])}?${e.isDir ? 'zip' : 'download'}`;
+    const href = `${url([...path, e.name])}?${e.isDir ? 'zip' : 'download'}${purpose ? `&purpose=${purpose}` : ''}`;
+    const plain = async () => {
+      if (before && !(await before())) return;
+      const a = document.createElement('a'); // the browser's own download (phones, Safari, Firefox)
+      a.href = `${href}&t=${await getToken()}`;
+      a.click();
+    };
     const pick = (window as unknown as { showSaveFilePicker?: (o: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
-    if (!pick) return void window.open(`${href}&t=${await getToken()}`, '_blank');
+    if (!pick) return plain();
     let handle: FileSystemFileHandle;
     try {
       handle = await pick({ suggestedName: name });
-    } catch {
-      return; // cancelled
+    } catch (err) {
+      return (err as DOMException).name === 'AbortError' ? undefined : plain(); // cancelled, or the picker isn't allowed here
     }
+    if (before && !(await before())) return;
     setBusy(true);
     const started = Date.now();
     try {
@@ -498,9 +520,19 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             Delete
           </button>
         )}
-        <button style={button} disabled={!pick || busy} title="Folders download as a .zip" onClick={() => pick && download(pick)}>
+        <button
+          style={button}
+          disabled={!pick || busy}
+          title="Folders download as a .zip"
+          onClick={() => pick && (pick.project ? setProjectFor({ entry: pick, mode: 'download' }) : download(pick))}
+        >
           Download
         </button>
+        {pick?.project && (
+          <button style={{ ...button, fontWeight: 700 }} onClick={() => setProjectFor({ entry: pick, mode: 'info' })}>
+            Project...
+          </button>
+        )}
         <button style={button} disabled={!pick || pick.isDir} onClick={showVersions}>
           Versions
         </button>
@@ -552,6 +584,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                       style={{ width: 16, height: 16, verticalAlign: 'middle', marginRight: 4 }}
                     />
                     {e.name}
+                    {e.project && <ProjectTag p={e.project} />}
                   </td>
                   <td style={td}>{e.isDir ? '' : formatSize(e.size)}</td>
                   <td style={td}>{new Date(e.modified).toLocaleString()}</td>
@@ -583,7 +616,10 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                     <img src={fileIcon(e.name, e.isDir, 32)} alt="" style={{ width: 32, height: 32 }} />
                   )}
                 </div>
-                <div style={{ ...tileLabel, ...(selected === e.name ? selectedStyle : {}) }}>{e.name}</div>
+                <div style={{ ...tileLabel, ...(selected === e.name ? selectedStyle : {}) }}>
+                  {e.name}
+                  {e.project?.lock ? ' 🔒' : ''}
+                </div>
               </div>
             ))}
           </div>
@@ -596,6 +632,20 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
               setSharing(false);
               if (sent) setStatus(`Shared ${pick.name} to ${sent}.`);
             }}
+          />
+        )}
+        {projectFor && (
+          <ProjectPanel
+            app={app}
+            dir={path}
+            name={projectFor.entry.name}
+            isDir={projectFor.entry.isDir}
+            mode={projectFor.mode}
+            canEdit={can('upload')}
+            download={(purpose, before) => download(projectFor.entry, purpose, before)}
+            uploadStaged={uploadAll}
+            onClose={() => setProjectFor(null)}
+            onChanged={load}
           />
         )}
         {versions && (
@@ -662,11 +712,21 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       {xfer && <ProgressBar t={xfer} />}
       <div style={statusBar}>
         {status ||
+          (lockedBy && `🔒 ${lockedBy.project} is checked out by ${lockedBy.user}: you can view and download, not change.`) ||
           `${entries.length} object(s) · ${{ none: '', view: 'view only', upload: 'you can upload and delete your own files', edit: 'full edit' }[rights]}${quota ? ` · ${formatSize(quota.used)} of ${formatSize(quota.quota)} used` : ''} — ${isTouch ? 'tap' : 'double-click'} to open${can('upload') ? ' · drag files here to upload' : ''}`}
       </div>
     </div>
   );
 };
+
+/** " [Ableton Live · 🔒 bob]" after a project's name. */
+const ProjectTag: React.FC<{ p: ProjectInfo }> = ({ p }) => (
+  <span style={{ marginLeft: 6, opacity: 0.75 }}>
+    [{p.kind}
+    {p.lock ? ` · 🔒 ${p.lock.user}` : p.turn ? ` · ${p.turn.user}'s turn` : ''}
+    {p.status !== 'Not started' ? ` · ${p.status}` : ''}]
+  </span>
+);
 
 interface Transfer {
   label: string;

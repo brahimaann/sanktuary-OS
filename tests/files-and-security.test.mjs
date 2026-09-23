@@ -147,6 +147,68 @@ try {
   check('move cannot escape the space', (await call('alice', '/api/files/ed/mv.txt?move=..', 'POST')).status === 400);
   check('move onto an existing name -> 409', (await call('alice', '/api/files/ed/docs/song.txt?move=docs', 'POST')).status === 409);
 
+  // Projects: check-out, lock, queue, staged check-in with missing-sample check, turns
+  const { gzipSync } = await import('node:zlib');
+  const als = (refs) => gzipSync(`<Ableton>${refs.map((r) => `<FileRef><Path Value="${r}"/></FileRef>`).join('')}</Ableton>`);
+  mkdirSync(join(drive, 'team', 'Song A', 'Samples'), { recursive: true });
+  writeFileSync(join(drive, 'team', 'Song A', 'Song A.als'), als(['C:/Users/bob/Music/Samples/kick.wav']));
+  writeFileSync(join(drive, 'team', 'Song A', 'Samples', 'kick.wav'), 'kick');
+  const P = (u, space, action, extra = '') => call(u, `/api/projects?space=${space}&path=Song%20A&action=${action}${extra}`, 'POST');
+  const listing = JSON.parse((await call('bob', '/api/files/up/?list')).text);
+  check('listing marks Ableton project folders', listing.entries.find((e) => e.name === 'Song A')?.project?.kind === 'Ableton Live');
+  check('view rights cannot check out', (await P('carol', 'view', 'checkout')).status === 403);
+  check('upload rights can check out', (await P('bob', 'up', 'checkout')).status === 200);
+  check('second check-out refused', (await P('alice', 'ed', 'checkout')).status === 409);
+  check('locked project still viewable', (await call('alice', '/api/files/ed/Song%20A/Samples/kick.wav')).text === 'kick');
+  check('locked project: admin cannot change it', (await up('alice', 'ed', 'Song%20A/x.txt', 'x')).status === 423);
+  check(
+    'locked project: cannot move its parent folder away',
+    (await call('alice', '/api/files/ed/Song%20A?rename=B', 'POST')).status === 423,
+  );
+  check('others can queue', (await P('alice', 'ed', 'queue')).status === 200);
+  const stageUp = (path, data, stage) => up('bob', 'up', `Song%20A/${path}`, data, `&stage=${stage}&project=Song%20A`);
+  await stageUp(
+    'Song%20A.als',
+    als(['C:/Users/bob/Music/Samples/kick.wav', 'D:/Loops/snare.wav', 'C:/Users/bob/Music/Ableton/User Library/clap.wav']),
+    'stage-one1',
+  );
+  await stageUp('Samples/kick.wav', 'kick v2', 'stage-one1');
+  check('check-in needs every file to have arrived', (await P('bob', 'up', 'checkin', '&stage=stage-one1&files=3')).status === 409);
+  const warn = JSON.parse((await P('bob', 'up', 'checkin', '&stage=stage-one1&files=2')).text);
+  check('check-in warns about samples outside the project (not library ones)', warn.ok === false && warn.missing.join() === 'snare.wav');
+  check(
+    'only the holder can check in',
+    (await call('alice', '/api/projects?space=ed&path=Song%20A&action=checkin&stage=stage-one1&files=2&force=1', 'POST')).status === 423,
+  );
+  const ci = await P('bob', 'up', 'checkin', '&stage=stage-one1&files=2&force=1&note=new%20kick');
+  check(
+    'check-in swaps the new version in',
+    ci.status === 200 && readFileSync(join(drive, 'team', 'Song A', 'Samples', 'kick.wav'), 'utf8') === 'kick v2',
+  );
+  check('old version kept', readdirSync(join(drive, 'team', '.sk-versions', 'Song A')).length === 1);
+  check('staging folder gone', !readdirSync(join(drive, 'team')).some((f) => f.startsWith('.sk-checkin')));
+  const after = JSON.parse(ci.text);
+  check('lock released and turn passed to the queue', after.lock === null && after.turn?.user === 'alice');
+  check('bob cannot take it during alice’s turn', (await P('bob', 'up', 'checkout')).status === 409);
+  const aliceNotes = JSON.parse((await call('alice', '/api/projects?notifications')).text);
+  check(
+    'next in line is told it is their turn',
+    aliceNotes.some((n) => n.turn && n.where?.space),
+  );
+  check(
+    "Profile 'mine' lists it",
+    JSON.parse((await call('alice', '/api/projects?mine')).text).some((p) => p.name === 'Song A' && p.turn?.user === 'alice'),
+  );
+  check('alice claims her turn', (await P('alice', 'ed', 'checkout')).status === 200);
+  check('only owner/admin can force-release', (await P('bob', 'up', 'release')).status === 403);
+  check('holder releases', (await P('alice', 'ed', 'release')).status === 200);
+  check('follow works for view rights', (await P('carol', 'view', 'follow')).status === 200);
+  await call('alice', '/api/files/ed/Song%20A?rename=Song%20B', 'POST');
+  check(
+    'project record follows a rename',
+    JSON.parse((await call('carol', '/api/projects?space=view&path=Song%20B')).text).following === true,
+  );
+
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
   const zipBytes = Buffer.from(await zip.arrayBuffer());

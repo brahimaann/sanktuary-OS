@@ -8,6 +8,8 @@ import { displayName, Profile as P, useProfiles } from '../utils/profiles';
 import { dmId } from './Chat';
 import Avatar from './Avatar';
 import { formatSize } from './fileTypes';
+import { MyProjects } from './ProjectPanel';
+import { useOpenRef } from '../utils/refs';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 
 const FIELDS: [keyof P, string, string][] = [
@@ -39,6 +41,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   const [draft, setDraft] = useState<Partial<P>>({});
   const [msg, setMsg] = useState('');
   const picInput = useRef<HTMLInputElement>(null);
+  const openRef = useOpenRef();
 
   useEffect(() => {
     if (p) setDraft(p);
@@ -183,6 +186,20 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
               : 'drive offline'}
           </div>
         )}
+        <MyProjects
+          you={who}
+          open={(w) =>
+            /\.(psd|psb|ai)$/i.test(w.name) // single-file projects: open the folder they're in
+              ? openRef({
+                  kind: 'folder',
+                  title: w.dir[w.dir.length - 1] || w.space,
+                  app: w.space,
+                  dir: w.dir.slice(0, -1),
+                  name: w.dir[w.dir.length - 1],
+                })
+              : openRef({ kind: 'folder', title: w.name, app: w.space, dir: w.dir, name: w.name })
+          }
+        />
       </div>
       <div style={{ display: 'flex', gap: 6, padding: 6, alignItems: 'center' }}>
         <div style={{ ...statusBar, flex: 1, margin: 0 }}>{msg || 'Your profile shows in Teams, chats and the planner.'}</div>
