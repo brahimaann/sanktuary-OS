@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { useSignIn } from '@clerk/react';
+import { useClerk, useSignIn } from '@clerk/react';
 
 type CodeKind = 'email_code' | 'phone_code' | 'totp';
 interface LoginResult {
@@ -14,17 +14,27 @@ interface LoginResult {
  */
 export function useTeamLogin() {
   const { signIn } = useSignIn();
+  const clerk = useClerk();
   const kind = useRef<CodeKind | null>(null);
 
   const finish = async (): Promise<string | null> => {
     if (signIn.status !== 'complete') return `Sign-in isn't complete yet (${signIn.status}).`;
     const done = await signIn.finalize();
-    return done.error ? done.error.longMessage || done.error.message : null;
+    if (done.error) return done.error.longMessage || done.error.message;
+    // A "pending" session (e.g. Clerk wants an organization picked) counts as signed out; say why instead of looping.
+    const task = (clerk.session as { currentTask?: { key: string } } | null | undefined)?.currentTask?.key;
+    return task ? `Clerk wants an extra setup step (${task}). An admin needs to turn that off in Clerk's settings.` : null;
   };
 
-  const login = async (nickname: string, password: string): Promise<LoginResult> => {
+  const login = async (nickname: string, password: string, retried = false): Promise<LoginResult> => {
     kind.current = null;
     const { error } = await signIn.password({ identifier: nickname, password });
+    // A half-finished earlier sign-in is still around: clear it and try once more.
+    if (error?.code === 'session_exists' && !retried) {
+      await clerk.signOut().catch(() => {});
+      await signIn.reset();
+      return login(nickname, password, true);
+    }
     if (error) return { error: error.longMessage || error.message };
     if (signIn.status === 'complete') {
       const err = await finish();
