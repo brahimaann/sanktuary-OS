@@ -4,7 +4,7 @@ import { useApi } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
-import { fileIcon, fileKind } from './fileTypes';
+import { fileIcon, fileKind, needsConversion } from './fileTypes';
 import Avatar from './Avatar';
 
 interface FilePreviewProps {
@@ -23,6 +23,8 @@ interface Comment {
 
 const WAVEFORM_MAX_BYTES = 80 * 1024 * 1024; // bigger files play fine, they just skip the waveform
 const TEXT_MAX_BYTES = 2 * 1024 * 1024;
+const OFFICE_MAX_BYTES = 30 * 1024 * 1024; // Word/spreadsheet files are converted in the browser
+const SHEET_MAX_ROWS = 2000;
 export const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 /** Previews a team file (images, audio with waveform, video, PDF, text) with a live comment thread. */
@@ -78,7 +80,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
           Download
         </button>
         {(kind === 'pdf' || kind === 'image') && (
-          <button style={button} disabled={!token} onClick={() => window.open(src, '_blank')}>
+          <button style={button} disabled={!token} onClick={() => window.open(needsConversion(name) ? `${src}&preview` : src, '_blank')}>
             Open in new tab
           </button>
         )}
@@ -88,7 +90,12 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
       </div>
       <div style={stage}>
         {!src ? null : kind === 'image' ? (
-          <img key={src} src={src} alt={name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          <img
+            key={src}
+            src={needsConversion(name) ? `${src}&preview` : src}
+            alt={name}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
         ) : kind === 'audio' ? (
           <AudioPreview key={src} src={src} name={name} media={media} comments={comments} onSeek={seek} />
         ) : kind === 'video' ? (
@@ -104,6 +111,10 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
           />
         ) : kind === 'pdf' ? (
           <iframe key={src} src={src} title={name} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
+        ) : kind === 'doc' ? (
+          <OfficePreview key={src} src={src} render={docToHtml} />
+        ) : kind === 'sheet' ? (
+          <OfficePreview key={src} src={src} render={sheetsToHtml} />
         ) : kind === 'text' ? (
           <TextPreview key={src} src={src} />
         ) : (
@@ -367,6 +378,73 @@ const AudioPreview: React.FC<{
         onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime / (e.currentTarget.duration || 1))}
         onError={() => setNote("This browser can't play this format — use Download.")}
       />
+    </div>
+  );
+};
+
+/** Word (.docx) -> HTML. Libraries load only when such a file is opened. */
+async function docToHtml(data: ArrayBuffer): Promise<{ tabs: [string, string][] }> {
+  const mammoth = (await import('mammoth/mammoth.browser')).default;
+  const { value } = await mammoth.convertToHtml({ arrayBuffer: data });
+  return { tabs: [['Document', value]] };
+}
+
+/** Spreadsheets -> one HTML table per sheet (capped so huge sheets stay responsive). */
+async function sheetsToHtml(data: ArrayBuffer): Promise<{ tabs: [string, string][] }> {
+  const XLSX = await import('xlsx');
+  const book = XLSX.read(data, { type: 'array', sheetRows: SHEET_MAX_ROWS + 1 });
+  return { tabs: book.SheetNames.map((n) => [n, XLSX.utils.sheet_to_html(book.Sheets[n], { header: '', footer: '' })]) };
+}
+
+const DOC_CSS =
+  'body{font:14px/1.5 Georgia,serif;margin:24px;color:#111;background:#fff}img{max-width:100%}' +
+  'table{border-collapse:collapse;font:12px Arial,sans-serif}td,th{border:1px solid #c0c0c0;padding:2px 6px;white-space:nowrap}' +
+  'tr:first-child td{background:#e8e8e8;font-weight:bold;position:sticky;top:0}';
+
+/**
+ * Converts an office file in the browser and shows it in a sandboxed frame (no scripts, no network),
+ * so nothing inside a document can run or reach out.
+ */
+const OfficePreview: React.FC<{ src: string; render: (data: ArrayBuffer) => Promise<{ tabs: [string, string][] }> }> = ({
+  src,
+  render,
+}) => {
+  const [tabs, setTabs] = useState<[string, string][] | null>(null);
+  const [tab, setTab] = useState(0);
+  const [note, setNote] = useState('Opening...');
+
+  useEffect(() => {
+    const abort = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(src, { signal: abort.signal });
+        if (Number(res.headers.get('content-length')) > OFFICE_MAX_BYTES) {
+          abort.abort();
+          return setNote('File is too large to preview — use Download.');
+        }
+        setTabs((await render(await res.arrayBuffer())).tabs);
+        setNote('');
+      } catch {
+        if (!abort.signal.aborted) setNote("Couldn't read this file — use Download.");
+      }
+    })();
+    return () => abort.abort();
+  }, [src, render]);
+
+  if (!tabs) return <div style={{ color: '#fff' }}>{note}</div>;
+  const page = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><style>${DOC_CSS}</style>${tabs[tab]?.[1] || ''}`;
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {tabs.length > 1 && (
+        <div style={{ display: 'flex', gap: 2, padding: 2, background: '#c0c0c0', overflowX: 'auto' }}>
+          {tabs.map(([n], i) => (
+            <button key={n} style={{ ...button, fontWeight: i === tab ? 700 : 400 }} onClick={() => setTab(i)}>
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+      <iframe title="Document preview" sandbox="" srcDoc={page} style={{ flex: 1, width: '100%', border: 0, background: '#fff' }} />
     </div>
   );
 };

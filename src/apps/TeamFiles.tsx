@@ -28,7 +28,19 @@ interface Upload {
   replace?: boolean; // edit rights: swap in and keep the old file as a version
 }
 
-const CHUNK = 50 * 1024 * 1024; // Cloudflare rejects request bodies over 100 MB
+const CHUNK = 32 * 1024 * 1024; // Cloudflare rejects request bodies over 100 MB
+const PARALLEL_FILES = 3;
+const PARALLEL_CHUNKS = 3;
+
+/** Runs worker over items with at most `n` running at once; rejects on the first failure. */
+async function pool<T>(items: T[], n: number, worker: (item: T) => Promise<void>) {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(n, items.length) }, async () => {
+      while (next < items.length) await worker(items[next++]);
+    }),
+  );
+}
 
 export const fileUrl = (app: string, parts: string[]) => `/api/files/${app}/${parts.map(encodeURIComponent).join('/')}`;
 
@@ -142,21 +154,28 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     }
     setBusy(true);
     const total = items.reduce((n, u) => n + u.file.size, 0) || 1;
-    let done = 0;
+    const sent = new Map<string, number>(); // bytes sent per in-flight chunk, for one combined progress figure
+    let filesDone = 0;
+    const progress = () => {
+      const bytes = [...sent.values()].reduce((a, b) => a + b, 0);
+      setStatus(`Uploading ${filesDone}/${items.length} done — ${Math.floor((bytes / total) * 100)}%`);
+    };
     try {
-      for (const [i, { file, rel, replace }] of items.entries()) {
+      // Several files at once, and several chunks of each big file at once: one connection through
+      // Cloudflare is often throttled, parallel ones fill the line.
+      await pool(items, PARALLEL_FILES, async ({ file, rel, replace }) => {
         const id = crypto.randomUUID();
         const chunks = Math.max(1, Math.ceil(file.size / CHUNK));
-        for (let c = 0; c < chunks; c++) {
-          const piece = file.slice(c * CHUNK, (c + 1) * CHUNK);
-          await putChunk(
-            `${url([...path, ...rel])}?upload=${id}&chunk=${c}&chunks=${chunks}&size=${file.size}${replace ? '&replace=1' : ''}`,
-            piece,
-            (loaded) => setStatus(`Uploading ${i + 1}/${items.length}: ${rel.join('/')} — ${Math.floor(((done + loaded) / total) * 100)}%`),
-          );
-          done += piece.size;
-        }
-      }
+        const base = `${url([...path, ...rel])}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${replace ? '&replace=1' : ''}`;
+        await pool([...Array(chunks).keys()], PARALLEL_CHUNKS, (c) =>
+          putChunk(`${base}&chunk=${c}`, file.slice(c * CHUNK, (c + 1) * CHUNK), (loaded) => {
+            sent.set(`${id}:${c}`, loaded);
+            progress();
+          }),
+        );
+        filesDone++;
+        progress();
+      });
       setStatus('');
     } catch (err) {
       setStatus(`Upload stopped: ${(err as Error).message}`);

@@ -150,6 +150,44 @@ try {
       png.headers.get('referrer-policy') === 'same-origin',
   );
 
+  // Parallel, out-of-order chunked upload (how the site uploads big files)
+  const big = Buffer.alloc(250_000);
+  for (let i = 0; i < big.length; i++) big[i] = (i * 7) % 251;
+  const cs = 100_000;
+  const pid = 'parallel' + Date.now();
+  const q = (c) => `/api/files/ed/stems/big.bin?upload=${pid}&chunk=${c}&chunks=3&size=${big.length}&chunkSize=${cs}`;
+  const results = await Promise.all([2, 0, 1].map((c) => call('bob', q(c), 'PUT', big.subarray(c * cs, (c + 1) * cs), true)));
+  check(
+    '3 chunks sent at once, out of order',
+    results.every((r) => r.status === 200),
+  );
+  check('file reassembled byte for byte', Buffer.compare(readFileSync(join(drive, 'team', 'stems', 'big.bin')), big) === 0);
+  check('no leftover part files', !readdirSync(join(drive, 'team', 'stems')).some((f) => f.startsWith('.sk-upload')));
+  check(
+    'chunk offsets must line up',
+    (await call('bob', `/api/files/ed/x.bin?upload=badchunk1&chunk=0&chunks=5&size=10&chunkSize=4`, 'PUT', 'x', true)).status === 400,
+  );
+
+  // Previews for formats browsers can't show
+  const { writePsd } = await import(new URL('../server/node_modules/ag-psd/dist/index.js', import.meta.url).href);
+  const px = new Uint8ClampedArray(120 * 80 * 4).fill(255);
+  writeFileSync(
+    join(drive, 'team', 'art.psd'),
+    Buffer.from(
+      writePsd({ width: 120, height: 80, imageData: { width: 120, height: 80, data: px }, children: [] }, { generateThumbnail: false }),
+    ),
+  );
+  const psdThumb = await call('alice', '/api/files/view/art.psd?thumb');
+  check('PSD thumbnail', psdThumb.status === 200 && psdThumb.headers.get('content-type') === 'image/webp');
+  check('PSD preview', (await call('alice', '/api/files/view/art.psd?preview')).status === 200);
+  check(
+    'PSD itself downloads (not shown raw)',
+    /attachment/.test((await call('alice', '/api/files/view/art.psd')).headers.get('content-disposition') || ''),
+  );
+
+  // Caching: page always re-checked, built assets cached forever
+  check('page is no-cache', (await fetch(B + '/')).headers.get('cache-control') === 'no-cache');
+
   // Boards: unsafe links rejected, connection spoofing ignored, bad JSON is a 400
   const board = JSON.parse((await call('alice', '/api/boards', 'POST', { name: 'Sec' })).text);
   const ctrl = new AbortController();

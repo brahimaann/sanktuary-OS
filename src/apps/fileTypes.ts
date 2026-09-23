@@ -1,39 +1,26 @@
-type FileKind = 'image' | 'audio' | 'video' | 'pdf' | 'text' | 'other';
+type FileKind = 'image' | 'audio' | 'video' | 'pdf' | 'doc' | 'sheet' | 'text' | 'other';
 
-const KINDS: Record<string, FileKind> = {
-  jpg: 'image',
-  jpeg: 'image',
-  png: 'image',
-  gif: 'image',
-  webp: 'image',
-  avif: 'image',
-  svg: 'image',
-  tif: 'image',
-  tiff: 'image',
-  mp3: 'audio',
-  wav: 'audio',
-  flac: 'audio',
-  m4a: 'audio',
-  aac: 'audio',
-  ogg: 'audio',
-  aif: 'audio',
-  aiff: 'audio',
-  mp4: 'video',
-  m4v: 'video',
-  mov: 'video',
-  webm: 'video',
+const EXTENSIONS: Record<Exclude<FileKind, 'other'>, string> = {
+  image: 'jpg jpeg png gif webp avif svg tif tiff psd',
+  audio: 'mp3 wav flac m4a aac ogg aif aiff',
+  video: 'mp4 m4v mov webm',
   pdf: 'pdf',
-  txt: 'text',
-  md: 'text',
-  csv: 'text',
-  json: 'text',
-  lrc: 'text',
+  doc: 'docx',
+  sheet: 'xlsx xls ods csv',
+  text: 'txt md json lrc srt vtt log xml html htm css js jsx ts tsx py yml yaml ini cfg toml sh bat ps1',
 };
+const KINDS = Object.fromEntries(Object.entries(EXTENSIONS).flatMap(([kind, exts]) => exts.split(' ').map((ext) => [ext, kind]))) as Record<
+  string,
+  FileKind
+>;
 
 export const fileKind = (name: string): FileKind => KINDS[name.split('.').pop()?.toLowerCase() || ''] || 'other';
 
+/** Browsers can't show these, so the server converts them (?preview) — see thumb() in server/index.mjs. */
+export const needsConversion = (name: string) => /\.(psd|tiff?)$/i.test(name);
+
 /** Thumbnails are generated server-side for these (see THUMBABLE in server/index.mjs). */
-export const hasThumb = (name: string) => /\.(jpe?g|png|webp|gif|avif|tiff?)$/i.test(name);
+export const hasThumb = (name: string) => /\.(jpe?g|png|webp|gif|avif|tiff?|psd)$/i.test(name);
 
 const ICONS: Record<FileKind | 'folder', string> = {
   folder: 'folder',
@@ -41,6 +28,8 @@ const ICONS: Record<FileKind | 'folder', string> = {
   audio: 'sound',
   video: 'video',
   pdf: 'document',
+  doc: 'doc',
+  sheet: 'document',
   text: 'notepad-file',
   other: 'document',
 };

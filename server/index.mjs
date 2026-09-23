@@ -15,6 +15,15 @@ import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:
 import { pipeline } from 'node:stream/promises';
 import { verifyToken } from '@clerk/backend';
 import sharp from 'sharp';
+import { initializeCanvas, readPsd } from 'ag-psd';
+
+// ag-psd needs a pixel-buffer factory on the server (there's no canvas); we only read raw composite pixels.
+initializeCanvas(
+  () => {
+    throw new Error('no canvas on the server');
+  },
+  (width, height) => ({ width, height, data: new Uint8ClampedArray(width * height * 4) }),
+);
 
 const PORT = Number(process.env.PORT || 3080);
 const DIST = resolve(new URL('../dist/', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
@@ -65,8 +74,14 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.eot': 'application/vnd.ms-fontobject',
   '.webmanifest': 'application/manifest+json',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xls': 'application/vnd.ms-excel',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+  '.psd': 'image/vnd.adobe.photoshop',
 };
-const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.tif', '.tiff']);
+const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.tif', '.tiff', '.psd']);
+const PSD_MAX = 400 * 1024 ** 2; // flattening reads the whole file into memory
 // User files that are safe to show in the browser. Anything else (HTML, SVG, scripts, unknown) is served as a
 // sandboxed download, so an uploaded page can never run as the viewer on sanktuary.studio.
 const SAFE_INLINE = /^(image\/(png|jpeg|gif|webp|avif|tiff|x-icon)|audio\/|video\/|application\/pdf|text\/plain)/;
@@ -254,6 +269,7 @@ async function files(req, res, url) {
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))));
     if (q.has('thumb')) return thumb(res, target);
+    if (q.has('preview')) return thumb(res, target, 2400);
     return stream(req, res, q, target);
   }
   const log = (action, extra = {}) =>
@@ -327,30 +343,42 @@ function freeName(dir, name) {
   }
 }
 
-// Uploads arrive in chunks (Cloudflare caps a request at 100 MB). Chunks are appended in order to a
-// hidden part file next to the destination, then renamed into place when the last one lands.
-// ?replace=1 (edit rights) swaps the new file in and keeps the old one as a version.
+// Uploads arrive in chunks (Cloudflare caps a request at 100 MB), several at once for speed. Each chunk is written
+// at its own offset in a hidden part file next to the destination; when every chunk has landed the part file is
+// renamed into place. ?replace=1 (edit rights) swaps the new file in and keeps the old one as a version.
 // ponytail: abandoned .sk-upload-* parts are never cleaned up; sweep old ones if they start piling up.
+const MAX_CHUNK = 95 * 1024 ** 2;
+const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
+const BIG_BUFFER = { highWaterMark: 1024 * 1024 }; // 1 MB disk reads/writes instead of 64 KB
+
 async function upload(req, res, q, { status, space, root, target, need, log }) {
   need(q.get('replace') ? 'edit' : 'upload');
   const id = q.get('upload') || '';
   const chunk = Number(q.get('chunk') || 0);
   const chunks = Number(q.get('chunks') || 1);
   const size = Number(q.get('size') || 0);
-  if (!/^[\w-]{8,64}$/.test(id) || !(chunk >= 0 && chunk < chunks)) fail(400, 'Bad upload');
+  const chunkSize = Number(q.get('chunkSize') || size);
+  const ok = /^[\w-]{8,64}$/.test(id) && Number.isInteger(chunk) && chunk >= 0 && chunk < chunks && chunkSize > 0 && chunkSize <= MAX_CHUNK;
+  if (!ok || (size && Math.ceil(size / chunkSize) !== chunks)) fail(400, 'Bad upload');
 
-  if (chunk === 0) {
+  const dir = dirname(target);
+  const part = join(dir, `.sk-upload-${id}`);
+  if (!uploads.has(id)) {
+    // First chunk to arrive (any order): check space, then create the part file
     const fs = status.drives.find((d) => d.id === space.drive)?.fs;
     if (/^FAT/i.test(fs || '') && size > FAT32_MAX) fail(413, `This drive is ${fs}, which can't hold files over 4 GB`);
     if (space.id === 'me' && space.quotaGB && (await folderSize(root)) + size > space.quotaGB * 1024 ** 3)
       fail(413, `Your space is full (${space.quotaGB} GB limit)`);
+    uploads.set(id, { got: new Set(), done: false });
+    await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
+    await writeFile(part, '', { flag: 'a' }); // create without truncating chunks that raced ahead
   }
-
-  const dir = dirname(target);
-  await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
-  const part = join(dir, `.sk-upload-${id}`);
-  await pipeline(req, createWriteStream(part, { flags: chunk === 0 ? 'w' : 'a' }));
-  if (chunk < chunks - 1) return json(res, { ok: true });
+  const up = uploads.get(id);
+  await pipeline(req, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
+  up.got.add(chunk);
+  if (up.got.size < chunks || up.done) return json(res, { ok: true });
+  up.done = true;
+  uploads.delete(id);
 
   let name = target.split(sep).pop();
   if (q.get('replace')) await keepVersion(root, target);
@@ -375,21 +403,37 @@ async function stream(req, res, q, file) {
     const end = range[1] && range[2] ? Math.min(Number(range[2]), s.size - 1) : s.size - 1;
     if (start > end) fail(416, 'Bad range');
     res.writeHead(206, { ...headers, 'content-range': `bytes ${start}-${end}/${s.size}`, 'content-length': end - start + 1 });
-    return pipeline(createReadStream(file, { start, end }), res);
+    return pipeline(createReadStream(file, { start, end, ...BIG_BUFFER }), res);
   }
   res.writeHead(200, { ...headers, 'content-length': s.size });
-  return pipeline(createReadStream(file), res);
+  return pipeline(createReadStream(file, BIG_BUFFER), res);
 }
 
-async function thumb(res, file) {
+/** Opens an image for sharp. Photoshop files are flattened from the composite image they store. */
+async function imageInput(file, size) {
+  if (extname(file).toLowerCase() !== '.psd') return sharp(file, { animated: false });
+  if (size > PSD_MAX) fail(413, 'This Photoshop file is too large to preview');
+  const psd = readPsd(await readFile(file), { skipLayerImageData: true, skipThumbnail: true, useImageData: true });
+  if (!psd.imageData) fail(415, 'This PSD has no preview image (save it with "Maximize compatibility" on)');
+  const { width, height, data } = psd.imageData;
+  return sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { raw: { width, height, channels: 4 } });
+}
+
+/** Cached WebP rendering of an image: 256 px thumbnails, or larger previews for formats browsers can't show (PSD, TIFF). */
+async function thumb(res, file, max = 256) {
   if (!THUMBABLE.has(extname(file).toLowerCase())) fail(415, 'No thumbnail');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
-  const cached = join(THUMBS, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}`).digest('hex') + '.webp');
+  const cached = join(THUMBS, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|${max}`).digest('hex') + '.webp');
   if (!existsSync(cached)) {
     await mkdir(THUMBS, { recursive: true });
+    const img = await imageInput(file, s.size);
     await writeFile(
       cached,
-      await sharp(file, { animated: false }).rotate().resize(256, 256, { fit: 'inside' }).webp({ quality: 70 }).toBuffer(),
+      await img
+        .rotate()
+        .resize(max, max, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: max > 256 ? 85 : 70 })
+        .toBuffer(),
     );
   }
   res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'private, max-age=86400' });
@@ -605,7 +649,7 @@ async function boardsApi(req, res, url) {
     const name = safeName(url.searchParams.get('name'));
     const stored = randomUUID() + extname(name).toLowerCase();
     await mkdir(join(DATA, 'boards', id, 'assets'), { recursive: true });
-    await pipeline(req, createWriteStream(join(DATA, 'boards', id, 'assets', stored)));
+    await pipeline(req, createWriteStream(join(DATA, 'boards', id, 'assets', stored), BIG_BUFFER));
     return json(res, { src: `/api/boards/${id}/assets/${stored}`, name });
   }
   if (sub === 'assets' && req.method === 'GET') {
@@ -747,11 +791,14 @@ function staticFile(req, res, url) {
   let file = normalize(join(DIST, decodeURIComponent(url.pathname)));
   if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
-  const page = file.endsWith('index.html'); // always re-check the page so browsers pick up new builds
-  res.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
-    ...(page ? { 'cache-control': 'no-cache' } : {}),
-  });
+  // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their
+  // names, so they can be cached forever; icons, sounds etc. for a day.
+  const cache = file.endsWith('index.html')
+    ? 'no-cache'
+    : url.pathname.startsWith('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=86400';
+  res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': cache });
   return pipeline(createReadStream(file), res);
 }
 
