@@ -20,7 +20,9 @@ function Running($name) { (& $docker inspect -f '{{.State.Running}}' $name 2>$nu
 
 # ── External drives: removable volumes, or anything on a USB disk (the Seagate reports as a fixed disk) ──
 $usbVols = @(Get-Disk | Where-Object BusType -eq 'USB' | Get-Partition | ForEach-Object { $_.AccessPaths } | Where-Object { $_ -like '\\?\Volume*' })
-$drives = @(Get-CimInstance Win32_Volume | Where-Object { $_.DriveLetter -and ($_.DriveType -eq 2 -or $usbVols -contains $_.DeviceID) } | ForEach-Object {
+# Internal data drives (DriveType 3) are listed too, except the Windows drive. Nothing is shared until an
+# admin ticks it Connected in the admin panel.
+$drives = @(Get-CimInstance Win32_Volume | Where-Object { $_.DriveLetter -and $_.DriveLetter -ne $env:SystemDrive -and ($_.DriveType -eq 2 -or $_.DriveType -eq 3 -or $usbVols -contains $_.DeviceID) } | ForEach-Object {
   [ordered]@{
     id = $_.DeviceID -replace '^\\\\\?\\Volume\{|\}\\$', ''
     letter = $_.DriveLetter; label = $_.Label; fs = $_.FileSystem

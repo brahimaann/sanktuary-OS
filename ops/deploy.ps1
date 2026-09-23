@@ -17,6 +17,16 @@ function Run($what, [scriptblock]$cmd) {
   if ($LASTEXITCODE -ne 0) { throw "$what failed:`n$($out.Trim() -split "`n" | Select-Object -Last 15 | Out-String)" }
 }
 
+# The watcher and backup scripts run from C:\homeserver\nextcloud; keep those copies in step with the repo
+foreach ($f in 'drive-watch.ps1', 'sanktuary-backup.ps1') {
+  $src = Join-Path $proj "ops\nextcloud\$f"; $dst = "C:\homeserver\nextcloud\$f"
+  if ((Test-Path $src) -and (Test-Path (Split-Path $dst)) -and (-not (Test-Path $dst) -or (Get-FileHash $src).Hash -ne (Get-FileHash $dst).Hash)) {
+    if (Test-Path $dst) { Copy-Item $dst "$dst.bak" -Force } # keep the previous copy, in case it had local edits
+    Copy-Item $src $dst -Force
+    Log "updated $dst"
+  }
+}
+
 git fetch --quiet origin main 2>$null
 if ($LASTEXITCODE -ne 0) { exit } # offline; try again next time
 $remote = (git rev-parse origin/main).Trim()

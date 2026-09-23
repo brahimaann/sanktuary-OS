@@ -1,7 +1,7 @@
 # ops: scripts that run on the home server PC
 
-These run from `C:\homeserver\nextcloud\` on the server. The copies here are the backup / source of truth:
-after editing one here, copy it back to `C:\homeserver\nextcloud\` (or the other way round).
+These run from `C:\homeserver\nextcloud\` on the server. The copies here are the source of truth: `deploy.ps1`
+copies `drive-watch.ps1` and `sanktuary-backup.ps1` there whenever they change (the previous copy is kept as `.bak`).
 
 | File | What it does |
 |---|---|
