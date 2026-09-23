@@ -1,0 +1,142 @@
+:root {
+  /* ── SABR 98 Custom Palette ── */
+  --sabr-title-active-start: #5C2018;
+  --sabr-title-active-end: #9B4D30;
+  --sabr-title-inactive-start: #7A6E64;
+  --sabr-title-inactive-end: #A89E94;
+  --sabr-accent: #C47A3C;
+  --sabr-accent-dark: #8B4D20;
+  --sabr-desktop-bg: #1E1612;
+  --sabr-taskbar-bg: #C0B8AE;
+  --sabr-start-btn: #C0B0A0;
+  --sabr-text-warm: #F5E6D3;
+  --sabr-highlight: #D4915A;
+
+  /* Overwrite the default OS-GUI variables system-wide */
+  --Background: var(--sabr-desktop-bg);
+  --Hilight: var(--sabr-highlight);
+  --ActiveTitle: var(--sabr-title-active-start);
+  --GradientActiveTitle: var(--sabr-title-active-end);
+  --InactiveTitle: var(--sabr-title-inactive-start);
+  --GradientInactiveTitle: var(--sabr-title-inactive-end);
+  --ButtonFace: var(--sabr-taskbar-bg);
+  --Scrollbar: var(--sabr-taskbar-bg);
+  --Menu: var(--sabr-taskbar-bg);
+}
+
+@import "tailwindcss";
+
+@import "./layout.css";
+@import "./classic.css";
+
+/* Exact clone rules */
+* {
+  box-sizing: border-box;
+  text-rendering: optimizeSpeed;
+  image-rendering: pixelated; /* Guarantees crisp 16-bit icons */
+}
+
+body, html {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--Background, #008080); /* Perfect Win98 Teal, overridden by SABR */
+  font-family: "MS Sans Serif", Arial, sans-serif;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: none;
+}
+
+/* --- CRT Monitor Effect Styles --- */
+
+/* CRT Wrapper container */
+.crt-wrapper {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #000;
+}
+
+/* CRT monitor bezel graphic overlay */
+.crt-bezel-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 999999; /* On top of everything */
+  pointer-events: none;
+  display: block;
+}
+
+/* Centered screen content inside the bezel frame */
+.crt-screen-content {
+  position: absolute;
+  top: 6%;
+  left: 6%;
+  width: 88%;
+  height: 85%;
+  overflow: hidden;
+  z-index: 1;
+}
+
+/* CRT screen glass vignette shadow */
+.crt-screen-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 999996; /* Underneath scanlines but over desktop/apps */
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.35) 100%);
+}
+
+/* Scanlines and RGB subpixel grid */
+.crt-screen-filter {
+  position: absolute;
+  inset: 0;
+  z-index: 999998; /* Just underneath the bezel */
+  pointer-events: none;
+  background: 
+    /* Repeating scanlines */
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%) 0 0 / 100% 2px,
+    /* Repeating vertical RGB color grid */
+    linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04)) 0 0 / 3px 100%;
+}
+
+/* Screen flicker animation overlay */
+.crt-screen-flicker {
+  position: absolute;
+  inset: 0;
+  z-index: 999997;
+  pointer-events: none;
+  background: rgba(18, 16, 16, 0.08);
+  opacity: 0.15;
+  animation: crt-flicker 0.15s ease infinite;
+}
+
+@keyframes crt-flicker {
+  0% { opacity: 0.08; }
+  50% { opacity: 0.12; }
+  100% { opacity: 0.09; }
+}
+
+/* Screen power-on scan effect */
+.crt-power-on {
+  animation: crt-turn-on 1.5s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+@keyframes crt-turn-on {
+  0% {
+    transform: scaleY(0.01) scaleX(0);
+    filter: brightness(20) contrast(2);
+  }
+  40% {
+    transform: scaleY(0.01) scaleX(1);
+    filter: brightness(15) contrast(1.5);
+  }
+  100% {
+    transform: scaleY(1) scaleX(1);
+    filter: brightness(1.05) contrast(1.05);
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "sanktuary-os-server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@clerk/backend": "^3.18.1",
+    "sharp": "^0.34.5"
+  }
+}

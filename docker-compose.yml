@@ -1,0 +1,16 @@
+# Sanktuary OS: the Cloudflare Tunnel that publishes the site.
+# The site itself (server/index.mjs) runs directly on Windows via the "Sanktuary OS server" scheduled task,
+# so external drives can be plugged in at any time. Start/update the tunnel: docker compose up -d
+services:
+  # Publishes https://sanktuary.studio -> http://web:3080 (route set in the Cloudflare dashboard).
+  # "web" points at this PC, where the server listens on 127.0.0.1:3080.
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run   # /ready is read by the admin panel's health tab
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    extra_hosts:
+      - "web:host-gateway"
+    ports:
+      - "127.0.0.1:2000:2000"

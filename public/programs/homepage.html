@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Microsoft Internet Explorer Start Page</title>
+  <style>
+    body {
+      background-color: #008080;
+      color: #000;
+      font-family: "MS Sans Serif", Arial, sans-serif;
+      font-size: 12px;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      background-color: #c0c0c0;
+      border: 2px solid;
+      border-color: #fff #808080 #808080 #fff;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 15px;
+      box-shadow: 4px 4px 10px rgba(0,0,0,0.5);
+    }
+    .header {
+      background: linear-gradient(90deg, #000080, #1084d0);
+      color: white;
+      padding: 5px 10px;
+      font-weight: bold;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid #808080;
+      margin-bottom: 15px;
+    }
+    .logo-container {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .logo-text {
+      font-size: 24px;
+      font-weight: bold;
+      color: #000080;
+      text-shadow: 2px 2px #fff;
+      font-style: italic;
+    }
+    .logo-sub {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: #404040;
+    }
+    .search-box {
+      background-color: #fff;
+      border: 2px solid;
+      border-color: #808080 #fff #fff #808080;
+      padding: 15px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .search-input {
+      font-family: monospace;
+      font-size: 14px;
+      padding: 4px;
+      width: 60%;
+      border: 2px solid;
+      border-color: #808080 #fff #fff #808080;
+      outline: none;
+    }
+    .search-btn {
+      font-family: inherit;
+      font-size: 12px;
+      padding: 4px 15px;
+      background-color: #c0c0c0;
+      border: 2px solid;
+      border-color: #fff #808080 #808080 #fff;
+      cursor: pointer;
+      outline: none;
+    }
+    .search-btn:active {
+      border-color: #808080 #fff #fff #808080;
+    }
+    .section-title {
+      font-weight: bold;
+      border-bottom: 2px solid #808080;
+      padding-bottom: 2px;
+      margin-bottom: 10px;
+      color: #000080;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+    .card {
+      border: 1px solid #808080;
+      padding: 10px;
+      background-color: #d8d8d8;
+    }
+    .card a {
+      color: #000080;
+      font-weight: bold;
+      text-decoration: underline;
+    }
+    .card a:hover {
+      color: #ff0000;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 25px;
+      font-size: 10px;
+      color: #404040;
+      border-top: 1px solid #808080;
+      padding-top: 10px;
+    }
+    .gif-container {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span>Welcome to MSN Internet Start</span>
+      <span style="font-size:10px;">Microsoft</span>
+    </div>
+
+    <div class="logo-container">
+      <div class="logo-text">Microsoft Internet Explorer</div>
+      <div class="logo-sub">WHERE DO YOU WANT TO GO TODAY?</div>
+    </div>
+
+    <!-- Search Engine -->
+    <div class="search-box">
+      <form action="https://wiby.me/" method="get" target="_blank">
+        <label for="q" style="font-weight:bold; display:block; margin-bottom:8px;">Search the Web:</label>
+        <input type="text" name="q" id="q" class="search-input" placeholder="Search the classic web...">
+        <button type="submit" class="search-btn">Search</button>
+      </form>
+    </div>
+
+    <div class="grid">
+      <!-- Card 1 -->
+      <div class="card">
+        <div class="section-title">Retro Portals</div>
+        <ul style="padding-left:15px; margin:5px 0;">
+          <li><a href="https://wiby.me" target="_blank">Wiby Search Engine</a></li>
+          <li><a href="https://neocities.org" target="_blank">Neocities Directory</a></li>
+          <li><a href="https://archive.org" target="_blank">The Internet Archive</a></li>
+        </ul>
+      </div>
+
+      <!-- Card 2 -->
+      <div class="card">
+        <div class="section-title">Classic Web Ring</div>
+        <ul style="padding-left:15px; margin:5px 0;">
+          <li><a href="https://win98-web.netlify.app" target="_blank">Win98-Web Hub</a></li>
+          <li><a href="https://98.js.org" target="_blank">98.js Simulation</a></li>
+          <li><a href="https://poolsuite.net" target="_blank">Poolsuite FM</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gif-container">
+      <img src="/images/ie-animated.gif" alt="" style="width:88px; height:31px; display:none;" onerror="this.style.display='none'">
+      <div style="font-style:italic; color:#505050; font-size:11px; text-align:center; width:100%;">
+        ⚡ Powered by the HQ OS Virtual Disk Web Connection
+      </div>
+    </div>
+
+    <div class="footer">
+      &copy; 1998 Microsoft Corporation. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>
