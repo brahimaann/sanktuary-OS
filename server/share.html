@@ -149,6 +149,139 @@
         height: 60vh;
         border: 0;
       }
+      /* Win98 Media Player */
+      .mp {
+        width: 100%;
+        background: var(--face);
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: 1px 1px 0 #000;
+      }
+      .mp-title {
+        background: linear-gradient(90deg, var(--navy), #1084d0);
+        color: #fff;
+        font-weight: 700;
+        padding: 3px 5px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .mp-title img {
+        width: 16px;
+        height: 16px;
+        image-rendering: pixelated;
+      }
+      .mp-body {
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .mp video {
+        width: 100%;
+        max-height: 55vh;
+        background: #000;
+        display: block;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+      }
+      .mp-lcd {
+        background: #000;
+        color: #00ff40;
+        font-family: 'Lucida Console', 'Courier New', monospace;
+        font-size: 13px;
+        padding: 6px 8px;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        text-shadow: 0 0 4px #00ff4088;
+      }
+      .mp-lcd .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mp-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .mp-btn {
+        width: 34px;
+        height: 28px;
+        padding: 0;
+        justify-content: center;
+      }
+      .mp-btn svg {
+        width: 12px;
+        height: 12px;
+      }
+      .mp-btn.on {
+        border-color: #000 #fff #fff #000;
+        box-shadow: inset 1px 1px #808080;
+        background: #d4d4d4;
+      }
+      .mp-sep {
+        width: 2px;
+        align-self: stretch;
+        margin: 2px 4px;
+        border-left: 1px solid #808080;
+        border-right: 1px solid #fff;
+      }
+      /* Win98 trackbar: sunken groove, raised rectangular thumb */
+      .mp input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+        height: 24px;
+        margin: 0;
+        cursor: pointer;
+        border: 0;
+        padding: 0;
+      }
+      .mp input[type='range']::-webkit-slider-runnable-track {
+        height: 4px;
+        background: #fff;
+        border: 1px solid;
+        border-color: #808080 #fff #fff #808080;
+        box-shadow: inset 1px 1px #000;
+      }
+      .mp input[type='range']::-moz-range-track {
+        height: 4px;
+        background: #fff;
+        border: 1px solid;
+        border-color: #808080 #fff #fff #808080;
+      }
+      .mp input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 11px;
+        height: 21px;
+        margin-top: -9px;
+        background: var(--face);
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset -1px -1px #808080;
+      }
+      .mp input[type='range']::-moz-range-thumb {
+        width: 9px;
+        height: 19px;
+        border-radius: 0;
+        background: var(--face);
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset -1px -1px #808080;
+      }
+      .mp .seek {
+        width: 100%;
+      }
+      .mp .vol {
+        width: 80px;
+      }
       .err {
         color: #a00000;
       }
@@ -251,24 +384,83 @@
         const k = kind(name);
         const dl = info.download ? `<a class="btn" href="${src}&download">Download ${esc(name)}</a>` : '';
         const media =
-          k === 'audio'
-            ? `<audio controls autoplay src="${src}"></audio>`
-            : k === 'video'
-              ? `<video controls playsinline src="${src}"></video>`
-              : k === 'image'
-                ? `<img src="${src}" alt="">`
-                : k === 'preview'
-                  ? `<img src="${base}/thumb?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}" alt="">`
-                  : k === 'pdf'
-                    ? `<iframe src="${src}"></iframe>`
-                    : k === 'text'
-                      ? `<iframe src="${src}" style="height:40vh;background:#fff"></iframe>`
-                      : `<div>No preview for this kind of file.${info.download ? '' : ' Downloads are turned off for this link.'}</div>`;
+          k === 'audio' || k === 'video'
+            ? player(name, src, k)
+            : k === 'image'
+              ? `<img src="${src}" alt="">`
+              : k === 'preview'
+                ? `<img src="${base}/thumb?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}" alt="">`
+                : k === 'pdf'
+                  ? `<iframe src="${src}"></iframe>`
+                  : k === 'text'
+                    ? `<iframe src="${src}" style="height:40vh;background:#fff"></iframe>`
+                    : `<div>No preview for this kind of file.${info.download ? '' : ' Downloads are turned off for this link.'}</div>`;
         return `<div class="viewer inset">${media}${dl}</div>`;
+      }
+
+      // Win98 Media Player: the browser's <audio>/<video> does the playing, hidden behind our own controls
+      const glyph = {
+        play: '<svg viewBox="0 0 12 12"><path d="M2 1 L11 6 L2 11 Z"/></svg>',
+        pause: '<svg viewBox="0 0 12 12"><path d="M2 1h3v10H2zM7 1h3v10H7z"/></svg>',
+        stop: '<svg viewBox="0 0 12 12"><path d="M2 2h8v8H2z"/></svg>',
+      };
+      const clock = (s) =>
+        isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--';
+      function player(name, src, k) {
+        return `<div class="mp" data-player>
+          <div class="mp-title"><img src="/images/icons/media-player-16x16.png" alt="">Media Player - ${esc(name)}</div>
+          <div class="mp-body">
+            ${k === 'video' ? `<video playsinline preload="metadata" src="${src}"></video>` : `<audio preload="metadata" src="${src}"></audio>`}
+            <div class="mp-lcd"><span class="name" data-state>Stopped</span><span data-time>00:00 / --:--</span></div>
+            <input class="seek" type="range" min="0" max="1000" value="0" aria-label="Position" data-seek>
+            <div class="mp-row">
+              <button class="mp-btn" title="Play" data-play>${glyph.play}</button>
+              <button class="mp-btn" title="Pause" data-pause>${glyph.pause}</button>
+              <button class="mp-btn" title="Stop" data-stop>${glyph.stop}</button>
+              <span class="mp-sep"></span>
+              <img src="/images/icons/speaker-16x16.png" alt="Volume" width="16" height="16">
+              <input class="vol" type="range" min="0" max="100" value="100" aria-label="Volume" data-vol>
+            </div>
+          </div>
+        </div>`;
+      }
+      function wirePlayers() {
+        app.querySelectorAll('[data-player]').forEach((el) => {
+          const m = el.querySelector('audio, video');
+          const $ = (s) => el.querySelector(s);
+          const seek = $('[data-seek]');
+          let dragging = false;
+          const show = () => {
+            $('[data-time]').textContent = `${clock(m.currentTime)} / ${clock(m.duration)}`;
+            $('[data-state]').textContent = m.ended ? 'Finished' : m.paused ? (m.currentTime ? 'Paused' : 'Stopped') : 'Playing';
+            $('[data-play]').classList.toggle('on', !m.paused);
+            $('[data-pause]').classList.toggle('on', m.paused && m.currentTime > 0 && !m.ended);
+            if (!dragging && m.duration) seek.value = String((m.currentTime / m.duration) * 1000);
+          };
+          ['timeupdate', 'play', 'pause', 'ended', 'loadedmetadata'].forEach((ev) => m.addEventListener(ev, show));
+          $('[data-play]').onclick = () => m.play();
+          $('[data-pause]').onclick = () => m.pause();
+          $('[data-stop]').onclick = () => {
+            m.pause();
+            m.currentTime = 0;
+            show();
+          };
+          if (m.tagName === 'VIDEO') m.onclick = () => (m.paused ? m.play() : m.pause());
+          seek.oninput = () => {
+            dragging = true;
+            if (m.duration) $('[data-time]').textContent = `${clock((seek.value / 1000) * m.duration)} / ${clock(m.duration)}`;
+          };
+          seek.onchange = () => {
+            dragging = false;
+            if (m.duration) m.currentTime = (seek.value / 1000) * m.duration;
+          };
+          $('[data-vol]').oninput = (e) => (m.volume = e.target.value / 100);
+        });
       }
 
       function single() {
         app.innerHTML = header(viewer(info.name));
+        wirePlayers();
       }
 
       async function folder() {
@@ -294,6 +486,7 @@
               .join('') || '<div class="row">This folder is empty.</div>'
           }</div>` +
           (selected ? viewer(selected) : '');
+        wirePlayers();
         app.querySelectorAll('[data-up]').forEach((a) =>
           a.addEventListener('click', (ev) => {
             ev.preventDefault();
