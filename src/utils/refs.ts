@@ -5,13 +5,13 @@ import { fileIcon } from '../apps/fileTypes';
 export interface Ref {
   kind: 'file' | 'folder' | 'board' | 'plan';
   title: string;
-  app?: string;     // space id (file/folder)
-  dir?: string[];   // parent folders (file/folder)
-  name?: string;    // file/folder name
+  app?: string; // space id (file/folder)
+  dir?: string[]; // parent folders (file/folder)
+  name?: string; // file/folder name
   boardId?: string; // board/plan
 }
 
-export const DRAG_FILE = 'application/x-sk-file';   // dragged out of a team files window
+export const DRAG_FILE = 'application/x-sk-file'; // dragged out of a team files window
 export const DRAG_BOARD = 'application/x-sk-board'; // dragged out of the Moodboards/Planner list
 
 /** Reads a Sanktuary ref from a drop, if there is one. */
@@ -30,24 +30,57 @@ export function refFromDrop(dt: DataTransfer): Ref | null {
 }
 
 export const refIcon = (r: Ref) =>
-  r.kind === 'folder' ? '/images/icons/folder-16x16.png'
-    : r.kind === 'board' ? '/images/icons/paint-16x16.png'
-    : r.kind === 'plan' ? '/images/icons/task-16x16.png'
-    : fileIcon(r.name || '', false);
+  r.kind === 'folder'
+    ? '/images/icons/folder-16x16.png'
+    : r.kind === 'board'
+      ? '/images/icons/paint-16x16.png'
+      : r.kind === 'plan'
+        ? '/images/icons/task-16x16.png'
+        : fileIcon(r.name || '', false);
 
 /** Opens a ref in the right window. */
 export function useOpenRef() {
   const { openWindow } = useWindowManager();
   return (r: Ref) => {
     if (r.kind === 'file' && r.app && r.name) {
-      openWindow({ id: `preview-${r.app}-${[...(r.dir || []), r.name].join('/')}`, title: r.name, icon: fileIcon(r.name, false), appType: 'file-preview', appProps: { app: r.app, dir: r.dir || [], name: r.name, siblings: [r.name] }, width: 720, height: 520 });
+      openWindow({
+        id: `preview-${r.app}-${[...(r.dir || []), r.name].join('/')}`,
+        title: r.name,
+        icon: fileIcon(r.name, false),
+        appType: 'file-preview',
+        appProps: { app: r.app, dir: r.dir || [], name: r.name, siblings: [r.name] },
+        width: 720,
+        height: 520,
+      });
     } else if (r.kind === 'folder' && r.app) {
       const path = [...(r.dir || []), ...(r.name ? [r.name] : [])];
-      openWindow({ id: `space-${r.app}-${path.join('/')}`, title: r.name || r.title, icon: '/images/icons/folder-16x16.png', appType: 'team-files', appProps: { app: r.app, initialPath: path } });
+      openWindow({
+        id: `space-${r.app}-${path.join('/')}`,
+        title: r.name || r.title,
+        icon: '/images/icons/folder-16x16.png',
+        appType: 'team-files',
+        appProps: { app: r.app, initialPath: path },
+      });
     } else if (r.kind === 'board' && r.boardId) {
-      openWindow({ id: `canvas-${r.boardId}`, title: r.title, icon: '/images/icons/paint-16x16.png', appType: 'canvas', appProps: { boardId: r.boardId }, width: 1000, height: 680 });
+      openWindow({
+        id: `canvas-${r.boardId}`,
+        title: r.title,
+        icon: '/images/icons/paint-16x16.png',
+        appType: 'canvas',
+        appProps: { boardId: r.boardId },
+        width: 1000,
+        height: 680,
+      });
     } else if (r.kind === 'plan' && r.boardId) {
-      openWindow({ id: `planner-${r.boardId}`, title: r.title, icon: '/images/icons/task-16x16.png', appType: 'planner', appProps: { boardId: r.boardId }, width: 1000, height: 640 });
+      openWindow({
+        id: `planner-${r.boardId}`,
+        title: r.title,
+        icon: '/images/icons/task-16x16.png',
+        appType: 'planner',
+        appProps: { boardId: r.boardId },
+        width: 1000,
+        height: 640,
+      });
     }
   };
 }

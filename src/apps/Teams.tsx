@@ -12,9 +12,35 @@ import MembersPicker from './MembersPicker';
 import { isTouch } from './fileTypes';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 
-interface Channel { id: string; name: string; topic?: string; lastAt: string | null; private?: boolean; members?: string[] }
-interface Dm { id: string; with: string; lastAt: string | null }
-interface Activity { id: string; at: string; user: string; action: string; space?: string; spaceName?: string; path?: string; to?: string; board?: string; boardKind?: string; title?: string; card?: string; text?: string; t?: number | null }
+interface Channel {
+  id: string;
+  name: string;
+  topic?: string;
+  lastAt: string | null;
+  private?: boolean;
+  members?: string[];
+}
+interface Dm {
+  id: string;
+  with: string;
+  lastAt: string | null;
+}
+interface Activity {
+  id: string;
+  at: string;
+  user: string;
+  action: string;
+  space?: string;
+  spaceName?: string;
+  path?: string;
+  to?: string;
+  board?: string;
+  boardKind?: string;
+  title?: string;
+  card?: string;
+  text?: string;
+  t?: number | null;
+}
 
 const TABS = ['Buddies', 'Channels', 'Activity'] as const;
 
@@ -39,7 +65,13 @@ const BuddyList: React.FC = () => {
   const mine = byName[me];
 
   const loadChat = useCallback(() => {
-    api('/api/chat').then((d) => { setChannels(d.channels); setDms(d.dms); }, () => {});
+    api('/api/chat').then(
+      (d) => {
+        setChannels(d.channels);
+        setDms(d.dms);
+      },
+      () => {},
+    );
   }, [api]);
   useEffect(loadChat, [loadChat]);
   useLiveEvent('channel', loadChat);
@@ -50,10 +82,26 @@ const BuddyList: React.FC = () => {
   });
 
   const openChat = (channel: string, title: string) =>
-    openWindow({ id: `chat-${channel}`, title, icon: '/images/icons/outlook-express-16x16.png', appType: 'chat', appProps: { channel }, width: 460, height: 420 });
+    openWindow({
+      id: `chat-${channel}`,
+      title,
+      icon: '/images/icons/outlook-express-16x16.png',
+      appType: 'chat',
+      appProps: { channel },
+      width: 460,
+      height: 420,
+    });
   const openDm = (p: Profile) => openChat(dmId(me, p.username), `${displayName(p)} — Instant Message`);
   const openProfile = (username?: string) =>
-    openWindow({ id: `profile-${username || 'me'}`, title: username && username !== me ? `${displayName(byName[username], username)} — Info` : 'My Profile', icon: '/images/icons/my-documents-16x16.png', appType: 'profile', appProps: { username }, width: 420, height: 520 });
+    openWindow({
+      id: `profile-${username || 'me'}`,
+      title: username && username !== me ? `${displayName(byName[username], username)} — Info` : 'My Profile',
+      icon: '/images/icons/my-documents-16x16.png',
+      appType: 'profile',
+      appProps: { username },
+      width: 420,
+      height: 520,
+    });
 
   const saveStatus = async () => {
     if (statusMsg === null || statusMsg === (mine?.status || '')) return setStatusMsg(null);
@@ -72,7 +120,9 @@ const BuddyList: React.FC = () => {
       const c = await api('/api/chat', { method: 'POST', body: JSON.stringify({ name, private: members !== null, members }) });
       loadChat();
       openChat(c.id, `#${c.name}`);
-    } catch (e) { dialog.alert((e as Error).message, { icon: 'error' }); }
+    } catch (e) {
+      dialog.alert((e as Error).message, { icon: 'error' });
+    }
   };
 
   const unread = (id: string, lastAt: string | null) => !!lastAt && lastAt > lastRead(id);
@@ -103,15 +153,26 @@ const BuddyList: React.FC = () => {
             onChange={(e) => setStatusMsg(e.target.value)}
             onBlur={saveStatus}
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', fontSize: 11, fontStyle: 'italic', border: '2px inset #808080', padding: '1px 3px' }}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              fontFamily: 'inherit',
+              fontSize: 11,
+              fontStyle: 'italic',
+              border: '2px inset #808080',
+              padding: '1px 3px',
+            }}
           />
         </div>
-        <button style={button} onClick={() => openProfile()}>Profile</button>
+        <button style={button} onClick={() => openProfile()}>
+          Profile
+        </button>
       </div>
       <div style={{ display: 'flex', gap: 2, padding: '4px 4px 0' }}>
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} style={{ ...button, fontWeight: tab === t ? 700 : 400 }}>
-            {t}{t === 'Channels' && [...channels, ...dms].some((c) => unread(c.id, c.lastAt)) ? ' •' : ''}
+            {t}
+            {t === 'Channels' && [...channels, ...dms].some((c) => unread(c.id, c.lastAt)) ? ' •' : ''}
           </button>
         ))}
       </div>
@@ -119,12 +180,18 @@ const BuddyList: React.FC = () => {
         {tab === 'Buddies' && (
           <>
             <Group title={`Online (${online.length})`}>
-              {online.map((p) => <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />)}
+              {online.map((p) => (
+                <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />
+              ))}
             </Group>
             <Group title={`Offline (${offline.length})`}>
-              {offline.map((p) => <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />)}
+              {offline.map((p) => (
+                <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />
+              ))}
             </Group>
-            {others.length === 0 && <div style={{ padding: 8, color: '#666' }}>No other members yet. Admins can add members in the Admin Panel.</div>}
+            {others.length === 0 && (
+              <div style={{ padding: 8, color: '#666' }}>No other members yet. Admins can add members in the Admin Panel.</div>
+            )}
           </>
         )}
         {tab === 'Channels' && (
@@ -132,14 +199,20 @@ const BuddyList: React.FC = () => {
             <Group title="Channels">
               {channels.map((c) => (
                 <Row key={c.id} {...open(() => openChat(c.id, `#${c.name}`))} bold={unread(c.id, c.lastAt)}>
-                  <b>{c.private ? '🔒' : '#'}</b>&nbsp;{c.name}{c.topic && <span style={{ color: '#666', marginLeft: 6 }}>{c.topic}</span>}
+                  <b>{c.private ? '🔒' : '#'}</b>&nbsp;{c.name}
+                  {c.topic && <span style={{ color: '#666', marginLeft: 6 }}>{c.topic}</span>}
                 </Row>
               ))}
             </Group>
             <Group title="Direct messages">
               {dms.map((d) => (
-                <Row key={d.id} {...open(() => openChat(d.id, `${displayName(byName[d.with], d.with)} — Instant Message`))} bold={unread(d.id, d.lastAt)}>
-                  <Avatar username={d.with} avatar={byName[d.with]?.avatar} size={16} online={byName[d.with]?.online} />&nbsp;{displayName(byName[d.with], d.with)}
+                <Row
+                  key={d.id}
+                  {...open(() => openChat(d.id, `${displayName(byName[d.with], d.with)} — Instant Message`))}
+                  bold={unread(d.id, d.lastAt)}
+                >
+                  <Avatar username={d.with} avatar={byName[d.with]?.avatar} size={16} online={byName[d.with]?.online} />
+                  &nbsp;{displayName(byName[d.with], d.with)}
                 </Row>
               ))}
               {dms.length === 0 && <div style={{ padding: '2px 8px', color: '#666' }}>Double-click a buddy to start one.</div>}
@@ -149,7 +222,11 @@ const BuddyList: React.FC = () => {
         {tab === 'Activity' && <ActivityFeed byName={byName} />}
       </div>
       <div style={{ display: 'flex', gap: 4, padding: 4 }}>
-        {tab === 'Channels' && <button style={button} onClick={newChannel}>New channel...</button>}
+        {tab === 'Channels' && (
+          <button style={button} onClick={newChannel}>
+            New channel...
+          </button>
+        )}
         <div style={{ ...statusBar, flex: 1, margin: 0 }}>{online.length} buddy(s) online</div>
       </div>
     </div>
@@ -163,18 +240,65 @@ const Group: React.FC<{ title: string; children: React.ReactNode }> = ({ title, 
   </div>
 );
 
-const Row: React.FC<{ children: React.ReactNode; bold?: boolean; onClick?: () => void; onDoubleClick?: () => void }> = ({ children, bold, ...handlers }) => (
-  <div {...handlers} style={{ display: 'flex', alignItems: 'center', padding: isTouch ? '8px' : '3px 8px', cursor: 'default', userSelect: 'none', fontWeight: bold ? 700 : 400 }}>{children}</div>
+const Row: React.FC<{ children: React.ReactNode; bold?: boolean; onClick?: () => void; onDoubleClick?: () => void }> = ({
+  children,
+  bold,
+  ...handlers
+}) => (
+  <div
+    {...handlers}
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      padding: isTouch ? '8px' : '3px 8px',
+      cursor: 'default',
+      userSelect: 'none',
+      fontWeight: bold ? 700 : 400,
+    }}
+  >
+    {children}
+  </div>
 );
 
-const Buddy: React.FC<{ p: Profile; onClick?: () => void; onDoubleClick?: () => void; onInfo: () => void }> = ({ p, onInfo, ...handlers }) => (
-  <div {...handlers} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: isTouch ? '8px' : '3px 8px', cursor: 'default', userSelect: 'none', opacity: p.online ? 1 : 0.6 }}>
+const Buddy: React.FC<{ p: Profile; onClick?: () => void; onDoubleClick?: () => void; onInfo: () => void }> = ({
+  p,
+  onInfo,
+  ...handlers
+}) => (
+  <div
+    {...handlers}
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: isTouch ? '8px' : '3px 8px',
+      cursor: 'default',
+      userSelect: 'none',
+      opacity: p.online ? 1 : 0.6,
+    }}
+  >
     <Avatar username={p.username} avatar={p.avatar} size={24} online={p.online} />
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontWeight: 700 }}>{displayName(p)}{p.role && <span style={{ fontWeight: 400, color: '#666' }}> · {p.role}</span>}</div>
-      {p.status && <div style={{ fontStyle: 'italic', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.status}</div>}
+      <div style={{ fontWeight: 700 }}>
+        {displayName(p)}
+        {p.role && <span style={{ fontWeight: 400, color: '#666' }}> · {p.role}</span>}
+      </div>
+      {p.status && (
+        <div style={{ fontStyle: 'italic', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {p.status}
+        </div>
+      )}
     </div>
-    <button style={{ ...button, padding: '0 6px' }} onClick={(e) => { e.stopPropagation(); onInfo(); }} onDoubleClick={(e) => e.stopPropagation()}>Info</button>
+    <button
+      style={{ ...button, padding: '0 6px' }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onInfo();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      Info
+    </button>
   </div>
 );
 
@@ -182,7 +306,9 @@ const ActivityFeed: React.FC<{ byName: Record<string, Profile> }> = ({ byName })
   const api = useApi();
   const openRef = useOpenRef();
   const [items, setItems] = useState<Activity[]>([]);
-  useEffect(() => { api('/api/activity').then(setItems, () => {}); }, [api]);
+  useEffect(() => {
+    api('/api/activity').then(setItems, () => {});
+  }, [api]);
   useLiveEvent('activity', (a: Activity) => setItems((prev) => [a, ...prev].slice(0, 150)));
 
   const open = (a: Activity) => {
@@ -195,19 +321,34 @@ const ActivityFeed: React.FC<{ byName: Record<string, Profile> }> = ({ byName })
   };
   const fmtT = (t?: number | null) => (t == null ? '' : ` at ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`);
 
-  if (!items.length) return <div style={{ padding: 8, color: '#666' }}>Nothing yet. Uploads, comments, new boards and finished tasks show up here.</div>;
+  if (!items.length)
+    return <div style={{ padding: 8, color: '#666' }}>Nothing yet. Uploads, comments, new boards and finished tasks show up here.</div>;
   return (
     <>
       {items.map((a) => (
-        <div key={a.id} onDoubleClick={() => open(a)} onClick={() => isTouch && open(a)} style={{ display: 'flex', gap: 6, padding: '4px 8px', borderBottom: '1px solid #eee', cursor: 'default' }} title="Double-click to open">
+        <div
+          key={a.id}
+          onDoubleClick={() => open(a)}
+          onClick={() => isTouch && open(a)}
+          style={{ display: 'flex', gap: 6, padding: '4px 8px', borderBottom: '1px solid #eee', cursor: 'default' }}
+          title="Double-click to open"
+        >
           <Avatar username={a.user} avatar={byName[a.user]?.avatar} size={20} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <b>{displayName(byName[a.user], a.user)}</b> {a.action}{' '}
-            <b>{a.card || a.title || a.path}</b>
-            {a.to && <> → <b>{a.to}</b></>}
+            <b>{displayName(byName[a.user], a.user)}</b> {a.action} <b>{a.card || a.title || a.path}</b>
+            {a.to && (
+              <>
+                {' '}
+                → <b>{a.to}</b>
+              </>
+            )}
             {a.spaceName && <span style={{ color: '#666' }}> in {a.spaceName}</span>}
             {a.board && a.card && <span style={{ color: '#666' }}> in {a.title}</span>}
-            {a.text && <div style={{ fontStyle: 'italic', color: '#444' }}>“{a.text}”{fmtT(a.t)}</div>}
+            {a.text && (
+              <div style={{ fontStyle: 'italic', color: '#444' }}>
+                “{a.text}”{fmtT(a.t)}
+              </div>
+            )}
             <div style={{ color: '#999', fontSize: 10 }}>{new Date(a.at).toLocaleString()}</div>
           </div>
         </div>

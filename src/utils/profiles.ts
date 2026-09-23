@@ -24,9 +24,15 @@ export function useProfiles() {
   const api = useApi();
   const online = useOnline();
   const [list, setList] = useState<Profile[]>([]);
-  const load = useCallback(() => { api('/api/profiles').then(setList, () => {}); }, [api]);
+  const load = useCallback(() => {
+    api('/api/profiles').then(setList, () => {});
+  }, [api]);
   useEffect(load, [load]);
-  useLiveEvent('profile', (p: Profile) => setList((prev) => (prev.some((x) => x.username === p.username) ? prev.map((x) => (x.username === p.username ? { ...x, ...p } : x)) : [...prev, p])));
+  useLiveEvent('profile', (p: Profile) =>
+    setList((prev) =>
+      prev.some((x) => x.username === p.username) ? prev.map((x) => (x.username === p.username ? { ...x, ...p } : x)) : [...prev, p],
+    ),
+  );
   const byName: Record<string, Profile> = Object.fromEntries(list.map((p) => [p.username, { ...p, online: online.includes(p.username) }]));
   return { profiles: Object.values(byName), byName, reload: load };
 }

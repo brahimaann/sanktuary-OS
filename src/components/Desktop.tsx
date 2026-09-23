@@ -17,37 +17,117 @@ interface DesktopIconDef {
 
 const DEFAULT_ICONS: DesktopIconDef[] = [
   // Column 1
-  { id: 'my-computer', title: 'My Computer', icon: '/images/icons/my-computer-32x32.png', appType: 'explorer', appProps: { path: 'C:/' }, width: 640, height: 485 },
-  { id: 'my-documents', title: 'My Documents', icon: '/images/icons/my-documents-32x32.png', appType: 'explorer', appProps: { path: 'C:/My Documents' }, width: 640, height: 480 },
-  { id: 'network', title: 'Sanktuary Net', icon: '/images/icons/network-32x32.png', appType: 'explorer', appProps: { path: 'C:/Sanktuary Net' }, width: 640, height: 480 },
-  { id: 'recycle', title: 'Recycle Bin', icon: '/images/icons/recycle-bin-32x32.png', appType: 'explorer', appProps: { path: 'C:/Recycled' }, width: 640, height: 480 },
-  { id: 'ie', title: 'Internet Explorer', icon: '/images/icons/internet-explorer-32x32.png', appType: 'internet-explorer', appProps: { src: 'https://en.m.wikipedia.org/wiki/African_history' }, width: 900, height: 640 },
+  {
+    id: 'my-computer',
+    title: 'My Computer',
+    icon: '/images/icons/my-computer-32x32.png',
+    appType: 'explorer',
+    appProps: { path: 'C:/' },
+    width: 640,
+    height: 485,
+  },
+  {
+    id: 'my-documents',
+    title: 'My Documents',
+    icon: '/images/icons/my-documents-32x32.png',
+    appType: 'explorer',
+    appProps: { path: 'C:/My Documents' },
+    width: 640,
+    height: 480,
+  },
+  {
+    id: 'network',
+    title: 'Sanktuary Net',
+    icon: '/images/icons/network-32x32.png',
+    appType: 'explorer',
+    appProps: { path: 'C:/Sanktuary Net' },
+    width: 640,
+    height: 480,
+  },
+  {
+    id: 'recycle',
+    title: 'Recycle Bin',
+    icon: '/images/icons/recycle-bin-32x32.png',
+    appType: 'explorer',
+    appProps: { path: 'C:/Recycled' },
+    width: 640,
+    height: 480,
+  },
+  {
+    id: 'ie',
+    title: 'Internet Explorer',
+    icon: '/images/icons/internet-explorer-32x32.png',
+    appType: 'internet-explorer',
+    appProps: { src: 'https://en.m.wikipedia.org/wiki/African_history' },
+    width: 900,
+    height: 640,
+  },
   { id: 'africaonly', title: 'AfricaOnly.TV', icon: '/images/icons/video-32x32.png', appType: 'africaonly', width: 900, height: 620 },
   { id: 'notepad', title: 'Notepad', icon: '/images/icons/notepad-32x32.png', appType: 'notepad', width: 480, height: 360 },
 
   // Column 2
   { id: 'winamp', title: 'Winamp', icon: '/images/icons/winamp2-32x32.png', appType: 'winamp', width: 275, height: 348 },
-  { id: 'pipes', title: '3D Pipes', icon: '/images/icons/pipes-32x32.png', appType: 'iframe', appProps: { src: '/programs/pipes/index.html#%7B%22hideUI%22%3Atrue%7D' }, width: 800, height: 600 },
+  {
+    id: 'pipes',
+    title: '3D Pipes',
+    icon: '/images/icons/pipes-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/programs/pipes/index.html#%7B%22hideUI%22%3Atrue%7D' },
+    width: 800,
+    height: 600,
+  },
 
   // Column 3
   { id: 'pong', title: 'Pong', icon: '/images/icons/pinball-32x32.png', appType: 'pong', width: 520, height: 380 },
-  { id: 'powder-toy', title: 'Sandspiel (Powder)', icon: '/images/icons/pipes-32x32.png', appType: 'iframe', appProps: { src: 'https://sandspiel.club/' }, width: 800, height: 600 },
+  {
+    id: 'powder-toy',
+    title: 'Sandspiel (Powder)',
+    icon: '/images/icons/pipes-32x32.png',
+    appType: 'iframe',
+    appProps: { src: 'https://sandspiel.club/' },
+    width: 800,
+    height: 600,
+  },
   { id: 'webradio', title: 'MRND Web Radio', icon: '/images/icons/speaker-32x32.png', appType: 'webradio', width: 280, height: 320 },
 
   // Team spaces on the home server (Clerk sign-in required)
-  { id: 'sanktuary-network', title: 'Sanktuary Network', icon: '/images/icons/network-32x32.png', appType: 'network', width: 560, height: 420 },
+  {
+    id: 'sanktuary-network',
+    title: 'Sanktuary Network',
+    icon: '/images/icons/network-32x32.png',
+    appType: 'network',
+    width: 560,
+    height: 420,
+  },
   { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
-  { id: 'planner', title: 'Planner', icon: '/images/icons/task-32x32.png', appType: 'boards', appProps: { kind: 'kanban' }, width: 560, height: 420 },
+  {
+    id: 'planner',
+    title: 'Planner',
+    icon: '/images/icons/task-32x32.png',
+    appType: 'boards',
+    appProps: { kind: 'kanban' },
+    width: 560,
+    height: 420,
+  },
   { id: 'teams', title: 'Sanktuary Teams', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
 ];
 
 // Only shown to admins (see useMe)
-const ADMIN_ICON: DesktopIconDef = { id: 'admin-panel', title: 'Admin Panel', icon: '/images/icons/settings-32x32.png', appType: 'admin', width: 760, height: 540 };
+const ADMIN_ICON: DesktopIconDef = {
+  id: 'admin-panel',
+  title: 'Admin Panel',
+  icon: '/images/icons/settings-32x32.png',
+  appType: 'admin',
+  width: 760,
+  height: 540,
+};
 
 export const Desktop: React.FC = () => {
   const { openWindow, wallpaper, bgColor } = useWindowManager();
   const { me } = useMe();
-  useEffect(() => { if (me) startLive(); }, [me]);
+  useEffect(() => {
+    if (me) startLive();
+  }, [me]);
   const [vfsIcons, setVfsIcons] = useState<DesktopIconDef[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
@@ -58,7 +138,7 @@ export const Desktop: React.FC = () => {
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [currentDragPos, setCurrentDragPos] = useState<{ x: number; y: number } | null>(null);
   const dragMoved = useRef(false);
-  
+
   // Custom right click context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; visible: boolean } | null>(null);
   const [iconContextMenu, setIconContextMenu] = useState<{ x: number; y: number; icon: DesktopIconDef } | null>(null);
@@ -154,7 +234,7 @@ export const Desktop: React.FC = () => {
   // Marquee Selection Logic / Clicking background
   const handlePointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement;
-    
+
     // Do not dismiss if clicking inside the context menu
     if (target.closest('.context-menu')) {
       return;
@@ -182,7 +262,7 @@ export const Desktop: React.FC = () => {
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const currentX = moveEvent.clientX - rect.left;
       const currentY = moveEvent.clientY - rect.top;
-      setMarquee((prev) => prev ? { ...prev, currentX, currentY } : null);
+      setMarquee((prev) => (prev ? { ...prev, currentX, currentY } : null));
 
       // Compute intersection
       const x1 = Math.min(startX, currentX);
@@ -246,7 +326,12 @@ export const Desktop: React.FC = () => {
     e.currentTarget.setPointerCapture(e.pointerId);
 
     const parentRect = desktopRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-    const curPos = positions[id] || getIconPos(id, allIcons.findIndex((i) => i.id === id));
+    const curPos =
+      positions[id] ||
+      getIconPos(
+        id,
+        allIcons.findIndex((i) => i.id === id),
+      );
 
     dragMoved.current = false;
     setDraggingId(id);
@@ -300,9 +385,7 @@ export const Desktop: React.FC = () => {
     setContextMenu(null);
     setActiveSubMenu(null);
     if (e.ctrlKey) {
-      setSelectedIds((prev) => 
-        prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-      );
+      setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
     } else {
       setSelectedIds([id]);
     }
@@ -346,7 +429,7 @@ export const Desktop: React.FC = () => {
     setContextMenu({
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
-      visible: true
+      visible: true,
     });
   };
 
@@ -438,7 +521,9 @@ export const Desktop: React.FC = () => {
         return (
           <div
             key={icon.id}
-            ref={(el) => { iconRefs.current[icon.id] = el; }}
+            ref={(el) => {
+              iconRefs.current[icon.id] = el;
+            }}
             onPointerDown={(e) => handleIconPointerDown(icon.id, e)}
             onPointerMove={(e) => handleIconPointerMove(icon.id, e)}
             onPointerUp={(e) => handleIconPointerUp(icon.id, e)}
@@ -456,11 +541,7 @@ export const Desktop: React.FC = () => {
             }}
           >
             <div className="icon-wrapper w-[32px] h-[32px] relative flex justify-center items-center">
-              <img
-                src={icon.icon}
-                alt=""
-                className="w-[32px] h-[32px] select-none pointer-events-none image-render-pixelated"
-              />
+              <img src={icon.icon} alt="" className="w-[32px] h-[32px] select-none pointer-events-none image-render-pixelated" />
               <div
                 className="selection-effect absolute top-0 left-0 w-[32px] h-[32px] bg-[#000080] opacity-[0.5] rounded"
                 style={{
@@ -512,10 +593,7 @@ export const Desktop: React.FC = () => {
         >
           <div className="px-3 py-1 cursor-default text-gray-500 opacity-60">Arrange Icons</div>
           <div className="px-3 py-1 cursor-default text-gray-500 opacity-60">Line Up Icons</div>
-          <div
-            onClick={() => window.location.reload()}
-            className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default"
-          >
+          <div onClick={() => window.location.reload()} className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default">
             Refresh
           </div>
           <div className="h-[1px] bg-gray-400 my-1"></div>
@@ -535,9 +613,7 @@ export const Desktop: React.FC = () => {
             <span>▶</span>
 
             {activeSubMenu === 'new' && (
-              <div
-                className="absolute bg-[#c0c0c0] text-black border-2 border-outset p-[2px] left-[144px] -top-1 w-[130px] flex flex-col z-[100000]"
-              >
+              <div className="absolute bg-[#c0c0c0] text-black border-2 border-outset p-[2px] left-[144px] -top-1 w-[130px] flex flex-col z-[100000]">
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
@@ -630,13 +706,13 @@ export const Desktop: React.FC = () => {
             <div className="p-4 flex items-center gap-3">
               <img
                 src="/images/icons/msg-warning-32x32.png"
-                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
                 className="w-8 h-8 flex-shrink-0 image-render-pixelated"
                 alt="Warning"
               />
-              <p className="text-xs leading-relaxed text-black break-words flex-1">
-                {confirmDialog.message}
-              </p>
+              <p className="text-xs leading-relaxed text-black break-words flex-1">{confirmDialog.message}</p>
             </div>
             <div className="flex justify-end gap-2 px-3 py-2 bg-[#c0c0c0]">
               <button

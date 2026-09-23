@@ -7,12 +7,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
-    }
+      '@': path.resolve(__dirname, './src'),
+    },
   },
   server: {
     port: 3001,
     host: true,
-    proxy: { '/api': 'http://localhost:3080' }
-  }
+    proxy: { '/api': 'http://localhost:3080' },
+  },
 });

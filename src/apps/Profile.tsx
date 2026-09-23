@@ -39,13 +39,20 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   const [msg, setMsg] = useState('');
   const picInput = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { if (p) setDraft(p); }, [p?.username]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (p) setDraft(p);
+  }, [p?.username]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     try {
-      await api('/api/profiles/me', { method: 'PUT', body: JSON.stringify(Object.fromEntries([...FIELDS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? '']))) });
+      await api('/api/profiles/me', {
+        method: 'PUT',
+        body: JSON.stringify(Object.fromEntries([...FIELDS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? '']))),
+      });
       setMsg('Saved.');
-    } catch (e) { setMsg((e as Error).message); }
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
   };
   const uploadPic = async (file?: File) => {
     if (!file) return;
@@ -53,7 +60,9 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
       const res = await fetch('/api/profiles/me/avatar', { method: 'PUT', body: file });
       if (!res.ok) throw new Error(await res.text());
       setMsg('Picture updated.');
-    } catch (e) { setMsg((e as Error).message); }
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
   };
 
   if (!who) return <div style={{ ...shell, padding: 16 }}>Loading...</div>;
@@ -66,18 +75,49 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             <Avatar username={who} avatar={p?.avatar} size={64} online={p?.online} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>{displayName(p, who)}</div>
-              <div style={{ color: '#444' }}>@{who}{p?.admin ? ' · admin' : ''}{p?.role ? ` · ${p.role}` : ''}</div>
-              <div style={{ color: '#444' }}>{p?.online ? 'Online now' : p?.lastSignIn ? `Last seen ${new Date(p.lastSignIn).toLocaleDateString()}` : 'Offline'}</div>
+              <div style={{ color: '#444' }}>
+                @{who}
+                {p?.admin ? ' · admin' : ''}
+                {p?.role ? ` · ${p.role}` : ''}
+              </div>
+              <div style={{ color: '#444' }}>
+                {p?.online ? 'Online now' : p?.lastSignIn ? `Last seen ${new Date(p.lastSignIn).toLocaleDateString()}` : 'Offline'}
+              </div>
             </div>
           </div>
-          {p?.status && <div style={{ fontStyle: 'italic', background: '#ffffe1', border: '1px solid #808080', padding: 6 }}>{p.status}</div>}
+          {p?.status && (
+            <div style={{ fontStyle: 'italic', background: '#ffffe1', border: '1px solid #808080', padding: 6 }}>{p.status}</div>
+          )}
           {p?.bio && <div style={{ whiteSpace: 'pre-wrap', background: '#fff', border: '2px inset #808080', padding: 6 }}>{p.bio}</div>}
-          {(['soundcloud', 'instagram', 'website'] as const).map((k) => p?.[k] && (
-            <div key={k}><b>{k[0].toUpperCase() + k.slice(1)}:</b> <a href={linkFor(k, p[k]!)} target="_blank" rel="noopener noreferrer">{p[k]}</a></div>
-          ))}
+          {(['soundcloud', 'instagram', 'website'] as const).map(
+            (k) =>
+              p?.[k] && (
+                <div key={k}>
+                  <b>{k[0].toUpperCase() + k.slice(1)}:</b>{' '}
+                  <a href={linkFor(k, p[k]!)} target="_blank" rel="noopener noreferrer">
+                    {p[k]}
+                  </a>
+                </div>
+              ),
+          )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: 6 }}>
-          <button style={{ ...button, fontWeight: 700 }} onClick={() => openWindow({ id: `chat-${dmId(self, who)}`, title: `${displayName(p, who)} — Instant Message`, icon: '/images/icons/outlook-express-16x16.png', appType: 'chat', appProps: { channel: dmId(self, who) }, width: 460, height: 420 })}>Send message</button>
+          <button
+            style={{ ...button, fontWeight: 700 }}
+            onClick={() =>
+              openWindow({
+                id: `chat-${dmId(self, who)}`,
+                title: `${displayName(p, who)} — Instant Message`,
+                icon: '/images/icons/outlook-express-16x16.png',
+                appType: 'chat',
+                appProps: { channel: dmId(self, who) },
+                width: 460,
+                height: 420,
+              })
+            }
+          >
+            Send message
+          </button>
         </div>
       </div>
     );
@@ -88,40 +128,79 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
     <div style={shell}>
       <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <span onClick={() => picInput.current?.click()} style={{ cursor: 'pointer' }} title="Change picture"><Avatar username={who} avatar={p?.avatar} size={64} /></span>
+          <span onClick={() => picInput.current?.click()} style={{ cursor: 'pointer' }} title="Change picture">
+            <Avatar username={who} avatar={p?.avatar} size={64} />
+          </span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>@{who}{me?.admin ? ' · admin' : ''}</div>
-            <button style={{ ...button, marginTop: 4 }} onClick={() => picInput.current?.click()}>Change picture...</button>
-            <input ref={picInput} type="file" accept="image/*" hidden onChange={(e) => { uploadPic(e.target.files?.[0]); e.target.value = ''; }} />
+            <div style={{ fontWeight: 700, fontSize: 14 }}>
+              @{who}
+              {me?.admin ? ' · admin' : ''}
+            </div>
+            <button style={{ ...button, marginTop: 4 }} onClick={() => picInput.current?.click()}>
+              Change picture...
+            </button>
+            <input
+              ref={picInput}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                uploadPic(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
           </div>
-          <div title="Account, access code and sign out"><UserButton /></div>
+          <div title="Account, access code and sign out">
+            <UserButton />
+          </div>
         </div>
         {FIELDS.map(([k, label, hint]) => (
           <label key={k} style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: 6 }}>
             {label}
-            <input value={(draft[k] as string) ?? ''} placeholder={hint} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} style={input} />
+            <input
+              value={(draft[k] as string) ?? ''}
+              placeholder={hint}
+              onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+              style={input}
+            />
           </label>
         ))}
         <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 6 }}>
           About me
-          <textarea value={draft.bio ?? ''} rows={4} onChange={(e) => setDraft({ ...draft, bio: e.target.value })} style={{ ...input, resize: 'vertical' }} />
+          <textarea
+            value={draft.bio ?? ''}
+            rows={4}
+            onChange={(e) => setDraft({ ...draft, bio: e.target.value })}
+            style={{ ...input, resize: 'vertical' }}
+          />
         </label>
         {mySpace && (
           <div style={{ border: '2px groove #fff', padding: 6 }}>
-            <b>My Space</b>: {mySpace.online ? `${formatSize(mySpace.used || 0)} of ${mySpace.quota ? formatSize(mySpace.quota) : 'unlimited'} used` : 'drive offline'}
+            <b>My Space</b>:{' '}
+            {mySpace.online
+              ? `${formatSize(mySpace.used || 0)} of ${mySpace.quota ? formatSize(mySpace.quota) : 'unlimited'} used`
+              : 'drive offline'}
           </div>
         )}
       </div>
       <div style={{ display: 'flex', gap: 6, padding: 6, alignItems: 'center' }}>
         <div style={{ ...statusBar, flex: 1, margin: 0 }}>{msg || 'Your profile shows in Teams, chats and the planner.'}</div>
-        <button style={{ ...button, fontWeight: 700 }} onClick={save}>Save</button>
+        <button style={{ ...button, fontWeight: 700 }} onClick={save}>
+          Save
+        </button>
       </div>
     </div>
   );
 };
 
 const linkFor = (k: string, v: string) =>
-  /^https?:\/\//.test(v) ? v : k === 'instagram' ? `https://instagram.com/${v.replace(/^@/, '')}` : k === 'soundcloud' ? `https://soundcloud.com/${v}` : `https://${v}`;
+  /^https?:\/\//.test(v)
+    ? v
+    : k === 'instagram'
+      ? `https://instagram.com/${v.replace(/^@/, '')}`
+      : k === 'soundcloud'
+        ? `https://soundcloud.com/${v}`
+        : `https://${v}`;
 
 const input: React.CSSProperties = { fontFamily: 'inherit', fontSize: 12, padding: '2px 4px', border: '2px inset #808080', minWidth: 0 };
 

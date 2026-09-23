@@ -1,6 +1,6 @@
 /**
  * Video collections for the three community folders.
- * 
+ *
  * To add a new video, just push an entry into the appropriate collection's `videos` array.
  * YouTube URLs should use the embed format: https://www.youtube.com/embed/VIDEO_ID
  * Other sources can use direct embed URLs.
@@ -9,10 +9,10 @@
 export interface Video {
   id: string;
   title: string;
-  src: string;            // Embed URL (YouTube /embed/..., Vimeo /video/..., or direct)
-  thumbnail?: string;     // Optional thumbnail URL — auto-generated for YouTube if omitted
-  duration?: string;      // e.g. "12:34"
-  artist?: string;        // Creator / channel name
+  src: string; // Embed URL (YouTube /embed/..., Vimeo /video/..., or direct)
+  thumbnail?: string; // Optional thumbnail URL — auto-generated for YouTube if omitted
+  duration?: string; // e.g. "12:34"
+  artist?: string; // Creator / channel name
   description?: string;
 }
 
@@ -21,7 +21,7 @@ export interface VideoCollection {
   name: string;
   subtitle: string;
   description: string;
-  color: string;          // Accent color for the folder
+  color: string; // Accent color for the folder
   videos: Video[];
 }
 
@@ -106,7 +106,7 @@ const weDPpl: VideoCollection = {
     },
     {
       id: 'wdp-4',
-      title: "The Ballot or the Bullet",
+      title: 'The Ballot or the Bullet',
       src: 'https://www.youtube.com/embed/0ymPLDO0pOA',
       artist: 'Malcolm X',
       duration: '1:12:24',

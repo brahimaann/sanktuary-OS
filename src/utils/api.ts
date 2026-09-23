@@ -32,7 +32,7 @@ export function useApi() {
       if (!res.ok) throw Object.assign(new Error((await res.text()) || `HTTP ${res.status}`), { status: res.status });
       return res.headers.get('content-type')?.includes('json') ? res.json() : res.text();
     },
-    [getToken]
+    [getToken],
   );
 }
 

@@ -1,16 +1,16 @@
 :root {
   /* ── SABR 98 Custom Palette ── */
-  --sabr-title-active-start: #5C2018;
-  --sabr-title-active-end: #9B4D30;
-  --sabr-title-inactive-start: #7A6E64;
-  --sabr-title-inactive-end: #A89E94;
-  --sabr-accent: #C47A3C;
-  --sabr-accent-dark: #8B4D20;
-  --sabr-desktop-bg: #1E1612;
-  --sabr-taskbar-bg: #C0B8AE;
-  --sabr-start-btn: #C0B0A0;
-  --sabr-text-warm: #F5E6D3;
-  --sabr-highlight: #D4915A;
+  --sabr-title-active-start: #5c2018;
+  --sabr-title-active-end: #9b4d30;
+  --sabr-title-inactive-start: #7a6e64;
+  --sabr-title-inactive-end: #a89e94;
+  --sabr-accent: #c47a3c;
+  --sabr-accent-dark: #8b4d20;
+  --sabr-desktop-bg: #1e1612;
+  --sabr-taskbar-bg: #c0b8ae;
+  --sabr-start-btn: #c0b0a0;
+  --sabr-text-warm: #f5e6d3;
+  --sabr-highlight: #d4915a;
 
   /* Overwrite the default OS-GUI variables system-wide */
   --Background: var(--sabr-desktop-bg);
@@ -24,10 +24,10 @@
   --Menu: var(--sabr-taskbar-bg);
 }
 
-@import "tailwindcss";
+@import 'tailwindcss';
 
-@import "./layout.css";
-@import "./classic.css";
+@import './layout.css';
+@import './classic.css';
 
 /* Exact clone rules */
 * {
@@ -36,14 +36,15 @@
   image-rendering: pixelated; /* Guarantees crisp 16-bit icons */
 }
 
-body, html {
+body,
+html {
   margin: 0;
   padding: 0;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
   background-color: var(--Background, #008080); /* Perfect Win98 Teal, overridden by SABR */
-  font-family: "MS Sans Serif", Arial, sans-serif;
+  font-family: 'MS Sans Serif', Arial, sans-serif;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: none;
 }
@@ -100,8 +101,8 @@ body, html {
   background: 
     /* Repeating scanlines */
     linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%) 0 0 / 100% 2px,
-    /* Repeating vertical RGB color grid */
-    linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04)) 0 0 / 3px 100%;
+    /* Repeating vertical RGB color grid */ linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04)) 0
+      0 / 3px 100%;
 }
 
 /* Screen flicker animation overlay */
@@ -116,9 +117,15 @@ body, html {
 }
 
 @keyframes crt-flicker {
-  0% { opacity: 0.08; }
-  50% { opacity: 0.12; }
-  100% { opacity: 0.09; }
+  0% {
+    opacity: 0.08;
+  }
+  50% {
+    opacity: 0.12;
+  }
+  100% {
+    opacity: 0.09;
+  }
 }
 
 /* Screen power-on scan effect */

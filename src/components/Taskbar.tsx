@@ -4,14 +4,7 @@ import sound from '../utils/sound';
 import { liveUser, useLiveEvent } from '../utils/live';
 
 export const Taskbar: React.FC = () => {
-  const {
-    windows,
-    startMenuOpen,
-    setStartMenuOpen,
-    openWindow,
-    focusWindow,
-    minimizeWindow,
-  } = useWindowManager();
+  const { windows, startMenuOpen, setStartMenuOpen, openWindow, focusWindow, minimizeWindow } = useWindowManager();
 
   const [timeStr, setTimeStr] = useState('');
   const startMenuRef = useRef<HTMLDivElement>(null);
@@ -41,7 +34,6 @@ export const Taskbar: React.FC = () => {
       height: 350,
     });
   };
-
 
   // Update clock every second
   useEffect(() => {
@@ -83,15 +75,7 @@ export const Taskbar: React.FC = () => {
     }
   };
 
-  const launchApp = (
-    id: string,
-    title: string,
-    appType: AppType,
-    icon: string,
-    width = 400,
-    height = 300,
-    props: any = {}
-  ) => {
+  const launchApp = (id: string, title: string, appType: AppType, icon: string, width = 400, height = 300, props: any = {}) => {
     openWindow({
       id,
       title,
@@ -114,11 +98,7 @@ export const Taskbar: React.FC = () => {
           startMenuOpen ? 'inset-deep' : ''
         }`}
       >
-        <img
-          src="/images/start-logo.png"
-          alt="WinLogo"
-          className="w-4 h-4 mr-1 image-render-pixelated"
-        />
+        <img src="/images/start-logo.png" alt="WinLogo" className="w-4 h-4 mr-1 image-render-pixelated" />
         Start
       </button>
 
@@ -131,18 +111,10 @@ export const Taskbar: React.FC = () => {
             key={win.id}
             onClick={() => handleTaskClick(win.id, win.focused, win.isMinimized)}
             className={`task flex items-center h-[22px] max-w-[150px] flex-1 px-1 m-[1px] text-xs text-black overflow-hidden text-ellipsis whitespace-nowrap outline-none ${
-              win.focused && !win.isMinimized
-                ? 'font-bold inset-deep'
-                : ''
+              win.focused && !win.isMinimized ? 'font-bold inset-deep' : ''
             }`}
           >
-            {win.icon && (
-              <img
-                src={win.icon}
-                alt=""
-                className="w-4 h-4 mr-1 image-render-pixelated flex-shrink-0"
-              />
-            )}
+            {win.icon && <img src={win.icon} alt="" className="w-4 h-4 mr-1 image-render-pixelated flex-shrink-0" />}
             <span className="truncate">{win.title}</span>
           </button>
         ))}
@@ -172,11 +144,7 @@ export const Taskbar: React.FC = () => {
             📟
           </button>
         )}
-        <img
-          src="/images/icons/speaker-16x16.png"
-          alt="Volume"
-          className="w-4 h-4 mr-2 image-render-pixelated"
-        />
+        <img src="/images/icons/speaker-16x16.png" alt="Volume" className="w-4 h-4 mr-2 image-render-pixelated" />
         <span className="taskbar-time">{timeStr}</span>
       </div>
 
@@ -198,40 +166,38 @@ export const Taskbar: React.FC = () => {
           <ul className="flex-1 list-none p-1 m-0 text-xs">
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('explorer-c', 'My Computer', 'explorer', '/images/icons/my-computer-16x16.png', 640, 480, { path: 'C:/' })}
+                onClick={() =>
+                  launchApp('explorer-c', 'My Computer', 'explorer', '/images/icons/my-computer-16x16.png', 640, 480, { path: 'C:/' })
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/my-computer-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/my-computer-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>My Computer</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('network', 'Sanktuary Net', 'explorer', '/images/icons/network-16x16.png', 640, 480, { path: 'C:/Sanktuary Net' })}
+                onClick={() =>
+                  launchApp('network', 'Sanktuary Net', 'explorer', '/images/icons/network-16x16.png', 640, 480, {
+                    path: 'C:/Sanktuary Net',
+                  })
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/network-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/network-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Sanktuary Net</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('explorer-docs', 'My Documents', 'explorer', '/images/icons/my-documents-16x16.png', 640, 480, { path: 'C:/My Documents' })}
+                onClick={() =>
+                  launchApp('explorer-docs', 'My Documents', 'explorer', '/images/icons/my-documents-16x16.png', 640, 480, {
+                    path: 'C:/My Documents',
+                  })
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/my-documents-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/my-documents-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>My Documents</span>
               </button>
             </li>
@@ -240,11 +206,7 @@ export const Taskbar: React.FC = () => {
                 onClick={() => launchApp('notepad', 'Untitled - Notepad', 'notepad', '/images/icons/notepad-16x16.png', 480, 360)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/notepad-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/notepad-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Notepad</span>
               </button>
             </li>
@@ -253,11 +215,7 @@ export const Taskbar: React.FC = () => {
                 onClick={() => launchApp('calculator', 'Calculator', 'calculator', '/images/icons/calculator-16x16.png', 260, 260)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/calculator-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/calculator-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Calculator</span>
               </button>
             </li>
@@ -266,11 +224,7 @@ export const Taskbar: React.FC = () => {
                 onClick={() => launchApp('soundrec', 'Sound - Sound Recorder', 'soundrec', '/images/icons/speaker-16x16.png', 280, 160)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/speaker-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/speaker-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Sound Recorder</span>
               </button>
             </li>
@@ -279,11 +233,7 @@ export const Taskbar: React.FC = () => {
                 onClick={() => launchApp('winamp', 'Winamp', 'winamp', '/images/icons/winamp2-16x16.png', 275, 348)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/winamp2-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/winamp2-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Winamp</span>
               </button>
             </li>
@@ -292,11 +242,7 @@ export const Taskbar: React.FC = () => {
                 onClick={() => launchApp('ppls-story', 'Ppls Library', 'ppls-story', '/images/icons/ppls-story-32x32.svg', 800, 600)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/ppls-story-32x32.svg"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/ppls-story-32x32.svg" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Ppls Library</span>
               </button>
             </li>
@@ -305,40 +251,40 @@ export const Taskbar: React.FC = () => {
 
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('pinball', '3D Pinball for Windows - Space Cadet', 'iframe', '/images/icons/pinball-16x16.png', 600, 440, { src: '/programs/pinball/space-cadet.html' })}
+                onClick={() =>
+                  launchApp('pinball', '3D Pinball for Windows - Space Cadet', 'iframe', '/images/icons/pinball-16x16.png', 600, 440, {
+                    src: '/programs/pinball/space-cadet.html',
+                  })
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/pinball-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/pinball-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>3D Pinball</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('paint', 'untitled - Paint', 'iframe', '/images/icons/paint-16x16.png', 800, 600, { src: '/programs/jspaint/index.html' })}
+                onClick={() =>
+                  launchApp('paint', 'untitled - Paint', 'iframe', '/images/icons/paint-16x16.png', 800, 600, {
+                    src: '/programs/jspaint/index.html',
+                  })
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/paint-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/paint-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Paint</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('powder-toy', 'Sandspiel (Powder)', 'iframe', '/images/icons/pipes-16x16.png', 800, 600, { src: 'https://sandspiel.club/' })}
+                onClick={() =>
+                  launchApp('powder-toy', 'Sandspiel (Powder)', 'iframe', '/images/icons/pipes-16x16.png', 800, 600, {
+                    src: 'https://sandspiel.club/',
+                  })
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/pipes-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/pipes-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Sandspiel (Powder)</span>
               </button>
             </li>
@@ -347,24 +293,18 @@ export const Taskbar: React.FC = () => {
                 onClick={() => launchApp('webradio', 'MRND Web Radio', 'webradio', '/images/icons/speaker-16x16.png', 280, 320)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/speaker-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/speaker-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>MRND Web Radio</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('display-properties', 'Display Properties', 'display-properties', '/images/icons/themes-16x16.png', 360, 400)}
+                onClick={() =>
+                  launchApp('display-properties', 'Display Properties', 'display-properties', '/images/icons/themes-16x16.png', 360, 400)
+                }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img
-                  src="/images/icons/themes-32x32.png"
-                  alt=""
-                  className="w-6 h-6 mr-3 image-render-pixelated"
-                />
+                <img src="/images/icons/themes-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Display Properties</span>
               </button>
             </li>
@@ -390,7 +330,17 @@ const TeamsTray: React.FC = () => {
   if (!unread) return null;
   return (
     <button
-      onClick={() => { setUnread(0); openWindow({ id: 'teams', title: 'Sanktuary Teams', icon: '/images/icons/outlook-express-16x16.png', appType: 'teams', width: 300, height: 520 }); }}
+      onClick={() => {
+        setUnread(0);
+        openWindow({
+          id: 'teams',
+          title: 'Sanktuary Teams',
+          icon: '/images/icons/outlook-express-16x16.png',
+          appType: 'teams',
+          width: 300,
+          height: 520,
+        });
+      }}
       title={`${unread} new message(s) — open Sanktuary Teams`}
       className="mr-2 cursor-pointer border-none bg-transparent outline-none flex items-center gap-1"
     >

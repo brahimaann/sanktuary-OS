@@ -15,7 +15,7 @@ export const DisplayProperties: React.FC = () => {
     setScreensaverActive,
   } = useWindowManager();
   const [activeTab, setActiveTab] = useState<'background' | 'screensaver'>('background');
-  
+
   // Local modifications before Apply/OK
   const [selectedWallpaper, setSelectedWallpaper] = useState(wallpaper);
   const [selectedBgColor, setSelectedBgColor] = useState(bgColor);
@@ -128,9 +128,7 @@ export const DisplayProperties: React.FC = () => {
                         setSelectedWallpaper(wp.file);
                         setSelectedBgColor(wp.color);
                       }}
-                      className={`px-2 py-1 cursor-default ${
-                        isSelected ? 'bg-[#000080] text-white' : 'hover:bg-gray-200'
-                      }`}
+                      className={`px-2 py-1 cursor-default ${isSelected ? 'bg-[#000080] text-white' : 'hover:bg-gray-200'}`}
                     >
                       {wp.name}
                     </div>
@@ -159,10 +157,7 @@ export const DisplayProperties: React.FC = () => {
             </div>
 
             {/* Screen Saver Controls Box */}
-            <fieldset
-              className="border p-2 flex flex-col gap-2"
-              style={{ borderColor: '#808080' }}
-            >
+            <fieldset className="border p-2 flex flex-col gap-2" style={{ borderColor: '#808080' }}>
               <legend className="px-1 text-black font-semibold">Screen Saver</legend>
               <div className="flex items-center gap-2">
                 <select

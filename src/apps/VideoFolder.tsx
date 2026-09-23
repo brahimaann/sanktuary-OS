@@ -40,14 +40,22 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
           <span style={{ fontWeight: 700, fontSize: 12 }}>{collection.name}</span>
           <span style={{ color: '#666', fontSize: 11, marginLeft: 4 }}>— {collection.subtitle}</span>
         </div>
-        <span style={{ fontSize: 10, color: '#888' }}>{collection.videos.length} video{collection.videos.length !== 1 ? 's' : ''}</span>
+        <span style={{ fontSize: 10, color: '#888' }}>
+          {collection.videos.length} video{collection.videos.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       {/* ── Description banner ── */}
-      <div style={{
-        padding: '6px 12px', background: collection.color, color: '#fff',
-        fontSize: 11, lineHeight: 1.4, borderBottom: '1px solid #808080',
-      }}>
+      <div
+        style={{
+          padding: '6px 12px',
+          background: collection.color,
+          color: '#fff',
+          fontSize: 11,
+          lineHeight: 1.4,
+          borderBottom: '1px solid #808080',
+        }}
+      >
         {collection.description}
       </div>
 
@@ -59,12 +67,7 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
           </div>
         ) : (
           collection.videos.map((video) => (
-            <div
-              key={video.id}
-              style={card}
-              onDoubleClick={() => openVideo(video)}
-              title={`Double-click to play: ${video.title}`}
-            >
+            <div key={video.id} style={card} onDoubleClick={() => openVideo(video)} title={`Double-click to play: ${video.title}`}>
               {/* Thumbnail */}
               <div style={thumbWrap}>
                 <img
@@ -82,9 +85,7 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
                   <div style={playBtn}>▶</div>
                 </div>
                 {/* Duration badge */}
-                {video.duration && (
-                  <div style={durationBadge}>{video.duration}</div>
-                )}
+                {video.duration && <div style={durationBadge}>{video.duration}</div>}
               </div>
 
               {/* Info */}
@@ -108,72 +109,125 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
 
 /* ── Styles ── */
 const shell: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-  background: '#c0c0c0', fontFamily: '"MS Sans Serif", Arial, sans-serif',
-  fontSize: 11, overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  height: '100%',
+  background: '#c0c0c0',
+  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontSize: 11,
+  overflow: 'hidden',
 };
 const toolbar: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', padding: '4px 8px',
-  background: '#c0c0c0', borderBottom: '1px solid #808080',
+  display: 'flex',
+  alignItems: 'center',
+  padding: '4px 8px',
+  background: '#c0c0c0',
+  borderBottom: '1px solid #808080',
   flexShrink: 0,
 };
 const grid: React.CSSProperties = {
-  flex: 1, overflow: 'auto', padding: 10,
+  flex: 1,
+  overflow: 'auto',
+  padding: 10,
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-  gap: 10, alignContent: 'start',
-  background: '#fff', border: '2px inset #808080',
+  gap: 10,
+  alignContent: 'start',
+  background: '#fff',
+  border: '2px inset #808080',
   margin: '0 2px',
 };
 const card: React.CSSProperties = {
-  background: '#f0f0f0', border: '1px solid #c0c0c0',
-  borderRadius: 0, cursor: 'default', overflow: 'hidden',
+  background: '#f0f0f0',
+  border: '1px solid #c0c0c0',
+  borderRadius: 0,
+  cursor: 'default',
+  overflow: 'hidden',
   transition: 'border-color 0.12s',
 };
 const thumbWrap: React.CSSProperties = {
-  position: 'relative', width: '100%', aspectRatio: '16/9',
-  background: '#000', overflow: 'hidden',
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '16/9',
+  background: '#000',
+  overflow: 'hidden',
 };
 const thumbImg: React.CSSProperties = {
-  width: '100%', height: '100%', objectFit: 'cover', display: 'block',
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  display: 'block',
 };
 const playOverlay: React.CSSProperties = {
-  position: 'absolute', inset: 0,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
   background: 'rgba(0,0,0,0.3)',
   opacity: 0.7,
   transition: 'opacity 0.15s',
 };
 const playBtn: React.CSSProperties = {
-  width: 36, height: 36, borderRadius: '50%',
-  background: 'rgba(0,0,0,0.7)', border: '2px solid rgba(255,255,255,0.8)',
-  color: '#fff', fontSize: 16,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  width: 36,
+  height: 36,
+  borderRadius: '50%',
+  background: 'rgba(0,0,0,0.7)',
+  border: '2px solid rgba(255,255,255,0.8)',
+  color: '#fff',
+  fontSize: 16,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
   paddingLeft: 3,
 };
 const durationBadge: React.CSSProperties = {
-  position: 'absolute', bottom: 4, right: 4,
-  background: 'rgba(0,0,0,0.8)', color: '#fff',
-  padding: '1px 5px', fontSize: 10, fontFamily: 'monospace',
+  position: 'absolute',
+  bottom: 4,
+  right: 4,
+  background: 'rgba(0,0,0,0.8)',
+  color: '#fff',
+  padding: '1px 5px',
+  fontSize: 10,
+  fontFamily: 'monospace',
 };
 const titleText: React.CSSProperties = {
-  fontWeight: 700, fontSize: 11, lineHeight: 1.3,
-  overflow: 'hidden', textOverflow: 'ellipsis',
-  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+  fontWeight: 700,
+  fontSize: 11,
+  lineHeight: 1.3,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
 };
 const artistText: React.CSSProperties = {
-  fontSize: 10, color: '#666', marginTop: 2,
-  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  fontSize: 10,
+  color: '#666',
+  marginTop: 2,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 };
 const statusBar: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', flexShrink: 0,
-  background: '#c0c0c0', borderTop: '1px solid #fff', height: 20,
+  display: 'flex',
+  alignItems: 'center',
+  flexShrink: 0,
+  background: '#c0c0c0',
+  borderTop: '1px solid #fff',
+  height: 20,
 };
 const statusSeg: React.CSSProperties = {
-  flex: 1, padding: '0 6px', fontSize: 10,
-  border: '1px inset #808080', height: '100%',
-  display: 'flex', alignItems: 'center',
-  overflow: 'hidden', whiteSpace: 'nowrap',
+  flex: 1,
+  padding: '0 6px',
+  fontSize: 10,
+  border: '1px inset #808080',
+  height: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
 };
 
 export default VideoFolder;

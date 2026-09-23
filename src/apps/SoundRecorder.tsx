@@ -320,7 +320,12 @@ export const SoundRecorder: React.FC = () => {
           title="Rewind"
           className="w-10 h-8 border border-outset flex items-center justify-center bg-[#c0c0c0] active:border-inset outline-none"
         >
-          <img src="/programs/sound-recorder/img/buttons.png" alt="" className="image-render-pixelated object-none" style={{ objectPosition: '0px 0px', width: '14px', height: '14px' }} />
+          <img
+            src="/programs/sound-recorder/img/buttons.png"
+            alt=""
+            className="image-render-pixelated object-none"
+            style={{ objectPosition: '0px 0px', width: '14px', height: '14px' }}
+          />
         </button>
 
         {/* Fast Forward */}
@@ -329,7 +334,12 @@ export const SoundRecorder: React.FC = () => {
           title="Fast Forward"
           className="w-10 h-8 border border-outset flex items-center justify-center bg-[#c0c0c0] active:border-inset outline-none"
         >
-          <img src="/programs/sound-recorder/img/buttons.png" alt="" className="image-render-pixelated object-none" style={{ objectPosition: '-15px 0px', width: '14px', height: '14px' }} />
+          <img
+            src="/programs/sound-recorder/img/buttons.png"
+            alt=""
+            className="image-render-pixelated object-none"
+            style={{ objectPosition: '-15px 0px', width: '14px', height: '14px' }}
+          />
         </button>
 
         {/* Play */}
@@ -339,7 +349,12 @@ export const SoundRecorder: React.FC = () => {
           title="Play"
           className="w-10 h-8 border border-outset flex items-center justify-center bg-[#c0c0c0] active:border-inset disabled:opacity-50 outline-none"
         >
-          <img src="/programs/sound-recorder/img/buttons.png" alt="" className="image-render-pixelated object-none" style={{ objectPosition: '-30px 0px', width: '14px', height: '14px' }} />
+          <img
+            src="/programs/sound-recorder/img/buttons.png"
+            alt=""
+            className="image-render-pixelated object-none"
+            style={{ objectPosition: '-30px 0px', width: '14px', height: '14px' }}
+          />
         </button>
 
         {/* Stop */}
@@ -349,7 +364,12 @@ export const SoundRecorder: React.FC = () => {
           title="Stop"
           className="w-10 h-8 border border-outset flex items-center justify-center bg-[#c0c0c0] active:border-inset disabled:opacity-50 outline-none"
         >
-          <img src="/programs/sound-recorder/img/buttons.png" alt="" className="image-render-pixelated object-none" style={{ objectPosition: '-45px 0px', width: '14px', height: '14px' }} />
+          <img
+            src="/programs/sound-recorder/img/buttons.png"
+            alt=""
+            className="image-render-pixelated object-none"
+            style={{ objectPosition: '-45px 0px', width: '14px', height: '14px' }}
+          />
         </button>
 
         {/* Record */}
@@ -359,7 +379,12 @@ export const SoundRecorder: React.FC = () => {
           title="Record"
           className="w-10 h-8 border border-outset flex items-center justify-center bg-[#c0c0c0] active:border-inset disabled:opacity-50 outline-none"
         >
-          <img src="/programs/sound-recorder/img/buttons.png" alt="" className="image-render-pixelated object-none" style={{ objectPosition: '-60px 0px', width: '14px', height: '14px' }} />
+          <img
+            src="/programs/sound-recorder/img/buttons.png"
+            alt=""
+            className="image-render-pixelated object-none"
+            style={{ objectPosition: '-60px 0px', width: '14px', height: '14px' }}
+          />
         </button>
       </div>
     </div>

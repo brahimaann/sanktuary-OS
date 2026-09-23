@@ -30,29 +30,83 @@ const BIOS_LINES: TermLine[] = [
   { text: 'Copyright (C) 1984-85, Award Software, Inc.', color: '#aaaaaa' },
   { text: '' },
   { text: '' },
-  { text: 'Detecting mouse... OK', parts: [{ text: 'Detecting mouse... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
-  { text: 'Detecting touch support... FAILED', parts: [{ text: 'Detecting touch support... ', color: '#aaaaaa' }, { text: 'FAILED', color: '#ff5555' }] },
-  { text: 'Connecting to The Sanktuary... OK', parts: [{ text: 'Connecting to The Sanktuary... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
-  { text: 'Initializing file system... OK', parts: [{ text: 'Initializing file system... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
-  { text: 'Loading system themes... OK', parts: [{ text: 'Loading system themes... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
-  { text: 'Initializing Recycle Bin... OK', parts: [{ text: 'Initializing Recycle Bin... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
+  {
+    text: 'Detecting mouse... OK',
+    parts: [
+      { text: 'Detecting mouse... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
+  {
+    text: 'Detecting touch support... FAILED',
+    parts: [
+      { text: 'Detecting touch support... ', color: '#aaaaaa' },
+      { text: 'FAILED', color: '#ff5555' },
+    ],
+  },
+  {
+    text: 'Connecting to The Sanktuary... OK',
+    parts: [
+      { text: 'Connecting to The Sanktuary... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
+  {
+    text: 'Initializing file system... OK',
+    parts: [
+      { text: 'Initializing file system... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
+  {
+    text: 'Loading system themes... OK',
+    parts: [
+      { text: 'Loading system themes... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
+  {
+    text: 'Initializing Recycle Bin... OK',
+    parts: [
+      { text: 'Initializing Recycle Bin... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
   { text: `Preloading default theme assets... ${hashBlob}`, color: '#55ffff' },
-  { text: 'Preloading default theme assets... OK', parts: [{ text: 'Preloading default theme assets... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
-  { text: 'Loading custom applications... OK', parts: [{ text: 'Loading custom applications... ', color: '#aaaaaa' }, { text: 'OK', color: '#55ff55' }] },
-  { text: 'Press F8 for Startup Menu... Booting OS/390 Emulator... OK', parts: [{ text: 'Press F8 for Startup Menu... Booting OS/390 Emulator... ', color: '#ffffff' }, { text: 'OK', color: '#55ff55' }] },
+  {
+    text: 'Preloading default theme assets... OK',
+    parts: [
+      { text: 'Preloading default theme assets... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
+  {
+    text: 'Loading custom applications... OK',
+    parts: [
+      { text: 'Loading custom applications... ', color: '#aaaaaa' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
+  {
+    text: 'Press F8 for Startup Menu... Booting OS/390 Emulator... OK',
+    parts: [
+      { text: 'Press F8 for Startup Menu... Booting OS/390 Emulator... ', color: '#ffffff' },
+      { text: 'OK', color: '#55ff55' },
+    ],
+  },
 ];
 
 const SANKTUARY_LOGO = [
-  "        SSSSSSSSSSS      The S/370, ESA/390 and z/Architecture",
-  "      SSSSSSSSSSSSSS                   Emulator",
-  "      SSS",
-  "      SSS                S A N K T U A R Y   [ S K T Y ]",
-  "        SSSSSSSSSSS      ",
-  "           SSSSSSSSS     Mainframe Emulation Subsystem",
-  "                 SSS     ",
+  '        SSSSSSSSSSS      The S/370, ESA/390 and z/Architecture',
+  '      SSSSSSSSSSSSSS                   Emulator',
+  '      SSS',
+  '      SSS                S A N K T U A R Y   [ S K T Y ]',
+  '        SSSSSSSSSSS      ',
+  '           SSSSSSSSS     Mainframe Emulation Subsystem',
+  '                 SSS     ',
   "      SSS        SSS     My PC thinks it's a MAINFRAME",
-  "      SSSSSSSSSSSSSS",
-  "        SSSSSSSSSSS      Copyright (C) 2026 The Sanktuary"
+  '      SSSSSSSSSSSSSS',
+  '        SSSSSSSSSSS      Copyright (C) 2026 The Sanktuary',
 ];
 
 const HERCULES_LINES = [
@@ -65,7 +119,7 @@ const HERCULES_LINES = [
   { text: 'Device number              : 0700', color: '#8888ff' },
   { text: 'Subchannel                 : 002B', color: '#8888ff' },
   { text: '' },
-  ...SANKTUARY_LOGO.map(line => ({ text: line, color: '#5555ff', bold: true })),
+  ...SANKTUARY_LOGO.map((line) => ({ text: line, color: '#5555ff', bold: true })),
   { text: '' },
   { text: 'HHCLC001I IPLing from device 0700...', color: '#ffffff' },
   { text: 'HHCLC002I Load parameter: 0182', color: '#ffffff' },
@@ -77,11 +131,7 @@ const HERCULES_LINES = [
 type BootStage = 'BIOS' | 'HERCULES' | 'MAINFRAME_LINK';
 type DialogueState = 'ASK_NAME' | 'ASK_PASSWORD' | 'ASK_CODE' | 'VERIFYING' | 'ASK_BOOT' | 'BOOTING' | 'DONE';
 
-const ASK_PASSWORD_LINES = [
-  `TEAM OPERATORS: ENTER YOUR ACCESS CODE.`,
-  `GUESTS: PRESS ENTER TO CONTINUE WITHOUT CLEARANCE.`,
-  ` `,
-];
+const ASK_PASSWORD_LINES = [`TEAM OPERATORS: ENTER YOUR ACCESS CODE.`, `GUESTS: PRESS ENTER TO CONTINUE WITHOUT CLEARANCE.`, ` `];
 
 export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
   const [stage, setStage] = useState<BootStage>('BIOS');
@@ -135,7 +185,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
     }
     const delay = BIOS_LINES[biosVisibleCount]?.text === '' ? 50 : 100;
     const timer = setTimeout(() => {
-      setBiosVisibleCount(prev => prev + 1);
+      setBiosVisibleCount((prev) => prev + 1);
     }, delay);
     return () => clearTimeout(timer);
   }, [biosVisibleCount, stage]);
@@ -154,7 +204,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
       return () => clearTimeout(timer);
     }
     const timer = setTimeout(() => {
-      setHerculesVisibleCount(prev => prev + 1);
+      setHerculesVisibleCount((prev) => prev + 1);
     }, 45);
     return () => clearTimeout(timer);
   }, [herculesVisibleCount, stage, isMobile]);
@@ -188,7 +238,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
         `ALL SESSION METADATA WILL BE ENCRYPTED AND LOGGED.`,
         ` `,
         `IDENTIFICATION IS REQUIRED FOR OS BOOT PERMISSION.`,
-        ` `
+        ` `,
       ]);
     } else {
       setDialogueState('ASK_BOOT');
@@ -273,21 +323,17 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
 
     // Append operator input to history (access codes are masked)
     const shown = dialogueState === 'ASK_PASSWORD' ? '*'.repeat(cleanInput.length) : cleanInput;
-    setMainframeHistory(prev => [...prev, `${promptLabel}${shown}`]);
+    setMainframeHistory((prev) => [...prev, `${promptLabel}${shown}`]);
 
     if (dialogueState === 'ASK_NAME') {
       if (!cleanInput) {
-        setMainframeHistory(prev => [
-          ...prev,
-          `*** ERROR: OPERATOR ID CANNOT BE EMPTY.`,
-          ` `
-        ]);
+        setMainframeHistory((prev) => [...prev, `*** ERROR: OPERATOR ID CANNOT BE EMPTY.`, ` `]);
         return;
       }
 
       setCookie('hq_os_username', cleanInput, 365);
 
-      setMainframeHistory(prev => [
+      setMainframeHistory((prev) => [
         ...prev,
         `*** OPERATOR ID '${cleanInput.toUpperCase()}' REGISTERED SUCCESSFULLY.`,
         `*** CREATING OS SECURITY CONTEXT... OK`,
@@ -299,16 +345,16 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
     } else if (dialogueState === 'ASK_PASSWORD') {
       const askBoot = [` `, `INITIATE GRAPHICAL WORKSPACE INTERFACE? (Y/N):`];
       if (!cleanInput) {
-        setMainframeHistory(prev => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
+        setMainframeHistory((prev) => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
         setPromptLabel('===> ');
         setDialogueState('ASK_BOOT');
         return;
       }
       setDialogueState('VERIFYING');
-      setMainframeHistory(prev => [...prev, `VERIFYING OPERATOR CLEARANCE...`]);
+      setMainframeHistory((prev) => [...prev, `VERIFYING OPERATOR CLEARANCE...`]);
       teamLogin(getCookie('hq_os_username') || '', cleanInput).then(({ error, needCode }) => {
         if (error) {
-          setMainframeHistory(prev => [
+          setMainframeHistory((prev) => [
             ...prev,
             `*** ERROR: ACCESS DENIED. ${error.toUpperCase()}`,
             `*** RE-ENTER ACCESS CODE, OR PRESS ENTER FOR GUEST ACCESS.`,
@@ -316,11 +362,16 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
           ]);
           setDialogueState('ASK_PASSWORD');
         } else if (needCode) {
-          setMainframeHistory(prev => [...prev, `*** ${needCode.toUpperCase()}`, ` `]);
+          setMainframeHistory((prev) => [...prev, `*** ${needCode.toUpperCase()}`, ` `]);
           setPromptLabel('VERIFICATION CODE: ');
           setDialogueState('ASK_CODE');
         } else {
-          setMainframeHistory(prev => [...prev, `*** OPERATOR VERIFIED... OK`, `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`, ...askBoot]);
+          setMainframeHistory((prev) => [
+            ...prev,
+            `*** OPERATOR VERIFIED... OK`,
+            `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`,
+            ...askBoot,
+          ]);
           setPromptLabel('===> ');
           setDialogueState('ASK_BOOT');
         }
@@ -329,19 +380,29 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
     } else if (dialogueState === 'ASK_CODE') {
       const askBoot = [` `, `INITIATE GRAPHICAL WORKSPACE INTERFACE? (Y/N):`];
       if (!cleanInput) {
-        setMainframeHistory(prev => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
+        setMainframeHistory((prev) => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
         setPromptLabel('===> ');
         setDialogueState('ASK_BOOT');
         return;
       }
       setDialogueState('VERIFYING');
-      setMainframeHistory(prev => [...prev, `CONFIRMING DEVICE...`]);
+      setMainframeHistory((prev) => [...prev, `CONFIRMING DEVICE...`]);
       teamVerify(cleanInput).then((error) => {
         if (error) {
-          setMainframeHistory(prev => [...prev, `*** ERROR: CODE REJECTED. ${error.toUpperCase()}`, `*** TRY AGAIN, OR PRESS ENTER FOR GUEST ACCESS.`, ` `]);
+          setMainframeHistory((prev) => [
+            ...prev,
+            `*** ERROR: CODE REJECTED. ${error.toUpperCase()}`,
+            `*** TRY AGAIN, OR PRESS ENTER FOR GUEST ACCESS.`,
+            ` `,
+          ]);
           setDialogueState('ASK_CODE');
         } else {
-          setMainframeHistory(prev => [...prev, `*** OPERATOR VERIFIED... OK`, `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`, ...askBoot]);
+          setMainframeHistory((prev) => [
+            ...prev,
+            `*** OPERATOR VERIFIED... OK`,
+            `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`,
+            ...askBoot,
+          ]);
           setPromptLabel('===> ');
           setDialogueState('ASK_BOOT');
         }
@@ -350,35 +411,35 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
     } else if (dialogueState === 'ASK_BOOT') {
       const lower = cleanInput.toLowerCase();
       if (lower === 'y' || lower === 'yes') {
-        setMainframeHistory(prev => [
+        setMainframeHistory((prev) => [
           ...prev,
           `*** BOOT COMMAND: LOAD GRAPHICAL WORKSPACE`,
           `*** INITIALIZING WIN98 EMULATION ENVIRONMENT...`,
           `*** LOADING USER EXPERIENCE STACK... OK`,
-          `*** REDIRECTING CONSOLE... IPL COMPLETED.`
+          `*** REDIRECTING CONSOLE... IPL COMPLETED.`,
         ]);
         setDialogueState('BOOTING');
         setTimeout(() => {
           handleComplete();
         }, 1200);
       } else if (lower === 'n' || lower === 'no') {
-        setMainframeHistory(prev => [
+        setMainframeHistory((prev) => [
           ...prev,
           `*** BOOT COMMAND: TERMINAL ONLY (SUSPENDED)`,
           `*** SECURITY POLICY ERROR: MAIN DECK INTERFACE MANDATES GUI OVERLAY.`,
           `*** OVERRIDING OPERATOR CMD... FORCE GRAPHICAL INITIALIZATION.`,
-          `*** DEPLOYING OS SHELL IN 2 SECONDS...`
+          `*** DEPLOYING OS SHELL IN 2 SECONDS...`,
         ]);
         setDialogueState('BOOTING');
         setTimeout(() => {
           handleComplete();
         }, 2200);
       } else {
-        setMainframeHistory(prev => [
+        setMainframeHistory((prev) => [
           ...prev,
           `*** UNRECOGNIZED IPL OPTION: '${cleanInput}'`,
           `*** ASSUMING DEFAULT: GRAPHICAL BOOT SYSTEM`,
-          `*** BOOTING OS/390 GRAPHICAL LAYER PROTOCOLS...`
+          `*** BOOTING OS/390 GRAPHICAL LAYER PROTOCOLS...`,
         ]);
         setDialogueState('BOOTING');
         setTimeout(() => {
@@ -390,7 +451,11 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
 
   const renderHistoryLine = (line: string, index: number) => {
     if (line.trim() === '') {
-      return <div key={index} style={{ height: '1.15em' }}>&nbsp;</div>;
+      return (
+        <div key={index} style={{ height: '1.15em' }}>
+          &nbsp;
+        </div>
+      );
     }
 
     if (line.startsWith('***')) {
@@ -462,13 +527,19 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
 
   const renderBioLine = (line: TermLine, i: number) => {
     if (line.text === '') {
-      return <div key={i} style={{ height: '1.1em' }}>&nbsp;</div>;
+      return (
+        <div key={i} style={{ height: '1.1em' }}>
+          &nbsp;
+        </div>
+      );
     }
     if (line.parts) {
       return (
         <div key={i}>
           {line.parts.map((p, j) => (
-            <span key={j} style={{ color: p.color }}>{p.text}</span>
+            <span key={j} style={{ color: p.color }}>
+              {p.text}
+            </span>
           ))}
         </div>
       );
@@ -548,9 +619,26 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
           {/* Energy Star logo — top right */}
           <div style={{ position: 'absolute', top: 8, right: 12, textAlign: 'center' }}>
             <svg style={{ width: 100, height: 70 }} viewBox="0 0 120 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M 60,4 L 67,24 L 88,24 L 71,37 L 78,57 L 60,44 L 42,57 L 49,37 L 32,24 L 53,24 Z" stroke="#ffff00" strokeWidth="1.5" fill="none" strokeLinejoin="round" />
+              <path
+                d="M 60,4 L 67,24 L 88,24 L 71,37 L 78,57 L 60,44 L 42,57 L 49,37 L 32,24 L 53,24 Z"
+                stroke="#ffff00"
+                strokeWidth="1.5"
+                fill="none"
+                strokeLinejoin="round"
+              />
               <path d="M 30,14 A 40,40 0 0,0 74,62" stroke="#00cc00" strokeWidth="2" strokeLinecap="round" fill="none" />
-              <text x="60" y="36" fill="#ffff00" fontSize="10" fontWeight="bold" fontFamily="Arial, sans-serif" textAnchor="middle" fontStyle="italic">energy</text>
+              <text
+                x="60"
+                y="36"
+                fill="#ffff00"
+                fontSize="10"
+                fontWeight="bold"
+                fontFamily="Arial, sans-serif"
+                textAnchor="middle"
+                fontStyle="italic"
+              >
+                energy
+              </text>
             </svg>
             <div style={{ color: '#00cc00', fontSize: '9px', letterSpacing: '0.5px', marginTop: '-4px', fontFamily: 'Arial, sans-serif' }}>
               EPA POLLUTION PREVENTER
@@ -583,7 +671,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
               key={i}
               style={{
                 color: line.color || '#aaaaaa',
-                fontWeight: ('bold' in line && line.bold) ? 'bold' : 'normal',
+                fontWeight: 'bold' in line && line.bold ? 'bold' : 'normal',
                 wordBreak: 'break-all',
                 whiteSpace: 'pre',
               }}
@@ -645,7 +733,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
           )}
 
           {/* Skip button at the very bottom right */}
-          <div 
+          <div
             onClick={(e) => {
               e.stopPropagation();
               handleComplete();
@@ -663,8 +751,8 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
               borderRadius: '2px',
               userSelect: 'none',
             }}
-            onMouseEnter={(e) => e.currentTarget.style.color = '#ffffff'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#444444'}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#ffffff')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#444444')}
           >
             [ESC] SKIP INTRO
           </div>

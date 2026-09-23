@@ -7,10 +7,10 @@ services:
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run   # /ready is read by the admin panel's health tab
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run # /ready is read by the admin panel's health tab
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN}
     extra_hosts:
-      - "web:host-gateway"
+      - 'web:host-gateway'
     ports:
-      - "127.0.0.1:2000:2000"
+      - '127.0.0.1:2000:2000'

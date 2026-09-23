@@ -20,7 +20,7 @@ export const WebRadio: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
-  
+
   // Simulated visualizer heights
   const [visualizerHeights, setVisualizerHeights] = useState<number[]>([10, 10, 10, 10, 10, 10, 10, 10]);
 
@@ -53,7 +53,7 @@ export const WebRadio: React.FC = () => {
     audioRef.current.addEventListener('ended', onEnded);
 
     if (isPlaying) {
-      audioRef.current.play().catch(e => console.log('Audio playback failed', e));
+      audioRef.current.play().catch((e) => console.log('Audio playback failed', e));
     }
 
     return () => {
@@ -82,9 +82,7 @@ export const WebRadio: React.FC = () => {
     }
 
     const interval = setInterval(() => {
-      setVisualizerHeights(
-        Array.from({ length: 8 }, () => Math.floor(Math.random() * 28) + 4)
-      );
+      setVisualizerHeights(Array.from({ length: 8 }, () => Math.floor(Math.random() * 28) + 4));
     }, 120);
 
     return () => clearInterval(interval);
@@ -96,7 +94,7 @@ export const WebRadio: React.FC = () => {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play().catch(e => console.log('Audio playback failed', e));
+      audioRef.current.play().catch((e) => console.log('Audio playback failed', e));
       setIsPlaying(true);
     }
   };
@@ -142,11 +140,7 @@ export const WebRadio: React.FC = () => {
           {/* Retro green bar Equalizer Visualizer */}
           <div className="flex items-end gap-[2px] h-[35px] w-[50px] border-b border-green-900 pb-[1px] select-none">
             {visualizerHeights.map((h, i) => (
-              <div
-                key={i}
-                className="bg-[#00ff00] w-[4px]"
-                style={{ height: `${h}px` }}
-              ></div>
+              <div key={i} className="bg-[#00ff00] w-[4px]" style={{ height: `${h}px` }}></div>
             ))}
           </div>
         </div>

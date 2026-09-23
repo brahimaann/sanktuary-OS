@@ -35,15 +35,8 @@ const Chat = lazy(() => import('./apps/Chat'));
 const Profile = lazy(() => import('./apps/Profile'));
 const Planner = lazy(() => import('./apps/Planner'));
 
-
 export const App: React.FC = () => {
-  const {
-    windows,
-    screensaver,
-    screensaverTimeout,
-    isScreensaverActive,
-    setScreensaverActive,
-  } = useWindowManager();
+  const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
   const [isBooting, setIsBooting] = useState(true);
   const [powerOnClass, setPowerOnClass] = useState('');
 
@@ -70,9 +63,12 @@ export const App: React.FC = () => {
     let timeoutId: ReturnType<typeof setTimeout>;
     const resetTimer = () => {
       clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        setScreensaverActive(true);
-      }, screensaverTimeout * 60 * 1000);
+      timeoutId = setTimeout(
+        () => {
+          setScreensaverActive(true);
+        },
+        screensaverTimeout * 60 * 1000,
+      );
     };
 
     const handleActivity = () => {
@@ -108,7 +104,6 @@ export const App: React.FC = () => {
 
   const curveX = borderX * 0.2;
   const curveY = borderY * 0.2;
-
 
   const renderAppContent = (win: any) => {
     let content: React.ReactNode;
@@ -166,7 +161,9 @@ export const App: React.FC = () => {
         content = <LocalEchoTerminal />;
         break;
       case 'video-player':
-        content = <VideoPlayer videoSrc={win.appProps?.videoSrc} videoTitle={win.appProps?.videoTitle} videoArtist={win.appProps?.videoArtist} />;
+        content = (
+          <VideoPlayer videoSrc={win.appProps?.videoSrc} videoTitle={win.appProps?.videoTitle} videoArtist={win.appProps?.videoArtist} />
+        );
         break;
       case 'winamp':
         content = <Winamp />;
@@ -239,21 +236,21 @@ export const App: React.FC = () => {
             <stop offset="100%" stopColor="#a6a299" />
           </radialGradient>
         </defs>
-        <path 
-          d={`M 0 0 H ${W} V ${H} H 0 Z M ${borderX} ${borderY} Q ${W / 2} ${borderY - curveY} ${W - borderX} ${borderY} Q ${W - borderX + curveX} ${(H - borderBottom + borderY) / 2} ${W - borderX} ${H - borderBottom} Q ${W / 2} ${H - borderBottom + curveY} ${borderX} ${H - borderBottom} Q ${borderX - curveX} ${(H - borderBottom + borderY) / 2} ${borderX} ${borderY} Z`} 
-          fill="url(#bezel-shading)" 
-          fillRule="evenodd" 
+        <path
+          d={`M 0 0 H ${W} V ${H} H 0 Z M ${borderX} ${borderY} Q ${W / 2} ${borderY - curveY} ${W - borderX} ${borderY} Q ${W - borderX + curveX} ${(H - borderBottom + borderY) / 2} ${W - borderX} ${H - borderBottom} Q ${W / 2} ${H - borderBottom + curveY} ${borderX} ${H - borderBottom} Q ${borderX - curveX} ${(H - borderBottom + borderY) / 2} ${borderX} ${borderY} Z`}
+          fill="url(#bezel-shading)"
+          fillRule="evenodd"
         />
-        <path 
-          d={`M ${borderX} ${borderY} Q ${W / 2} ${borderY - curveY} ${W - borderX} ${borderY} Q ${W - borderX + curveX} ${(H - borderBottom + borderY) / 2} ${W - borderX} ${H - borderBottom} Q ${W / 2} ${H - borderBottom + curveY} ${borderX} ${H - borderBottom} Q ${borderX - curveX} ${(H - borderBottom + borderY) / 2} ${borderX} ${borderY}`} 
-          fill="none" 
-          stroke="#807d75" 
-          strokeWidth={Math.max(1.5, borderX * 0.08)} 
+        <path
+          d={`M ${borderX} ${borderY} Q ${W / 2} ${borderY - curveY} ${W - borderX} ${borderY} Q ${W - borderX + curveX} ${(H - borderBottom + borderY) / 2} ${W - borderX} ${H - borderBottom} Q ${W / 2} ${H - borderBottom + curveY} ${borderX} ${H - borderBottom} Q ${borderX - curveX} ${(H - borderBottom + borderY) / 2} ${borderX} ${borderY}`}
+          fill="none"
+          stroke="#807d75"
+          strokeWidth={Math.max(1.5, borderX * 0.08)}
         />
       </svg>
 
       {/* Screen Content Window — dynamic dimensions positioned to match the bezel hole */}
-      <div 
+      <div
         className={`crt-screen-content ${isBooting ? '' : powerOnClass}`}
         style={{
           top: borderY,
@@ -266,12 +263,7 @@ export const App: React.FC = () => {
         <div className="crt-screen-filter" />
         <div className="crt-screen-flicker" />
 
-        {isScreensaverActive && (
-          <Screensaver
-            type={screensaver}
-            onDismiss={() => setScreensaverActive(false)}
-          />
-        )}
+        {isScreensaverActive && <Screensaver type={screensaver} onDismiss={() => setScreensaverActive(false)} />}
 
         {isBooting ? (
           /* BIOS boot terminal — rendered INSIDE the CRT screen */

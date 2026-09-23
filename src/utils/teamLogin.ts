@@ -2,7 +2,10 @@ import { useRef } from 'react';
 import { useSignIn } from '@clerk/react';
 
 type CodeKind = 'email_code' | 'phone_code' | 'totp';
-export interface LoginResult { error?: string; needCode?: string }
+interface LoginResult {
+  error?: string;
+  needCode?: string;
+}
 
 /**
  * Nickname + access code sign-in against Clerk, used by the boot terminal and team windows.
@@ -53,9 +56,12 @@ export function useTeamLogin() {
 
   const verify = async (code: string): Promise<string | null> => {
     const c = code.trim();
-    const r = kind.current === 'phone_code' ? await signIn.mfa.verifyPhoneCode({ code: c })
-      : kind.current === 'totp' ? await signIn.mfa.verifyTOTP({ code: c })
-      : await signIn.mfa.verifyEmailCode({ code: c });
+    const r =
+      kind.current === 'phone_code'
+        ? await signIn.mfa.verifyPhoneCode({ code: c })
+        : kind.current === 'totp'
+          ? await signIn.mfa.verifyTOTP({ code: c })
+          : await signIn.mfa.verifyEmailCode({ code: c });
     if (r.error) return r.error.longMessage || r.error.message;
     return finish();
   };

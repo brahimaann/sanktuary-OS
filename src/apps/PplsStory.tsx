@@ -29,30 +29,34 @@ export const CIVIC_ALERTS: CivicAlert[] = [
     id: 'tenant-rights',
     type: 'Legislative',
     title: 'Tenant Rights Bill Vote at City Hall',
-    details: 'A bill affecting local tenant rights and eviction protections is up for a vote at City Hall on Tuesday. Renters are organizing public comments to demand municipal support.\n\nHistorical Connection: This struggle reclaims the Manden Charter\'s 1236 declaration of the right to life and physical integrity (Article 5), establishing collective societal protection for all members.',
-    connectedEventId: 'manden-charter-kurukan-fuga'
+    details:
+      "A bill affecting local tenant rights and eviction protections is up for a vote at City Hall on Tuesday. Renters are organizing public comments to demand municipal support.\n\nHistorical Connection: This struggle reclaims the Manden Charter's 1236 declaration of the right to life and physical integrity (Article 5), establishing collective societal protection for all members.",
+    connectedEventId: 'manden-charter-kurukan-fuga',
   },
   {
     id: 'grant-withholding',
     type: 'Economic',
     title: 'Small Business Grant Policy Shift',
-    details: 'Notice: Major corporate tax withholding changes are affecting local small business grants for minority creators. Public comments on redistributing city funds end this Friday.\n\nHistorical Connection: Relates to the Asiento de Negros (1518), which institutionalized the commodification of human bodies and resources, showing the roots of racial capitalism.',
-    connectedEventId: 'asiento-de-negros'
+    details:
+      'Notice: Major corporate tax withholding changes are affecting local small business grants for minority creators. Public comments on redistributing city funds end this Friday.\n\nHistorical Connection: Relates to the Asiento de Negros (1518), which institutionalized the commodification of human bodies and resources, showing the roots of racial capitalism.',
+    connectedEventId: 'asiento-de-negros',
   },
   {
     id: 'redistricting',
     type: 'Civic',
     title: 'District Redrawing Public Hearing',
-    details: 'Your district is undergoing border redistribution. Public comment period ends Friday. Community members are mobilizing to prevent political gerrymandering.\n\nHistorical Connection: Connects to the Spanish colonial Sistema de Castas (1540), which legally engineered division to maintain minority control and prevent democratic coalition building.',
-    connectedEventId: 'sistema-de-castas'
+    details:
+      'Your district is undergoing border redistribution. Public comment period ends Friday. Community members are mobilizing to prevent political gerrymandering.\n\nHistorical Connection: Connects to the Spanish colonial Sistema de Castas (1540), which legally engineered division to maintain minority control and prevent democratic coalition building.',
+    connectedEventId: 'sistema-de-castas',
   },
   {
     id: 'artist-land-trust',
     type: 'Cultural',
     title: 'Land Trust Meeting & Local Art Showcase',
-    details: 'Community land trust meeting and local artist showcase tonight at the Neighborhood Arts Center. Discussions will focus on protecting creative spaces from rising displacement.\n\nHistorical Connection: Echoes the Aboriginal Songlines (65,000 BCE) mapping of geographic space through ecological stewardship and collective care rather than private ownership.',
-    connectedEventId: 'aboriginal-songlines'
-  }
+    details:
+      'Community land trust meeting and local artist showcase tonight at the Neighborhood Arts Center. Discussions will focus on protecting creative spaces from rising displacement.\n\nHistorical Connection: Echoes the Aboriginal Songlines (65,000 BCE) mapping of geographic space through ecological stewardship and collective care rather than private ownership.',
+    connectedEventId: 'aboriginal-songlines',
+  },
 ];
 
 // ──────────────────────────────────────────────
@@ -66,7 +70,7 @@ function bootstrapVFS() {
   vfsBootstrapped = true;
   try {
     vfs.mkdir('C:/Ppls_Story');
-    
+
     // Write timeline events text files
     TIMELINE_EVENTS.forEach((evt) => {
       if (evt.primarySourceText && evt.mediaPayload && evt.mediaPayload.startsWith('C:/')) {
@@ -75,23 +79,24 @@ function bootstrapVFS() {
     });
 
     // Write general Pulse log
-    const pulseText = `THE PULSE — CIVIC ALERT NOTIFIER\n` +
+    const pulseText =
+      `THE PULSE — CIVIC ALERT NOTIFIER\n` +
       `══════════════════════════════════════════\n\n` +
-      CIVIC_ALERTS.map(alert => 
-        `[${alert.type.toUpperCase()} ALERT]: ${alert.title}\n` +
-        `------------------------------------------\n` +
-        `${alert.details}\n`
+      CIVIC_ALERTS.map(
+        (alert) =>
+          `[${alert.type.toUpperCase()} ALERT]: ${alert.title}\n` + `------------------------------------------\n` + `${alert.details}\n`,
       ).join('\n\n');
     vfs.writeFile('C:/Ppls_Story/Pulse.txt', pulseText);
 
     // Write individual alerts
     CIVIC_ALERTS.forEach((alert) => {
       const filename = `Alert_${alert.id.replace(/-/g, '_')}.txt`;
-      vfs.writeFile(`C:/Ppls_Story/${filename}`, 
+      vfs.writeFile(
+        `C:/Ppls_Story/${filename}`,
         `${alert.title.toUpperCase()}\n` +
-        `Category: ${alert.type}\n` +
-        `══════════════════════════════════════════\n\n` +
-        `${alert.details}\n`
+          `Category: ${alert.type}\n` +
+          `══════════════════════════════════════════\n\n` +
+          `${alert.details}\n`,
       );
     });
   } catch (e) {
@@ -111,12 +116,14 @@ const geoToXY = (lat: number, lng: number) => {
 };
 
 const pointsToPath = (points: [number, number][]) => {
-  return points
-    .map((p, idx) => {
-      const { x, y } = geoToXY(p[1], p[0]);
-      return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ') + ' Z';
+  return (
+    points
+      .map((p, idx) => {
+        const { x, y } = geoToXY(p[1], p[0]);
+        return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ') + ' Z'
+  );
 };
 
 interface ContinentShape {
@@ -132,119 +139,275 @@ const CONTINENTS_DATA: ContinentShape[] = [
     name: 'Africa',
     region: 'Africa',
     points: [
-      [-17, 14], [-16, 20], [-14, 25], [-10, 35], [5, 36], [11, 37], [15, 32], 
-      [30, 31], [32, 30], [34, 27], [40, 20], [43, 12], [51, 11], [46, -3], 
-      [40, -15], [33, -27], [28, -32], [20, -34], [18, -34], [15, -23], 
-      [12, -12], [9, -1], [5, 4], [-8, 4], [-13, 9], [-17, 14]
-    ]
+      [-17, 14],
+      [-16, 20],
+      [-14, 25],
+      [-10, 35],
+      [5, 36],
+      [11, 37],
+      [15, 32],
+      [30, 31],
+      [32, 30],
+      [34, 27],
+      [40, 20],
+      [43, 12],
+      [51, 11],
+      [46, -3],
+      [40, -15],
+      [33, -27],
+      [28, -32],
+      [20, -34],
+      [18, -34],
+      [15, -23],
+      [12, -12],
+      [9, -1],
+      [5, 4],
+      [-8, 4],
+      [-13, 9],
+      [-17, 14],
+    ],
   },
   {
     id: 'madagascar',
     name: 'Madagascar',
     region: 'Africa',
     points: [
-      [49, -12], [50, -16], [47, -25], [43, -25], [44, -20], [49, -12]
-    ]
+      [49, -12],
+      [50, -16],
+      [47, -25],
+      [43, -25],
+      [44, -20],
+      [49, -12],
+    ],
   },
   {
     id: 'north_america',
     name: 'North America',
     region: 'Americas',
     points: [
-      [-168, 65], [-150, 70], [-120, 70], [-100, 68], [-83, 65], [-80, 51], 
-      [-75, 52], [-64, 60], [-55, 53], [-52, 47], [-60, 46], [-70, 42], 
-      [-74, 40], [-77, 34], [-80, 25], [-85, 30], [-97, 26], [-105, 20], 
-      [-88, 16], [-83, 9], [-77, 7], [-90, 14], [-105, 22], [-110, 23], 
-      [-115, 32], [-124, 40], [-125, 50], [-135, 57], [-145, 60], [-160, 55], 
-      [-168, 65]
-    ]
+      [-168, 65],
+      [-150, 70],
+      [-120, 70],
+      [-100, 68],
+      [-83, 65],
+      [-80, 51],
+      [-75, 52],
+      [-64, 60],
+      [-55, 53],
+      [-52, 47],
+      [-60, 46],
+      [-70, 42],
+      [-74, 40],
+      [-77, 34],
+      [-80, 25],
+      [-85, 30],
+      [-97, 26],
+      [-105, 20],
+      [-88, 16],
+      [-83, 9],
+      [-77, 7],
+      [-90, 14],
+      [-105, 22],
+      [-110, 23],
+      [-115, 32],
+      [-124, 40],
+      [-125, 50],
+      [-135, 57],
+      [-145, 60],
+      [-160, 55],
+      [-168, 65],
+    ],
   },
   {
     id: 'south_america',
     name: 'South America',
     region: 'Americas',
     points: [
-      [-77, 7], [-72, 12], [-60, 6], [-50, 0], [-35, -5], [-39, -13], 
-      [-43, -23], [-48, -27], [-55, -34], [-63, -40], [-65, -50], [-67, -55], 
-      [-74, -45], [-72, -30], [-70, -20], [-81, -5], [-80, 1], [-77, 7]
-    ]
+      [-77, 7],
+      [-72, 12],
+      [-60, 6],
+      [-50, 0],
+      [-35, -5],
+      [-39, -13],
+      [-43, -23],
+      [-48, -27],
+      [-55, -34],
+      [-63, -40],
+      [-65, -50],
+      [-67, -55],
+      [-74, -45],
+      [-72, -30],
+      [-70, -20],
+      [-81, -5],
+      [-80, 1],
+      [-77, 7],
+    ],
   },
   {
     id: 'cuba',
     name: 'Cuba',
     region: 'Americas',
     points: [
-      [-84, 22], [-80, 22], [-75, 20], [-77, 20], [-84, 22]
-    ]
+      [-84, 22],
+      [-80, 22],
+      [-75, 20],
+      [-77, 20],
+      [-84, 22],
+    ],
   },
   {
     id: 'hispaniola',
     name: 'Hispaniola',
     region: 'Americas',
     points: [
-      [-74, 20], [-70, 19], [-68, 18], [-72, 18], [-74, 20]
-    ]
+      [-74, 20],
+      [-70, 19],
+      [-68, 18],
+      [-72, 18],
+      [-74, 20],
+    ],
   },
   {
     id: 'eurasia',
     name: 'Eurasia',
     region: 'Global',
     points: [
-      [-9, 39], [-2, 43], [-5, 48], [2, 51], [5, 53], [8, 55], [14, 54], 
-      [18, 59], [20, 65], [30, 70], [40, 68], [50, 68], [60, 70], [80, 75], 
-      [100, 77], [120, 73], [140, 72], [170, 66], [180, 66], [170, 60], 
-      [160, 55], [142, 53], [135, 48], [125, 38], [120, 38], [122, 30], 
-      [110, 20], [105, 10], [100, 5], [98, 10], [88, 22], [80, 13], [77, 8], 
-      [73, 18], [67, 24], [58, 25], [50, 26], [48, 30], [35, 12], [43, 12], 
-      [35, 27], [32, 30], [34, 32], [36, 36], [28, 36], [26, 40], [22, 38], 
-      [16, 40], [12, 42], [9, 44], [3, 41], [-2, 37], [-9, 39]
-    ]
+      [-9, 39],
+      [-2, 43],
+      [-5, 48],
+      [2, 51],
+      [5, 53],
+      [8, 55],
+      [14, 54],
+      [18, 59],
+      [20, 65],
+      [30, 70],
+      [40, 68],
+      [50, 68],
+      [60, 70],
+      [80, 75],
+      [100, 77],
+      [120, 73],
+      [140, 72],
+      [170, 66],
+      [180, 66],
+      [170, 60],
+      [160, 55],
+      [142, 53],
+      [135, 48],
+      [125, 38],
+      [120, 38],
+      [122, 30],
+      [110, 20],
+      [105, 10],
+      [100, 5],
+      [98, 10],
+      [88, 22],
+      [80, 13],
+      [77, 8],
+      [73, 18],
+      [67, 24],
+      [58, 25],
+      [50, 26],
+      [48, 30],
+      [35, 12],
+      [43, 12],
+      [35, 27],
+      [32, 30],
+      [34, 32],
+      [36, 36],
+      [28, 36],
+      [26, 40],
+      [22, 38],
+      [16, 40],
+      [12, 42],
+      [9, 44],
+      [3, 41],
+      [-2, 37],
+      [-9, 39],
+    ],
   },
   {
     id: 'australia',
     name: 'Australia',
     region: 'Global',
     points: [
-      [113, -26], [115, -32], [120, -34], [130, -32], [138, -35], [145, -38], 
-      [150, -34], [153, -28], [145, -15], [136, -12], [130, -15], [122, -18], 
-      [113, -26]
-    ]
+      [113, -26],
+      [115, -32],
+      [120, -34],
+      [130, -32],
+      [138, -35],
+      [145, -38],
+      [150, -34],
+      [153, -28],
+      [145, -15],
+      [136, -12],
+      [130, -15],
+      [122, -18],
+      [113, -26],
+    ],
   },
   {
     id: 'greenland',
     name: 'Greenland',
     region: 'Global',
     points: [
-      [-60, 80], [-50, 83], [-30, 83], [-20, 75], [-40, 60], [-50, 64], 
-      [-55, 74], [-60, 80]
-    ]
+      [-60, 80],
+      [-50, 83],
+      [-30, 83],
+      [-20, 75],
+      [-40, 60],
+      [-50, 64],
+      [-55, 74],
+      [-60, 80],
+    ],
   },
   {
     id: 'uk',
     name: 'United Kingdom',
     region: 'Global',
     points: [
-      [-5, 50], [-2, 50], [1, 51], [1, 53], [-2, 57], [-4, 58], [-6, 57], 
-      [-5, 55], [-3, 53], [-5, 50]
-    ]
+      [-5, 50],
+      [-2, 50],
+      [1, 51],
+      [1, 53],
+      [-2, 57],
+      [-4, 58],
+      [-6, 57],
+      [-5, 55],
+      [-3, 53],
+      [-5, 50],
+    ],
   },
   {
     id: 'ireland',
     name: 'Ireland',
     region: 'Global',
     points: [
-      [-10, 52], [-9, 54], [-7, 55], [-6, 54], [-6, 52], [-8, 51], [-10, 52]
-    ]
+      [-10, 52],
+      [-9, 54],
+      [-7, 55],
+      [-6, 54],
+      [-6, 52],
+      [-8, 51],
+      [-10, 52],
+    ],
   },
   {
     id: 'japan',
     name: 'Japan',
     region: 'Global',
     points: [
-      [140, 45], [145, 44], [142, 40], [140, 35], [135, 34], [130, 31], 
-      [132, 33], [140, 45]
-    ]
-  }
+      [140, 45],
+      [145, 44],
+      [142, 40],
+      [140, 35],
+      [135, 34],
+      [130, 31],
+      [132, 33],
+      [140, 45],
+    ],
+  },
 ];
 
 // ──────────────────────────────────────────────
@@ -275,11 +438,11 @@ const WorldMap: React.FC<WorldMapProps> = ({
   const [zoom, setZoom] = useState(1);
   const [translateX, setTranslateX] = useState(0);
   const [translateY, setTranslateY] = useState(0);
-  
+
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  
+
   const [hoveredRegion, setHoveredRegion] = useState<Region | null>(null);
   const [hoveredEvent, setHoveredEvent] = useState<TimelineEvent | null>(null);
   const [hoveredPos, setHoveredPos] = useState({ x: 0, y: 0 });
@@ -291,15 +454,15 @@ const WorldMap: React.FC<WorldMapProps> = ({
     if (!selectedEvent) return;
     const { lat, lng } = selectedEvent.location;
     const { x, y } = geoToXY(lat, lng);
-    
+
     const targetZoom = 3.5;
     let tx = 1000 / 2 - x * targetZoom;
     let ty = 500 / 2 - y * targetZoom;
-    
+
     // Clamp within 1000x500 map bounds
     tx = Math.max(1000 * (1 - targetZoom), Math.min(0, tx));
     ty = Math.max(500 * (1 - targetZoom), Math.min(0, ty));
-    
+
     setZoom(targetZoom);
     setTranslateX(tx);
     setTranslateY(ty);
@@ -331,16 +494,16 @@ const WorldMap: React.FC<WorldMapProps> = ({
     if (!isDragging) return;
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
-    
+
     const dx = (e.clientX - dragStart.x) * (1000 / rect.width);
     const dy = (e.clientY - dragStart.y) * (500 / rect.height);
-    
+
     let newTx = dragOffset.x + dx;
     let newTy = dragOffset.y + dy;
-    
+
     newTx = Math.max(1000 * (1 - zoom), Math.min(0, newTx));
     newTy = Math.max(500 * (1 - zoom), Math.min(0, newTy));
-    
+
     setTranslateX(newTx);
     setTranslateY(newTy);
   };
@@ -450,9 +613,15 @@ const WorldMap: React.FC<WorldMapProps> = ({
     <div style={mapContainer} className="ppls-map-container">
       {/* Zoom controls (Win98 retro buttons) */}
       <div style={zoomControls}>
-        <button onClick={() => handleZoomStep(1.4)} style={retroBtn} title="Zoom In">+</button>
-        <button onClick={() => handleZoomStep(1 / 1.4)} style={retroBtn} title="Zoom Out">-</button>
-        <button onClick={resetZoom} style={{ ...retroBtn, fontSize: 8 }} title="Zoom to Fit">Fit</button>
+        <button onClick={() => handleZoomStep(1.4)} style={retroBtn} title="Zoom In">
+          +
+        </button>
+        <button onClick={() => handleZoomStep(1 / 1.4)} style={retroBtn} title="Zoom Out">
+          -
+        </button>
+        <button onClick={resetZoom} style={{ ...retroBtn, fontSize: 8 }} title="Zoom to Fit">
+          Fit
+        </button>
       </div>
 
       <svg
@@ -480,16 +649,12 @@ const WorldMap: React.FC<WorldMapProps> = ({
           {Array.from({ length: 11 }, (_, i) => {
             const lat = -75 + i * 15;
             const { y } = geoToXY(lat, 0);
-            return (
-              <line key={`lat-${lat}`} x1="0" y1={y} x2="1000" y2={y} stroke="#000060" strokeWidth="0.5" />
-            );
+            return <line key={`lat-${lat}`} x1="0" y1={y} x2="1000" y2={y} stroke="#000060" strokeWidth="0.5" />;
           })}
           {Array.from({ length: 11 }, (_, i) => {
             const lng = -150 + i * 30;
             const { x } = geoToXY(0, lng);
-            return (
-              <line key={`lng-${lng}`} x1={x} y1="0" x2={x} y2="500" stroke="#000060" strokeWidth="0.5" />
-            );
+            return <line key={`lng-${lng}`} x1={x} y1="0" x2={x} y2="500" stroke="#000060" strokeWidth="0.5" />;
           })}
 
           {/* Continent shapes */}
@@ -593,9 +758,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
                 />
 
                 {/* Inner dot for active pins */}
-                {isActive && (
-                  <circle cx="0" cy="0" r="1.2" fill={isSelected ? '#ffffff' : '#ff3333'} />
-                )}
+                {isActive && <circle cx="0" cy="0" r="1.2" fill={isSelected ? '#ffffff' : '#ff3333'} />}
               </g>
             );
           })}
@@ -622,7 +785,9 @@ const WorldMap: React.FC<WorldMapProps> = ({
             whiteSpace: 'nowrap',
           }}
         >
-          <div style={{ fontWeight: 'bold' }}>{hoveredEvent.year}: {hoveredEvent.title}</div>
+          <div style={{ fontWeight: 'bold' }}>
+            {hoveredEvent.year}: {hoveredEvent.title}
+          </div>
           <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>📍 {hoveredEvent.location.name}</div>
         </div>
       )}
@@ -648,7 +813,9 @@ const PplsStory: React.FC = () => {
   const [pulseBlink, setPulseBlink] = useState(true);
 
   // Bootstrap VFS on mount
-  useEffect(() => { bootstrapVFS(); }, []);
+  useEffect(() => {
+    bootstrapVFS();
+  }, []);
 
   // Pulse blinking effect
   useEffect(() => {
@@ -680,22 +847,19 @@ const PplsStory: React.FC = () => {
   // Filtered events
   const filteredEvents = useMemo(
     () => getFilteredEvents(selectedRegion, yearRange.min, sliderYear),
-    [selectedRegion, sliderYear, yearRange.min]
+    [selectedRegion, sliderYear, yearRange.min],
   );
 
   // Selected event
-  const selectedEvent = useMemo(
-    () => {
-      if (navMode === 'threads' && activeThreadId) {
-        const thread = CULTURAL_THREADS.find((t) => t.id === activeThreadId);
-        if (thread && thread.connectedEventIds.includes(selectedEventId || '')) {
-          return TIMELINE_EVENTS.find((e) => e.id === selectedEventId) || null;
-        }
+  const selectedEvent = useMemo(() => {
+    if (navMode === 'threads' && activeThreadId) {
+      const thread = CULTURAL_THREADS.find((t) => t.id === activeThreadId);
+      if (thread && thread.connectedEventIds.includes(selectedEventId || '')) {
+        return TIMELINE_EVENTS.find((e) => e.id === selectedEventId) || null;
       }
-      return filteredEvents.find((e) => e.id === selectedEventId) || filteredEvents[0] || null;
-    },
-    [filteredEvents, selectedEventId, navMode, activeThreadId]
-  );
+    }
+    return filteredEvents.find((e) => e.id === selectedEventId) || filteredEvents[0] || null;
+  }, [filteredEvents, selectedEventId, navMode, activeThreadId]);
 
   const connectedOppressionThread = useMemo(() => {
     if (!selectedEvent) return null;
@@ -712,39 +876,47 @@ const PplsStory: React.FC = () => {
   }, [filteredEvents, selectedEventId, navMode]);
 
   // ── Cross-routing handlers ──
-  const launchVideo = useCallback((evt: TimelineEvent) => {
-    openWindow({
-      id: `ppls-video-${evt.id}`,
-      title: `${evt.title} — Media Player`,
-      appType: 'video-player',
-      icon: '/images/icons/media-player-16x16.png',
-      appProps: {
-        videoSrc: evt.mediaPayload,
-        videoTitle: evt.title,
-        videoArtist: evt.artist || evt.region,
-      },
-      width: 640,
-      height: 480,
-    });
-  }, [openWindow]);
-
-  const launchDocument = useCallback((evt: TimelineEvent) => {
-    if (evt.primarySourceText && evt.mediaPayload && evt.mediaPayload.startsWith('C:/')) {
-      const vfsPath = evt.mediaPayload;
-      try {
-        vfs.writeFile(vfsPath, evt.primarySourceText);
-      } catch (_) { /* already exists */ }
+  const launchVideo = useCallback(
+    (evt: TimelineEvent) => {
       openWindow({
-        id: `ppls-doc-${evt.id}`,
-        title: `${evt.title} - Notepad`,
-        appType: 'notepad',
-        icon: '/images/icons/notepad-16x16.png',
-        appProps: { filePath: vfsPath },
-        width: 560,
-        height: 420,
+        id: `ppls-video-${evt.id}`,
+        title: `${evt.title} — Media Player`,
+        appType: 'video-player',
+        icon: '/images/icons/media-player-16x16.png',
+        appProps: {
+          videoSrc: evt.mediaPayload,
+          videoTitle: evt.title,
+          videoArtist: evt.artist || evt.region,
+        },
+        width: 640,
+        height: 480,
       });
-    }
-  }, [openWindow]);
+    },
+    [openWindow],
+  );
+
+  const launchDocument = useCallback(
+    (evt: TimelineEvent) => {
+      if (evt.primarySourceText && evt.mediaPayload && evt.mediaPayload.startsWith('C:/')) {
+        const vfsPath = evt.mediaPayload;
+        try {
+          vfs.writeFile(vfsPath, evt.primarySourceText);
+        } catch (_) {
+          /* already exists */
+        }
+        openWindow({
+          id: `ppls-doc-${evt.id}`,
+          title: `${evt.title} - Notepad`,
+          appType: 'notepad',
+          icon: '/images/icons/notepad-16x16.png',
+          appProps: { filePath: vfsPath },
+          width: 560,
+          height: 420,
+        });
+      }
+    },
+    [openWindow],
+  );
 
   const launchExplorer = useCallback(() => {
     openWindow({
@@ -758,65 +930,72 @@ const PplsStory: React.FC = () => {
     });
   }, [openWindow]);
 
-  const launchThreadViewer = useCallback((threadId: string) => {
-    const thread = HISTORICAL_THREADS.find((t) => t.id === threadId);
-    if (!thread) return;
-    openWindow({
-      id: `ppls-thread-viewer-${thread.id}`,
-      title: `${thread.title} — Diagnostic Tool`,
-      appType: 'ppls-thread-viewer',
-      icon: '/images/icons/my-computer-16x16.png',
-      appProps: { threadId },
-      width: 480,
-      height: 380,
-    });
-  }, [openWindow]);
+  const launchThreadViewer = useCallback(
+    (threadId: string) => {
+      const thread = HISTORICAL_THREADS.find((t) => t.id === threadId);
+      if (!thread) return;
+      openWindow({
+        id: `ppls-thread-viewer-${thread.id}`,
+        title: `${thread.title} — Diagnostic Tool`,
+        appType: 'ppls-thread-viewer',
+        icon: '/images/icons/my-computer-16x16.png',
+        appProps: { threadId },
+        width: 480,
+        height: 380,
+      });
+    },
+    [openWindow],
+  );
 
   // Handle clicking on a Pulse Alert item
-  const handleAlertClick = useCallback((alert: CivicAlert) => {
-    // 1. Write the target warning text file to the VFS
-    const filename = `Alert_${alert.id.replace(/-/g, '_')}.txt`;
-    const vfsPath = `C:/Ppls_Story/${filename}`;
-    try {
-      vfs.writeFile(vfsPath, 
-        `THE PULSE — CIVIC NOTIFICATION\n` +
-        `Category: ${alert.type}\n` +
-        `Subject: ${alert.title}\n` +
-        `══════════════════════════════════════════\n\n` +
-        `${alert.details}\n\n` +
-        `------------------------------------------\n` +
-        `ENCYCLOPEDIA REFERENCE:\n` +
-        `The encyclopedia has been automatically focused on the connected entry:\n` +
-        `Entry ID: ${alert.connectedEventId}\n` +
-        `Please refer to 'Ppls Library' window to explore the historical roots of this issue.`
-      );
-    } catch (_) {}
+  const handleAlertClick = useCallback(
+    (alert: CivicAlert) => {
+      // 1. Write the target warning text file to the VFS
+      const filename = `Alert_${alert.id.replace(/-/g, '_')}.txt`;
+      const vfsPath = `C:/Ppls_Story/${filename}`;
+      try {
+        vfs.writeFile(
+          vfsPath,
+          `THE PULSE — CIVIC NOTIFICATION\n` +
+            `Category: ${alert.type}\n` +
+            `Subject: ${alert.title}\n` +
+            `══════════════════════════════════════════\n\n` +
+            `${alert.details}\n\n` +
+            `------------------------------------------\n` +
+            `ENCYCLOPEDIA REFERENCE:\n` +
+            `The encyclopedia has been automatically focused on the connected entry:\n` +
+            `Entry ID: ${alert.connectedEventId}\n` +
+            `Please refer to 'Ppls Library' window to explore the historical roots of this issue.`,
+        );
+      } catch (_) {}
 
-    // 2. Launch Notepad with the file path
-    openWindow({
-      id: `ppls-pulse-${alert.id}`,
-      title: `${alert.title} — Notifier`,
-      appType: 'notepad',
-      icon: '/images/icons/notepad-16x16.png',
-      appProps: { filePath: vfsPath },
-      width: 480,
-      height: 360,
-    });
+      // 2. Launch Notepad with the file path
+      openWindow({
+        id: `ppls-pulse-${alert.id}`,
+        title: `${alert.title} — Notifier`,
+        appType: 'notepad',
+        icon: '/images/icons/notepad-16x16.png',
+        appProps: { filePath: vfsPath },
+        width: 480,
+        height: 360,
+      });
 
-    // 3. Shift app filters to focus connected event
-    const connectedEvt = TIMELINE_EVENTS.find((e) => e.id === alert.connectedEventId);
-    if (connectedEvt) {
-      if (connectedEvt.year > sliderYear) {
-        setSliderYear(connectedEvt.year);
+      // 3. Shift app filters to focus connected event
+      const connectedEvt = TIMELINE_EVENTS.find((e) => e.id === alert.connectedEventId);
+      if (connectedEvt) {
+        if (connectedEvt.year > sliderYear) {
+          setSliderYear(connectedEvt.year);
+        }
+        setSelectedRegion('All');
+        setNavMode('index');
+        setSelectedEventId(connectedEvt.id);
       }
-      setSelectedRegion('All');
-      setNavMode('index');
-      setSelectedEventId(connectedEvt.id);
-    }
 
-    // 4. Close notification popup
-    setShowPulsePanel(false);
-  }, [openWindow, sliderYear]);
+      // 4. Close notification popup
+      setShowPulsePanel(false);
+    },
+    [openWindow, sliderYear],
+  );
 
   return (
     <div style={shell}>
@@ -859,13 +1038,16 @@ const PplsStory: React.FC = () => {
               }}
               style={{
                 ...regionTab,
-                background: selectedRegion === r && navMode === 'index' ? (r === 'All' ? '#c0c0c0' : REGION_META[r as Region].color) : '#c0c0c0',
+                background:
+                  selectedRegion === r && navMode === 'index' ? (r === 'All' ? '#c0c0c0' : REGION_META[r as Region].color) : '#c0c0c0',
                 color: selectedRegion === r && r !== 'All' && navMode === 'index' ? '#fff' : '#000',
                 borderBottom: selectedRegion === r && navMode === 'index' ? '2px solid transparent' : '2px solid #808080',
                 fontWeight: selectedRegion === r && navMode === 'index' ? 700 : 400,
               }}
             >
-              {r === 'All' ? '🌍 All Regions' : `${r === 'Africa' ? '🌍' : r === 'Americas' ? '🗽' : r === 'Asia' ? '🌏' : r === 'Oceania' ? '🌊' : '🌐'} ${REGION_META[r as Region].displayName}`}
+              {r === 'All'
+                ? '🌍 All Regions'
+                : `${r === 'Africa' ? '🌍' : r === 'Americas' ? '🗽' : r === 'Asia' ? '🌏' : r === 'Oceania' ? '🌊' : '🌐'} ${REGION_META[r as Region].displayName}`}
             </button>
           ))}
         </div>
@@ -936,9 +1118,7 @@ const PplsStory: React.FC = () => {
           <div style={indexList}>
             {navMode === 'index' ? (
               filteredEvents.length === 0 ? (
-                <div style={{ padding: 12, color: '#888', textAlign: 'center', fontSize: 11 }}>
-                  No entries found for this selection.
-                </div>
+                <div style={{ padding: 12, color: '#888', textAlign: 'center', fontSize: 11 }}>No entries found for this selection.</div>
               ) : (
                 filteredEvents.map((evt) => {
                   const isSelected = evt.id === selectedEvent?.id;
@@ -954,11 +1134,13 @@ const PplsStory: React.FC = () => {
                     >
                       <span style={indexYear}>{evt.year}</span>
                       <span style={indexTitle}>{evt.title}</span>
-                      <span style={{
-                        ...indexBadge,
-                        background: REGION_META[evt.region].color,
-                        color: '#fff',
-                      }}>
+                      <span
+                        style={{
+                          ...indexBadge,
+                          background: REGION_META[evt.region].color,
+                          color: '#fff',
+                        }}
+                      >
                         {evt.region.substring(0, 3).toUpperCase()}
                       </span>
                     </div>
@@ -984,9 +1166,7 @@ const PplsStory: React.FC = () => {
                       }}
                     >
                       <div style={{ fontWeight: 700, fontSize: 10 }}>{thread.title}</div>
-                      <div style={{ fontSize: 8, color: isThreadSelected ? '#e0e0e0' : '#555', marginTop: 2 }}>
-                        {thread.description}
-                      </div>
+                      <div style={{ fontSize: 8, color: isThreadSelected ? '#e0e0e0' : '#555', marginTop: 2 }}>{thread.description}</div>
                     </div>
                     {isThreadSelected && (
                       <div style={{ background: '#f5f5f5' }}>
@@ -1025,22 +1205,29 @@ const PplsStory: React.FC = () => {
           {selectedEvent ? (
             <>
               {/* Event header */}
-              <div style={{
-                ...contentHeader,
-                borderLeft: `4px solid ${REGION_META[selectedEvent.region].color}`,
-              }}>
+              <div
+                style={{
+                  ...contentHeader,
+                  borderLeft: `4px solid ${REGION_META[selectedEvent.region].color}`,
+                }}
+              >
                 <div style={contentTitle}>{selectedEvent.title}</div>
                 <div style={contentMeta}>
-                  <span style={{
-                    ...contentBadge,
-                    background: REGION_META[selectedEvent.region].color,
-                  }}>
+                  <span
+                    style={{
+                      ...contentBadge,
+                      background: REGION_META[selectedEvent.region].color,
+                    }}
+                  >
                     {REGION_META[selectedEvent.region].displayName}
                   </span>
                   <span style={contentYear}>{selectedEvent.year}</span>
-                  {selectedEvent.tags && selectedEvent.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} style={contentTag}>#{tag}</span>
-                  ))}
+                  {selectedEvent.tags &&
+                    selectedEvent.tags.slice(0, 3).map((tag) => (
+                      <span key={tag} style={contentTag}>
+                        #{tag}
+                      </span>
+                    ))}
                 </div>
               </div>
 
@@ -1052,18 +1239,14 @@ const PplsStory: React.FC = () => {
                 {selectedEvent.primarySourceText && (
                   <div style={sourcePreview}>
                     <div style={sourcePreviewHeader}>📜 Primary Source Excerpt</div>
-                    <div style={sourcePreviewText}>
-                      {selectedEvent.primarySourceText.substring(0, 300)}...
-                    </div>
+                    <div style={sourcePreviewText}>{selectedEvent.primarySourceText.substring(0, 300)}...</div>
                   </div>
                 )}
 
                 {/* Reflect terminal prompt box */}
                 {selectedEvent.principle && (
                   <div style={reflectBox}>
-                    <div style={reflectHeader}>
-                      💭 Historical Principle: {selectedEvent.principle.corePrinciple}
-                    </div>
+                    <div style={reflectHeader}>💭 Historical Principle: {selectedEvent.principle.corePrinciple}</div>
                     <div style={reflectBody}>
                       <div style={{ marginBottom: 6 }}>
                         <strong>System of Restraint:</strong> {selectedEvent.principle.systemOfRestraint}
@@ -1092,7 +1275,11 @@ const PplsStory: React.FC = () => {
                   </button>
                 )}
                 {connectedOppressionThread && (
-                  <button style={actionBtnTrace} onClick={() => launchThreadViewer(connectedOppressionThread.id)} title="Trace the System of Oppression">
+                  <button
+                    style={actionBtnTrace}
+                    onClick={() => launchThreadViewer(connectedOppressionThread.id)}
+                    title="Trace the System of Oppression"
+                  >
                     <span style={{ marginRight: 6 }}>🔍</span> Trace the System
                   </button>
                 )}
@@ -1147,25 +1334,21 @@ const PplsStory: React.FC = () => {
         <div style={pulsePanel}>
           <div style={pulsePanelHeader}>
             <span style={{ fontWeight: 700 }}>🚨 The Pulse: Local Civic Alerts</span>
-            <button onClick={() => setShowPulsePanel(false)} style={pulseCloseBtn}>×</button>
+            <button onClick={() => setShowPulsePanel(false)} style={pulseCloseBtn}>
+              ×
+            </button>
           </div>
           <div style={pulsePanelBody}>
             <div style={{ fontSize: 9, color: '#666', marginBottom: 8, borderBottom: '1px solid #c0c0c0', paddingBottom: 4 }}>
               Click an alert to open in Notepad & focus historical context.
             </div>
             {CIVIC_ALERTS.map((alert) => (
-              <div
-                key={alert.id}
-                onClick={() => handleAlertClick(alert)}
-                style={pulseAlertItem}
-              >
+              <div key={alert.id} onClick={() => handleAlertClick(alert)} style={pulseAlertItem}>
                 <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
                   <span style={alertBadgeStyle(alert.type)}>{alert.type.toUpperCase()}</span>
                   <strong style={{ fontSize: 10 }}>{alert.title}</strong>
                 </div>
-                <div style={{ fontSize: 9, color: '#444' }}>
-                  {alert.details.substring(0, 110)}...
-                </div>
+                <div style={{ fontSize: 9, color: '#444' }}>{alert.details.substring(0, 110)}...</div>
               </div>
             ))}
           </div>
@@ -1180,29 +1363,46 @@ const PplsStory: React.FC = () => {
 // ──────────────────────────────────────────────
 
 const shell: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-  background: '#c0c0c0', fontFamily: '"MS Sans Serif", Arial, sans-serif',
-  fontSize: 11, overflow: 'hidden', color: '#000', position: 'relative',
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  height: '100%',
+  background: '#c0c0c0',
+  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontSize: 11,
+  overflow: 'hidden',
+  color: '#000',
+  position: 'relative',
 };
 
 const menuBar: React.CSSProperties = {
-  display: 'flex', gap: 0, padding: '2px 4px',
-  background: '#c0c0c0', borderBottom: '1px solid #808080',
-  flexShrink: 0, alignItems: 'center',
+  display: 'flex',
+  gap: 0,
+  padding: '2px 4px',
+  background: '#c0c0c0',
+  borderBottom: '1px solid #808080',
+  flexShrink: 0,
+  alignItems: 'center',
 };
 
 const menuItem: React.CSSProperties = {
-  padding: '1px 8px', cursor: 'default', fontSize: 11,
+  padding: '1px 8px',
+  cursor: 'default',
+  fontSize: 11,
 };
 
 const topSection: React.CSSProperties = {
-  flexShrink: 0, borderBottom: '2px solid #808080',
+  flexShrink: 0,
+  borderBottom: '2px solid #808080',
 };
 
 const mapContainer: React.CSSProperties = {
-  height: 220, background: '#000020',
-  border: '2px inset #808080', margin: '2px',
-  overflow: 'hidden', position: 'relative',
+  height: 220,
+  background: '#000020',
+  border: '2px inset #808080',
+  margin: '2px',
+  overflow: 'hidden',
+  position: 'relative',
 };
 
 const zoomControls: React.CSSProperties = {
@@ -1232,256 +1432,390 @@ const retroBtn: React.CSSProperties = {
 };
 
 const regionTabs: React.CSSProperties = {
-  display: 'flex', gap: 0, padding: '0 2px',
+  display: 'flex',
+  gap: 0,
+  padding: '0 2px',
   background: '#c0c0c0',
 };
 
 const regionTab: React.CSSProperties = {
-  flex: 1, padding: '4px 6px', fontSize: 10,
-  border: '1px solid #808080', borderBottom: 'none',
-  cursor: 'pointer', textAlign: 'center',
+  flex: 1,
+  padding: '4px 6px',
+  fontSize: 10,
+  border: '1px solid #808080',
+  borderBottom: 'none',
+  cursor: 'pointer',
+  textAlign: 'center',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   outline: 'none',
 };
 
 const sliderRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6,
-  padding: '4px 8px', background: '#d4d0c8',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '4px 8px',
+  background: '#d4d0c8',
   borderTop: '1px solid #fff',
 };
 
 const sliderLabel: React.CSSProperties = {
-  fontSize: 10, fontFamily: 'monospace', color: '#444',
-  minWidth: 32, textAlign: 'center',
+  fontSize: 10,
+  fontFamily: 'monospace',
+  color: '#444',
+  minWidth: 32,
+  textAlign: 'center',
 };
 
 const sliderInput: React.CSSProperties = {
-  flex: 1, height: 14, cursor: 'pointer',
+  flex: 1,
+  height: 14,
+  cursor: 'pointer',
   accentColor: 'var(--sabr-title-active-start)',
 };
 
 const sliderValue: React.CSSProperties = {
-  fontSize: 10, fontWeight: 700, color: 'var(--sabr-title-active-start)',
-  minWidth: 70, textAlign: 'right',
+  fontSize: 10,
+  fontWeight: 700,
+  color: 'var(--sabr-title-active-start)',
+  minWidth: 70,
+  textAlign: 'right',
   fontFamily: 'monospace',
 };
 
 const bottomSection: React.CSSProperties = {
-  flex: 1, display: 'flex', overflow: 'hidden',
+  flex: 1,
+  display: 'flex',
+  overflow: 'hidden',
   minHeight: 0,
 };
 
 const indexPane: React.CSSProperties = {
-  width: 200, minWidth: 160, display: 'flex', flexDirection: 'column',
+  width: 200,
+  minWidth: 160,
+  display: 'flex',
+  flexDirection: 'column',
   borderRight: '2px solid #808080',
   background: '#c0c0c0',
 };
 
 const sidebarTabs: React.CSSProperties = {
-  display: 'flex', borderBottom: '1.5px solid #808080',
-  background: '#d4d0c8', flexShrink: 0,
+  display: 'flex',
+  borderBottom: '1.5px solid #808080',
+  background: '#d4d0c8',
+  flexShrink: 0,
 };
 
 const sidebarTab: React.CSSProperties = {
-  flex: 1, padding: '4px 2px', fontSize: 10,
-  border: '1.5px outset #ffffff', borderBottom: 'none',
-  cursor: 'pointer', textAlign: 'center',
-  fontFamily: '"MS Sans Serif", Arial', outline: 'none',
+  flex: 1,
+  padding: '4px 2px',
+  fontSize: 10,
+  border: '1.5px outset #ffffff',
+  borderBottom: 'none',
+  cursor: 'pointer',
+  textAlign: 'center',
+  fontFamily: '"MS Sans Serif", Arial',
+  outline: 'none',
 };
 
 const indexList: React.CSSProperties = {
-  flex: 1, overflow: 'auto',
-  background: '#fff', border: '2px inset #808080',
+  flex: 1,
+  overflow: 'auto',
+  background: '#fff',
+  border: '2px inset #808080',
   margin: '2px',
 };
 
 const indexItem: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6,
-  padding: '4px 6px', cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '4px 6px',
+  cursor: 'pointer',
   borderBottom: '1px solid #e8e8e8',
-  fontSize: 11, lineHeight: 1.3,
+  fontSize: 11,
+  lineHeight: 1.3,
 };
 
 const indexYear: React.CSSProperties = {
-  fontFamily: 'monospace', fontSize: 10, fontWeight: 700,
-  minWidth: 32, flexShrink: 0,
+  fontFamily: 'monospace',
+  fontSize: 10,
+  fontWeight: 700,
+  minWidth: 32,
+  flexShrink: 0,
 };
 
 const indexTitle: React.CSSProperties = {
-  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
+  flex: 1,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 };
 
 const indexBadge: React.CSSProperties = {
-  fontSize: 8, padding: '1px 3px', fontWeight: 700,
-  flexShrink: 0, letterSpacing: 0.5,
+  fontSize: 8,
+  padding: '1px 3px',
+  fontWeight: 700,
+  flexShrink: 0,
+  letterSpacing: 0.5,
 };
 
 const threadHeader: React.CSSProperties = {
-  padding: '6px 8px', cursor: 'pointer',
-  borderBottom: '1.5px solid #808080', transition: 'background 0.2s',
+  padding: '6px 8px',
+  cursor: 'pointer',
+  borderBottom: '1.5px solid #808080',
+  transition: 'background 0.2s',
   lineHeight: 1.3,
 };
 
 const contentPane: React.CSSProperties = {
-  flex: 1, display: 'flex', flexDirection: 'column',
-  overflow: 'hidden', background: '#fff',
-  border: '2px inset #808080', margin: '2px 2px 2px 0',
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  background: '#fff',
+  border: '2px inset #808080',
+  margin: '2px 2px 2px 0',
 };
 
 const contentHeader: React.CSSProperties = {
-  padding: '10px 12px 8px', borderBottom: '1px solid #d0d0d0',
-  background: '#f8f6f2', flexShrink: 0,
+  padding: '10px 12px 8px',
+  borderBottom: '1px solid #d0d0d0',
+  background: '#f8f6f2',
+  flexShrink: 0,
   paddingLeft: 16,
 };
 
 const contentTitle: React.CSSProperties = {
-  fontSize: 14, fontWeight: 700, lineHeight: 1.3,
+  fontSize: 14,
+  fontWeight: 700,
+  lineHeight: 1.3,
   marginBottom: 4,
 };
 
 const contentMeta: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
   flexWrap: 'wrap',
 };
 
 const contentBadge: React.CSSProperties = {
-  color: '#fff', fontSize: 9, padding: '1px 6px',
+  color: '#fff',
+  fontSize: 9,
+  padding: '1px 6px',
   fontWeight: 700,
 };
 
 const contentYear: React.CSSProperties = {
-  fontFamily: 'monospace', fontSize: 12, fontWeight: 700,
+  fontFamily: 'monospace',
+  fontSize: 12,
+  fontWeight: 700,
   color: '#444',
 };
 
 const contentTag: React.CSSProperties = {
-  fontSize: 9, color: '#666', fontStyle: 'italic',
+  fontSize: 9,
+  color: '#666',
+  fontStyle: 'italic',
 };
 
 const contentBody: React.CSSProperties = {
-  flex: 1, overflow: 'auto', padding: '10px 14px',
+  flex: 1,
+  overflow: 'auto',
+  padding: '10px 14px',
 };
 
 const contentSummary: React.CSSProperties = {
-  fontSize: 12, lineHeight: 1.6, color: '#222',
+  fontSize: 12,
+  lineHeight: 1.6,
+  color: '#222',
   margin: '0 0 12px 0',
 };
 
 const sourcePreview: React.CSSProperties = {
-  background: '#f5f0e8', border: '1px solid #d0c8b8',
-  padding: 0, marginTop: 8,
+  background: '#f5f0e8',
+  border: '1px solid #d0c8b8',
+  padding: 0,
+  marginTop: 8,
 };
 
 const sourcePreviewHeader: React.CSSProperties = {
-  padding: '4px 8px', fontWeight: 700, fontSize: 10,
-  background: '#e8e0d0', borderBottom: '1px solid #d0c8b8',
+  padding: '4px 8px',
+  fontWeight: 700,
+  fontSize: 10,
+  background: '#e8e0d0',
+  borderBottom: '1px solid #d0c8b8',
 };
 
 const sourcePreviewText: React.CSSProperties = {
-  padding: '8px 10px', fontSize: 10, lineHeight: 1.5,
-  fontFamily: '"Courier New", monospace', color: '#444',
+  padding: '8px 10px',
+  fontSize: 10,
+  lineHeight: 1.5,
+  fontFamily: '"Courier New", monospace',
+  color: '#444',
   whiteSpace: 'pre-wrap',
 };
 
 const reflectBox: React.CSSProperties = {
-  background: '#ffffe0', border: '2px solid #808000',
+  background: '#ffffe0',
+  border: '2px solid #808000',
   boxShadow: '2px 2px 0 rgba(0,0,0,0.1)',
-  margin: '12px 0 4px', padding: 0,
+  margin: '12px 0 4px',
+  padding: 0,
 };
 
 const reflectHeader: React.CSSProperties = {
-  background: '#808000', color: '#fff',
-  padding: '3px 8px', fontWeight: 700, fontSize: 10,
+  background: '#808000',
+  color: '#fff',
+  padding: '3px 8px',
+  fontWeight: 700,
+  fontSize: 10,
   fontFamily: '"MS Sans Serif", Arial',
 };
 
 const reflectBody: React.CSSProperties = {
-  padding: '8px 10px', fontSize: 11, lineHeight: 1.4,
+  padding: '8px 10px',
+  fontSize: 11,
+  lineHeight: 1.4,
   color: '#000',
 };
 
 const reflectPrompt: React.CSSProperties = {
-  borderTop: '1px dashed #808000', paddingTop: 6,
-  marginTop: 6, color: '#800000', fontStyle: 'italic',
+  borderTop: '1px dashed #808000',
+  paddingTop: 6,
+  marginTop: 6,
+  color: '#800000',
+  fontStyle: 'italic',
 };
 
 const actionBar: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 8,
-  padding: '6px 10px', borderTop: '1px solid #d0d0d0',
-  background: '#e8e8e8', flexShrink: 0,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '6px 10px',
+  borderTop: '1px solid #d0d0d0',
+  background: '#e8e8e8',
+  flexShrink: 0,
 };
 
 const actionBtn: React.CSSProperties = {
-  padding: '4px 14px', fontSize: 11, fontWeight: 700,
-  background: 'var(--sabr-title-active-start)', color: '#fff',
-  border: '2px outset var(--sabr-title-active-end)', cursor: 'pointer',
+  padding: '4px 14px',
+  fontSize: 11,
+  fontWeight: 700,
+  background: 'var(--sabr-title-active-start)',
+  color: '#fff',
+  border: '2px outset var(--sabr-title-active-end)',
+  cursor: 'pointer',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
 };
 
 const actionBtnAlt: React.CSSProperties = {
-  padding: '4px 14px', fontSize: 11, fontWeight: 700,
-  background: '#c0c0c0', color: '#000',
-  border: '2px outset #e0e0e0', cursor: 'pointer',
+  padding: '4px 14px',
+  fontSize: 11,
+  fontWeight: 700,
+  background: '#c0c0c0',
+  color: '#000',
+  border: '2px outset #e0e0e0',
+  cursor: 'pointer',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
 };
 
 const actionBtnSmall: React.CSSProperties = {
-  padding: '3px 8px', fontSize: 10,
-  background: '#c0c0c0', color: '#444',
-  border: '1px outset #e0e0e0', cursor: 'pointer',
+  padding: '3px 8px',
+  fontSize: 10,
+  background: '#c0c0c0',
+  color: '#444',
+  border: '1px outset #e0e0e0',
+  cursor: 'pointer',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
 };
 
 const actionBtnTrace: React.CSSProperties = {
-  padding: '4px 14px', fontSize: 11, fontWeight: 700,
-  background: '#800000', color: '#fff',
-  border: '2px outset #ff4040', cursor: 'pointer',
+  padding: '4px 14px',
+  fontSize: 11,
+  fontWeight: 700,
+  background: '#800000',
+  color: '#fff',
+  border: '2px outset #ff4040',
+  cursor: 'pointer',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
 };
 
 const statusBar: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', flexShrink: 0,
-  background: '#c0c0c0', borderTop: '1px solid #fff', height: 20,
+  display: 'flex',
+  alignItems: 'center',
+  flexShrink: 0,
+  background: '#c0c0c0',
+  borderTop: '1px solid #fff',
+  height: 20,
 };
 
 const statusSeg: React.CSSProperties = {
-  flex: 1, padding: '0 6px', fontSize: 10,
-  border: '1px inset #808080', height: '100%',
-  display: 'flex', alignItems: 'center',
-  overflow: 'hidden', whiteSpace: 'nowrap',
+  flex: 1,
+  padding: '0 6px',
+  fontSize: 10,
+  border: '1px inset #808080',
+  height: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
 };
 
 const pulsePanel: React.CSSProperties = {
-  position: 'absolute', right: 4, bottom: 22,
-  width: 280, background: '#c0c0c0',
-  border: '2px outset #ffffff', zIndex: 1000,
+  position: 'absolute',
+  right: 4,
+  bottom: 22,
+  width: 280,
+  background: '#c0c0c0',
+  border: '2px outset #ffffff',
+  zIndex: 1000,
   boxShadow: '3px 3px 0 rgba(0,0,0,0.3)',
-  display: 'flex', flexDirection: 'column',
+  display: 'flex',
+  flexDirection: 'column',
 };
 
 const pulsePanelHeader: React.CSSProperties = {
-  background: 'var(--sabr-title-active-start)', color: '#fff',
-  padding: '4px 8px', display: 'flex',
-  justifyContent: 'space-between', alignItems: 'center',
-  fontSize: 10, fontWeight: 'bold',
+  background: 'var(--sabr-title-active-start)',
+  color: '#fff',
+  padding: '4px 8px',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  fontSize: 10,
+  fontWeight: 'bold',
 };
 
 const pulseCloseBtn: React.CSSProperties = {
-  background: '#c0c0c0', border: '1px outset #ffffff',
-  fontSize: 10, width: 14, height: 14,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  cursor: 'pointer', outline: 'none', color: '#000', paddingBottom: 2,
+  background: '#c0c0c0',
+  border: '1px outset #ffffff',
+  fontSize: 10,
+  width: 14,
+  height: 14,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  outline: 'none',
+  color: '#000',
+  paddingBottom: 2,
 };
 
 const pulsePanelBody: React.CSSProperties = {
-  padding: '8px', overflowY: 'auto', maxHeight: 280,
-  background: '#fff', border: '2px inset #808080', margin: '2px',
+  padding: '8px',
+  overflowY: 'auto',
+  maxHeight: 280,
+  background: '#fff',
+  border: '2px inset #808080',
+  margin: '2px',
 };
 
 const pulseAlertItem: React.CSSProperties = {
-  padding: '6px 8px', borderBottom: '1px solid #e8e8e8',
-  cursor: 'pointer', transition: 'background 0.1s',
+  padding: '6px 8px',
+  borderBottom: '1px solid #e8e8e8',
+  cursor: 'pointer',
+  transition: 'background 0.1s',
   lineHeight: 1.3,
 };
 
@@ -1493,10 +1827,14 @@ const alertBadgeStyle = (type: CivicAlert['type']): React.CSSProperties => {
   else if (type === 'Cultural') bg = '#800080';
 
   return {
-    background: bg, color: '#fff',
-    fontSize: 7, fontWeight: 700,
-    padding: '1px 3px', borderRadius: 1,
-    textTransform: 'uppercase', marginRight: 4,
+    background: bg,
+    color: '#fff',
+    fontSize: 7,
+    fontWeight: 700,
+    padding: '1px 3px',
+    borderRadius: 1,
+    textTransform: 'uppercase',
+    marginRight: 4,
     display: 'inline-block',
   };
 };

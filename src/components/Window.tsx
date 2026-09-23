@@ -148,11 +148,7 @@ export const Window: React.FC<WindowProps> = ({
       style={style}
       onPointerDown={handlePointerDown}
     >
-      <div
-        className="window-titlebar"
-        onPointerDown={handleTitlePointerDown}
-        onDoubleClick={() => resizable && maximizeWindow(id)}
-      >
+      <div className="window-titlebar" onPointerDown={handleTitlePointerDown} onDoubleClick={() => resizable && maximizeWindow(id)}>
         {icon && (
           <img
             src={icon}

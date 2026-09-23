@@ -65,15 +65,18 @@ const Pong: React.FC = () => {
 
   const { W, H } = dimensions;
 
-  const resetBall = useCallback((s: GameState, scorer: 'player' | 'ai') => {
-    const angle = (Math.random() * 50 - 25) * (Math.PI / 180);
-    const dir = scorer === 'player' ? -1 : 1; // serve toward the one who just got scored on
-    const speed = INITIAL_BALL_SPEED + (s.playerScore + s.aiScore) * SPEED_STEP * 0.5;
-    s.ballX = W / 2;
-    s.ballY = H / 2;
-    s.ballVX = dir * speed * Math.cos(angle);
-    s.ballVY = speed * Math.sin(angle) * (Math.random() > 0.5 ? 1 : -1);
-  }, [W, H]);
+  const resetBall = useCallback(
+    (s: GameState, scorer: 'player' | 'ai') => {
+      const angle = (Math.random() * 50 - 25) * (Math.PI / 180);
+      const dir = scorer === 'player' ? -1 : 1; // serve toward the one who just got scored on
+      const speed = INITIAL_BALL_SPEED + (s.playerScore + s.aiScore) * SPEED_STEP * 0.5;
+      s.ballX = W / 2;
+      s.ballY = H / 2;
+      s.ballVX = dir * speed * Math.cos(angle);
+      s.ballVY = speed * Math.sin(angle) * (Math.random() > 0.5 ? 1 : -1);
+    },
+    [W, H],
+  );
 
   // Main game loop
   const loop = useCallback(() => {
@@ -105,8 +108,14 @@ const Pong: React.FC = () => {
       s.ballY += s.ballVY;
 
       // Top/bottom wall bounce
-      if (s.ballY <= 0) { s.ballY = 0; s.ballVY = Math.abs(s.ballVY); }
-      if (s.ballY + BALL_SIZE >= H) { s.ballY = H - BALL_SIZE; s.ballVY = -Math.abs(s.ballVY); }
+      if (s.ballY <= 0) {
+        s.ballY = 0;
+        s.ballVY = Math.abs(s.ballVY);
+      }
+      if (s.ballY + BALL_SIZE >= H) {
+        s.ballY = H - BALL_SIZE;
+        s.ballVY = -Math.abs(s.ballVY);
+      }
 
       // Player paddle (left side)
       const playerPaddleX = PADDLE_MARGIN;
@@ -145,13 +154,17 @@ const Pong: React.FC = () => {
       // Scoring
       if (s.ballX < 0) {
         s.aiScore += 1;
-        if (s.aiScore >= WIN_SCORE) { s.phase = 'gameover'; s.winner = 'ai'; }
-        else resetBall(s, 'ai');
+        if (s.aiScore >= WIN_SCORE) {
+          s.phase = 'gameover';
+          s.winner = 'ai';
+        } else resetBall(s, 'ai');
         setDisplayScore({ player: s.playerScore, ai: s.aiScore });
       } else if (s.ballX + BALL_SIZE > W) {
         s.playerScore += 1;
-        if (s.playerScore >= WIN_SCORE) { s.phase = 'gameover'; s.winner = 'player'; }
-        else resetBall(s, 'player');
+        if (s.playerScore >= WIN_SCORE) {
+          s.phase = 'gameover';
+          s.winner = 'player';
+        } else resetBall(s, 'player');
         setDisplayScore({ player: s.playerScore, ai: s.aiScore });
       }
 
@@ -247,7 +260,9 @@ const Pong: React.FC = () => {
       }
       if (['ArrowUp', 'ArrowDown'].includes(e.key)) e.preventDefault();
     };
-    const onUp = (e: KeyboardEvent) => { keysRef.current[e.key] = false; };
+    const onUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key] = false;
+    };
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
     return () => {
@@ -267,21 +282,31 @@ const Pong: React.FC = () => {
   }, [W, H, loop]);
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', background: '#000', display: 'flex', flexDirection: 'column', position: 'relative', userSelect: 'none' }}>
-      <canvas
-        ref={canvasRef}
-        width={W}
-        height={H}
-        style={{ display: 'block', width: '100%', height: '100%' }}
-      />
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        background: '#000',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+        userSelect: 'none',
+      }}
+    >
+      <canvas ref={canvasRef} width={W} height={H} style={{ display: 'block', width: '100%', height: '100%' }} />
 
       {/* Overlay messages */}
       {phase === 'idle' && (
         <div style={overlayStyle}>
           <div style={titleStyle}>PONG</div>
-          <div style={subStyle}>You <span style={{ color: '#00e5ff' }}>◀</span> vs AI <span style={{ color: '#ff4444' }}>▶</span></div>
+          <div style={subStyle}>
+            You <span style={{ color: '#00e5ff' }}>◀</span> vs AI <span style={{ color: '#ff4444' }}>▶</span>
+          </div>
           <div style={hintStyle}>W/S or ↑/↓ to move</div>
-          <button style={btnStyle} onClick={startGame}>▶ Start Game</button>
+          <button style={btnStyle} onClick={startGame}>
+            ▶ Start Game
+          </button>
           <div style={smallHint}>First to {WIN_SCORE} wins</div>
         </div>
       )}
@@ -289,8 +314,12 @@ const Pong: React.FC = () => {
       {phase === 'paused' && (
         <div style={overlayStyle}>
           <div style={titleStyle}>PAUSED</div>
-          <button style={btnStyle} onClick={togglePause}>▶ Resume</button>
-          <button style={{ ...btnStyle, marginTop: 8, background: 'rgba(255,255,255,0.1)' }} onClick={startGame}>↺ Restart</button>
+          <button style={btnStyle} onClick={togglePause}>
+            ▶ Resume
+          </button>
+          <button style={{ ...btnStyle, marginTop: 8, background: 'rgba(255,255,255,0.1)' }} onClick={startGame}>
+            ↺ Restart
+          </button>
         </div>
       )}
 
@@ -302,18 +331,29 @@ const Pong: React.FC = () => {
           <div style={subStyle}>
             {displayScore.player} — {displayScore.ai}
           </div>
-          <button style={btnStyle} onClick={startGame}>▶ Play Again</button>
+          <button style={btnStyle} onClick={startGame}>
+            ▶ Play Again
+          </button>
         </div>
       )}
 
       {/* Controls hint strip at bottom */}
       {phase === 'playing' && (
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          background: 'rgba(0,0,0,0.55)', color: 'rgba(255,255,255,0.4)',
-          fontSize: 10, textAlign: 'center', padding: '2px 0',
-          fontFamily: 'monospace', letterSpacing: 1,
-        }}>
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            background: 'rgba(0,0,0,0.55)',
+            color: 'rgba(255,255,255,0.4)',
+            fontSize: 10,
+            textAlign: 'center',
+            padding: '2px 0',
+            fontFamily: 'monospace',
+            letterSpacing: 1,
+          }}
+        >
           W/S · ↑/↓ &nbsp;|&nbsp; P = Pause
         </div>
       )}
@@ -322,24 +362,38 @@ const Pong: React.FC = () => {
 };
 
 const overlayStyle: React.CSSProperties = {
-  position: 'absolute', inset: 0,
-  display: 'flex', flexDirection: 'column',
-  alignItems: 'center', justifyContent: 'center',
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
   background: 'rgba(0,0,0,0.7)',
   gap: 8,
 };
 const titleStyle: React.CSSProperties = {
-  fontFamily: 'monospace', fontSize: 36, fontWeight: 900,
-  color: '#fff', letterSpacing: 6, textShadow: '0 0 20px rgba(255,255,255,0.5)',
+  fontFamily: 'monospace',
+  fontSize: 36,
+  fontWeight: 900,
+  color: '#fff',
+  letterSpacing: 6,
+  textShadow: '0 0 20px rgba(255,255,255,0.5)',
 };
 const subStyle: React.CSSProperties = {
-  fontFamily: 'monospace', color: 'rgba(255,255,255,0.7)', fontSize: 13,
+  fontFamily: 'monospace',
+  color: 'rgba(255,255,255,0.7)',
+  fontSize: 13,
 };
 const hintStyle: React.CSSProperties = {
-  fontFamily: 'monospace', color: 'rgba(255,255,255,0.45)', fontSize: 11,
+  fontFamily: 'monospace',
+  color: 'rgba(255,255,255,0.45)',
+  fontSize: 11,
 };
 const smallHint: React.CSSProperties = {
-  fontFamily: 'monospace', color: 'rgba(255,255,255,0.3)', fontSize: 10, marginTop: 4,
+  fontFamily: 'monospace',
+  color: 'rgba(255,255,255,0.3)',
+  fontSize: 10,
+  marginTop: 4,
 };
 const btnStyle: React.CSSProperties = {
   marginTop: 12,

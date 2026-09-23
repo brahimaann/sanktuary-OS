@@ -29,7 +29,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
   const [historyIndex, setHistoryIndex] = useState(0);
   const [items, setItems] = useState<VFSNode[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
-  
+
   // Keep local address bar text to prevent loading on every keystroke
   const [addressBarValue, setAddressBarValue] = useState(initialPath);
 
@@ -87,7 +87,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
     if (await dialog.confirm(`Are you sure you want to delete "${selectedName}"?`, { title: 'Confirm File Delete', icon: 'warning' })) {
       try {
         const fullPath = `${currentPath}/${selectedName}`;
-        const item = items.find(i => i.name === selectedName);
+        const item = items.find((i) => i.name === selectedName);
         if (item) {
           if (item.type === 'dir') {
             vfs.rmdir(fullPath);
@@ -223,25 +223,59 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
         <div className="group relative mr-2">
           <button className="px-2 py-[2px] hover:bg-[#000080] hover:text-white outline-none cursor-default">File</button>
           <div className="hidden group-hover:block absolute left-0 top-[19px] bg-[#c0c0c0] border-2 border-outset w-[120px] z-[1000] shadow text-black">
-            <button onClick={handleCreateFolder} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">New Folder</button>
-            <button onClick={handleCreateFile} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">New Document</button>
+            <button
+              onClick={handleCreateFolder}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default"
+            >
+              New Folder
+            </button>
+            <button
+              onClick={handleCreateFile}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default"
+            >
+              New Document
+            </button>
             <hr className="my-1 border-t border-gray-400 border-b border-white" />
-            <button onClick={handleClose} disabled={!windowId} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs disabled:opacity-50 cursor-default">Close</button>
+            <button
+              onClick={handleClose}
+              disabled={!windowId}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs disabled:opacity-50 cursor-default"
+            >
+              Close
+            </button>
           </div>
         </div>
 
         <div className="group relative mr-2">
           <button className="px-2 py-[2px] hover:bg-[#000080] hover:text-white outline-none cursor-default">Edit</button>
           <div className="hidden group-hover:block absolute left-0 top-[19px] bg-[#c0c0c0] border-2 border-outset w-[100px] z-[1000] shadow text-black">
-            <button onClick={handleSelectAll} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">Select All</button>
-            <button onClick={handleDeleteSelected} disabled={!selectedName} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs disabled:opacity-50 cursor-default">Delete</button>
+            <button
+              onClick={handleSelectAll}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default"
+            >
+              Select All
+            </button>
+            <button
+              onClick={handleDeleteSelected}
+              disabled={!selectedName}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs disabled:opacity-50 cursor-default"
+            >
+              Delete
+            </button>
           </div>
         </div>
 
         <div className="group relative mr-2">
           <button className="px-2 py-[2px] hover:bg-[#000080] hover:text-white outline-none cursor-default">View</button>
           <div className="hidden group-hover:block absolute left-0 top-[19px] bg-[#c0c0c0] border-2 border-outset w-[100px] z-[1000] shadow text-black">
-            <button onClick={() => { if (!isNetworkPath(currentPath)) loadDirectory(currentPath); }} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">Refresh</button>
+            <button
+              onClick={() => {
+                if (!isNetworkPath(currentPath)) loadDirectory(currentPath);
+              }}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default"
+            >
+              Refresh
+            </button>
           </div>
         </div>
 
@@ -251,7 +285,12 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
         <div className="group relative">
           <button className="px-2 py-[2px] hover:bg-[#000080] hover:text-white outline-none cursor-default">Help</button>
           <div className="hidden group-hover:block absolute left-0 top-[19px] bg-[#c0c0c0] border-2 border-outset w-[140px] z-[1000] shadow text-black">
-            <button onClick={() => dialog.alert('Windows 98 Explorer\nExact React Clone')} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">About Explorer</button>
+            <button
+              onClick={() => dialog.alert('Windows 98 Explorer\nExact React Clone')}
+              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default"
+            >
+              About Explorer
+            </button>
           </div>
         </div>
       </div>
@@ -274,10 +313,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           <span>Forward</span>
           <img src="/images/icons/forward-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
         </button>
-        <button
-          onClick={handleUp}
-          className="flex items-center gap-1 px-2 py-1 border border-outset active:border-inset outline-none"
-        >
+        <button onClick={handleUp} className="flex items-center gap-1 px-2 py-1 border border-outset active:border-inset outline-none">
           <img src="/images/icons/up-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
           <span>Up</span>
         </button>
@@ -306,7 +342,11 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           {/* Left Info Panel */}
           <div className="w-[180px] bg-[#c0c0c0] p-4 flex flex-col justify-start border-r border-[#808080] select-none">
             <img src="/images/icons/network-32x32.png" alt="" className="w-12 h-12 image-render-pixelated" />
-            <h1 className="text-xl font-bold font-sans mt-3 leading-tight break-words">Network<br />Neighborhood</h1>
+            <h1 className="text-xl font-bold font-sans mt-3 leading-tight break-words">
+              Network
+              <br />
+              Neighborhood
+            </h1>
             <div className="h-1 w-full mt-4 flex">
               <div className="w-1/4 bg-red-600 h-full"></div>
               <div className="w-1/4 bg-yellow-500 h-full"></div>
@@ -361,10 +401,10 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
                 item.type === 'dir'
                   ? '/images/icons/folder-32x32.png'
                   : ext === 'txt'
-                  ? '/images/icons/notepad-file-32x32.png'
-                  : ext === 'wav'
-                  ? '/images/icons/speaker-32x32.png'
-                  : '/images/icons/folder-open-32x32.png';
+                    ? '/images/icons/notepad-file-32x32.png'
+                    : ext === 'wav'
+                      ? '/images/icons/speaker-32x32.png'
+                      : '/images/icons/folder-open-32x32.png';
 
               return (
                 <div
@@ -375,11 +415,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
                     isSelected ? 'bg-[#000080] text-white' : 'text-black'
                   }`}
                 >
-                  <img
-                    src={icon}
-                    alt=""
-                    className="w-8 h-8 select-none pointer-events-none image-render-pixelated"
-                  />
+                  <img src={icon} alt="" className="w-8 h-8 select-none pointer-events-none image-render-pixelated" />
                   <span
                     className="text-[11px] mt-1 px-1 break-all truncate max-w-full"
                     style={{

@@ -31,7 +31,7 @@ function ensureYTApi(cb: () => void) {
 
   (window as any).onYouTubeIframeAPIReady = () => {
     ytApiReady = true;
-    ytApiCallbacks.forEach(fn => fn());
+    ytApiCallbacks.forEach((fn) => fn());
     ytApiCallbacks = [];
   };
 }
@@ -48,11 +48,7 @@ function formatTime(seconds: number): string {
  * Uses the YouTube IFrame Player API for real playback control.
  * YouTube's own controls are hidden; all interaction goes through the Win98 chrome.
  */
-const VideoPlayer: React.FC<VideoPlayerProps> = ({
-  videoSrc,
-  videoTitle = 'Untitled',
-  videoArtist,
-}) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ videoSrc, videoTitle = 'Untitled', videoArtist }) => {
   const playerDivRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const timerRef = useRef<number>(0);
@@ -62,7 +58,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(80);
   const [muted, setMuted] = useState(false);
-
 
   const ytId = extractYTId(videoSrc);
   const isYouTube = !!ytId;
@@ -83,13 +78,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         videoId: ytId,
         playerVars: {
           autoplay: 1,
-          controls: 0,         // Hide YouTube controls
+          controls: 0, // Hide YouTube controls
           modestbranding: 1,
           rel: 0,
           showinfo: 0,
-          iv_load_policy: 3,   // Hide annotations
-          disablekb: 1,        // Disable YouTube keyboard shortcuts
-          fs: 0,               // Hide fullscreen button
+          iv_load_policy: 3, // Hide annotations
+          disablekb: 1, // Disable YouTube keyboard shortcuts
+          fs: 0, // Hide fullscreen button
           playsinline: 1,
         },
         events: {
@@ -116,7 +111,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     return () => {
       if (playerRef.current) {
-        try { playerRef.current.destroy(); } catch (_) {}
+        try {
+          playerRef.current.destroy();
+        } catch (_) {}
         playerRef.current = null;
       }
     };
@@ -139,38 +136,51 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [playerState]);
 
   // ── Controls ──
-  const play = useCallback(() => { playerRef.current?.playVideo(); }, []);
-  const pause = useCallback(() => { playerRef.current?.pauseVideo(); }, []);
+  const play = useCallback(() => {
+    playerRef.current?.playVideo();
+  }, []);
+  const pause = useCallback(() => {
+    playerRef.current?.pauseVideo();
+  }, []);
   const stop = useCallback(() => {
     playerRef.current?.stopVideo();
     setCurrentTime(0);
     setPlayerState('ended');
   }, []);
 
-  const seekTo = useCallback((pct: number) => {
-    if (duration > 0 && playerRef.current) {
-      playerRef.current.seekTo(pct * duration, true);
-      setCurrentTime(pct * duration);
-    }
-  }, [duration]);
+  const seekTo = useCallback(
+    (pct: number) => {
+      if (duration > 0 && playerRef.current) {
+        playerRef.current.seekTo(pct * duration, true);
+        setCurrentTime(pct * duration);
+      }
+    },
+    [duration],
+  );
 
-  const handleSeekBarClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seekTo(pct);
-  }, [seekTo]);
+  const handleSeekBarClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      seekTo(pct);
+    },
+    [seekTo],
+  );
 
-  const changeVolume = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const vol = Math.round(pct * 100);
-    setVolume(vol);
-    playerRef.current?.setVolume(vol);
-    if (vol > 0 && muted) {
-      setMuted(false);
-      playerRef.current?.unMute();
-    }
-  }, [muted]);
+  const changeVolume = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const vol = Math.round(pct * 100);
+      setVolume(vol);
+      playerRef.current?.setVolume(vol);
+      if (vol > 0 && muted) {
+        setMuted(false);
+        playerRef.current?.unMute();
+      }
+    },
+    [muted],
+  );
 
   const toggleMute = useCallback(() => {
     if (muted) {
@@ -185,10 +195,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const progress = duration > 0 ? currentTime / duration : 0;
 
   const stateLabel =
-    playerState === 'playing' ? 'Playing' :
-    playerState === 'paused' ? 'Paused' :
-    playerState === 'buffering' ? 'Buffering...' :
-    playerState === 'ended' ? 'Stopped' : 'Ready';
+    playerState === 'playing'
+      ? 'Playing'
+      : playerState === 'paused'
+        ? 'Paused'
+        : playerState === 'buffering'
+          ? 'Buffering...'
+          : playerState === 'ended'
+            ? 'Stopped'
+            : 'Ready';
 
   return (
     <div style={shell}>
@@ -243,16 +258,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         {/* Buttons row */}
         <div style={buttonRow}>
           <div style={{ display: 'flex', gap: 1 }}>
-            <button style={tBtn} title="Stop" onClick={stop}>⏹</button>
-            <button style={{ ...tBtn, ...(playerState === 'playing' ? tBtnActive : {}) }} title="Play" onClick={play}>▶</button>
-            <button style={{ ...tBtn, ...(playerState === 'paused' ? tBtnActive : {}) }} title="Pause" onClick={pause}>⏸</button>
+            <button style={tBtn} title="Stop" onClick={stop}>
+              ⏹
+            </button>
+            <button style={{ ...tBtn, ...(playerState === 'playing' ? tBtnActive : {}) }} title="Play" onClick={play}>
+              ▶
+            </button>
+            <button style={{ ...tBtn, ...(playerState === 'paused' ? tBtnActive : {}) }} title="Pause" onClick={pause}>
+              ⏸
+            </button>
           </div>
 
           <div style={divider} />
 
           <div style={{ display: 'flex', gap: 1 }}>
-            <button style={tBtn} title="Rewind 10s" onClick={() => seekTo(Math.max(0, (currentTime - 10) / (duration || 1)))}>⏪</button>
-            <button style={tBtn} title="Forward 10s" onClick={() => seekTo(Math.min(1, (currentTime + 10) / (duration || 1)))}>⏩</button>
+            <button style={tBtn} title="Rewind 10s" onClick={() => seekTo(Math.max(0, (currentTime - 10) / (duration || 1)))}>
+              ⏪
+            </button>
+            <button style={tBtn} title="Forward 10s" onClick={() => seekTo(Math.min(1, (currentTime + 10) / (duration || 1)))}>
+              ⏩
+            </button>
           </div>
 
           <div style={{ flex: 1 }} />
@@ -272,7 +297,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* ── Status bar ── */}
       <div style={statusBarStyle}>
         <div style={statusSeg}>
-          <span style={{ color: playerState === 'playing' ? '#008000' : playerState === 'paused' ? '#808000' : '#808080', marginRight: 4 }}>●</span>
+          <span style={{ color: playerState === 'playing' ? '#008000' : playerState === 'paused' ? '#808000' : '#808080', marginRight: 4 }}>
+            ●
+          </span>
           {stateLabel}
         </div>
         <div style={{ ...statusSeg, flex: 0, width: 100, borderLeft: '1px solid #808080', textAlign: 'center', justifyContent: 'center' }}>
@@ -285,30 +312,51 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
 /* ── Styles ── */
 const shell: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
-  background: '#c0c0c0', fontFamily: '"MS Sans Serif", Arial, sans-serif',
-  fontSize: 11, overflow: 'hidden', color: '#000',
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  height: '100%',
+  background: '#c0c0c0',
+  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontSize: 11,
+  overflow: 'hidden',
+  color: '#000',
 };
 const menuBar: React.CSSProperties = {
-  display: 'flex', gap: 0, padding: '2px 4px',
-  background: '#c0c0c0', borderBottom: '1px solid #808080',
+  display: 'flex',
+  gap: 0,
+  padding: '2px 4px',
+  background: '#c0c0c0',
+  borderBottom: '1px solid #808080',
   flexShrink: 0,
 };
 const menuItemStyle: React.CSSProperties = {
-  padding: '1px 8px', cursor: 'default', fontSize: 11,
+  padding: '1px 8px',
+  cursor: 'default',
+  fontSize: 11,
 };
 const videoArea: React.CSSProperties = {
-  flex: 1, background: '#000', overflow: 'hidden',
-  border: '2px inset #404040', margin: '0 2px', minHeight: 0,
+  flex: 1,
+  background: '#000',
+  overflow: 'hidden',
+  border: '2px inset #404040',
+  margin: '0 2px',
+  minHeight: 0,
 };
 const nowPlaying: React.CSSProperties = {
-  background: '#1a1a2e', padding: '3px 8px',
-  borderTop: '1px solid #333', borderBottom: '1px solid #333',
-  flexShrink: 0, overflow: 'hidden',
+  background: '#1a1a2e',
+  padding: '3px 8px',
+  borderTop: '1px solid #333',
+  borderBottom: '1px solid #333',
+  flexShrink: 0,
+  overflow: 'hidden',
 };
 const ticker: React.CSSProperties = {
-  fontSize: 11, color: '#ddd', whiteSpace: 'nowrap',
-  overflow: 'hidden', textOverflow: 'ellipsis',
+  fontSize: 11,
+  color: '#ddd',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
   fontFamily: 'monospace',
 };
 const transportBar: React.CSSProperties = {
@@ -317,55 +365,95 @@ const transportBar: React.CSSProperties = {
   flexShrink: 0,
 };
 const seekBarTrack: React.CSSProperties = {
-  width: '100%', height: 10,
-  background: '#222', border: '1px inset #808080',
-  position: 'relative', marginBottom: 2, cursor: 'pointer',
+  width: '100%',
+  height: 10,
+  background: '#222',
+  border: '1px inset #808080',
+  position: 'relative',
+  marginBottom: 2,
+  cursor: 'pointer',
 };
 const seekBarFill: React.CSSProperties = {
-  height: '100%', background: '#000080',
+  height: '100%',
+  background: '#000080',
   transition: 'width 0.15s linear',
 };
 const seekBarThumb: React.CSSProperties = {
-  position: 'absolute', top: -2, width: 10, height: 14,
-  background: '#c0c0c0', border: '2px outset #e0e0e0',
-  cursor: 'pointer', transform: 'translateX(-50%)',
+  position: 'absolute',
+  top: -2,
+  width: 10,
+  height: 14,
+  background: '#c0c0c0',
+  border: '2px outset #e0e0e0',
+  cursor: 'pointer',
+  transform: 'translateX(-50%)',
   transition: 'left 0.15s linear',
 };
 const timeText: React.CSSProperties = {
-  fontSize: 9, fontFamily: 'monospace', color: '#444',
+  fontSize: 9,
+  fontFamily: 'monospace',
+  color: '#444',
 };
 const buttonRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 0',
 };
 const tBtn: React.CSSProperties = {
-  width: 28, height: 24, fontSize: 12, cursor: 'pointer',
-  background: '#c0c0c0', border: '2px outset #e0e0e0',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  padding: 0, fontFamily: 'inherit',
+  width: 28,
+  height: 24,
+  fontSize: 12,
+  cursor: 'pointer',
+  background: '#c0c0c0',
+  border: '2px outset #e0e0e0',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 0,
+  fontFamily: 'inherit',
 };
 const tBtnActive: React.CSSProperties = {
-  border: '2px inset #808080', background: '#a8a8a8',
+  border: '2px inset #808080',
+  background: '#a8a8a8',
 };
 const divider: React.CSSProperties = {
-  width: 1, height: 18, background: '#808080', margin: '0 4px',
+  width: 1,
+  height: 18,
+  background: '#808080',
+  margin: '0 4px',
 };
 const volumeTrack: React.CSSProperties = {
-  width: 64, height: 8, background: '#222',
-  border: '1px inset #808080', position: 'relative', cursor: 'pointer',
+  width: 64,
+  height: 8,
+  background: '#222',
+  border: '1px inset #808080',
+  position: 'relative',
+  cursor: 'pointer',
 };
 const volumeFill: React.CSSProperties = {
-  height: '100%', background: '#000080',
+  height: '100%',
+  background: '#000080',
   transition: 'width 0.1s',
 };
 const statusBarStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', flexShrink: 0,
-  background: '#c0c0c0', borderTop: '1px solid #fff', height: 20,
+  display: 'flex',
+  alignItems: 'center',
+  flexShrink: 0,
+  background: '#c0c0c0',
+  borderTop: '1px solid #fff',
+  height: 20,
 };
 const statusSeg: React.CSSProperties = {
-  flex: 1, padding: '0 6px', fontSize: 10,
-  border: '1px inset #808080', height: '100%',
-  display: 'flex', alignItems: 'center',
-  overflow: 'hidden', whiteSpace: 'nowrap',
+  flex: 1,
+  padding: '0 6px',
+  fontSize: 10,
+  border: '1px inset #808080',
+  height: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  overflow: 'hidden',
+  whiteSpace: 'nowrap',
 };
 
 export default VideoPlayer;

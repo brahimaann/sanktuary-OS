@@ -13,11 +13,7 @@ const PplsThreadViewer: React.FC<PplsThreadViewerProps> = ({ threadId }) => {
   const thread = HISTORICAL_THREADS.find((t) => t.id === threadId);
 
   if (!thread) {
-    return (
-      <div style={{ padding: 20, textAlign: 'center', fontFamily: '"MS Sans Serif", Arial' }}>
-        Historical Thread not found.
-      </div>
-    );
+    return <div style={{ padding: 20, textAlign: 'center', fontFamily: '"MS Sans Serif", Arial' }}>Historical Thread not found.</div>;
   }
 
   const handleEventClick = (eventId: string) => {
@@ -90,9 +86,7 @@ const PplsThreadViewer: React.FC<PplsThreadViewerProps> = ({ threadId }) => {
 
       {/* Connected Events timeline links */}
       <div style={eventsPane}>
-        <div style={{ fontWeight: 700, fontSize: 10, color: '#444', marginBottom: 6 }}>
-          🔗 CONNECTED HISTORICAL EVENTS:
-        </div>
+        <div style={{ fontWeight: 700, fontSize: 10, color: '#444', marginBottom: 6 }}>🔗 CONNECTED HISTORICAL EVENTS:</div>
         <div style={eventsList}>
           {thread.connectedEventIds.map((id) => {
             const evt = TIMELINE_EVENTS.find((e) => e.id === id);

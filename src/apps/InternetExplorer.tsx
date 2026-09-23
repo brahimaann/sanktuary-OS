@@ -25,9 +25,7 @@ const FAVORITES: { title: string; url: string }[] = [
   { title: 'Miriam Makeba (Mama Africa)', url: 'https://en.m.wikipedia.org/wiki/Miriam_Makeba' },
 ];
 
-export const InternetExplorer: React.FC<InternetExplorerProps> = ({
-  src = DEFAULT_HOME,
-}) => {
+export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAULT_HOME }) => {
   const [history, setHistory] = useState<HistoryEntry[]>([{ url: src, title: src }]);
   const [histIdx, setHistIdx] = useState(0);
   const [addressBarValue, setAddressBarValue] = useState(src);
@@ -66,24 +64,27 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
     setTimeout(() => setProgress(0), 600);
   };
 
-  const navigate = useCallback((url: string) => {
-    let finalUrl = url.trim();
-    if (!finalUrl) return;
-    // Add protocol if missing
-    if (!/^https?:\/\//i.test(finalUrl) && !finalUrl.startsWith('//')) {
-      finalUrl = 'https://' + finalUrl;
-    }
-    const newEntry: HistoryEntry = { url: finalUrl, title: finalUrl };
-    const newHistory = history.slice(0, histIdx + 1);
-    newHistory.push(newEntry);
-    setHistory(newHistory);
-    setHistIdx(newHistory.length - 1);
-    setAddressBarValue(finalUrl);
-    setStatusText(`Opening: ${finalUrl}`);
-    startProgress();
-    setShowFavMenu(false);
-    setShowFavorites(false);
-  }, [history, histIdx]);
+  const navigate = useCallback(
+    (url: string) => {
+      let finalUrl = url.trim();
+      if (!finalUrl) return;
+      // Add protocol if missing
+      if (!/^https?:\/\//i.test(finalUrl) && !finalUrl.startsWith('//')) {
+        finalUrl = 'https://' + finalUrl;
+      }
+      const newEntry: HistoryEntry = { url: finalUrl, title: finalUrl };
+      const newHistory = history.slice(0, histIdx + 1);
+      newHistory.push(newEntry);
+      setHistory(newHistory);
+      setHistIdx(newHistory.length - 1);
+      setAddressBarValue(finalUrl);
+      setStatusText(`Opening: ${finalUrl}`);
+      startProgress();
+      setShowFavMenu(false);
+      setShowFavorites(false);
+    },
+    [history, histIdx],
+  );
 
   const handleBack = () => {
     if (histIdx > 0) {
@@ -170,14 +171,23 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
       {/* ── Menu Bar ── */}
       <div style={menuBar}>
         {['File', 'Edit', 'View', 'Go'].map((m) => (
-          <span key={m} style={menuItem}>{m}</span>
+          <span key={m} style={menuItem}>
+            {m}
+          </span>
         ))}
 
         {/* Favorites with dropdown */}
         <div style={{ position: 'relative' }}>
           <span
-            style={{ ...menuItem, background: showFavMenu ? 'var(--sabr-title-active-start)' : 'transparent', color: showFavMenu ? '#fff' : '#000' }}
-            onClick={() => { setShowFavMenu(!showFavMenu); setShowFavorites(false); }}
+            style={{
+              ...menuItem,
+              background: showFavMenu ? 'var(--sabr-title-active-start)' : 'transparent',
+              color: showFavMenu ? '#fff' : '#000',
+            }}
+            onClick={() => {
+              setShowFavMenu(!showFavMenu);
+              setShowFavorites(false);
+            }}
           >
             Favorites
           </span>
@@ -188,11 +198,19 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
                 <div
                   key={fav.url}
                   style={favItem}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--sabr-title-active-start)', e.currentTarget.style.color = '#fff')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent', e.currentTarget.style.color = '#000')}
+                  onMouseEnter={(e) => (
+                    (e.currentTarget.style.background = 'var(--sabr-title-active-start)'),
+                    (e.currentTarget.style.color = '#fff')
+                  )}
+                  onMouseLeave={(e) => ((e.currentTarget.style.background = 'transparent'), (e.currentTarget.style.color = '#000'))}
                   onClick={() => navigate(fav.url)}
                 >
-                  <img src="/images/icons/internet-explorer-16x16.png" alt="" style={{ width: 14, height: 14, marginRight: 6, imageRendering: 'pixelated' }} onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  <img
+                    src="/images/icons/internet-explorer-16x16.png"
+                    alt=""
+                    style={{ width: 14, height: 14, marginRight: 6, imageRendering: 'pixelated' }}
+                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                  />
                   {fav.title}
                 </div>
               ))}
@@ -202,7 +220,12 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
 
         <span style={menuItem}>Help</span>
         <div style={{ flex: 1 }} />
-        <img src="/images/icons/internet-explorer-16x16.png" alt="IE" style={{ width: 22, height: 22, marginRight: 6, imageRendering: 'pixelated' }} onError={(e) => (e.currentTarget.style.display = 'none')} />
+        <img
+          src="/images/icons/internet-explorer-16x16.png"
+          alt="IE"
+          style={{ width: 22, height: 22, marginRight: 6, imageRendering: 'pixelated' }}
+          onError={(e) => (e.currentTarget.style.display = 'none')}
+        />
       </div>
 
       {/* ── Toolbar ── */}
@@ -242,7 +265,14 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
         <div style={toolSep} />
 
         {/* Favorites toggle */}
-        <button style={{ ...toolBtn, background: showFavorites ? '#b0b0b0' : 'transparent' }} onClick={() => { setShowFavorites(!showFavorites); setShowFavMenu(false); }} title="Favorites">
+        <button
+          style={{ ...toolBtn, background: showFavorites ? '#b0b0b0' : 'transparent' }}
+          onClick={() => {
+            setShowFavorites(!showFavorites);
+            setShowFavMenu(false);
+          }}
+          title="Favorites"
+        >
           <span style={toolIcon}>★</span>
           <span style={toolLabel}>Favorites</span>
         </button>
@@ -272,18 +302,34 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
           <div style={favSidebar}>
             <div style={favSidebarHeader}>
               <span>★ Favorites</span>
-              <button style={favSidebarClose} onClick={() => setShowFavorites(false)}>×</button>
+              <button style={favSidebarClose} onClick={() => setShowFavorites(false)}>
+                ×
+              </button>
             </div>
             <div style={favSidebarList}>
               {FAVORITES.map((fav) => (
                 <div
                   key={fav.url}
                   style={favSidebarItem}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--sabr-title-active-start)'; e.currentTarget.style.color = '#fff'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#000'; }}
-                  onClick={() => { navigate(fav.url); setShowFavorites(false); }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--sabr-title-active-start)';
+                    e.currentTarget.style.color = '#fff';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = '#000';
+                  }}
+                  onClick={() => {
+                    navigate(fav.url);
+                    setShowFavorites(false);
+                  }}
                 >
-                  <img src="/images/icons/internet-explorer-16x16.png" alt="" style={{ width: 14, height: 14, marginRight: 6, imageRendering: 'pixelated', flexShrink: 0 }} onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  <img
+                    src="/images/icons/internet-explorer-16x16.png"
+                    alt=""
+                    style={{ width: 14, height: 14, marginRight: 6, imageRendering: 'pixelated', flexShrink: 0 }}
+                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                  />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fav.title}</span>
                 </div>
               ))}
@@ -313,11 +359,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
       {/* ── Status Bar ── */}
       <div style={statusBar}>
         <div style={statusLeft}>
-          {isLoading ? (
-            <span style={{ color: 'var(--sabr-title-active-start)' }}>⏳ {statusText}</span>
-          ) : (
-            <span>✓ {statusText}</span>
-          )}
+          {isLoading ? <span style={{ color: 'var(--sabr-title-active-start)' }}>⏳ {statusText}</span> : <span>✓ {statusText}</span>}
         </div>
         <div style={statusRight}>
           <span style={{ marginRight: 8, fontSize: 9 }}>🔒 Internet</span>
@@ -325,10 +367,12 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({
       </div>
 
       {/* Click-away overlay for menus */}
-      {(showFavMenu) && (
+      {showFavMenu && (
         <div
           style={{ position: 'absolute', inset: 0, zIndex: 9 }}
-          onClick={() => { setShowFavMenu(false); }}
+          onClick={() => {
+            setShowFavMenu(false);
+          }}
         />
       )}
     </div>

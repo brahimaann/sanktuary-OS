@@ -7,35 +7,35 @@ import { dialog } from '../utils/dialog';
 const CITIES_PRESETS = [
   { name: 'Use Geolocation (GPS)', lat: 0, lng: 0, isGPS: true },
   { name: 'Oakland, CA', lat: 37.8044, lng: -122.2712 },
-  { name: 'Memphis, TN', lat: 35.1495, lng: -90.0490 },
-  { name: 'Minneapolis, MN', lat: 44.9778, lng: -93.2650 },
+  { name: 'Memphis, TN', lat: 35.1495, lng: -90.049 },
+  { name: 'Minneapolis, MN', lat: 44.9778, lng: -93.265 },
   { name: 'New York, NY', lat: 40.7338, lng: -74.0021 },
   { name: 'Chicago, IL', lat: 41.8781, lng: -87.6298 },
   { name: 'Los Angeles, CA', lat: 33.9416, lng: -118.2417 },
-  { name: 'Tulsa, OK', lat: 36.1540, lng: -95.9928 },
+  { name: 'Tulsa, OK', lat: 36.154, lng: -95.9928 },
   { name: 'Houston, TX', lat: 29.7604, lng: -95.3698 },
-  { name: 'Atlanta, GA', lat: 33.7537, lng: -84.3860 },
+  { name: 'Atlanta, GA', lat: 33.7537, lng: -84.386 },
   { name: 'Philadelphia, PA', lat: 39.9526, lng: -75.1652 },
   { name: 'Detroit, MI', lat: 42.3314, lng: -83.0458 },
   { name: 'London, UK', lat: 51.5173, lng: -0.2037 },
   { name: 'Dublin, Ireland', lat: 53.3498, lng: -6.2603 },
   { name: 'Paris, France', lat: 48.8566, lng: 2.3522 },
-  { name: 'Berlin, Germany', lat: 52.5200, lng: 13.4050 },
+  { name: 'Berlin, Germany', lat: 52.52, lng: 13.405 },
   { name: 'St. Petersburg, Russia', lat: 59.9343, lng: 30.3351 },
   { name: 'Dakar, Senegal', lat: 14.7167, lng: -17.4677 },
-  { name: 'Soweto, South Africa', lat: -26.2485, lng: 27.8540 },
+  { name: 'Soweto, South Africa', lat: -26.2485, lng: 27.854 },
   { name: 'Beijing, China', lat: 39.9042, lng: 116.4074 },
-  { name: 'Mumbai, India', lat: 19.0760, lng: 72.8777 }
+  { name: 'Mumbai, India', lat: 19.076, lng: 72.8777 },
 ];
 
 const FONT_SIZES: { [key: string]: number } = {
-  'Auto': 12,
+  Auto: 12,
   '6 x 8': 10,
   '7 x 12': 12,
   '8 x 8': 11,
   '8 x 12': 13,
   '10 x 18': 15,
-  '12 x 16': 17
+  '12 x 16': 17,
 };
 
 interface ConsoleItem {
@@ -69,15 +69,17 @@ const LocalEchoTerminal: React.FC = () => {
           <div>&nbsp;&nbsp;&nbsp;(C)Copyright Microsoft Corp 1981-1998.</div>
           <div style={{ height: 6 }} />
           <div>📡 LOCAL RESONANCE SYSTEM COMMAND UTILITY [Version 1.0.4]</div>
-          <div>Type <span style={{ color: '#ffffff', fontWeight: 'bold' }}>"help"</span> for a list of available commands.</div>
+          <div>
+            Type <span style={{ color: '#ffffff', fontWeight: 'bold' }}>"help"</span> for a list of available commands.
+          </div>
           <div style={{ height: 6 }} />
           <div style={{ color: '#808080' }}>[i] Initializing local proximity sensors...</div>
           <div style={{ color: '#55ff55' }}>[+] Position locked on: Oakland, CA preset coordinates.</div>
           <div style={{ color: '#55ffff' }}>[i] Proximity signals ready. Type "detect" to view echo.</div>
           <div style={{ height: 6 }} />
         </div>
-      )
-    }
+      ),
+    },
   ]);
 
   // Re-calculate closest echo
@@ -101,10 +103,7 @@ const LocalEchoTerminal: React.FC = () => {
   }, [consoleHistory]);
 
   const appendOutput = (content: React.ReactNode, type: ConsoleItem['type'] = 'text') => {
-    setConsoleHistory((prev) => [
-      ...prev,
-      { id: Math.random().toString(), type, content }
-    ]);
+    setConsoleHistory((prev) => [...prev, { id: Math.random().toString(), type, content }]);
   };
 
   const appendLine = (text: string, type: ConsoleItem['type'] = 'text') => {
@@ -113,12 +112,7 @@ const LocalEchoTerminal: React.FC = () => {
     else if (type === 'success') color = '#55ff55';
     else if (type === 'info') color = '#55ffff';
 
-    appendOutput(
-      <div style={{ color, whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>
-        {text}
-      </div>,
-      type
-    );
+    appendOutput(<div style={{ color, whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{text}</div>, type);
   };
 
   // Geolocation trigger
@@ -152,7 +146,7 @@ const LocalEchoTerminal: React.FC = () => {
         appendLine(`[x] GPS ACCESS FAILED: ${errMsg}. Falling back to Oakland, CA preset.`, 'error');
         setUserCoords({ lat: 37.8044, lng: -122.2712 });
       },
-      { timeout: 8000 }
+      { timeout: 8000 },
     );
   };
 
@@ -183,9 +177,9 @@ const LocalEchoTerminal: React.FC = () => {
     const { echo } = closestEcho;
     const filename = `Local_Echo_${echo.id.replace(/-/g, '_')}.txt`;
     const vfsPath = `C:/Ppls_Story/${filename}`;
-    
+
     // Write full echo content to VFS
-    const echoContent = 
+    const echoContent =
       `📡 LOCAL ECHO ARCHIVE — ${echo.title.toUpperCase()}\n` +
       `Sector: ${echo.location.name} (Coordinates: ${echo.location.lat}, ${echo.location.lng})\n` +
       `Year: ${echo.year}\n` +
@@ -322,7 +316,7 @@ const LocalEchoTerminal: React.FC = () => {
         try {
           const pathForVfs = currentDir.replace(/\\/g, '/');
           const files = vfs.readdir(pathForVfs);
-          
+
           appendLine(` Volume in drive C is PPLS_STORY`);
           appendLine(` Volume Serial Number is 1998-0625`);
           appendLine(` Directory of ${currentDir}\n`);
@@ -339,7 +333,17 @@ const LocalEchoTerminal: React.FC = () => {
           for (const f of files) {
             const isDir = f.type === 'dir';
             const date = new Date(f.updatedAt);
-            const dateStr = date.toLocaleDateString('en-US', { hour12: true, month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', '').toLowerCase();
+            const dateStr = date
+              .toLocaleDateString('en-US', {
+                hour12: true,
+                month: '2-digit',
+                day: '2-digit',
+                year: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+              .replace(',', '')
+              .toLowerCase();
 
             if (isDir) {
               dirCount++;
@@ -419,7 +423,7 @@ const LocalEchoTerminal: React.FC = () => {
         // Try to match city
         const targetCity = args.join(' ').trim().toLowerCase();
         const foundIdx = CITIES_PRESETS.findIndex(
-          (p) => p.name.toLowerCase().includes(targetCity) || p.name.toLowerCase().replace(/,/g, '').includes(targetCity)
+          (p) => p.name.toLowerCase().includes(targetCity) || p.name.toLowerCase().replace(/,/g, '').includes(targetCity),
         );
 
         if (foundIdx !== -1) {
@@ -471,14 +475,10 @@ const LocalEchoTerminal: React.FC = () => {
             <div style={{ color: '#ffff55', fontWeight: 'bold', textAlign: 'center', marginBottom: 4, letterSpacing: 1 }}>
               ■ DIALOG: HISTORICAL PULSE REFLECTION ■
             </div>
-            <div style={{ lineHeight: 1.4, marginBottom: 8 }}>
-              {echo.principle.inferencePrompt}
-            </div>
-            <div style={{ color: '#80ff80', fontSize: 10 }}>
-              * To submit your answer, type: submit [your reflection answer text]
-            </div>
+            <div style={{ lineHeight: 1.4, marginBottom: 8 }}>{echo.principle.inferencePrompt}</div>
+            <div style={{ color: '#80ff80', fontSize: 10 }}>* To submit your answer, type: submit [your reflection answer text]</div>
           </div>,
-          'dialog'
+          'dialog',
         );
         break;
       }
@@ -522,17 +522,22 @@ const LocalEchoTerminal: React.FC = () => {
       const fullCmd = inputValue;
       setInputValue('');
       if (!fullCmd.trim()) {
-        setConsoleHistory((prev) => [
-          ...prev,
-          { id: Math.random().toString(), type: 'text', content: <div>{currentDir}&gt;</div> }
-        ]);
+        setConsoleHistory((prev) => [...prev, { id: Math.random().toString(), type: 'text', content: <div>{currentDir}&gt;</div> }]);
         return;
       }
 
       // Add typed command line to history
       setConsoleHistory((prev) => [
         ...prev,
-        { id: Math.random().toString(), type: 'text', content: <div>{currentDir}&gt; {fullCmd}</div> }
+        {
+          id: Math.random().toString(),
+          type: 'text',
+          content: (
+            <div>
+              {currentDir}&gt; {fullCmd}
+            </div>
+          ),
+        },
       ]);
 
       executeCommand(fullCmd);
@@ -547,20 +552,21 @@ const LocalEchoTerminal: React.FC = () => {
 
   // Toolbar action handlers
   const handleMark = () => {
-    dialog.alert("MS-DOS Mark: Text selection mode active. Drag cursor across terminal output to select text.");
+    dialog.alert('MS-DOS Mark: Text selection mode active. Drag cursor across terminal output to select text.');
   };
 
   const handleCopy = () => {
     if (!closestEcho) return;
     const { echo } = closestEcho;
-    const textToCopy = 
+    const textToCopy =
       `📡 LOCAL ECHO DETECTED [Sector: ${echo.location.name}]\n` +
       `Title: ${echo.title} (${echo.year})\n` +
       `Micro-History: ${echo.microHistory}\n` +
       `Reflection: ${echo.principle.inferencePrompt}`;
-    navigator.clipboard.writeText(textToCopy)
-      .then(() => dialog.alert("Console output details copied to clipboard."))
-      .catch(() => dialog.alert("Failed to copy. Clipboard access denied."));
+    navigator.clipboard
+      .writeText(textToCopy)
+      .then(() => dialog.alert('Console output details copied to clipboard.'))
+      .catch(() => dialog.alert('Failed to copy. Clipboard access denied.'));
   };
 
   const handlePaste = async () => {
@@ -579,7 +585,7 @@ const LocalEchoTerminal: React.FC = () => {
         dialog.alert(`MS-DOS Paste Error:\nClipboard text "${text.substring(0, 30)}" does not contain valid lat,lng coordinates.`);
       }
     } catch (_) {
-      dialog.alert("MS-DOS Paste Error:\nClipboard read permission denied by browser.");
+      dialog.alert('MS-DOS Paste Error:\nClipboard read permission denied by browser.');
     }
   };
 
@@ -590,17 +596,17 @@ const LocalEchoTerminal: React.FC = () => {
   const handleProperties = () => {
     dialog.alert(
       `MS-DOS Prompt Properties\n` +
-      `-------------------------\n` +
-      `Program Name: local_echo.exe\n` +
-      `Conventional Memory: 640KB\n` +
-      `Expanded Memory: Auto\n` +
-      `Display: Windowed (100% Win98 emulation)\n` +
-      `Database Engine: pplsStoryData LOCAL_ECHOES (20 Nodes)`
+        `-------------------------\n` +
+        `Program Name: local_echo.exe\n` +
+        `Conventional Memory: 640KB\n` +
+        `Expanded Memory: Auto\n` +
+        `Display: Windowed (100% Win98 emulation)\n` +
+        `Database Engine: pplsStoryData LOCAL_ECHOES (20 Nodes)`,
     );
   };
 
   const handleBackground = () => {
-    dialog.alert("MS-DOS Background Execution: Enable. The pager taskbar tray icon will continue monitoring proximity in the background.");
+    dialog.alert('MS-DOS Background Execution: Enable. The pager taskbar tray icon will continue monitoring proximity in the background.');
   };
 
   const handleFont = () => {
@@ -610,7 +616,9 @@ const LocalEchoTerminal: React.FC = () => {
   };
 
   // Dummy reads to satisfy compiler TS6133 unused check
-  if (isLocating || geoError) { /* no-op */ }
+  if (isLocating || geoError) {
+    /* no-op */
+  }
 
   return (
     <div style={terminalShell}>
@@ -708,16 +716,11 @@ const LocalEchoTerminal: React.FC = () => {
       {/* Windows 98 MS-DOS Window Toolbar */}
       <div style={toolbarStyle}>
         {/* Font Select */}
-        <select
-          value={selectedFont}
-          onChange={(e) => setSelectedFont(e.target.value)}
-          className="dos-select"
-          title="Select Font Size"
-        >
+        <select value={selectedFont} onChange={(e) => setSelectedFont(e.target.value)} className="dos-select" title="Select Font Size">
           <option value="Auto">Auto</option>
-          <option value="6 x 8"> 6 x  8</option>
+          <option value="6 x 8"> 6 x 8</option>
           <option value="7 x 12"> 7 x 12</option>
-          <option value="8 x 8"> 8 x  8</option>
+          <option value="8 x 8"> 8 x 8</option>
           <option value="8 x 12"> 8 x 12</option>
           <option value="10 x 18">10 x 18</option>
           <option value="12 x 16">12 x 16</option>
@@ -796,7 +799,9 @@ const LocalEchoTerminal: React.FC = () => {
 
         <button title="Font" className="dos-btn" onClick={handleFont}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <text x="3" y="12" fontFamily="'Courier New', monospace" fontSize="13" fontWeight="bold" fill="#000">A</text>
+            <text x="3" y="12" fontFamily="'Courier New', monospace" fontSize="13" fontWeight="bold" fill="#000">
+              A
+            </text>
           </svg>
         </button>
       </div>
@@ -806,15 +811,13 @@ const LocalEchoTerminal: React.FC = () => {
         {/* Screen Monitor Box */}
         <div ref={screenRef} className="dos-screen" style={monitorScreen(terminalFontSize)} onClick={focusInput}>
           <div style={scanlineOverlay} />
-          
+
           <div style={screenContent}>
             {/* Scrollable console lines */}
             {consoleHistory.map((item) => (
-              <div key={item.id}>
-                {item.content}
-              </div>
+              <div key={item.id}>{item.content}</div>
             ))}
-            
+
             {/* Active Command Line Input Prompt */}
             <div style={promptLine}>
               <span>{currentDir}&gt;</span>

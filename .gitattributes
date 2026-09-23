@@ -1,0 +1,4 @@
+# Store text files with LF line endings (matches Prettier); Git detects binaries automatically.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

@@ -20,7 +20,11 @@ export function startLive() {
   for (const event of EVENTS) {
     source.addEventListener(event, (e) => {
       const data = JSON.parse((e as MessageEvent).data);
-      if (event === 'hello') { me = data.you; online = data.online; dispatch('presence', data); }
+      if (event === 'hello') {
+        me = data.you;
+        online = data.online;
+        dispatch('presence', data);
+      }
       if (event === 'presence') online = data.online;
       dispatch(event, data);
     });
@@ -50,7 +54,9 @@ export function useLiveEvent(event: string, handler: Handler) {
     const h: Handler = (d) => ref.current(d);
     if (!handlers.has(event)) handlers.set(event, new Set());
     handlers.get(event)!.add(h);
-    return () => { handlers.get(event)!.delete(h); };
+    return () => {
+      handlers.get(event)!.delete(h);
+    };
   }, [event]);
 }
 

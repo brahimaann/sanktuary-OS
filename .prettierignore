@@ -1,0 +1,9 @@
+public/
+dist/
+data/
+cache/
+node_modules/
+server/node_modules/
+package-lock.json
+server/package-lock.json
+*.md

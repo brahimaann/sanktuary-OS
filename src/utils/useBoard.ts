@@ -6,7 +6,12 @@ import { useApi } from './api';
  * queue that saves changes and forwards them to everyone else, and undo/redo of your own changes.
  */
 type Changes<T> = Record<string, T | null>;
-export interface BoardPeer { user: string; color: string; x?: number; y?: number }
+interface BoardPeer {
+  user: string;
+  color: string;
+  x?: number;
+  y?: number;
+}
 
 export function useBoard<T extends { id: string }>(boardId: string) {
   const api = useApi();
@@ -32,15 +37,27 @@ export function useBoard<T extends { id: string }>(boardId: string) {
         setPeers(Object.fromEntries(d.peers.map((p: BoardPeer & { conn: string }) => [p.conn, p])));
         setStatus('');
       });
-      on('ops', ({ ops }) => setItems((prev) => {
-        const next = { ...prev };
-        for (const op of ops) op.put ? (next[op.put.id] = op.put) : delete next[op.del];
-        return next;
-      }));
+      on('ops', ({ ops }) =>
+        setItems((prev) => {
+          const next = { ...prev };
+          for (const op of ops) op.put ? (next[op.put.id] = op.put) : delete next[op.del];
+          return next;
+        }),
+      );
       on('join', (p) => setPeers((prev) => ({ ...prev, [p.conn]: p })));
-      on('leave', ({ conn }) => setPeers((prev) => { const n = { ...prev }; delete n[conn]; return n; }));
+      on('leave', ({ conn }) =>
+        setPeers((prev) => {
+          const n = { ...prev };
+          delete n[conn];
+          return n;
+        }),
+      );
       on('cursor', (c) => setPeers((prev) => ({ ...prev, [c.conn]: { ...prev[c.conn], ...c } })));
-      on('deleted', () => { setStatus('This board was deleted.'); es?.close(); alive = false; });
+      on('deleted', () => {
+        setStatus('This board was deleted.');
+        es?.close();
+        alive = false;
+      });
       es.onerror = () => {
         if (es?.readyState === EventSource.CLOSED && alive) {
           setStatus('Reconnecting...');
@@ -49,7 +66,11 @@ export function useBoard<T extends { id: string }>(boardId: string) {
       };
     };
     connect();
-    return () => { alive = false; clearTimeout(retry); es?.close(); };
+    return () => {
+      alive = false;
+      clearTimeout(retry);
+      es?.close();
+    };
   }, [boardId, api]);
 
   const pending = useRef<Record<string, T | null>>({});
@@ -67,19 +88,25 @@ export function useBoard<T extends { id: string }>(boardId: string) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ conn: me.current.conn, ops, cursor }),
-    }).then((r) => !r.ok && setStatus(`Not saved: ${r.status}`), () => setStatus('Not saved: offline'));
+    }).then(
+      (r) => !r.ok && setStatus(`Not saved: ${r.status}`),
+      () => setStatus('Not saved: offline'),
+    );
   }, [boardId]);
 
-  const send = useCallback((changes: Changes<T>, immediate: boolean) => {
-    setItems((prev) => {
-      const next = { ...prev };
-      for (const [id, it] of Object.entries(changes)) it ? (next[id] = it) : delete next[id];
-      return next;
-    });
-    Object.assign(pending.current, changes);
-    if (immediate) flush();
-    else timer.current ??= setTimeout(flush, 60);
-  }, [flush]);
+  const send = useCallback(
+    (changes: Changes<T>, immediate: boolean) => {
+      setItems((prev) => {
+        const next = { ...prev };
+        for (const [id, it] of Object.entries(changes)) it ? (next[id] = it) : delete next[id];
+        return next;
+      });
+      Object.assign(pending.current, changes);
+      if (immediate) flush();
+      else timer.current ??= setTimeout(flush, 60);
+    },
+    [flush],
+  );
 
   // ── Undo / redo: each entry holds what the touched items looked like before ──
   const undoStack = useRef<Changes<T>[]>([]);
@@ -103,10 +130,13 @@ export function useBoard<T extends { id: string }>(boardId: string) {
    * Apply changes locally now; send them within 60 ms (or right away). null deletes an item.
    * transient: part of a drag, recorded once at the end with remember().
    */
-  const queue = useCallback((changes: Changes<T>, immediate = false, transient = false) => {
-    if (!transient) remember(snapshot(Object.keys(changes)));
-    send(changes, immediate);
-  }, [send, remember]);
+  const queue = useCallback(
+    (changes: Changes<T>, immediate = false, transient = false) => {
+      if (!transient) remember(snapshot(Object.keys(changes)));
+      send(changes, immediate);
+    },
+    [send, remember],
+  );
 
   const step = (from: typeof undoStack, to: typeof undoStack) => {
     const entry = from.current.pop();
@@ -119,14 +149,28 @@ export function useBoard<T extends { id: string }>(boardId: string) {
   const undo = useCallback(() => step(undoStack, redoStack), [send]); // eslint-disable-line react-hooks/exhaustive-deps
   const redo = useCallback(() => step(redoStack, undoStack), [send]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendCursor = useCallback((pos: { x: number; y: number }) => {
-    pendingCursor.current = pos;
-    timer.current ??= setTimeout(flush, 100);
-  }, [flush]);
+  const sendCursor = useCallback(
+    (pos: { x: number; y: number }) => {
+      pendingCursor.current = pos;
+      timer.current ??= setTimeout(flush, 100);
+    },
+    [flush],
+  );
 
   return {
-    items, peers, status, setStatus, me, queue, flush, sendCursor,
-    undo, redo, remember, snapshot,
-    canUndo: undoStack.current.length > 0, canRedo: redoStack.current.length > 0,
+    items,
+    peers,
+    status,
+    setStatus,
+    me,
+    queue,
+    flush,
+    sendCursor,
+    undo,
+    redo,
+    remember,
+    snapshot,
+    canUndo: undoStack.current.length > 0,
+    canRedo: redoStack.current.length > 0,
   };
 }

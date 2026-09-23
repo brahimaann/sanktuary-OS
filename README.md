@@ -27,6 +27,26 @@ Team members log in with a nickname + access code (Clerk) in the boot terminal o
 - **Files on drives**: deleted files go to `<space>/.sk-trash/`, replaced files to `<space>/.sk-versions/`.
 - **Secrets**: `.env` (see `.env.example`), not in git.
 
+## Security
+
+- Every API call needs a Clerk sign-in (or the signed `sk_session` cookie it issues); rights are checked per space,
+  board and channel on the server. Private boards/channels are enforced on lists, live feeds and the activity feed.
+- User files are served inline only for safe types (images, audio, video, PDF, plain text); anything else
+  (HTML, SVG, scripts, unknown) downloads inside a CSP sandbox. Board links must be http(s).
+- Paths can't leave a space (`..`, absolute paths and NTFS `name:stream` are rejected). Nothing is deleted:
+  files go to `.sk-trash`, replaced files to `.sk-versions`, boards to `data/boards-trash`.
+- The server listens on 127.0.0.1 only; the internet reaches it through the Cloudflare tunnel. Secrets live in `.env`.
+- Clerk (production): sign-up is **Restricted**, new devices are confirmed by an emailed code.
+
+## Development
+
+```
+npm test              # server tests on temp data with a fake Clerk (see tests/README.md)
+npm run format        # Prettier
+npm run format:check
+npx tsc --noEmit      # type check
+```
+
 ## Updating
 
 ```

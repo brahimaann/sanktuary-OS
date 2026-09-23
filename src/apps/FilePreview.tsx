@@ -13,7 +13,13 @@ interface FilePreviewProps {
   name: string;
   siblings: string[]; // files in the same folder, for prev/next
 }
-interface Comment { id: string; user: string; at: string; t: number | null; text: string }
+interface Comment {
+  id: string;
+  user: string;
+  at: string;
+  t: number | null;
+  text: string;
+}
 
 const WAVEFORM_MAX_BYTES = 80 * 1024 * 1024; // bigger files play fine, they just skip the waveform
 const TEXT_MAX_BYTES = 2 * 1024 * 1024;
@@ -34,31 +40,86 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   useEffect(() => {
     let live = true;
     getToken().then((t) => live && setToken(t || ''));
-    return () => { live = false; };
+    return () => {
+      live = false;
+    };
   }, [name, getToken]);
 
   const step = (d: number) => siblings.length > 1 && setName(siblings[(index + d + siblings.length) % siblings.length]);
-  const seek = (t: number) => { if (media.current) { media.current.currentTime = t; media.current.play(); } };
+  const seek = (t: number) => {
+    if (media.current) {
+      media.current.currentTime = t;
+      media.current.play();
+    }
+  };
 
   return (
-    <div style={shell} tabIndex={0} onKeyDown={(e) => { if ((e.target as HTMLElement).tagName === 'TEXTAREA') return; if (e.key === 'ArrowLeft') step(-1); if (e.key === 'ArrowRight') step(1); }}>
+    <div
+      style={shell}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if ((e.target as HTMLElement).tagName === 'TEXTAREA') return;
+        if (e.key === 'ArrowLeft') step(-1);
+        if (e.key === 'ArrowRight') step(1);
+      }}
+    >
       <div style={toolbar}>
-        {siblings.length > 1 && <button style={button} onClick={() => step(-1)}>◀ Prev</button>}
-        {siblings.length > 1 && <button style={button} onClick={() => step(1)}>Next ▶</button>}
-        <button style={button} disabled={!token} onClick={() => window.open(`${src}&download`, '_blank')}>Download</button>
-        {(kind === 'pdf' || kind === 'image') && <button style={button} disabled={!token} onClick={() => window.open(src, '_blank')}>Open in new tab</button>}
-        <span style={{ marginLeft: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>{name}</span>
+        {siblings.length > 1 && (
+          <button style={button} onClick={() => step(-1)}>
+            ◀ Prev
+          </button>
+        )}
+        {siblings.length > 1 && (
+          <button style={button} onClick={() => step(1)}>
+            Next ▶
+          </button>
+        )}
+        <button style={button} disabled={!token} onClick={() => window.open(`${src}&download`, '_blank')}>
+          Download
+        </button>
+        {(kind === 'pdf' || kind === 'image') && (
+          <button style={button} disabled={!token} onClick={() => window.open(src, '_blank')}>
+            Open in new tab
+          </button>
+        )}
+        <span style={{ marginLeft: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>
+          {name}
+        </span>
       </div>
       <div style={stage}>
-        {!src ? null
-          : kind === 'image' ? <img key={src} src={src} alt={name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-          : kind === 'audio' ? <AudioPreview key={src} src={src} name={name} media={media} comments={comments} onSeek={seek} />
-          : kind === 'video' ? <video key={src} ref={(el) => { media.current = el; }} src={src} controls playsInline style={{ maxWidth: '100%', maxHeight: '100%', background: '#000' }} />
-          : kind === 'pdf' ? <iframe key={src} src={src} title={name} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
-          : kind === 'text' ? <TextPreview key={src} src={src} />
-          : <NoPreview name={name} />}
+        {!src ? null : kind === 'image' ? (
+          <img key={src} src={src} alt={name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+        ) : kind === 'audio' ? (
+          <AudioPreview key={src} src={src} name={name} media={media} comments={comments} onSeek={seek} />
+        ) : kind === 'video' ? (
+          <video
+            key={src}
+            ref={(el) => {
+              media.current = el;
+            }}
+            src={src}
+            controls
+            playsInline
+            style={{ maxWidth: '100%', maxHeight: '100%', background: '#000' }}
+          />
+        ) : kind === 'pdf' ? (
+          <iframe key={src} src={src} title={name} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
+        ) : kind === 'text' ? (
+          <TextPreview key={src} src={src} />
+        ) : (
+          <NoPreview name={name} />
+        )}
       </div>
-      <Comments key={path} app={app} path={path} comments={comments} setComments={setComments} media={media} timed={kind === 'audio' || kind === 'video'} onSeek={seek} />
+      <Comments
+        key={path}
+        app={app}
+        path={path}
+        comments={comments}
+        setComments={setComments}
+        media={media}
+        timed={kind === 'audio' || kind === 'video'}
+        onSeek={seek}
+      />
       <div style={statusBar}>{siblings.length > 1 ? `${index + 1} of ${siblings.length} — use ◀ ▶ or arrow keys` : name}</div>
     </div>
   );
@@ -66,8 +127,13 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
 
 /** Live comment thread for one file. On audio/video each comment is pinned to the playback time. */
 const Comments: React.FC<{
-  app: string; path: string; comments: Comment[]; setComments: React.Dispatch<React.SetStateAction<Comment[]>>;
-  media: React.MutableRefObject<HTMLMediaElement | null>; timed: boolean; onSeek: (t: number) => void;
+  app: string;
+  path: string;
+  comments: Comment[];
+  setComments: React.Dispatch<React.SetStateAction<Comment[]>>;
+  media: React.MutableRefObject<HTMLMediaElement | null>;
+  timed: boolean;
+  onSeek: (t: number) => void;
 }> = ({ app, path, comments, setComments, media, timed, onSeek }) => {
   const api = useApi();
   const { byName } = useProfiles();
@@ -76,8 +142,14 @@ const Comments: React.FC<{
   const [err, setErr] = useState('');
   const q = `space=${encodeURIComponent(app)}&path=${encodeURIComponent(path)}`;
 
-  useEffect(() => { api(`/api/comments?${q}`).then(setComments, () => setComments([])); }, [api, q, setComments]);
-  useLiveEvent('comment', (d) => d.space === app && d.path === path && setComments((prev) => (prev.some((c) => c.id === d.comment.id) ? prev : [...prev, d.comment])));
+  useEffect(() => {
+    api(`/api/comments?${q}`).then(setComments, () => setComments([]));
+  }, [api, q, setComments]);
+  useLiveEvent(
+    'comment',
+    (d) =>
+      d.space === app && d.path === path && setComments((prev) => (prev.some((c) => c.id === d.comment.id) ? prev : [...prev, d.comment])),
+  );
   useLiveEvent('uncomment', (d) => d.space === app && d.path === path && setComments((prev) => prev.filter((c) => c.id !== d.id)));
 
   const post = async () => {
@@ -88,38 +160,88 @@ const Comments: React.FC<{
       setComments((prev) => (prev.some((x) => x.id === c.id) ? prev : [...prev, c]));
       setText('');
       setErr('');
-    } catch (e) { setErr((e as Error).message); }
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
   const remove = (id: string) => api(`/api/comments?${q}&id=${id}`, { method: 'DELETE' }).catch((e) => setErr(e.message));
   const sorted = [...comments].sort((a, b) => (a.t ?? Infinity) - (b.t ?? Infinity) || a.at.localeCompare(b.at));
   const me = liveUser();
 
   return (
-    <div style={{ borderTop: '1px solid #808080', display: 'flex', flexDirection: 'column', maxHeight: open ? '40%' : undefined, minHeight: 0 }}>
+    <div
+      style={{
+        borderTop: '1px solid #808080',
+        display: 'flex',
+        flexDirection: 'column',
+        maxHeight: open ? '40%' : undefined,
+        minHeight: 0,
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px' }}>
-        <button style={{ ...button, padding: '0 6px' }} onClick={() => setOpen(!open)}>{open ? '▾' : '▸'} Comments ({comments.length})</button>
+        <button style={{ ...button, padding: '0 6px' }} onClick={() => setOpen(!open)}>
+          {open ? '▾' : '▸'} Comments ({comments.length})
+        </button>
         {err && <span style={{ color: '#a00000' }}>{err}</span>}
       </div>
       {open && (
         <>
           <div style={{ flex: 1, overflow: 'auto', background: '#fff', border: '2px inset #808080', margin: '0 2px', minHeight: 40 }}>
-            {!sorted.length && <div style={{ padding: 6, color: '#777' }}>{timed ? 'No feedback yet. Play the track, pause where something needs work, and comment: it gets pinned to that moment.' : 'No comments yet.'}</div>}
+            {!sorted.length && (
+              <div style={{ padding: 6, color: '#777' }}>
+                {timed
+                  ? 'No feedback yet. Play the track, pause where something needs work, and comment: it gets pinned to that moment.'
+                  : 'No comments yet.'}
+              </div>
+            )}
             {sorted.map((c) => (
-              <div key={c.id} style={{ display: 'flex', gap: 6, padding: '3px 6px', borderBottom: '1px solid #eee', alignItems: 'flex-start' }}>
+              <div
+                key={c.id}
+                style={{ display: 'flex', gap: 6, padding: '3px 6px', borderBottom: '1px solid #eee', alignItems: 'flex-start' }}
+              >
                 <Avatar username={c.user} avatar={byName[c.user]?.avatar} size={18} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {c.t !== null && <button onClick={() => onSeek(c.t!)} style={{ ...button, padding: '0 4px', marginRight: 4, color: '#000080', fontWeight: 700 }} title="Jump to this moment">{clock(c.t)}</button>}
+                  {c.t !== null && (
+                    <button
+                      onClick={() => onSeek(c.t!)}
+                      style={{ ...button, padding: '0 4px', marginRight: 4, color: '#000080', fontWeight: 700 }}
+                      title="Jump to this moment"
+                    >
+                      {clock(c.t)}
+                    </button>
+                  )}
                   <b>{displayName(byName[c.user], c.user)}</b> <span style={{ whiteSpace: 'pre-wrap' }}>{c.text}</span>
                   <span style={{ color: '#999', fontSize: 10, marginLeft: 6 }}>{new Date(c.at).toLocaleString()}</span>
                 </div>
-                {c.user === me && <button onClick={() => remove(c.id)} style={{ border: 'none', background: 'none', color: '#aaa', cursor: 'pointer' }} title="Delete">×</button>}
+                {c.user === me && (
+                  <button
+                    onClick={() => remove(c.id)}
+                    style={{ border: 'none', background: 'none', color: '#aaa', cursor: 'pointer' }}
+                    title="Delete"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
           </div>
           <div style={{ display: 'flex', gap: 4, padding: 4 }}>
-            <textarea value={text} rows={1} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); post(); } }}
-              placeholder={timed ? 'Comment at the current playback time...' : 'Add a comment...'} style={{ flex: 1, resize: 'none', fontFamily: 'Arial, sans-serif', fontSize: 12, border: '2px inset #808080', padding: 3 }} />
-            <button style={{ ...button, fontWeight: 700 }} onClick={post}>{timed ? 'Comment @ now' : 'Comment'}</button>
+            <textarea
+              value={text}
+              rows={1}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  post();
+                }
+              }}
+              placeholder={timed ? 'Comment at the current playback time...' : 'Add a comment...'}
+              style={{ flex: 1, resize: 'none', fontFamily: 'Arial, sans-serif', fontSize: 12, border: '2px inset #808080', padding: 3 }}
+            />
+            <button style={{ ...button, fontWeight: 700 }} onClick={post}>
+              {timed ? 'Comment @ now' : 'Comment'}
+            </button>
           </div>
         </>
       )}
@@ -128,7 +250,13 @@ const Comments: React.FC<{
 };
 
 /** Native audio player plus a clickable waveform with comment markers. */
-const AudioPreview: React.FC<{ src: string; name: string; media: React.MutableRefObject<HTMLMediaElement | null>; comments: Comment[]; onSeek: (t: number) => void }> = ({ src, name, media, comments, onSeek }) => {
+const AudioPreview: React.FC<{
+  src: string;
+  name: string;
+  media: React.MutableRefObject<HTMLMediaElement | null>;
+  comments: Comment[];
+  onSeek: (t: number) => void;
+}> = ({ src, name, media, comments, onSeek }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<number[] | null>(null);
   const [note, setNote] = useState('Drawing waveform...');
@@ -194,17 +322,43 @@ const AudioPreview: React.FC<{ src: string; name: string; media: React.MutableRe
   };
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: 8, padding: 12, boxSizing: 'border-box', background: '#c0c0c0' }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: 12,
+        boxSizing: 'border-box',
+        background: '#c0c0c0',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <img src={fileIcon(name, false, 32)} alt="" style={{ width: 32, height: 32 }} />
         <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
       </div>
       <div style={{ flex: 1, minHeight: 60, border: '2px inset #808080', background: '#000', position: 'relative' }}>
-        {peaks && <canvas ref={canvasRef} onPointerDown={seekTo} style={{ width: '100%', height: '100%', display: 'block', cursor: 'pointer' }} title="Click to jump · yellow lines are comments" />}
-        {note && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00c000' }}>{note}</div>}
+        {peaks && (
+          <canvas
+            ref={canvasRef}
+            onPointerDown={seekTo}
+            style={{ width: '100%', height: '100%', display: 'block', cursor: 'pointer' }}
+            title="Click to jump · yellow lines are comments"
+          />
+        )}
+        {note && (
+          <div
+            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00c000' }}
+          >
+            {note}
+          </div>
+        )}
       </div>
       <audio
-        ref={(el) => { media.current = el; }}
+        ref={(el) => {
+          media.current = el;
+        }}
         src={src}
         controls
         preload="metadata"
@@ -221,10 +375,29 @@ const TextPreview: React.FC<{ src: string }> = ({ src }) => {
   const [text, setText] = useState('Loading...');
   useEffect(() => {
     fetch(src).then(async (res) =>
-      setText(Number(res.headers.get('content-length')) > TEXT_MAX_BYTES ? 'File is too large to preview — use Download.' : await res.text())
+      setText(
+        Number(res.headers.get('content-length')) > TEXT_MAX_BYTES ? 'File is too large to preview — use Download.' : await res.text(),
+      ),
     );
   }, [src]);
-  return <pre style={{ margin: 0, padding: 8, width: '100%', height: '100%', overflow: 'auto', background: '#fff', whiteSpace: 'pre-wrap', fontFamily: 'Fixedsys Excelsior, monospace', fontSize: 13, boxSizing: 'border-box' }}>{text}</pre>;
+  return (
+    <pre
+      style={{
+        margin: 0,
+        padding: 8,
+        width: '100%',
+        height: '100%',
+        overflow: 'auto',
+        background: '#fff',
+        whiteSpace: 'pre-wrap',
+        fontFamily: 'Fixedsys Excelsior, monospace',
+        fontSize: 13,
+        boxSizing: 'border-box',
+      }}
+    >
+      {text}
+    </pre>
+  );
 };
 
 const NoPreview: React.FC<{ name: string }> = ({ name }) => (
@@ -235,8 +408,15 @@ const NoPreview: React.FC<{ name: string }> = ({ name }) => (
 );
 
 const stage: React.CSSProperties = {
-  flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-  background: '#808080', border: '2px inset #808080', margin: '0 2px', overflow: 'hidden',
+  flex: 1,
+  minHeight: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: '#808080',
+  border: '2px inset #808080',
+  margin: '0 2px',
+  overflow: 'hidden',
 };
 
 export default FilePreview;

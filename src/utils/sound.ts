@@ -74,7 +74,7 @@ class SoundSynthesizer {
     const ctx = this.getContext();
     if (!ctx) return;
 
-    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
     notes.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -103,10 +103,10 @@ class SoundSynthesizer {
     // Gb, Db, Eb, Ab, Db harmonic sequence
     const chords = [
       { freqs: [370.0, 554.37], time: 0, dur: 0.4 },
-      { freqs: [277.18, 415.30, 622.25], time: 0.3, dur: 0.5 },
+      { freqs: [277.18, 415.3, 622.25], time: 0.3, dur: 0.5 },
       { freqs: [311.13, 466.16, 739.99], time: 0.7, dur: 0.6 },
-      { freqs: [415.30, 622.25, 830.61], time: 1.2, dur: 0.8 },
-      { freqs: [277.18, 554.37, 830.61, 1108.73], time: 1.8, dur: 1.4 }
+      { freqs: [415.3, 622.25, 830.61], time: 1.2, dur: 0.8 },
+      { freqs: [277.18, 554.37, 830.61, 1108.73], time: 1.8, dur: 1.4 },
     ];
 
     chords.forEach(({ freqs, time, dur }) => {
