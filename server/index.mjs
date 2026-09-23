@@ -17,6 +17,7 @@ import { pipeline } from 'node:stream/promises';
 import { gunzipSync } from 'node:zlib';
 import { verifyToken } from '@clerk/backend';
 import sharp from 'sharp';
+import webpush from 'web-push';
 import { initializeCanvas, readPsd } from 'ag-psd';
 
 // ag-psd needs a pixel-buffer factory on the server (there's no canvas); we only read raw composite pixels.
@@ -632,13 +633,85 @@ async function missingFiles(dir) {
   return [...missing].slice(0, 50);
 }
 
-// ── Notifications: data/notifications/<user>.jsonl, shown in Profile > My Projects and the tray ──
+// ── Notifications: data/notifications/<user>.jsonl, shown in Profile > My Projects and the tray,
+// and pushed to every phone/computer the member turned notifications on for ──
 async function notify(username, text, extra = {}) {
   if (!/^[\w.-]{1,64}$/.test(username)) return;
   const n = { id: randomUUID().slice(0, 12), at: new Date().toISOString(), text, ...extra };
   await mkdir(join(DATA, 'notifications'), { recursive: true });
   await appendFile(join(DATA, 'notifications', `${username}.jsonl`), JSON.stringify(n) + '\n');
   emit('notify', n, (u) => u.username === username);
+  push(username, { title: extra.turn ? "Sanktuary: it's your turn" : 'Sanktuary', body: text, tag: extra.project }).catch(console.error);
+}
+
+// ── Push notifications (Web Push): data/push.json holds each member's subscribed devices ──
+// Keys are made once and kept in data/vapid.json; the public half goes to browsers when they subscribe.
+let pushSubs = null;
+let pushSaved = Promise.resolve();
+const loadPush = async () => (pushSubs ??= await readJson('push.json', {}));
+const savePush = () => (pushSaved = pushSaved.then(() => saveJson('push.json', pushSubs)).catch(console.error));
+let vapid = null;
+async function vapidKeys() {
+  if (vapid) return vapid;
+  vapid = await readJson('vapid.json', null);
+  if (!vapid) {
+    vapid = webpush.generateVAPIDKeys();
+    await mkdir(DATA, { recursive: true });
+    await saveJson('vapid.json', vapid);
+  }
+  webpush.setVapidDetails('https://sanktuary.studio', vapid.publicKey, vapid.privateKey);
+  return vapid;
+}
+
+/** Sends to every device the member subscribed; devices that unsubscribed or expired are dropped. */
+async function push(username, payload) {
+  const devices = (await loadPush())[username];
+  if (!devices?.length) return;
+  await vapidKeys();
+  const body = JSON.stringify({ url: '/', ...payload });
+  const results = await Promise.all(
+    devices.map((d) =>
+      webpush.sendNotification(d, body, { TTL: 24 * 3600 }).then(
+        () => true,
+        (err) => ![404, 410].includes(err.statusCode), // gone: forget it; anything else: keep and retry next time
+      ),
+    ),
+  );
+  if (results.includes(false)) {
+    pushSubs[username] = devices.filter((_, i) => results[i]);
+    savePush();
+  }
+}
+
+async function pushApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const action = url.pathname.split('/')[3];
+  if (req.method === 'GET' && action === 'key') return json(res, { key: (await vapidKeys()).publicKey });
+  const all = await loadPush();
+  const mine = (all[user.username] ||= []);
+  if (req.method === 'POST' && action === 'subscribe') {
+    const { subscription: s } = await jsonBody(req);
+    const ok = s && /^https:\/\//.test(s.endpoint) && typeof s.keys?.p256dh === 'string' && typeof s.keys?.auth === 'string';
+    if (!ok) fail(400, 'Bad subscription');
+    all[user.username] = [
+      ...mine.filter((d) => d.endpoint !== s.endpoint),
+      { endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } },
+    ].slice(-10);
+    savePush();
+    return json(res, { ok: true, devices: all[user.username].length });
+  }
+  if (req.method === 'POST' && action === 'unsubscribe') {
+    const { endpoint } = await jsonBody(req);
+    all[user.username] = mine.filter((d) => d.endpoint !== endpoint);
+    savePush();
+    return json(res, { ok: true });
+  }
+  if (req.method === 'POST' && action === 'test') {
+    if (!mine.length) fail(400, 'Turn notifications on first');
+    await push(user.username, { title: 'Sanktuary', body: 'Notifications are working on this device.' });
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown push action');
 }
 
 /** Resolve "a/b/c" inside a space, refusing anything that escapes it. */
@@ -1064,17 +1137,22 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   const dir = dirname(target);
   const part = join(dir, `.sk-upload-${id}`);
   if (!uploads.has(id)) {
-    // First chunk to arrive (any order): check space, then create the part file
-    const fs = status.drives.find((d) => d.id === space.drive)?.fs;
-    if (/^FAT/i.test(fs || '') && size > FAT32_MAX) fail(413, `This drive is ${fs}, which can't hold files over 4 GB`);
-    if (space.id === 'me' && space.quotaGB && (await folderSize(root)) + size > space.quotaGB * 1024 ** 3)
-      fail(413, `Your space is full (${space.quotaGB} GB limit)`);
-    uploads.set(id, { got: new Set(), done: false });
-    const made = await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
-    await writeFile(part, '', { flag: 'a' }); // create without truncating chunks that raced ahead
-    if (made) await setOwner(space, made.replace(/^\\\\\?\\/, ''), user); // Windows returns it as \\?\C:\...
+    // First chunk to arrive (any order) registers the upload straight away (no await before this, so chunks
+    // arriving together can't each start their own), then checks space and creates the part file.
+    const ready = (async () => {
+      const fs = status.drives.find((d) => d.id === space.drive)?.fs;
+      if (/^FAT/i.test(fs || '') && size > FAT32_MAX) fail(413, `This drive is ${fs}, which can't hold files over 4 GB`);
+      if (space.id === 'me' && space.quotaGB && (await folderSize(root)) + size > space.quotaGB * 1024 ** 3)
+        fail(413, `Your space is full (${space.quotaGB} GB limit)`);
+      const made = await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
+      await writeFile(part, '', { flag: 'a' });
+      if (made) await setOwner(space, made.replace(/^\\\\\?\\/, ''), user); // Windows returns it as \\?\C:\...
+    })();
+    uploads.set(id, { got: new Set(), done: false, ready });
+    ready.catch(() => uploads.delete(id)); // refused: a retry starts fresh
   }
   const up = uploads.get(id);
+  await up.ready; // every chunk waits until the part file exists
   await pipeline(req, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
   up.got.add(chunk);
   if (up.got.size < chunks || up.done) return json(res, { ok: true });
@@ -1528,11 +1606,12 @@ function staticFile(req, res, url) {
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
   // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their
   // names, so they can be cached forever; icons, sounds etc. for a day.
-  const cache = file.endsWith('index.html')
-    ? 'no-cache'
-    : url.pathname.startsWith('/assets/')
-      ? 'public, max-age=31536000, immutable'
-      : 'public, max-age=86400';
+  const cache =
+    file.endsWith('index.html') || file.endsWith('sw.js')
+      ? 'no-cache'
+      : url.pathname.startsWith('/assets/')
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=86400';
   res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': cache });
   return pipeline(createReadStream(file), res);
 }
@@ -1744,6 +1823,17 @@ async function chat(req, res, url) {
     await mkdir(CHAT(), { recursive: true });
     await appendFile(join(CHAT(), `${channel}.jsonl`), JSON.stringify(msg) + '\n');
     emit('message', msg, audience);
+    // A DM also reaches the other person's phone when they don't have Sanktuary open
+    const other =
+      isDm &&
+      channel
+        .split('~')
+        .slice(1)
+        .find((n) => n !== user.username);
+    if (other && !tabs.has(other))
+      push(other, { title: `Message from ${user.username}`, body: text.slice(0, 200) || 'Sent you a file', tag: channel }).catch(
+        console.error,
+      );
     return json(res, msg);
   }
   if (sub === 'typing' && req.method === 'POST') {
@@ -1882,6 +1972,7 @@ const routes = [
   ['/api/activity', activity],
   ['/api/projects', projectsApi],
   ['/api/links', linksApi],
+  ['/api/push', pushApi],
   ['/s/', publicShare],
 ];
 

@@ -260,6 +260,27 @@ try {
   );
   check('made-up token -> 404', (await anon('/s/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/info')).status === 404);
 
+  // Push notifications
+  const key = JSON.parse((await call('bob', '/api/push/key')).text).key;
+  check('push key is a P-256 public key', typeof key === 'string' && Buffer.from(key, 'base64url').length === 65);
+  check('push key is kept, not remade', JSON.parse((await call('carol', '/api/push/key')).text).key === key);
+  check('push needs a login', (await call(null, '/api/push/key')).status === 401);
+  check(
+    'bad subscription refused',
+    (await call('bob', '/api/push/subscribe', 'POST', { subscription: { endpoint: 'http://evil' } })).status === 400,
+  );
+  check('test before subscribing -> 400', (await call('bob', '/api/push/test', 'POST')).status === 400);
+  const sub = { endpoint: 'https://127.0.0.1:9/push/bob', keys: { p256dh: 'BPk', auth: 'x' } };
+  check('subscribe works', JSON.parse((await call('bob', '/api/push/subscribe', 'POST', { subscription: sub })).text).devices === 1);
+  check(
+    'same device twice stays one',
+    JSON.parse((await call('bob', '/api/push/subscribe', 'POST', { subscription: sub })).text).devices === 1,
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  const devices = JSON.parse(readFileSync(join(dir, 'data', 'push.json'), 'utf8'));
+  check('devices stored per member', devices.bob?.length === 1 && !devices.carol?.length);
+  check('unsubscribe works', (await call('bob', '/api/push/unsubscribe', 'POST', { endpoint: sub.endpoint })).status === 200);
+
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
   const zipBytes = Buffer.from(await zip.arrayBuffer());

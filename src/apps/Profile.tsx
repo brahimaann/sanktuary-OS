@@ -9,6 +9,7 @@ import { dmId } from './Chat';
 import Avatar from './Avatar';
 import { formatSize } from './fileTypes';
 import { MyProjects } from './ProjectPanel';
+import PushSettings from '../components/PushSettings';
 import { useOpenRef } from '../utils/refs';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 
@@ -200,6 +201,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
               : openRef({ kind: 'folder', title: w.name, app: w.space, dir: w.dir, name: w.name })
           }
         />
+        <PushSettings />
       </div>
       <div style={{ display: 'flex', gap: 6, padding: 6, alignItems: 'center' }}>
         <div style={{ ...statusBar, flex: 1, margin: 0 }}>{msg || 'Your profile shows in Teams, chats and the planner.'}</div>
