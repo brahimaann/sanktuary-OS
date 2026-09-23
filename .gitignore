@@ -27,3 +27,4 @@ dist-ssr
 .env
 data/
 cache/
+ops/nextcloud/.env

@@ -1,0 +1,33 @@
+# Nextcloud, reachable only over Tailscale at http://boroma:8080
+# Start/update: docker compose up -d   (run in this folder)
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db:/var/lib/postgresql/data
+
+  app:
+    image: nextcloud:apache
+    restart: unless-stopped
+    depends_on: [db]
+    ports:
+      - '100.67.139.44:8080:80' # Tailscale IP only, not your LAN or the internet
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: nextcloud
+      POSTGRES_USER: nextcloud
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      NEXTCLOUD_TRUSTED_DOMAINS: boroma boroma.tailab8c2c.ts.net 100.67.139.44
+      PHP_UPLOAD_LIMIT: 16G
+    volumes:
+      - nextcloud:/var/www/html # Nextcloud's own files, on the SSD
+      - '${DATA_SRC:-H:/}:${DATA_DST:-/mnt/h}' # the Seagate drive; drive-watch.ps1 swaps in ./offline when it is unplugged
+
+volumes:
+  db:
+  nextcloud:
