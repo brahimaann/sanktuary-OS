@@ -281,6 +281,67 @@ try {
   check('devices stored per member', devices.bob?.length === 1 && !devices.carol?.length);
   check('unsubscribe works', (await call('bob', '/api/push/unsubscribe', 'POST', { endpoint: sub.endpoint })).status === 200);
 
+  // Tracks: releases, track pages, private releases, notifications, deadlines
+  const album = JSON.parse(
+    (await call('alice', '/api/tracks/release', 'POST', { title: 'TSIMY', kind: 'Album', date: '2027-06-01' })).text,
+  );
+  const song = JSON.parse((await call('alice', '/api/tracks/track', 'POST', { release: album.id, title: 'Summer I Missed You' })).text);
+  check('track created and numbered', song.n === 1 && song.status === 'Idea');
+  const seen = JSON.parse((await call('bob', '/api/tracks')).text);
+  check(
+    'releases are open to members by default',
+    seen.releases.some((r) => r.id === album.id) && seen.tracks.some((t) => t.id === song.id),
+  );
+  check('bad date refused', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { deadline: 'next week' })).status === 400);
+  check(
+    'only https links',
+    (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { links: { bandlab: 'javascript:alert(1)' } })).status === 400,
+  );
+  const edited = JSON.parse(
+    (
+      await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', {
+        status: 'Mixing',
+        bpm: '102',
+        bounce: { space: 'up', path: 'Song B/Samples/kick.wav' },
+        links: { bandlab: 'https://www.bandlab.com/post/abc' },
+      })
+    ).text,
+  );
+  check(
+    'members can edit a track',
+    edited.status === 'Mixing' && edited.bpm === '102' && edited.links.bandlab && edited.bounce.path.endsWith('kick.wav'),
+  );
+  check(
+    'file links cannot climb out',
+    (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { stems: { space: 'up', path: '../x' } })).status === 400,
+  );
+  const aliceTrackNotes = JSON.parse((await call('alice', '/api/projects?notifications')).text);
+  check(
+    'followers hear about status and new bounce',
+    aliceTrackNotes.some((n) => /now "Mixing"/.test(n.text)) && aliceTrackNotes.some((n) => /New bounce/.test(n.text)),
+  );
+  const soon = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { deadline: soon });
+  check(
+    'deadline 2 days out warns followers',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /is due in 2 days/.test(n.text)),
+  );
+  check('bob cannot hide alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { members: [] })).status === 403);
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { members: ['bob'] });
+  check(
+    'private release hidden from others',
+    !JSON.parse((await call('carol', '/api/tracks')).text).releases.some((r) => r.id === album.id),
+  );
+  check(
+    'private release: carol cannot open its track',
+    (await call('carol', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '1' })).status === 404,
+  );
+  check(
+    'listed member still sees it',
+    JSON.parse((await call('bob', '/api/tracks')).text).tracks.some((t) => t.id === song.id),
+  );
+  check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
+
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
   const zipBytes = Buffer.from(await zip.arrayBuffer());

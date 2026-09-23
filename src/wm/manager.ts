@@ -28,7 +28,8 @@ export type AppType =
   | 'teams'
   | 'chat'
   | 'profile'
-  | 'planner';
+  | 'planner'
+  | 'tracks';
 
 export interface WindowInstance {
   id: string;
@@ -105,7 +106,7 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
       if (spec.appType === 'notepad') {
         computedWidth = Math.max(320, Math.round(desktopWidth * 0.65));
         computedHeight = Math.max(240, Math.round(desktopHeight * 0.6));
-      } else if (spec.appType === 'canvas' || spec.appType === 'planner') {
+      } else if (spec.appType === 'canvas' || spec.appType === 'planner' || spec.appType === 'tracks') {
         computedWidth = Math.max(600, Math.round(desktopWidth * 0.9));
         computedHeight = Math.max(420, Math.round(desktopHeight * 0.85));
       } else if (spec.appType === 'explorer' || spec.appType === 'team-files') {

@@ -109,6 +109,7 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
     width: 560,
     height: 420,
   },
+  { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
   { id: 'teams', title: 'Sanktuary Teams', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
 ];
 

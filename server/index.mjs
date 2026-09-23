@@ -1069,6 +1069,196 @@ async function publicShare(req, res, url) {
   fail(404, 'Not found');
 }
 
+// ── /api/tracks: releases (album / EP / single) and their track pages — data/tracks.json ──
+// A track points at files in the spaces (current bounce, project folder, stems folder) rather than holding
+// them, so playing or opening them still goes through the normal space rights. Releases are open to every
+// member unless `members` lists who may see them (owner + admins always can), like boards.
+const TRACK_STATUSES = ['Idea', 'Writing', 'Recording', 'Mixing', 'Mastering', 'Done'];
+const RELEASE_KINDS = ['Album', 'EP', 'Single'];
+const TRACK_TEXT = { title: 80, bpm: 10, key: 20, credits: 2000, notes: 4000 };
+const TRACK_LINKS = ['bandlab', 'untitled', 'soundcloud', 'other'];
+let tracksDb = null;
+let tracksSaved = Promise.resolve();
+const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { releases: {}, tracks: {} }));
+const saveTracks = () => (tracksSaved = tracksSaved.then(() => saveJson('tracks.json', tracksDb)).catch(console.error));
+const canSeeRelease = (user, r) =>
+  !r.deleted && (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
+const fileRef = (v) =>
+  v === null
+    ? null
+    : v && typeof v.space === 'string' && typeof v.path === 'string' && !v.path.split('/').includes('..')
+      ? { space: v.space.slice(0, 64), path: v.path.slice(0, 500) }
+      : fail(400, 'Bad file link');
+const dateOrNull = (v) => (v === null || v === '' ? null : /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fail(400, 'Dates look like 2027-06-01'));
+
+async function tracksApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const db = await loadTracks();
+  const [, , , what, id] = url.pathname.split('/'); // /api/tracks/<release|track>/<id>
+  const me = user.username;
+  const changed = (release) => {
+    saveTracks();
+    emit('tracks', { release: release.id }, (u) =>
+      canSeeRelease({ username: u.username, admin: cfg.admins.includes(u.username) }, release),
+    );
+  };
+
+  if (req.method === 'GET' && !what) {
+    const releases = Object.values(db.releases).filter((r) => canSeeRelease(user, r));
+    const ids = new Set(releases.map((r) => r.id));
+    const tracks = Object.values(db.tracks)
+      .filter((t) => !t.deleted && ids.has(t.release))
+      .map((t) => ({ ...t, following: t.followers.includes(me), followers: t.followers.length }));
+    return json(res, { releases, tracks, statuses: TRACK_STATUSES, kinds: RELEASE_KINDS });
+  }
+
+  if (what === 'release') {
+    if (req.method === 'POST' && !id) {
+      const input = await jsonBody(req);
+      const title =
+        String(input.title || '')
+          .trim()
+          .slice(0, 80) || fail(400, 'Give the release a title');
+      const r = {
+        id: randomUUID().slice(0, 10),
+        title,
+        kind: RELEASE_KINDS.includes(input.kind) ? input.kind : 'Album',
+        date: dateOrNull(input.date ?? null),
+        cover: null,
+        members: null,
+        owner: me,
+        created: new Date().toISOString(),
+      };
+      db.releases[r.id] = r;
+      changed(r);
+      return json(res, r);
+    }
+    const r = (db.releases[id] && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
+    if (req.method === 'PATCH') {
+      const input = await jsonBody(req);
+      if (input.title !== undefined) r.title = String(input.title).trim().slice(0, 80) || r.title;
+      if (input.kind !== undefined) r.kind = RELEASE_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+      if (input.date !== undefined) r.date = dateOrNull(input.date);
+      if (input.cover !== undefined) r.cover = fileRef(input.cover);
+      if (input.members !== undefined) {
+        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
+        r.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
+      }
+      changed(r);
+      return json(res, r);
+    }
+    if (req.method === 'DELETE') {
+      if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can delete it');
+      r.deleted = new Date().toISOString(); // kept in the file, just hidden: recoverable
+      changed(r);
+      return json(res, { ok: true });
+    }
+  }
+
+  if (what === 'track') {
+    if (req.method === 'POST' && !id) {
+      const input = await jsonBody(req);
+      const r =
+        (db.releases[input.release] && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
+        fail(404, 'No such release');
+      const n = Object.values(db.tracks).filter((t) => t.release === r.id && !t.deleted).length + 1;
+      const t = {
+        id: randomUUID().slice(0, 10),
+        release: r.id,
+        n,
+        title:
+          String(input.title || '')
+            .trim()
+            .slice(0, 80) || `Track ${n}`,
+        status: 'Idea',
+        bpm: '',
+        key: '',
+        credits: '',
+        notes: '',
+        deadline: null,
+        bounce: null,
+        project: null,
+        stems: null,
+        links: {},
+        followers: [me],
+        history: [{ at: new Date().toISOString(), user: me, action: 'added the track' }],
+        updated: new Date().toISOString(),
+        updatedBy: me,
+      };
+      db.tracks[t.id] = t;
+      changed(r);
+      return json(res, t);
+    }
+    const t = db.tracks[id];
+    const r =
+      (t && !t.deleted && db.releases[t.release] && canSeeRelease(user, db.releases[t.release]) && db.releases[t.release]) ||
+      fail(404, 'No such track');
+    if (req.method === 'PATCH') {
+      const input = await jsonBody(req);
+      const log = (action) => (t.history = [{ at: new Date().toISOString(), user: me, action }, ...t.history].slice(0, 100));
+      const news = [];
+      for (const [k, max] of Object.entries(TRACK_TEXT)) if (input[k] !== undefined) t[k] = String(input[k] ?? '').slice(0, max);
+      if (input.n !== undefined) t.n = Math.max(1, Math.min(99, Number(input.n) || t.n));
+      if (input.deadline !== undefined) {
+        t.deadline = dateOrNull(input.deadline);
+        t.alerted = null;
+        log(t.deadline ? `set the deadline to ${t.deadline}` : 'cleared the deadline');
+      }
+      if (input.status !== undefined && input.status !== t.status) {
+        t.status = TRACK_STATUSES.includes(input.status) ? input.status : fail(400, 'Bad status');
+        log(`moved it to ${t.status}`);
+        news.push(`${t.title} is now "${t.status}" (${me}).`);
+      }
+      for (const k of ['bounce', 'project', 'stems'])
+        if (input[k] !== undefined) {
+          t[k] = fileRef(input[k]);
+          log(t[k] ? `set the ${k} to ${t[k].path}` : `removed the ${k}`);
+          if (k === 'bounce' && t[k]) news.push(`New bounce of ${t.title}: ${t[k].path.split('/').pop()} (${me}).`);
+        }
+      if (input.links !== undefined) {
+        for (const k of TRACK_LINKS) {
+          const v = String(input.links?.[k] ?? '').trim();
+          if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
+          if (v) t.links[k] = v.slice(0, 300);
+          else delete t.links[k];
+        }
+      }
+      if (input.follow !== undefined) t.followers = t.followers.filter((u) => u !== me).concat(input.follow ? [me] : []);
+      t.updated = new Date().toISOString();
+      t.updatedBy = me;
+      changed(r);
+      for (const text of news) for (const u of t.followers) if (u !== me) await notify(u, text, { track: t.id });
+      if (input.deadline) await trackDeadlines(); // a deadline set 1-3 days out warns right away
+      return json(res, { ...t, following: t.followers.includes(me), followers: t.followers.length });
+    }
+    if (req.method === 'DELETE') {
+      if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can remove tracks');
+      t.deleted = new Date().toISOString();
+      changed(r);
+      return json(res, { ok: true });
+    }
+  }
+  fail(404, 'Unknown tracks action');
+}
+
+/** Deadline reminders: 3 days before and on the day before, to everyone following the track. */
+async function trackDeadlines() {
+  const db = await loadTracks();
+  const today = new Date().toISOString().slice(0, 10);
+  for (const t of Object.values(db.tracks)) {
+    if (t.deleted || !t.deadline || t.status === 'Done' || !db.releases[t.release] || db.releases[t.release].deleted) continue;
+    const days = Math.round((Date.parse(t.deadline) - Date.parse(today)) / 864e5);
+    const stage = days <= 1 ? 'd1' : days <= 3 ? 'd3' : null;
+    if (!stage || t.alerted === `${stage}:${t.deadline}` || (stage === 'd3' && t.alerted === `d1:${t.deadline}`) || days < 0) continue;
+    t.alerted = `${stage}:${t.deadline}`;
+    const when = days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
+    for (const u of t.followers) await notify(u, `${t.title} is due ${when} (${t.deadline}). Status: ${t.status}.`, { track: t.id });
+    saveTracks();
+  }
+}
+setInterval(() => trackDeadlines().catch(console.error), 3.6e6).unref();
+
 /** What the file window and Profile need to show about a project. */
 const projectView = (p, me) => ({
   kind: p.kind,
@@ -1973,6 +2163,7 @@ const routes = [
   ['/api/projects', projectsApi],
   ['/api/links', linksApi],
   ['/api/push', pushApi],
+  ['/api/tracks', tracksApi],
   ['/s/', publicShare],
 ];
 

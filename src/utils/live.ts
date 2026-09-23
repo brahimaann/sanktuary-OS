@@ -5,7 +5,20 @@ import { useEffect, useRef, useState } from 'react';
  * profile changes, comments and activity. Authenticated by the sk_session cookie that /api/me sets.
  */
 type Handler = (data: any) => void;
-const EVENTS = ['hello', 'presence', 'message', 'unmessage', 'typing', 'channel', 'profile', 'comment', 'uncomment', 'activity', 'notify'];
+const EVENTS = [
+  'hello',
+  'presence',
+  'message',
+  'unmessage',
+  'typing',
+  'channel',
+  'profile',
+  'comment',
+  'uncomment',
+  'activity',
+  'notify',
+  'tracks',
+];
 const handlers = new Map<string, Set<Handler>>();
 let source: EventSource | null = null;
 let retry: ReturnType<typeof setTimeout> | undefined;
