@@ -51,7 +51,7 @@ interface Health {
   deploy: { at: string; ok: boolean; commit: string; message: string } | null;
 }
 
-const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups'] as const;
+const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Log'] as const;
 const RIGHTS: Rights[] = ['none', 'view', 'upload', 'edit'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
@@ -63,6 +63,7 @@ const AdminPanel: React.FC = () => {
   const [draft, setDraft] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [msg, setMsg] = useState('');
+  const [picking, setPicking] = useState<number | null>(null); // space whose folder is being browsed
 
   const load = useCallback(async () => {
     try {
@@ -207,8 +208,8 @@ const AdminPanel: React.FC = () => {
           <>
             <p style={hint}>
               A space is a folder on a connected drive that you share with the team. Rights: <b>view</b> (browse, preview, download) ·{' '}
-              <b>upload</b> (+ add files and folders) · <b>edit</b> (+ replace, rename, delete to trash). Admins always have edit. Removing
-              a space never deletes files.
+              <b>upload</b> (+ add files and folders) · <b>edit</b> (+ replace, rename). Members can only delete (to trash) what they added
+              themselves; admins can delete anything. Removing a space never deletes files.
             </p>
             {draft.spaces.map((s, i) => (
               <fieldset key={i} style={fieldset}>
@@ -257,6 +258,9 @@ const AdminPanel: React.FC = () => {
                       }
                     />
                   </label>
+                  <button style={button} onClick={() => setPicking(i)}>
+                    Browse...
+                  </button>
                   <label>
                     Everyone{' '}
                     <RightsSelect
@@ -325,8 +329,24 @@ const AdminPanel: React.FC = () => {
             >
               Add space...
             </button>
+            {picking !== null && draft.spaces[picking] && (
+              <FolderPicker
+                drive={draft.spaces[picking].drive}
+                driveName={driveName(draft.spaces[picking].drive)}
+                start={draft.spaces[picking].path}
+                onPick={(path) => {
+                  if (path !== null)
+                    edit((c) => {
+                      c.spaces[picking].path = path;
+                    });
+                  setPicking(null);
+                }}
+              />
+            )}
           </>
         )}
+
+        {tab === 'Log' && <LogTab />}
 
         {tab === 'Members' && (
           <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
@@ -648,6 +668,142 @@ const MembersTab: React.FC<{
   );
 };
 
+/** Walk a connected drive's folders and pick the one a space shares. onPick(null) = cancel. */
+const FolderPicker: React.FC<{ drive: string; driveName: string; start: string; onPick: (path: string | null) => void }> = ({
+  drive,
+  driveName,
+  start,
+  onPick,
+}) => {
+  const api = useApi();
+  const [path, setPath] = useState<string[]>(start.split(/[\\/]/).filter(Boolean));
+  const [folders, setFolders] = useState<string[] | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    setFolders(null);
+    api(`/api/admin/folders?drive=${encodeURIComponent(drive)}&path=${encodeURIComponent(path.join('/'))}`).then(
+      (r) => {
+        setFolders(r.folders);
+        setErr('');
+      },
+      (e) => setErr(e.message),
+    );
+  }, [api, drive, path]);
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.3)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10,
+      }}
+    >
+      <div
+        style={{
+          background: '#c0c0c0',
+          border: '2px outset #fff',
+          padding: 8,
+          width: 360,
+          maxWidth: '90%',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+      >
+        <b>Choose the folder to share</b>
+        <div style={{ ...input, marginLeft: 0 }}>
+          {driveName}:\{path.join('\\')}
+        </div>
+        <div style={{ height: 240, overflow: 'auto', background: '#fff', border: '2px inset #808080' }}>
+          {path.length > 0 && (
+            <div style={pickRow} onClick={() => setPath(path.slice(0, -1))}>
+              ⬑ ..
+            </div>
+          )}
+          {err && <div style={{ padding: 6, color: '#a00000' }}>{err}</div>}
+          {!err && !folders && <div style={{ padding: 6 }}>Loading...</div>}
+          {folders?.map((f) => (
+            <div key={f} style={pickRow} onClick={() => setPath([...path, f])}>
+              📁 {f}
+            </div>
+          ))}
+          {folders?.length === 0 && <div style={{ padding: 6, color: '#666' }}>No folders inside.</div>}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={button} onClick={() => onPick(null)}>
+            Cancel
+          </button>
+          <button style={{ ...button, fontWeight: 700 }} disabled={!!err} onClick={() => onPick(path.join('/'))}>
+            {path.length ? 'Share this folder' : 'Share the whole drive'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type Transfer = { at: string; user: string; action: string; space: string; path: string; bytes: number; ip?: string };
+
+/** Console-style log of every upload and download, newest first. */
+const LogTab: React.FC = () => {
+  const api = useApi();
+  const [log, setLog] = useState<Transfer[] | null>(null);
+  const [filter, setFilter] = useState('');
+  const [err, setErr] = useState('');
+  const load = useCallback(() => api('/api/admin/log').then(setLog, (e) => setErr(e.message)), [api]);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 10_000);
+    return () => clearInterval(t);
+  }, [load]);
+  const f = filter.toLowerCase();
+  const lines = (log || []).filter((e) => !f || `${e.user} ${e.action} ${e.space} ${e.path}`.toLowerCase().includes(f));
+  return (
+    <>
+      <div style={{ ...row, marginBottom: 8 }}>
+        <span style={{ flex: 1 }}>Every upload and download (last 500). Refreshes every 10 seconds.</span>
+        <input style={input} placeholder="Filter: name, file, space..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button style={button} onClick={load}>
+          Refresh
+        </button>
+      </div>
+      <div
+        style={{
+          background: '#000',
+          color: '#c0c0c0',
+          fontFamily: 'Consolas, "Courier New", monospace',
+          fontSize: 12,
+          padding: 8,
+          border: '2px inset #808080',
+          height: 'calc(100% - 40px)',
+          minHeight: 200,
+          overflow: 'auto',
+          whiteSpace: 'pre',
+        }}
+      >
+        {err && <div style={{ color: '#ff5555' }}>{err}</div>}
+        {!log && !err && 'Loading...'}
+        {log && !lines.length && 'Nothing logged yet.'}
+        {lines.map((e, i) => (
+          <div key={i}>
+            <span style={{ color: '#808080' }}>{new Date(e.at).toLocaleString()}</span>{' '}
+            <span style={{ color: '#ffff55' }}>{e.user.padEnd(12)}</span>{' '}
+            <span style={{ color: /upload|replace/.test(e.action) ? '#55ff55' : '#55ffff' }}>{e.action.padEnd(12)}</span> {e.space} \{' '}
+            {e.path.split('/').join('\\')}{' '}
+            <span style={{ color: '#808080' }}>
+              ({formatSize(e.bytes)}
+              {e.ip ? ` · ${e.ip}` : ''})
+            </span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+};
+
 const RightsSelect: React.FC<{ value: string; allowDefault?: boolean; onChange: (r: any) => void }> = ({
   value,
   allowDefault,
@@ -709,6 +865,7 @@ const input: React.CSSProperties = {
   marginLeft: 4,
 };
 const fieldset: React.CSSProperties = { border: '2px groove #fff', margin: '0 0 8px', padding: '4px 8px 8px' };
+const pickRow: React.CSSProperties = { padding: '3px 6px', cursor: 'pointer', borderBottom: '1px solid #eee' };
 const row: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' };
 
 export default AdminPanel;

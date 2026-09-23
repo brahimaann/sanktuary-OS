@@ -8,10 +8,11 @@
 // drive-watch.ps1 writes data/status.json (drives + letters, PC, Docker, Tailscale) every minute.
 import http from 'node:http';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { appendFile, cp, mkdir, readdir, readFile, rename, stat, statfs, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { verifyToken } from '@clerk/backend';
 import sharp from 'sharp';
@@ -253,11 +254,12 @@ async function files(req, res, url) {
   const parts = rest.map(decodeURIComponent);
   if (parts.some((p) => /[:\x00-\x1f]/.test(p))) fail(400, 'Bad path');
   const target = resolve(root, ...parts);
-  if (target !== root && !target.startsWith(root + sep)) fail(400, 'Bad path');
+  if (!inside(root, target)) fail(400, 'Bad path');
   const rel = relative(root, target);
   const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
   const q = url.searchParams;
 
+  const transfer = (action, bytes, path = rel) => logTransfer(req, user, action, space, path.split(sep).join('/'), bytes);
   if (req.method === 'GET') {
     need('view');
     if (q.has('list'))
@@ -267,16 +269,18 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
-    if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))));
+    if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))), transfer);
     if (q.has('thumb')) return thumb(res, target);
     if (q.has('preview')) return thumb(res, target, 2400);
-    return stream(req, res, q, target);
+    if (q.has('zip')) return zipFolder(res, target, target === root ? space.name : basename(target), transfer);
+    return stream(req, res, q, target, transfer);
   }
   const log = (action, extra = {}) =>
     space.id !== 'me' && logActivity(user, action, { space: space.id, spaceName: space.name, path: rel.split(sep).join('/'), ...extra });
   if (req.method === 'POST' && q.has('mkdir')) {
     need('upload');
     await mkdir(target);
+    await setOwner(space, target, user);
     log('made folder');
     return json(res, { ok: true });
   }
@@ -285,6 +289,7 @@ async function files(req, res, url) {
     const to = join(dirname(target), safeName(q.get('rename')));
     if (existsSync(to)) fail(409, 'Already exists');
     await rename(target, to);
+    await moveOwners(space, target, to);
     log('renamed', { to: q.get('rename') });
     return json(res, { ok: true });
   }
@@ -298,18 +303,99 @@ async function files(req, res, url) {
     return json(res, { ok: true });
   }
   if (req.method === 'DELETE') {
-    need('edit');
+    need('upload');
     if (target === root) fail(400, "Can't delete the space itself");
+    // Members can only bin what they added themselves; admins and personal spaces are unrestricted
+    if (!user.admin && space.id !== 'me' && !(await ownsAll(space, target, user.username)))
+      fail(403, 'You can only delete things you added. Ask an admin to remove this.');
     const bin = join(root, '.sk-trash', stamp(), rel); // recoverable: nothing is ever really deleted
     await mkdir(dirname(bin), { recursive: true });
     await rename(target, bin);
     log('deleted');
     return json(res, { ok: true });
   }
-  if (req.method === 'PUT') return upload(req, res, q, { status, space, root, target, need, log });
+  if (req.method === 'PUT') return upload(req, res, q, { status, space, root, target, need, log, user, transfer });
   fail(405, 'Not allowed');
 }
 
+// ── Who added what: data/owners.json, "<drive id>|<path on drive>" -> username ──
+// Keyed by drive + path (not space) so two spaces over the same folder agree, and letters can change.
+// Files that were already on the drive have no owner, so only admins can delete them.
+let owners = null;
+let ownersSaved = Promise.resolve();
+const ownerKey = (space, file) => `${space.drive}|${relative(space.driveRoot, file).split(sep).join('/').toLowerCase()}`;
+const loadOwners = async () => (owners ??= await readJson('owners.json', {}));
+const saveOwners = () => (ownersSaved = ownersSaved.then(() => saveJson('owners.json', owners)).catch(console.error));
+
+async function setOwner(space, file, user) {
+  (await loadOwners())[ownerKey(space, file)] = user.username;
+  return saveOwners();
+}
+
+async function moveOwners(space, from, to) {
+  const o = await loadOwners();
+  const [a, b] = [ownerKey(space, from), ownerKey(space, to)];
+  for (const k of Object.keys(o))
+    if (k === a || k.startsWith(a + '/')) {
+      o[b + k.slice(a.length)] = o[k];
+      delete o[k];
+    }
+  return saveOwners();
+}
+
+/** Did this member add the file, or the folder and every file in it? (Windows/Sanktuary clutter is ignored.) */
+async function ownsAll(space, target, username) {
+  const o = await loadOwners();
+  if (o[ownerKey(space, target)] !== username) return false;
+  if (!(await stat(target)).isDirectory()) return true;
+  for (const e of await readdir(target, { withFileTypes: true, recursive: true })) {
+    const file = join(e.parentPath, e.name);
+    if (
+      e.isDirectory() ||
+      relative(target, file)
+        .split(sep)
+        .some((p) => HIDDEN.test(p))
+    )
+      continue;
+    if (o[ownerKey(space, file)] !== username) return false;
+  }
+  return true;
+}
+
+// ── Transfer log: data/transfers.jsonl, every upload and download (Admin Panel > Log) ──
+function logTransfer(req, user, action, space, path, bytes) {
+  const entry = {
+    at: new Date().toISOString(),
+    user: user.username,
+    action,
+    space: space.name,
+    path,
+    bytes,
+    ip: req.headers['cf-connecting-ip'] || req.socket.remoteAddress,
+  };
+  appendFile(join(DATA, 'transfers.jsonl'), JSON.stringify(entry) + '\n').catch(console.error);
+}
+
+// A folder as one .zip (e.g. an Ableton project with its Samples), streamed by Windows' own tar so nothing
+// is staged on disk. Stored, not compressed: audio barely shrinks and this keeps it fast.
+const TAR = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+async function zipFolder(res, dir, name, transfer) {
+  if (!(await stat(dir).catch(() => null))?.isDirectory()) fail(404, 'Not a folder');
+  const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
+  if (!items.length) fail(404, 'This folder is empty');
+  const tar = spawn(TAR, ['--format', 'zip', '--options', 'zip:compression=store', '--exclude', '.sk-*', '-cf', '-', '-C', dir, ...items]);
+  tar.stderr.resume();
+  res.on('close', () => tar.kill());
+  res.writeHead(200, {
+    'content-type': 'application/zip',
+    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name + '.zip')}`,
+  });
+  transfer('downloaded folder (zip)', await folderSize(dir));
+  return pipeline(tar.stdout, res);
+}
+
+/** Is path p the folder root or somewhere under it? (A drive root like G:\ already ends in a separator.) */
+const inside = (root, p) => p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 const safeName = (name) => (/^[^/\\:\x00-\x1f]+$/.test(name || '') && name !== '..' && name !== '.' ? name : fail(400, 'Bad name'));
 
@@ -351,7 +437,7 @@ const MAX_CHUNK = 95 * 1024 ** 2;
 const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
 const BIG_BUFFER = { highWaterMark: 1024 * 1024 }; // 1 MB disk reads/writes instead of 64 KB
 
-async function upload(req, res, q, { status, space, root, target, need, log }) {
+async function upload(req, res, q, { status, space, root, target, need, log, user, transfer }) {
   need(q.get('replace') ? 'edit' : 'upload');
   const id = q.get('upload') || '';
   const chunk = Number(q.get('chunk') || 0);
@@ -370,8 +456,9 @@ async function upload(req, res, q, { status, space, root, target, need, log }) {
     if (space.id === 'me' && space.quotaGB && (await folderSize(root)) + size > space.quotaGB * 1024 ** 3)
       fail(413, `Your space is full (${space.quotaGB} GB limit)`);
     uploads.set(id, { got: new Set(), done: false });
-    await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
+    const made = await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
     await writeFile(part, '', { flag: 'a' }); // create without truncating chunks that raced ahead
+    if (made) await setOwner(space, made.replace(/^\\\\\?\\/, ''), user); // Windows returns it as \\?\C:\...
   }
   const up = uploads.get(id);
   await pipeline(req, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
@@ -384,13 +471,17 @@ async function upload(req, res, q, { status, space, root, target, need, log }) {
   if (q.get('replace')) await keepVersion(root, target);
   else name = freeName(dir, name);
   await rename(part, join(dir, name));
+  if (!q.get('replace')) await setOwner(space, join(dir, name), user);
   log(q.get('replace') ? 'replaced' : 'uploaded', { path: relative(root, join(dir, name)).split(sep).join('/') });
+  transfer(q.get('replace') ? 'replaced' : 'uploaded', size, relative(root, join(dir, name)));
   return json(res, { ok: true, name });
 }
 
-async function stream(req, res, q, file) {
+async function stream(req, res, q, file, transfer) {
   const s = await stat(file).catch(() => null);
   if (!s || s.isDirectory()) fail(404, 'Not found');
+  // Log each download/open once: players re-request ranges further into the file while seeking
+  if (transfer && !/^bytes=[1-9]/.test(req.headers.range || '')) transfer(q.has('download') ? 'downloaded' : 'opened', s.size);
   const type = MIME[extname(file).toLowerCase()] || 'application/octet-stream';
   const headers = { 'content-type': type, 'accept-ranges': 'bytes', 'last-modified': s.mtime.toUTCString() };
   if (q.has('download') || !SAFE_INLINE.test(type)) {
@@ -680,6 +771,30 @@ async function admin(req, res, url) {
     return json(res, { config: cfg, status: await readJson('status.json', null), backup: await readJson('backup.json', null), users });
   }
   if (req.method === 'GET' && action === 'health') return json(res, await health());
+  if (req.method === 'GET' && action === 'log') {
+    const lines = (await readFile(join(DATA, 'transfers.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean);
+    return json(
+      res,
+      lines
+        .slice(-500)
+        .map((l) => JSON.parse(l))
+        .reverse(),
+    );
+  }
+  if (req.method === 'GET' && action === 'folders') {
+    // Browse a connected drive's folders, to pick which part of it a space shares
+    const root = driveDir(cfg, await loadStatus(), url.searchParams.get('drive')) || fail(503, 'That drive is not connected');
+    const path = url.searchParams.get('path') || '';
+    const dir = resolve(root, path);
+    if (/[:\x00-\x1f]/.test(path) || !inside(resolve(root), dir)) fail(400, 'Bad path');
+    const entries = (await readdir(dir, { withFileTypes: true }).catch(() => null)) || fail(404, 'No such folder');
+    return json(res, {
+      folders: entries
+        .filter((e) => e.isDirectory() && !HIDDEN.test(e.name))
+        .map((e) => e.name)
+        .sort(),
+    });
+  }
   if (req.method === 'PUT' && action === 'config') {
     const next = validateConfig(await jsonBody(req), user);
     await saveJson('config.json', next);

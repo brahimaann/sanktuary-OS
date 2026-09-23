@@ -46,7 +46,7 @@ const srv = spawn(process.execPath, [SERVER], {
 let srvOut = '';
 srv.stdout.on('data', (d) => (srvOut += d));
 srv.stderr.on('data', (d) => (srvOut += d));
-await new Promise((r) => setTimeout(r, 1500));
+await new Promise((r) => srv.stdout.on('data', (d) => String(d).includes('sanktuary-os on') && r())); // wait until it's listening
 
 const B = 'http://127.0.0.1:3196';
 const cookie = (u) => {

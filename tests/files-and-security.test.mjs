@@ -29,6 +29,7 @@ writeFileSync(join(drive, 'team', 'docs', 'song.txt'), 'v1');
 writeFileSync(join(drive, 'team', 'evil.html'), '<script>alert(1)</script>');
 writeFileSync(join(drive, 'team', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 writeFileSync(join(drive, 'team', 'pic.png'), Buffer.from('89504e47', 'hex'));
+writeFileSync(join(drive, 'team', 'old.txt'), 'was on the drive before Sanktuary');
 const letter = drive.slice(0, 2); // e.g. C:
 const rel = drive.slice(3).split('\\').join('/');
 writeFileSync(
@@ -69,7 +70,7 @@ const srv = spawn(process.execPath, [SERVER], {
 let srvOut = '';
 srv.stdout.on('data', (d) => (srvOut += d));
 srv.stderr.on('data', (d) => (srvOut += d));
-await new Promise((r) => setTimeout(r, 1500));
+await new Promise((r) => srv.stdout.on('data', (d) => String(d).includes('sanktuary-os on') && r())); // wait until it's listening
 
 const B = 'http://127.0.0.1:3196';
 const cookie = (u) => {
@@ -111,7 +112,14 @@ try {
   check('no access -> space hidden', (await call('carol', '/api/files/up/?list')).status === 404);
   check('upload: can add', (await up('bob', 'up', 'docs/new.txt', 'new')).status === 200);
   check('upload: cannot replace', (await up('bob', 'up', 'docs/song.txt', 'v2', '&replace=1')).status === 403);
-  check('upload: cannot delete', (await call('bob', '/api/files/up/docs/new.txt', 'DELETE')).status === 403);
+  check("upload: cannot delete others' files", (await call('bob', '/api/files/up/docs/song.txt', 'DELETE')).status === 403);
+  check("edit: cannot delete others' files either", (await call('bob', '/api/files/ed/docs/song.txt', 'DELETE')).status === 403);
+  check("edit: cannot delete a folder holding others' files", (await call('bob', '/api/files/ed/docs', 'DELETE')).status === 403);
+  await call('bob', '/api/files/up/mine?mkdir', 'POST');
+  await up('bob', 'up', 'mine/a.txt', 'a');
+  check('upload: can delete own folder', (await call('bob', '/api/files/up/mine', 'DELETE')).status === 200);
+  await up('bob', 'up', 'drop/sub/b.txt', 'b'); // folder upload creates drop/sub for bob
+  check('upload: can delete own uploaded folder', (await call('bob', '/api/files/up/drop', 'DELETE')).status === 200);
   check(
     'edit: replace keeps version',
     (await up('bob', 'ed', 'docs/song.txt', 'v2', '&replace=1')).status === 200 &&
@@ -122,6 +130,27 @@ try {
     'edit: delete goes to trash',
     (await call('bob', '/api/files/ed/docs/new.txt', 'DELETE')).status === 200 && existsSync(join(drive, 'team', '.sk-trash')),
   );
+  check('admin: can delete anything', (await call('alice', '/api/files/ed/old.txt', 'DELETE')).status === 200);
+  await up('bob', 'up', 'renamed-me.txt', 'r');
+  await call('bob', '/api/files/ed/renamed-me.txt?rename=renamed.txt', 'POST');
+  check('rename keeps ownership', (await call('bob', '/api/files/up/renamed.txt', 'DELETE')).status === 200);
+
+  // Folder download as zip, transfer log, admin folder browser
+  const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
+  const zipBytes = Buffer.from(await zip.arrayBuffer());
+  check('folder downloads as zip', zip.status === 200 && zipBytes.subarray(0, 2).toString() === 'PK' && zipBytes.includes('song.txt'));
+  await call('carol', '/api/files/view/docs/song.txt?download');
+  const log = JSON.parse((await call('alice', '/api/admin/log')).text);
+  check(
+    'log has uploads and downloads',
+    log.some((e) => e.user === 'bob' && e.action === 'uploaded') &&
+      log.some((e) => e.user === 'carol' && e.action === 'downloaded' && e.path === 'docs/song.txt') &&
+      log.some((e) => e.action === 'downloaded folder (zip)'),
+  );
+  check('non-admin blocked from log', (await call('bob', '/api/admin/log')).status === 403);
+  const folders = JSON.parse((await call('alice', `/api/admin/folders?drive=d&path=${encodeURIComponent(rel + '/team')}`)).text).folders;
+  check('admin can browse drive folders', folders.includes('docs') && !folders.some((f) => f.startsWith('.sk-')));
+  check('folder browser blocks other drives', (await call('alice', '/api/admin/folders?drive=d&path=D%3A%2FWindows')).status === 400);
   check('disabled drive -> offline', (await call('alice', '/api/files/off/?list')).status === 503);
 
   // Path safety

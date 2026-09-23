@@ -317,11 +317,21 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             Rename
           </button>
         )}
-        {can('edit') && (
-          <button style={button} disabled={!pick} onClick={deleteSelected}>
+        {can('upload') && (
+          <button style={button} disabled={!pick} onClick={deleteSelected} title="You can delete what you added">
             Delete
           </button>
         )}
+        <button
+          style={button}
+          disabled={!pick}
+          title="Folders download as a .zip"
+          onClick={async () =>
+            pick && window.open(`${url([...path, pick.name])}?${pick.isDir ? 'zip' : 'download'}&t=${await getToken()}`, '_blank')
+          }
+        >
+          Download
+        </button>
         <button style={button} disabled={!pick || pick.isDir} onClick={showVersions}>
           Versions
         </button>
@@ -469,7 +479,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       </div>
       <div style={statusBar}>
         {status ||
-          `${entries.length} object(s) · ${{ none: '', view: 'view only', upload: 'you can upload', edit: 'full edit' }[rights]}${quota ? ` · ${formatSize(quota.used)} of ${formatSize(quota.quota)} used` : ''} — ${isTouch ? 'tap' : 'double-click'} to open${can('upload') ? ' · drag files here to upload' : ''}`}
+          `${entries.length} object(s) · ${{ none: '', view: 'view only', upload: 'you can upload and delete your own files', edit: 'full edit' }[rights]}${quota ? ` · ${formatSize(quota.used)} of ${formatSize(quota.quota)} used` : ''} — ${isTouch ? 'tap' : 'double-click'} to open${can('upload') ? ' · drag files here to upload' : ''}`}
       </div>
     </div>
   );
