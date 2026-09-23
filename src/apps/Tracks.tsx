@@ -57,7 +57,7 @@ const LINKS: [keyof Track['links'], string][] = [
   ['soundcloud', 'SoundCloud'],
   ['other', 'Other'],
 ];
-const daysUntil = (d: string) => Math.round((Date.parse(d) - Date.parse(new Date().toISOString().slice(0, 10))) / 864e5);
+const daysUntil = (d: string) => Math.round((Date.parse(d) - Date.parse(new Date().toLocaleDateString('en-CA'))) / 864e5);
 const due = (d: string) => {
   const n = daysUntil(d);
   return n < 0 ? `${-n} day(s) late` : n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;

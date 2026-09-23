@@ -320,7 +320,7 @@ try {
     'followers hear about status and new bounce',
     aliceTrackNotes.some((n) => /now "Mixing"/.test(n.text)) && aliceTrackNotes.some((n) => /New bounce/.test(n.text)),
   );
-  const soon = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 2 * 864e5).toLocaleDateString('en-CA');
   await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { deadline: soon });
   check(
     'deadline 2 days out warns followers',
@@ -341,6 +341,63 @@ try {
     JSON.parse((await call('bob', '/api/tracks')).text).tracks.some((t) => t.id === song.id),
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
+
+  // Timeline: visual projects and events, with Tracks dates merged in
+  const day = (n) => new Date(Date.now() + n * 864e5).toLocaleDateString('en-CA');
+  check('entry needs a date', (await call('bob', '/api/timeline', 'POST', { title: 'Shoot' })).status === 400);
+  check(
+    'end cannot be before start',
+    (await call('bob', '/api/timeline', 'POST', { title: 'X', start: day(5), end: day(2) })).status === 400,
+  );
+  const shoot = JSON.parse(
+    (
+      await call('bob', '/api/timeline', 'POST', {
+        title: 'Cover shoot',
+        kind: 'Shoot',
+        start: day(1),
+        people: ['bob', 'carol'],
+        location: 'Studio A',
+      })
+    ).text,
+  );
+  check('entry created', shoot.kind === 'Shoot' && shoot.people.includes('carol'));
+  const carolNotes = JSON.parse((await call('carol', '/api/projects?notifications')).text);
+  check(
+    'people put on it are told',
+    carolNotes.some((n) => /put you on "Cover shoot"/.test(n.text)),
+  );
+  check(
+    'day-before reminder goes out',
+    carolNotes.some((n) => /"Cover shoot" is tomorrow/.test(n.text) && /Studio A/.test(n.text)),
+  );
+  const aliceView = JSON.parse((await call('alice', '/api/timeline')).text);
+  check(
+    'everyone sees open entries',
+    aliceView.items.some((i) => i.id === shoot.id),
+  );
+  check(
+    'Tracks dates are on the timeline',
+    aliceView.items.some((i) => i.source === 'tracks' && /TSIMY.*out/.test(i.title)) && aliceView.items.some((i) => i.kind === 'Track due'),
+  );
+  check(
+    'private release dates stay private',
+    !JSON.parse((await call('carol', '/api/timeline')).text).items.some((i) => /TSIMY/.test(i.title)),
+  );
+  await call('carol', `/api/timeline/${shoot.id}`, 'PATCH', { status: 'In progress' });
+  check(
+    'status change reaches the others',
+    JSON.parse((await call('bob', '/api/projects?notifications')).text).some((n) => /"Cover shoot" is now In progress/.test(n.text)),
+  );
+  check('carol cannot hide bob’s entry', (await call('carol', `/api/timeline/${shoot.id}`, 'PATCH', { members: [] })).status === 403);
+  await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { members: [] }); // just bob (and admins)
+  check('private entry hidden from others', !JSON.parse((await call('carol', '/api/timeline')).text).items.some((i) => i.id === shoot.id));
+  check(
+    'admins still see private entries',
+    JSON.parse((await call('alice', '/api/timeline')).text).items.some((i) => i.id === shoot.id),
+  );
+  check('only https links', (await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { link: 'ftp://x' })).status === 400);
+  check('carol cannot delete it', [403, 404].includes((await call('carol', `/api/timeline/${shoot.id}`, 'DELETE')).status)); // 404 once it's private
+  check('owner deletes it', (await call('bob', `/api/timeline/${shoot.id}`, 'DELETE')).status === 200);
 
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });

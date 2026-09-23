@@ -1089,6 +1089,8 @@ const fileRef = (v) =>
     : v && typeof v.space === 'string' && typeof v.path === 'string' && !v.path.split('/').includes('..')
       ? { space: v.space.slice(0, 64), path: v.path.slice(0, 500) }
       : fail(400, 'Bad file link');
+/** Today as YYYY-MM-DD in the server's own time zone (the home PC's), not UTC, so evening dates don't jump a day. */
+const localDate = (d = new Date()) => d.toLocaleDateString('en-CA');
 const dateOrNull = (v) => (v === null || v === '' ? null : /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fail(400, 'Dates look like 2027-06-01'));
 
 async function tracksApi(req, res, url) {
@@ -1245,7 +1247,7 @@ async function tracksApi(req, res, url) {
 /** Deadline reminders: 3 days before and on the day before, to everyone following the track. */
 async function trackDeadlines() {
   const db = await loadTracks();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   for (const t of Object.values(db.tracks)) {
     if (t.deleted || !t.deadline || t.status === 'Done' || !db.releases[t.release] || db.releases[t.release].deleted) continue;
     const days = Math.round((Date.parse(t.deadline) - Date.parse(today)) / 864e5);
@@ -1258,6 +1260,165 @@ async function trackDeadlines() {
   }
 }
 setInterval(() => trackDeadlines().catch(console.error), 3.6e6).unref();
+
+// ── /api/timeline: visual projects and events on one calendar — data/timeline.json ──
+// Shoots, artwork, videos, shows, drops... with dates, people, status and a linked folder. Release dates and
+// track deadlines from Tracks are merged in (read-only) so there is one timeline for everything.
+// Entries are open to every member unless `members` lists who may see them (owner + admins always can).
+const TIMELINE_KINDS = ['Shoot', 'Artwork', 'Video', 'Event', 'Drop', 'Other'];
+const TIMELINE_STATUSES = ['Planned', 'In progress', 'Done', 'Cancelled'];
+const TIMELINE_TEXT = { title: 100, location: 200, notes: 4000 };
+let timelineDb = null;
+let timelineSaved = Promise.resolve();
+const loadTimeline = async () => (timelineDb ??= await readJson('timeline.json', { items: {} }));
+const saveTimeline = () => (timelineSaved = timelineSaved.then(() => saveJson('timeline.json', timelineDb)).catch(console.error));
+const usernameList = (v) => [...new Set((Array.isArray(v) ? v : []).map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))].slice(0, 30);
+
+async function timelineApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const db = await loadTimeline();
+  const me = user.username;
+  const id = url.pathname.split('/')[3];
+  const view = (i) => ({ ...i, following: i.followers.includes(me) });
+  const changed = (i) => {
+    saveTimeline();
+    emit('timeline', { id: i.id }, (u) => canSeeRelease({ username: u.username, admin: cfg.admins.includes(u.username) }, i));
+  };
+
+  if (req.method === 'GET' && !id) {
+    const items = Object.values(db.items)
+      .filter((i) => canSeeRelease(user, i))
+      .map(view);
+    // Dates from Tracks: release days and track deadlines, for the releases this member can see
+    const tdb = await loadTracks();
+    const fromTracks = [];
+    for (const r of Object.values(tdb.releases))
+      if (canSeeRelease(user, r) && r.date)
+        fromTracks.push({
+          id: `release-${r.id}`,
+          source: 'tracks',
+          kind: 'Release',
+          title: `${r.title} (${r.kind}) out`,
+          start: r.date,
+          release: r.id,
+        });
+    for (const t of Object.values(tdb.tracks)) {
+      const r = tdb.releases[t.release];
+      if (!t.deleted && t.deadline && r && canSeeRelease(user, r))
+        fromTracks.push({
+          id: `track-${t.id}`,
+          source: 'tracks',
+          kind: 'Track due',
+          title: `${t.title} due (${t.status})`,
+          start: t.deadline,
+          release: r.id,
+          track: t.id,
+          done: t.status === 'Done',
+        });
+    }
+    return json(res, { items: [...items, ...fromTracks], kinds: TIMELINE_KINDS, statuses: TIMELINE_STATUSES });
+  }
+
+  const apply = (i, input) => {
+    for (const [k, max] of Object.entries(TIMELINE_TEXT)) if (input[k] !== undefined) i[k] = String(input[k] ?? '').slice(0, max);
+    if (input.kind !== undefined) i.kind = TIMELINE_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+    if (input.status !== undefined) i.status = TIMELINE_STATUSES.includes(input.status) ? input.status : fail(400, 'Bad status');
+    if (input.start !== undefined) {
+      i.start = dateOrNull(input.start) || fail(400, 'An entry needs a date');
+      i.alerted = null;
+    }
+    if (input.end !== undefined) i.end = dateOrNull(input.end);
+    if (i.end && i.end < i.start) fail(400, "The end date can't be before the start");
+    if (input.people !== undefined) i.people = usernameList(input.people);
+    if (input.folder !== undefined) i.folder = fileRef(input.folder);
+    if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
+    if (input.link !== undefined) {
+      const v = String(input.link || '').trim();
+      if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
+      i.link = v.slice(0, 300);
+    }
+  };
+
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const i = {
+      id: randomUUID().slice(0, 10),
+      title: '',
+      kind: 'Other',
+      status: 'Planned',
+      start: null,
+      end: null,
+      people: [me],
+      location: '',
+      notes: '',
+      link: '',
+      folder: null,
+      release: null,
+      members: null,
+      owner: me,
+      followers: [me],
+      created: new Date().toISOString(),
+    };
+    apply(i, input);
+    i.title = i.title.trim() || fail(400, 'Give it a title');
+    if (!i.start) fail(400, 'An entry needs a date');
+    db.items[i.id] = i;
+    changed(i);
+    for (const u of i.people) if (u !== me) await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
+    await timelineAlerts();
+    return json(res, view(i));
+  }
+
+  const i = (db.items[id] && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such entry');
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    const before = { status: i.status, start: i.start, people: [...i.people] };
+    if (input.members !== undefined) {
+      if (i.owner !== me && !user.admin) fail(403, 'Only whoever made it or an admin can change who sees it');
+      i.members = Array.isArray(input.members) ? usernameList(input.members) : null;
+    }
+    if (input.follow !== undefined) i.followers = i.followers.filter((u) => u !== me).concat(input.follow ? [me] : []);
+    apply(i, input);
+    changed(i);
+    const told = new Set([...i.people, ...i.followers].filter((u) => u !== me));
+    const news = [];
+    if (i.status !== before.status) news.push(`"${i.title}" is now ${i.status} (${me}).`);
+    if (i.start !== before.start) news.push(`"${i.title}" moved to ${i.start}${i.end ? ` – ${i.end}` : ''} (${me}).`);
+    for (const text of news) for (const u of told) await notify(u, text, { timeline: i.id });
+    for (const u of i.people)
+      if (!before.people.includes(u) && u !== me)
+        await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
+    await timelineAlerts();
+    return json(res, view(i));
+  }
+  if (req.method === 'DELETE') {
+    if (i.owner !== me && !user.admin) fail(403, 'Only whoever made it or an admin can delete it');
+    delete db.items[id];
+    changed(i);
+    return json(res, { ok: true });
+  }
+  fail(405, 'Not allowed');
+}
+
+/** Reminders 3 days before, the day before and on the day, to the people on it and its followers. */
+async function timelineAlerts() {
+  const db = await loadTimeline();
+  const today = localDate();
+  for (const i of Object.values(db.items)) {
+    if (!i.start || ['Done', 'Cancelled'].includes(i.status)) continue;
+    const days = Math.round((Date.parse(i.start) - Date.parse(today)) / 864e5);
+    const stage = days === 0 ? 'd0' : days === 1 ? 'd1' : days <= 3 && days > 0 ? 'd3' : null;
+    if (!stage || i.alerted === `${stage}:${i.start}`) continue;
+    if (stage === 'd3' && i.alerted?.endsWith(`:${i.start}`)) continue; // already warned closer in
+    i.alerted = `${stage}:${i.start}`;
+    const when = days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
+    for (const u of new Set([...i.people, ...i.followers]))
+      await notify(u, `${i.kind}: "${i.title}" is ${when} (${i.start})${i.location ? ` at ${i.location}` : ''}.`, { timeline: i.id });
+    saveTimeline();
+  }
+}
+setInterval(() => timelineAlerts().catch(console.error), 3.6e6).unref();
 
 /** What the file window and Profile need to show about a project. */
 const projectView = (p, me) => ({
@@ -2164,6 +2325,7 @@ const routes = [
   ['/api/links', linksApi],
   ['/api/push', pushApi],
   ['/api/tracks', tracksApi],
+  ['/api/timeline', timelineApi],
   ['/s/', publicShare],
 ];
 
