@@ -5,6 +5,7 @@ import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
 import { fileIcon, formatSize, hasThumb, isTouch } from './fileTypes';
 import { RANK, Rights } from '../utils/api';
+import { dialog } from '../utils/dialog';
 import { DRAG_FILE, Ref } from '../utils/refs';
 import ShareDialog from './ShareDialog';
 
@@ -120,7 +121,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     if (!items.length || busy) return;
     // Same name already here? Editors choose: replace (old one kept as a version) or keep both.
     const clashes = items.filter((u) => u.rel.length === 1 && entries.some((e) => !e.isDir && e.name === u.rel[0]));
-    if (clashes.length && can('edit') && window.confirm(`${clashes.length} file(s) already exist here:\n${clashes.map((u) => u.rel[0]).slice(0, 8).join('\n')}\n\nOK = replace them (old versions are kept)\nCancel = keep both`)) {
+    if (clashes.length && can('edit') && await dialog.confirm(`${clashes.length} file(s) already exist here:\n${clashes.map((u) => u.rel[0]).slice(0, 8).join('\n')}\n\nReplace them? The old versions are kept.`, { title: 'Confirm File Replace', icon: 'warning', ok: 'Replace', cancel: 'Keep both' })) {
       clashes.forEach((u) => (u.replace = true));
     }
     setBusy(true);
@@ -170,7 +171,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   };
 
   const newFolder = async () => {
-    const folder = window.prompt('New folder name:')?.trim();
+    const folder = (await dialog.prompt('New folder name:', 'New Folder', { title: 'New Folder' }))?.trim();
     if (!folder) return;
     const res = await fetch(`${url([...path, folder])}?mkdir`, { method: 'POST', headers: { Authorization: `Bearer ${await getToken()}` } });
     res.ok ? load() : setStatus(res.status === 409 ? 'A folder with that name already exists.' : `Couldn't create folder (${res.status}).`);
@@ -179,13 +180,13 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   const pick = entries.find((e) => e.name === selected);
 
   const renameSelected = async () => {
-    const to = pick && window.prompt('Rename to:', pick.name)?.trim();
+    const to = pick && (await dialog.prompt('Rename to:', pick.name, { title: 'Rename' }))?.trim();
     if (!pick || !to || to === pick.name) return;
     try { await call(`${url([...path, pick.name])}?rename=${encodeURIComponent(to)}`, 'POST'); load(); } catch (err) { setStatus((err as Error).message); }
   };
 
   const deleteSelected = async () => {
-    if (!pick || !window.confirm(`Delete "${pick.name}"?\n\nIt goes to the space's trash (.sk-trash) and can be recovered by an admin.`)) return;
+    if (!pick || !(await dialog.confirm(`Are you sure you want to delete "${pick.name}"?\n\nIt goes to the space's trash (.sk-trash) and can be recovered by an admin.`, { title: 'Confirm File Delete', icon: 'warning' }))) return;
     try { await call(url([...path, pick.name]), 'DELETE'); load(); } catch (err) { setStatus((err as Error).message); }
   };
 
@@ -198,7 +199,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   };
 
   const restore = async (version: string) => {
-    if (!versions || !window.confirm(`Restore this version of "${versions.file}"?\nThe current file is kept as a version too.`)) return;
+    if (!versions || !(await dialog.confirm(`Restore this version of "${versions.file}"?\nThe current file is kept as a version too.`, { title: 'Restore' }))) return;
     try {
       await call(`${url([...path, versions.file])}?restore=${encodeURIComponent(version)}`, 'POST');
       setVersions(null);

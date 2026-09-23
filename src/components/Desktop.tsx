@@ -3,6 +3,7 @@ import { useWindowManager, AppType } from '../wm/manager';
 import { vfs } from '../vfs/fs';
 import { useMe } from '../utils/api';
 import { startLive } from '../utils/live';
+import { dialog } from '../utils/dialog';
 
 interface DesktopIconDef {
   id: string;
@@ -313,7 +314,7 @@ export const Desktop: React.FC = () => {
       try {
         const contents = vfs.readdir(path);
         if (contents.length === 0) {
-          alert('This folder is empty. Conserving energy by not opening it.');
+          dialog.alert('This folder is empty. Conserving energy by not opening it.');
           return;
         }
       } catch (err) {

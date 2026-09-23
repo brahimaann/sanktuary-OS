@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
 import MembersPicker from './MembersPicker';
+import { dialog } from '../utils/dialog';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { Ref, refFromDrop, refIcon, useOpenRef } from '../utils/refs';
@@ -99,8 +100,8 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
     }
   };
 
-  const remove = useCallback((id: string) => {
-    if (window.confirm('Delete this message for everyone?')) api(`/api/chat/${channel}/${id}`, { method: 'DELETE' }).catch((e) => setStatus(e.message));
+  const remove = useCallback(async (id: string) => {
+    if (await dialog.confirm('Delete this message for everyone?', { icon: 'warning' })) api(`/api/chat/${channel}/${id}`, { method: 'DELETE' }).catch((e) => setStatus(e.message));
   }, [api, channel]);
 
   const onDrop = (e: React.DragEvent) => {

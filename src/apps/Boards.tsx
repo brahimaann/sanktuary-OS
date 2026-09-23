@@ -4,6 +4,7 @@ import { useWindowManager } from '../wm/manager';
 import { useApi, useMe } from '../utils/api';
 import MembersPicker from './MembersPicker';
 import { isTouch } from './fileTypes';
+import { dialog } from '../utils/dialog';
 import { DRAG_BOARD } from '../utils/refs';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 
@@ -36,13 +37,13 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
       : openWindow({ id: `canvas-${b.id}`, title: b.name, icon: '/images/icons/paint-16x16.png', appType: 'canvas', appProps: { boardId: b.id, name: b.name }, width: 1000, height: 680 });
 
   const create = async () => {
-    const name = window.prompt(plans ? 'Name the new plan (e.g. Album rollout):' : 'Name the new board:')?.trim();
+    const name = (await dialog.prompt(plans ? 'Name the new plan (e.g. Album rollout):' : 'Name the new board:', '', { title: plans ? 'New Plan' : 'New Board' }))?.trim();
     if (!name) return;
     try { open(await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, kind }) })); load(); } catch (e) { setStatus((e as Error).message); }
   };
   const pick = boards?.find((b) => b.id === selected);
   const rename = async () => {
-    const name = pick && window.prompt('Rename board:', pick.name)?.trim();
+    const name = pick && (await dialog.prompt('Rename board:', pick.name, { title: 'Rename' }))?.trim();
     if (!pick || !name) return;
     try { await api(`/api/boards/${pick.id}`, { method: 'PATCH', body: JSON.stringify({ name }) }); load(); } catch (e) { setStatus((e as Error).message); }
   };
@@ -53,7 +54,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
     try { await api(`/api/boards/${pick.id}`, { method: 'PATCH', body: JSON.stringify({ members }) }); load(); } catch (e) { setStatus((e as Error).message); }
   };
   const remove = async () => {
-    if (!pick || !window.confirm(`Delete the board "${pick.name}"? An admin can still recover it from data\\boards-trash.`)) return;
+    if (!pick || !(await dialog.confirm(`Delete the board "${pick.name}"?\nAn admin can still recover it from data\\boards-trash.`, { icon: 'warning' }))) return;
     try { await api(`/api/boards/${pick.id}`, { method: 'DELETE' }); setSelected(null); load(); } catch (e) { setStatus((e as Error).message); }
   };
 

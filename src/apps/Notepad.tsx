@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { vfs } from '../vfs/fs';
 import { useWindowManager } from '../wm/manager';
+import { dialog } from '../utils/dialog';
 
 interface NotepadProps {
   filePath?: string;
@@ -29,15 +30,15 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
     setFilePath(null);
   };
 
-  const handleOpen = () => {
-    const path = prompt('Enter file path to open (e.g. C:/Desktop/Welcome.txt):');
+  const handleOpen = async () => {
+    const path = await dialog.prompt('Enter file path to open (e.g. C:/Desktop/Welcome.txt):', '', { title: 'Open' });
     if (path) {
       try {
         const txt = vfs.readFile(path);
         setContent(txt);
         setFilePath(path);
       } catch (err: any) {
-        alert(err.message || 'File not found');
+        dialog.alert(err.message || 'File not found');
       }
     }
   };
@@ -46,24 +47,24 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
     if (filePath) {
       try {
         vfs.writeFile(filePath, content);
-        alert(`Saved successfully to ${filePath}`);
+        dialog.alert(`Saved successfully to ${filePath}`);
       } catch (err: any) {
-        alert(`Error: ${err.message}`);
+        dialog.alert(`Error: ${err.message}`);
       }
     } else {
       handleSaveAs();
     }
   };
 
-  const handleSaveAs = () => {
-    const path = prompt('Enter target path to save as:', filePath || 'C:/Desktop/untitled.txt');
+  const handleSaveAs = async () => {
+    const path = await dialog.prompt('Enter target path to save as:', filePath || 'C:/Desktop/untitled.txt', { title: 'Save As' });
     if (path) {
       try {
         vfs.writeFile(path, content);
         setFilePath(path);
-        alert(`Saved successfully to ${path}`);
+        dialog.alert(`Saved successfully to ${path}`);
       } catch (err: any) {
-        alert(`Error: ${err.message}`);
+        dialog.alert(`Error: ${err.message}`);
       }
     }
   };
@@ -110,7 +111,7 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
         <div className="group relative">
           <button className="menu-button px-2 py-1 hover:bg-[#000080] hover:text-white outline-none">Help</button>
           <div className="hidden group-hover:block absolute left-0 top-[18px] bg-[#c0c0c0] border-2 border-outset w-[120px] z-[999] shadow">
-            <button onClick={() => alert(`Windows 98 Notepad\nExact React Clone`)} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">About Notepad</button>
+            <button onClick={() => dialog.alert(`Windows 98 Notepad\nExact React Clone`)} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">About Notepad</button>
           </div>
         </div>
       </div>

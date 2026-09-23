@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi, Rights } from '../utils/api';
 import { formatSize } from './fileTypes';
+import { dialog } from '../utils/dialog';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 
 interface Space { id: string; name: string; drive: string; path: string; everyone: Rights; access: Record<string, Rights> }
@@ -135,7 +136,7 @@ const AdminPanel: React.FC = () => {
                   </select></label>
                   <label>Folder <input style={input} value={s.path} placeholder="(whole drive)" onChange={(e) => edit((c) => { c.spaces[i].path = e.target.value; })} /></label>
                   <label>Everyone <RightsSelect value={s.everyone} onChange={(r) => edit((c) => { c.spaces[i].everyone = r; })} /></label>
-                  <button style={button} onClick={() => window.confirm(`Remove the space "${s.name}"? Files on the drive are not touched.`) && edit((c) => { c.spaces.splice(i, 1); })}>Remove</button>
+                  <button style={button} onClick={async () => (await dialog.confirm(`Remove the space "${s.name}"?\nFiles on the drive are not touched.`, { icon: 'warning' })) && edit((c) => { c.spaces.splice(i, 1); })}>Remove</button>
                 </div>
                 <div style={{ ...row, marginTop: 6 }}>
                   {usernames.filter((u) => !draft.admins.includes(u)).map((u) => (
@@ -144,12 +145,13 @@ const AdminPanel: React.FC = () => {
                 </div>
               </fieldset>
             ))}
-            <button style={button} onClick={() => edit((c) => {
-              const name = window.prompt('Name of the new space:')?.trim();
-              if (!name) return;
+            <button style={button} onClick={async () => {
+              const name = (await dialog.prompt('Name of the new space:'))?.trim();
+              if (name) edit((c) => {
               const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'space';
               c.spaces.push({ id: c.spaces.some((x) => x.id === id) ? `${id}-${c.spaces.length}` : id, name, drive: driveIds.find((d) => c.drives[d]?.enabled) || driveIds[0], path: '', everyone: 'none', access: {} });
-            })}>Add space...</button>
+              });
+            }}>Add space...</button>
           </>
         )}
 
@@ -227,12 +229,14 @@ const MembersTab: React.FC<{
 }> = ({ state, draft, edit, driveIds, driveName, reload, setMsg }) => {
   const api = useApi();
   const add = async () => {
-    const username = window.prompt('New member nickname (their operator ID):')?.trim();
+    const username = (await dialog.prompt('New member nickname (their operator ID):', '', { title: 'Add member' }))?.trim();
     if (!username) return;
-    const password = window.prompt(`Access code (password) for ${username} — at least 8 characters. Tell them in person or by DM.`);
+    const email = (await dialog.prompt(`Email for ${username}.\nClerk emails them a code the first time they log in on a new device.`, '', { title: 'Add member' }))?.trim();
+    if (email === undefined || email === null) return;
+    const password = await dialog.prompt(`Access code (password) for ${username} — at least 8 characters.\nTell them in person or by DM.`, '', { title: 'Add member', password: true });
     if (!password) return;
     try {
-      await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password }) });
+      await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username, password, email }) });
       setMsg(`${username} can now log on.`);
       reload();
     } catch (err) {

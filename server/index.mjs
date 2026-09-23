@@ -517,8 +517,8 @@ async function admin(req, res, url) {
     return json(res, { ok: true });
   }
   if (req.method === 'POST' && action === 'users') {
-    const { username, password } = JSON.parse(await body(req));
-    const r = await clerk('/users', { method: 'POST', body: JSON.stringify({ username, password }) });
+    const { username, password, email } = JSON.parse(await body(req));
+    const r = await clerk('/users', { method: 'POST', body: JSON.stringify({ username, password, ...(email ? { email_address: [email] } : {}) }) });
     const out = await r.json();
     if (!r.ok) fail(400, out.errors?.[0]?.long_message || out.errors?.[0]?.message || 'Clerk refused');
     return json(res, { ok: true, id: out.id });

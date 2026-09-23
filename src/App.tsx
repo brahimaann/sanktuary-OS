@@ -5,6 +5,7 @@ import Taskbar from './components/Taskbar';
 import Window from './components/Window';
 import BootScreen from './components/BootScreen';
 import Screensaver from './components/Screensaver';
+import { DialogHost } from './utils/dialog';
 
 // Code-split applications for fast initial boot and minimal bundle
 const Notepad = lazy(() => import('./apps/Notepad'));
@@ -300,6 +301,7 @@ export const App: React.FC = () => {
             ))}
 
             <Taskbar />
+            <DialogHost />
           </div>
         )}
       </div>

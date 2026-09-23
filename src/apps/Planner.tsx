@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useBoard } from '../utils/useBoard';
+import { dialog } from '../utils/dialog';
 import { displayName, useProfiles } from '../utils/profiles';
 import { Ref, refFromDrop, useOpenRef } from '../utils/refs';
 import { RefChip } from './Chat';
@@ -35,24 +36,24 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
   const cardsIn = (col: string) => all.filter((i): i is Card => i.type === 'card' && i.col === col).sort((a, b) => a.order - b.order);
   const doneCol = columns.find((c) => /done/i.test(c.title))?.id;
 
-  const addColumn = () => {
-    const title = window.prompt('Column name:')?.trim();
+  const addColumn = async () => {
+    const title = (await dialog.prompt('Column name:', '', { title: 'Add column' }))?.trim();
     const id = newId();
     if (title) queue({ [id]: { id, type: 'column', title, order: (columns.at(-1)?.order ?? 0) + 1 } }, true);
   };
-  const addCard = (col: string) => {
-    const title = window.prompt('Card title:')?.trim();
+  const addCard = async (col: string) => {
+    const title = (await dialog.prompt('Card title:', '', { title: 'Add card' }))?.trim();
     if (!title) return;
     const id = newId();
     queue({ [id]: { id, type: 'card', col, order: (cardsIn(col).at(-1)?.order ?? 0) + 1, title } }, true);
   };
-  const renameColumn = (c: Column) => {
-    const title = window.prompt('Rename column:', c.title)?.trim();
+  const renameColumn = async (c: Column) => {
+    const title = (await dialog.prompt('Rename column:', c.title, { title: 'Rename' }))?.trim();
     if (title) queue({ [c.id]: { ...c, title } }, true);
   };
-  const removeColumn = (c: Column) => {
-    if (cardsIn(c.id).length) return window.alert('Move or delete the cards in this column first.');
-    if (window.confirm(`Delete the column "${c.title}"?`)) queue({ [c.id]: null }, true);
+  const removeColumn = async (c: Column) => {
+    if (cardsIn(c.id).length) return dialog.alert('Move or delete the cards in this column first.', { icon: 'warning' });
+    if (await dialog.confirm(`Delete the column "${c.title}"?`, { icon: 'warning' })) queue({ [c.id]: null }, true);
   };
 
   // Drop a card before another card, or at the end of a column
@@ -145,7 +146,7 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
           people={profiles.map((p) => p.username)}
           nameOf={(u) => displayName(byName[u], u)}
           onChange={(c) => queue({ [c.id]: c })}
-          onDelete={() => { if (window.confirm(`Delete "${editCard.title}"?`)) { queue({ [editCard.id]: null }, true); setEditing(null); } }}
+          onDelete={async () => { if (await dialog.confirm(`Delete "${editCard.title}"?`, { icon: 'warning' })) { queue({ [editCard.id]: null }, true); setEditing(null); } }}
           onClose={() => setEditing(null)}
         />
       )}

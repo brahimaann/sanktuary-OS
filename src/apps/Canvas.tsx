@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useWindowManager } from '../wm/manager';
 import { useBoard } from '../utils/useBoard';
+import { dialog } from '../utils/dialog';
 import { fileIcon, fileKind } from './fileTypes';
 import { LogOn, fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 
@@ -324,7 +325,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
         <button style={button} onClick={() => add({ type: 'note', ...center(), w: 200, h: 140, color: NOTE_COLORS[0], text: '' })}>Note</button>
         <button style={button} onClick={() => add({ type: 'text', ...center(), w: 320, h: 60, text: 'Title' })}>Text</button>
         <button style={button} onClick={() => imageInput.current?.click()}>Image / File...</button>
-        <button style={button} onClick={() => { const u = window.prompt('Link URL:')?.trim(); if (u) addLink(u); }}>Link...</button>
+        <button style={button} onClick={async () => { const u = (await dialog.prompt('Link URL:', 'https://', { title: 'Add link' }))?.trim(); if (u && u !== 'https://') addLink(u); }}>Link...</button>
         <input ref={imageInput} type="file" multiple hidden onChange={(e) => { addFiles([...(e.target.files || [])]); e.target.value = ''; }} />
         {one && (one.type === 'note' || one.type === 'text') && <button style={button} onClick={() => setEditing(one.id)}>Edit</button>}
         {one?.type === 'note' && NOTE_COLORS.map((c) => (

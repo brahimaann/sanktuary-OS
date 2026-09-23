@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { dialog } from '../utils/dialog';
 
 export const SoundRecorder: React.FC = () => {
   const [position, setPosition] = useState(0);
@@ -93,7 +94,7 @@ export const SoundRecorder: React.FC = () => {
 
       drawLiveWave();
     } catch (err) {
-      alert('Microphone access denied or unavailable. Simulating recording wave instead.');
+      dialog.alert('Microphone access denied or unavailable. Simulating recording wave instead.');
       simulateRecording();
     }
   };

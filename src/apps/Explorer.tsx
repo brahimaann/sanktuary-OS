@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { vfs, VFSNode } from '../vfs/fs';
 import { useWindowManager } from '../wm/manager';
+import { dialog } from '../utils/dialog';
 
 interface ExplorerProps {
   path?: string;
@@ -62,7 +63,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
       }
       vfs.mkdir(`${currentPath}/${folderName}`);
     } catch (err: any) {
-      alert(err.message || 'Failed to create folder');
+      dialog.alert(err.message || 'Failed to create folder');
     }
   };
 
@@ -77,13 +78,13 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
       }
       vfs.writeFile(`${currentPath}/${fileName}`, '');
     } catch (err: any) {
-      alert(err.message || 'Failed to create file');
+      dialog.alert(err.message || 'Failed to create file');
     }
   };
 
-  const handleDeleteSelected = () => {
+  const handleDeleteSelected = async () => {
     if (!selectedName || isNetworkPath(currentPath)) return;
-    if (confirm(`Are you sure you want to delete "${selectedName}"?`)) {
+    if (await dialog.confirm(`Are you sure you want to delete "${selectedName}"?`, { title: 'Confirm File Delete', icon: 'warning' })) {
       try {
         const fullPath = `${currentPath}/${selectedName}`;
         const item = items.find(i => i.name === selectedName);
@@ -95,7 +96,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           }
         }
       } catch (err: any) {
-        alert(err.message || 'Failed to delete item');
+        dialog.alert(err.message || 'Failed to delete item');
       }
     }
   };
@@ -119,7 +120,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
       setSelectedName(null);
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Failed to read directory');
+      dialog.alert(err.message || 'Failed to read directory');
     }
   };
 
@@ -165,7 +166,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
       try {
         const contents = vfs.readdir(fullPath);
         if (contents.length === 0) {
-          alert('This folder is empty. Conserving energy by not opening it.');
+          dialog.alert('This folder is empty. Conserving energy by not opening it.');
           return;
         }
       } catch (err) {
@@ -196,7 +197,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           appProps: { filePath: fullPath },
         });
       } else {
-        alert(`File content:\n\n${item.content || '[Empty]'}`);
+        dialog.alert(`File content:\n\n${item.content || '[Empty]'}`);
       }
     }
   };
@@ -250,7 +251,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
         <div className="group relative">
           <button className="px-2 py-[2px] hover:bg-[#000080] hover:text-white outline-none cursor-default">Help</button>
           <div className="hidden group-hover:block absolute left-0 top-[19px] bg-[#c0c0c0] border-2 border-outset w-[140px] z-[1000] shadow text-black">
-            <button onClick={() => alert('Windows 98 Explorer\nExact React Clone')} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">About Explorer</button>
+            <button onClick={() => dialog.alert('Windows 98 Explorer\nExact React Clone')} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white text-xs cursor-default">About Explorer</button>
           </div>
         </div>
       </div>

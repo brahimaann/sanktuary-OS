@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { LOCAL_ECHOES, calculateHaversineDistance } from './pplsStoryData';
 import { useWindowManager } from '../wm/manager';
 import { vfs } from '../vfs/fs';
+import { dialog } from '../utils/dialog';
 
 const CITIES_PRESETS = [
   { name: 'Use Geolocation (GPS)', lat: 0, lng: 0, isGPS: true },
@@ -546,7 +547,7 @@ const LocalEchoTerminal: React.FC = () => {
 
   // Toolbar action handlers
   const handleMark = () => {
-    alert("MS-DOS Mark: Text selection mode active. Drag cursor across terminal output to select text.");
+    dialog.alert("MS-DOS Mark: Text selection mode active. Drag cursor across terminal output to select text.");
   };
 
   const handleCopy = () => {
@@ -558,8 +559,8 @@ const LocalEchoTerminal: React.FC = () => {
       `Micro-History: ${echo.microHistory}\n` +
       `Reflection: ${echo.principle.inferencePrompt}`;
     navigator.clipboard.writeText(textToCopy)
-      .then(() => alert("Console output details copied to clipboard."))
-      .catch(() => alert("Failed to copy. Clipboard access denied."));
+      .then(() => dialog.alert("Console output details copied to clipboard."))
+      .catch(() => dialog.alert("Failed to copy. Clipboard access denied."));
   };
 
   const handlePaste = async () => {
@@ -571,23 +572,23 @@ const LocalEchoTerminal: React.FC = () => {
         const lng = parseFloat(match[2]);
         setUserCoords({ lat, lng });
         setGeoError(null);
-        alert(`MS-DOS Clipboard Reader:\nParsed custom coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
+        dialog.alert(`MS-DOS Clipboard Reader:\nParsed custom coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
         appendLine(`[i] Clipboard coordinates parsed: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`, 'info');
         appendLine(`[i] Type "detect" to scan this sector for local echoes.`, 'info');
       } else {
-        alert(`MS-DOS Paste Error:\nClipboard text "${text.substring(0, 30)}" does not contain valid lat,lng coordinates.`);
+        dialog.alert(`MS-DOS Paste Error:\nClipboard text "${text.substring(0, 30)}" does not contain valid lat,lng coordinates.`);
       }
     } catch (_) {
-      alert("MS-DOS Paste Error:\nClipboard read permission denied by browser.");
+      dialog.alert("MS-DOS Paste Error:\nClipboard read permission denied by browser.");
     }
   };
 
   const handleFullScreen = () => {
-    alert("MS-DOS Tip: Double-click this window's title bar to toggle Full Screen (Maximize) mode.");
+    dialog.alert("MS-DOS Tip: Double-click this window's title bar to toggle Full Screen (Maximize) mode.");
   };
 
   const handleProperties = () => {
-    alert(
+    dialog.alert(
       `MS-DOS Prompt Properties\n` +
       `-------------------------\n` +
       `Program Name: local_echo.exe\n` +
@@ -599,7 +600,7 @@ const LocalEchoTerminal: React.FC = () => {
   };
 
   const handleBackground = () => {
-    alert("MS-DOS Background Execution: Enable. The pager taskbar tray icon will continue monitoring proximity in the background.");
+    dialog.alert("MS-DOS Background Execution: Enable. The pager taskbar tray icon will continue monitoring proximity in the background.");
   };
 
   const handleFont = () => {

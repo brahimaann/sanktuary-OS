@@ -5,6 +5,7 @@ import { useApi } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, Profile, useProfiles } from '../utils/profiles';
 import { useOpenRef } from '../utils/refs';
+import { dialog } from '../utils/dialog';
 import { dmId, lastRead, Message } from './Chat';
 import Avatar from './Avatar';
 import MembersPicker from './MembersPicker';
@@ -60,8 +61,8 @@ const BuddyList: React.FC = () => {
     setStatusMsg(null);
   };
 
-  const newChannel = () => {
-    const name = window.prompt('New channel name (e.g. music, artwork, merch):')?.trim();
+  const newChannel = async () => {
+    const name = (await dialog.prompt('New channel name (e.g. music, artwork, merch):', '', { title: 'New channel' }))?.trim();
     if (name) setNewName(name);
   };
   const createChannel = async (members: string[] | null) => {
@@ -71,7 +72,7 @@ const BuddyList: React.FC = () => {
       const c = await api('/api/chat', { method: 'POST', body: JSON.stringify({ name, private: members !== null, members }) });
       loadChat();
       openChat(c.id, `#${c.name}`);
-    } catch (e) { window.alert((e as Error).message); }
+    } catch (e) { dialog.alert((e as Error).message, { icon: 'error' }); }
   };
 
   const unread = (id: string, lastAt: string | null) => !!lastAt && lastAt > lastRead(id);
