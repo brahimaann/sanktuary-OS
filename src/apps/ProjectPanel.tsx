@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { IconLabel } from '../components/RetroIcon';
 import { useApi, useMe } from '../utils/api';
 import { dialog } from '../utils/dialog';
 import { useLiveEvent } from '../utils/live';
@@ -144,7 +145,7 @@ const ProjectPanel: React.FC<{
           />
           {canEdit && !free && !mine && !queued && (
             <button style={button} onClick={() => act('queue')}>
-              Join the queue
+              <IconLabel icon="plus">Join the queue</IconLabel>
             </button>
           )}
         </div>
@@ -194,13 +195,13 @@ const ProjectPanel: React.FC<{
                   )}
                   {free && (
                     <button style={{ ...button, fontWeight: 700 }} onClick={checkOut}>
-                      Check out
+                      <IconLabel icon="lock">Check out</IconLabel>
                     </button>
                   )}
                   {mine && (
                     <>
                       <button style={{ ...button, fontWeight: 700 }} onClick={() => picker.current?.click()}>
-                        Check in...
+                        <IconLabel icon="upload">Check in...</IconLabel>
                       </button>
                       <button
                         style={button}
@@ -208,18 +209,18 @@ const ProjectPanel: React.FC<{
                           (await dialog.confirm(`Give ${name} back without uploading changes?`, { icon: 'question' })) && act('release')
                         }
                       >
-                        Release
+                        <IconLabel icon="undo">Release</IconLabel>
                       </button>
                     </>
                   )}
                   {!free && !mine && !queued && (
                     <button style={button} onClick={() => act('queue')}>
-                      Join the queue
+                      <IconLabel icon="plus">Join the queue</IconLabel>
                     </button>
                   )}
                   {queued && (
                     <button style={button} onClick={() => act('unqueue')}>
-                      Leave the queue
+                      <IconLabel icon="close">Leave the queue</IconLabel>
                     </button>
                   )}
                   {lockedByOther && (
@@ -232,17 +233,17 @@ const ProjectPanel: React.FC<{
                         })) && act('release')
                       }
                     >
-                      Force release
+                      <IconLabel icon="key">Force release</IconLabel>
                     </button>
                   )}
                 </div>
               )}
               <div style={{ display: 'flex', gap: 6 }}>
                 <button style={button} onClick={() => download('view')}>
-                  Download to view
+                  <IconLabel icon="download">Download to view</IconLabel>
                 </button>
                 <button style={button} onClick={() => download('playground')}>
-                  Playground copy
+                  <IconLabel icon="download">Playground copy</IconLabel>
                 </button>
               </div>
 

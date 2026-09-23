@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { IconLabel } from './RetroIcon';
 import { useApi } from '../utils/api';
 
 type State = 'loading' | 'on' | 'off' | 'blocked' | 'unsupported' | 'ios-install';
@@ -82,15 +83,15 @@ const PushSettings: React.FC = () => {
           </span>
           {state === 'off' ? (
             <button style={button} onClick={turnOn}>
-              Turn on
+              <IconLabel icon="bell">Turn on</IconLabel>
             </button>
           ) : (
             <>
               <button style={button} onClick={test}>
-                Send test
+                <IconLabel icon="bell">Send test</IconLabel>
               </button>
               <button style={button} onClick={turnOff}>
-                Turn off
+                <IconLabel icon="close">Turn off</IconLabel>
               </button>
             </>
           )}

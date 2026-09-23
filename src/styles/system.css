@@ -244,3 +244,19 @@ html {
   border-color: #fff #000 #000 #fff;
   box-shadow: inset -1px -1px #808080;
 }
+
+/* Retro.Icons glyphs (src/components/RetroIcon.tsx): Win98 etched look on disabled buttons */
+.retro-icon {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+button:disabled .retro-icon {
+  filter: drop-shadow(1px 1px 0 #fff);
+}
+
+/* Win98 disabled controls: grey, etched text (and icons) instead of looking clickable */
+button:disabled {
+  color: #808080 !important;
+  text-shadow: 1px 1px 0 #fff;
+  cursor: default;
+}

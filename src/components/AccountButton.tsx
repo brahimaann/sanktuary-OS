@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useClerk, useUser } from '@clerk/react';
 import Avatar from '../apps/Avatar';
+import RetroIcon, { IconName } from './RetroIcon';
 
 /** Win98-style account menu (replaces Clerk's modern UserButton popup): who you are, account settings, log off. */
 const AccountButton: React.FC = () => {
@@ -18,7 +19,7 @@ const AccountButton: React.FC = () => {
 
   if (!user) return null;
   const name = user.username || user.firstName || 'you';
-  const item = (label: string, icon: string, onClick: () => void) => (
+  const item = (label: string, icon: IconName, onClick: () => void) => (
     <div
       role="menuitem"
       style={menuItem}
@@ -29,7 +30,7 @@ const AccountButton: React.FC = () => {
       onPointerEnter={(e) => Object.assign(e.currentTarget.style, { background: '#000080', color: '#fff' })}
       onPointerLeave={(e) => Object.assign(e.currentTarget.style, { background: '', color: '' })}
     >
-      <img src={icon} alt="" style={{ width: 16, height: 16 }} />
+      <RetroIcon name={icon} size={16} />
       {label}
     </div>
   );
@@ -50,9 +51,9 @@ const AccountButton: React.FC = () => {
             </div>
           </div>
           <div style={{ height: 2 }} />
-          {item('Account settings...', '/images/icons/tools-folder-16x16.png', () => clerk.openUserProfile())}
+          {item('Account settings...', 'gear', () => clerk.openUserProfile())}
           <div style={{ margin: '3px 2px', borderTop: '1px solid #808080', borderBottom: '1px solid #fff' }} />
-          {item(`Log Off ${name}...`, '/images/icons/logoff-16x16.png', () => clerk.signOut())}
+          {item(`Log Off ${name}...`, 'logout', () => clerk.signOut())}
         </div>
       )}
     </div>

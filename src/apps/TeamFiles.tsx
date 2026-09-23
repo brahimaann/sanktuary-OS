@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@clerk/react';
 import AccountButton from '../components/AccountButton';
+import RetroIcon, { IconLabel } from '../components/RetroIcon';
 import { useWindowManager } from '../wm/manager';
 import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
@@ -467,9 +468,9 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       WebkitTouchCallout: 'none',
     } as React.CSSProperties,
   });
-  const nav = (label: string, dir: 'left' | 'right' | 'up', off: boolean, onClick: () => void, extra = {}) => (
+  const nav = (label: string, dir: 'back' | 'forward' | 'up', off: boolean, onClick: () => void, extra = {}) => (
     <button style={{ ...button, display: 'flex', alignItems: 'center', gap: 3 }} disabled={off} onClick={onClick} {...extra}>
-      <Arrow dir={dir} off={off} />
+      <RetroIcon name={dir} />
       {label}
     </button>
   );
@@ -487,8 +488,8 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       onDrop={(e) => (can('upload') && e.dataTransfer.types.includes('Files') ? onDrop(e) : e.preventDefault())}
     >
       <div style={toolbar}>
-        {nav('Back', 'left', !hist.back.length, goBack)}
-        {nav('Forward', 'right', !hist.fwd.length, goForward)}
+        {nav('Back', 'back', !hist.back.length, goBack)}
+        {nav('Forward', 'forward', !hist.fwd.length, goForward)}
         {nav('Up', 'up', !path.length, () => go(path.slice(0, -1)), {
           ...(path.length ? dropProps(path.slice(0, -1)) : {}),
           style: {
@@ -502,7 +503,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         <div style={sep} />
         {can('upload') && (
           <button style={button} disabled={busy} onClick={() => uploadRef.current?.click()}>
-            Upload...
+            <IconLabel icon="upload">Upload...</IconLabel>
           </button>
         )}
         {can('upload') && (
@@ -526,21 +527,21 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           title="Folders download as a .zip"
           onClick={() => pick && (pick.project ? setProjectFor({ entry: pick, mode: 'download' }) : download(pick))}
         >
-          Download
+          <IconLabel icon="download">Download</IconLabel>
         </button>
         {pick?.project && (
           <button style={{ ...button, fontWeight: 700 }} onClick={() => setProjectFor({ entry: pick, mode: 'info' })}>
-            Project...
+            <IconLabel icon="lock">Project...</IconLabel>
           </button>
         )}
         <button style={button} disabled={!pick || pick.isDir} onClick={showVersions}>
-          Versions
+          <IconLabel icon="archive">Versions</IconLabel>
         </button>
         <button style={button} disabled={!pick} onClick={() => setSharing(true)}>
-          Share...
+          <IconLabel icon="share">Share...</IconLabel>
         </button>
         <button style={button} onClick={load}>
-          Refresh
+          <IconLabel icon="refresh">Refresh</IconLabel>
         </button>
         <button style={button} onClick={() => setViewMode(view === 'list' ? 'icons' : 'list')}>
           {view === 'list' ? 'Icons' : 'Details'}
@@ -777,21 +778,6 @@ const ProgressBar: React.FC<{ t: Transfer }> = ({ t }) => {
         />
       </div>
     </div>
-  );
-};
-
-/** Win98 toolbar arrow; disabled ones are grey with the white etched shadow. */
-const Arrow: React.FC<{ dir: 'left' | 'right' | 'up'; off?: boolean }> = ({ dir, off }) => {
-  const shape = <path d="M0 6.5 L6.5 0 L6.5 4 L13 4 L13 9 L6.5 9 L6.5 13 Z" />;
-  return (
-    <svg width="14" height="14" viewBox="-0.5 -0.5 14 14" style={{ transform: `rotate(${{ left: 0, right: 180, up: 90 }[dir]}deg)` }}>
-      {off && (
-        <g fill="#fff" transform="translate(1 1)">
-          {shape}
-        </g>
-      )}
-      <g fill={off ? '#808080' : '#000'}>{shape}</g>
-    </svg>
   );
 };
 

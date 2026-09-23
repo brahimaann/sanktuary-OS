@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import RetroIcon, { IconLabel } from '../components/RetroIcon';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
 import { useLiveEvent } from '../utils/live';
@@ -156,12 +157,12 @@ const TracksApp: React.FC = () => {
           </select>
         )}
         <button style={button} onClick={newRelease}>
-          New release...
+          <IconLabel icon="plus">New release...</IconLabel>
         </button>
         {release && (
           <>
             <button style={{ ...button, fontWeight: 700 }} onClick={addTrack}>
-              Add track...
+              <IconLabel icon="note">Add track...</IconLabel>
             </button>
             <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of release">
               {data.kinds.map((k) => (
@@ -361,7 +362,7 @@ const TrackPage: React.FC<{
         />
         <input style={{ ...input, flex: 1, fontWeight: 700, fontSize: 13 }} {...text('title')} />
         <button style={button} onClick={onClose} title="Close the track page">
-          ✕
+          <RetroIcon name="close" />
         </button>
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -412,7 +413,7 @@ const TrackPage: React.FC<{
                 }}
                 title="Waveform with timestamped comments"
               >
-                Comments...
+                <IconLabel icon="chat">Comments...</IconLabel>
               </button>
               <button style={button} onClick={() => setPicking('bounce')}>
                 Change...
@@ -449,7 +450,7 @@ const TrackPage: React.FC<{
           </>
         ) : (
           <button style={button} onClick={() => setPicking('bounce')}>
-            Choose the bounce...
+            <IconLabel icon="note">Choose the bounce...</IconLabel>
           </button>
         )}
       </Section>
@@ -470,7 +471,7 @@ const TrackPage: React.FC<{
                 )}
               </span>
               <button style={button} onClick={() => openFolder(t.project!)}>
-                Open
+                <IconLabel icon="external">Open</IconLabel>
               </button>
             </>
           ) : (
@@ -485,7 +486,7 @@ const TrackPage: React.FC<{
           <span style={{ flex: 1 }}>{t.stems ? <b>{t.stems.path.split('/').pop()}</b> : <span style={{ color: '#666' }}>none</span>}</span>
           {t.stems && (
             <button style={button} onClick={() => openFolder(t.stems!)}>
-              Open
+              <IconLabel icon="external">Open</IconLabel>
             </button>
           )}
           <button style={button} onClick={() => setPicking('stems')}>
@@ -507,7 +508,7 @@ const TrackPage: React.FC<{
             />
             {t.links[k] && (
               <a href={t.links[k]} target="_blank" rel="noopener noreferrer" style={{ ...button, textDecoration: 'none', color: '#000' }}>
-                Open
+                <IconLabel icon="external">Open</IconLabel>
               </a>
             )}
           </div>
@@ -551,7 +552,7 @@ const TrackPage: React.FC<{
               )
             }
           >
-            Remove track
+            <IconLabel icon="close">Remove track</IconLabel>
           </button>
         </div>
       )}

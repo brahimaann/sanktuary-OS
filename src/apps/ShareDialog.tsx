@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { IconLabel } from '../components/RetroIcon';
 import { useApi } from '../utils/api';
 import { displayName, useProfiles } from '../utils/profiles';
 import { Ref } from '../utils/refs';
@@ -94,7 +95,7 @@ const SendInTeams: React.FC<{ item: Ref; onClose: (sentTo?: string) => void }> =
           Cancel
         </button>
         <button style={{ ...button, fontWeight: 700 }} onClick={send}>
-          Send
+          <IconLabel icon="share">Send</IconLabel>
         </button>
       </div>
     </>
@@ -176,7 +177,7 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
         <button style={{ ...button, fontWeight: 700 }} onClick={create}>
-          Create link
+          <IconLabel icon="link">Create link</IconLabel>
         </button>
       </div>
       {live.length > 0 && (
@@ -189,10 +190,10 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
                   {l.download ? '' : '👁 '}by {l.createdBy} · {l.expires ? `until ${new Date(l.expires).toLocaleDateString()}` : 'no expiry'}
                 </span>
                 <button style={button} onClick={() => copy(l)}>
-                  Copy
+                  <IconLabel icon="link">Copy</IconLabel>
                 </button>
                 <button style={button} onClick={() => revoke(l)}>
-                  Turn off
+                  <IconLabel icon="close">Turn off</IconLabel>
                 </button>
               </div>
               <div style={{ color: '#555' }}>

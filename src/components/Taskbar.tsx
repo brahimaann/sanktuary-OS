@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useWindowManager, AppType } from '../wm/manager';
 import sound from '../utils/sound';
 import { liveUser, useLiveEvent } from '../utils/live';
+import RetroIcon from './RetroIcon';
 
 export const Taskbar: React.FC = () => {
   const { windows, startMenuOpen, setStartMenuOpen, openWindow, focusWindow, minimizeWindow } = useWindowManager();
@@ -343,7 +344,7 @@ const ProjectsTray: React.FC = () => {
       title={news.last}
       className="mr-2 cursor-pointer border-none bg-transparent outline-none flex items-center gap-1"
     >
-      <img src="/images/icons/folder-16x16.png" alt="" style={{ width: 16, height: 16 }} />
+      <RetroIcon name="bell" size={15} />
       <b style={{ color: news.turn ? '#000080' : undefined }}>{news.turn ? '★' : news.n}</b>
     </button>
   );

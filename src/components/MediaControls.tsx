@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import RetroIcon from './RetroIcon';
 
 /**
  * Win98 Media Player controls for an <audio>/<video> element (which keeps doing the playing, without its
@@ -53,14 +54,10 @@ const MediaControls: React.FC<{ media: React.RefObject<HTMLMediaElement | null>;
       />
       <div className="w98-mp-row">
         <button className={`w98-mp-btn${playing ? ' on' : ''}`} title="Play" onClick={() => m?.play()}>
-          <svg viewBox="0 0 12 12">
-            <path d="M2 1 L11 6 L2 11 Z" />
-          </svg>
+          <RetroIcon name="play" size={13} />
         </button>
         <button className={`w98-mp-btn${paused ? ' on' : ''}`} title="Pause" onClick={() => m?.pause()}>
-          <svg viewBox="0 0 12 12">
-            <path d="M2 1h3v10H2zM7 1h3v10H7z" />
-          </svg>
+          <RetroIcon name="pause" size={13} />
         </button>
         <button
           className="w98-mp-btn"
@@ -71,9 +68,7 @@ const MediaControls: React.FC<{ media: React.RefObject<HTMLMediaElement | null>;
             m.currentTime = 0;
           }}
         >
-          <svg viewBox="0 0 12 12">
-            <path d="M2 2h8v8H2z" />
-          </svg>
+          <RetroIcon name="stop" size={13} />
         </button>
         <span className="w98-mp-sep" />
         <img src="/images/icons/speaker-16x16.png" alt="Volume" width={16} height={16} />

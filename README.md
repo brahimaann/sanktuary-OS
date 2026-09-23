@@ -57,3 +57,7 @@ See `data/deploy.log`, or **Admin Panel → Health → Auto-deploy**.
 Tunnel: `docker compose up -d` in this folder.
 
 Don't move this folder without updating the three scheduled tasks and the paths in `ops/` (see `ops/README.md`).
+
+## Credits
+
+- Action icons (arrows, upload/download, share, lock, bell...): [Retro.Icons](https://retro-svg.vercel.app) by vetrisuriya.in, MIT licence. See `src/components/RetroIcon.tsx`.
