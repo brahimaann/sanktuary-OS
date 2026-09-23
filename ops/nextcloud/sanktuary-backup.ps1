@@ -31,6 +31,15 @@ foreach ($j in $jobs) {
   Save $state
 }
 
+# Sanktuary's own data (settings, check-outs, share links, tracks, timeline, business portal, chat) lives on the
+# PC, not on a space: copy it too. Tip: turn on BitLocker To Go for the backup drive, since business records go there.
+if ($target) {
+  robocopy $data "$target\Sanktuary Backup\_Sanktuary data" /E /XO /XF *.tmp *.log /R:1 /W:1 /NP /NFL /NDL /LOG+:"$data\backup.log" | Out-Null
+  $code = $LASTEXITCODE
+  $state.results += [ordered]@{ name = 'Sanktuary data'; ok = $code -lt 8; note = if ($code -lt 8) { 'ok' } else { "robocopy error $code (see data/backup.log)" } }
+  Save $state
+}
+
 $state.state = 'done'
 $state.finished = (Get-Date).ToUniversalTime().ToString('o')
 Save $state
