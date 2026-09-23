@@ -7,10 +7,11 @@ import { displayName, Profile, useProfiles } from '../utils/profiles';
 import { useOpenRef } from '../utils/refs';
 import { dmId, lastRead, Message } from './Chat';
 import Avatar from './Avatar';
+import MembersPicker from './MembersPicker';
 import { isTouch } from './fileTypes';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 
-interface Channel { id: string; name: string; topic?: string; lastAt: string | null }
+interface Channel { id: string; name: string; topic?: string; lastAt: string | null; private?: boolean; members?: string[] }
 interface Dm { id: string; with: string; lastAt: string | null }
 interface Activity { id: string; at: string; user: string; action: string; space?: string; spaceName?: string; path?: string; to?: string; board?: string; boardKind?: string; title?: string; card?: string; text?: string; t?: number | null }
 
@@ -32,6 +33,7 @@ const BuddyList: React.FC = () => {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [dms, setDms] = useState<Dm[]>([]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [newName, setNewName] = useState<string | null>(null); // channel being created: pick who can join
   const me = liveUser();
   const mine = byName[me];
 
@@ -58,10 +60,18 @@ const BuddyList: React.FC = () => {
     setStatusMsg(null);
   };
 
-  const newChannel = async () => {
+  const newChannel = () => {
     const name = window.prompt('New channel name (e.g. music, artwork, merch):')?.trim();
-    if (!name) return;
-    try { const c = await api('/api/chat', { method: 'POST', body: JSON.stringify({ name }) }); loadChat(); openChat(c.id, `#${c.name}`); } catch (e) { window.alert((e as Error).message); }
+    if (name) setNewName(name);
+  };
+  const createChannel = async (members: string[] | null) => {
+    const name = newName;
+    setNewName(null);
+    try {
+      const c = await api('/api/chat', { method: 'POST', body: JSON.stringify({ name, private: members !== null, members }) });
+      loadChat();
+      openChat(c.id, `#${c.name}`);
+    } catch (e) { window.alert((e as Error).message); }
   };
 
   const unread = (id: string, lastAt: string | null) => !!lastAt && lastAt > lastRead(id);
@@ -71,7 +81,17 @@ const BuddyList: React.FC = () => {
   const open = (fn: () => void) => ({ onClick: () => isTouch && fn(), onDoubleClick: fn });
 
   return (
-    <div style={shell}>
+    <div style={{ ...shell, position: 'relative' }}>
+      {newName !== null && (
+        <MembersPicker
+          title={`Who can join #${newName}?`}
+          members={null}
+          always={me}
+          note="Private channels are only visible to their members."
+          onSave={createChannel}
+          onClose={() => setNewName(null)}
+        />
+      )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 6, borderBottom: '1px solid #808080' }}>
         <Avatar username={me || '?'} avatar={mine?.avatar} size={36} online />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -111,7 +131,7 @@ const BuddyList: React.FC = () => {
             <Group title="Channels">
               {channels.map((c) => (
                 <Row key={c.id} {...open(() => openChat(c.id, `#${c.name}`))} bold={unread(c.id, c.lastAt)}>
-                  <b>#</b>&nbsp;{c.name}{c.topic && <span style={{ color: '#666', marginLeft: 6 }}>{c.topic}</span>}
+                  <b>{c.private ? '🔒' : '#'}</b>&nbsp;{c.name}{c.topic && <span style={{ color: '#666', marginLeft: 6 }}>{c.topic}</span>}
                 </Row>
               ))}
             </Group>

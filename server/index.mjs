@@ -23,7 +23,7 @@ const DATA = process.env.DATA_DIR || resolve(DIST, '../data');
 const THUMBS = process.env.THUMB_CACHE || resolve(DIST, '../cache/thumbs');
 const TUNNEL_READY = process.env.TUNNEL_READY || 'http://127.0.0.1:2000/ready';
 const SITE_ORIGINS = (process.env.SITE_ORIGINS || '').split(',').filter(Boolean);
-const CLERK = 'https://api.clerk.com/v1';
+const CLERK = process.env.CLERK_API_URL || 'https://api.clerk.com/v1'; // overridable so tests can use a fake Clerk
 const RANK = { none: 0, view: 1, upload: 2, edit: 3 };
 const FAT32_MAX = 4 * 1024 ** 3 - 1;
 const started = Date.now();
@@ -342,9 +342,12 @@ async function me(req, res, url) {
 // every USB drive unplugged. Edits are per-item last-writer-wins: a client sends the whole item it changed,
 // the server stores it and forwards it to everyone else on the board over server-sent events.
 // ponytail: no undo history or conflict merging inside one item; add a CRDT (Yjs) if people fight over the same note.
-const ITEM_TYPES = new Set(['note', 'text', 'image', 'file', 'link']);
+const ITEM_TYPES = new Set(['note', 'text', 'image', 'file', 'link', 'edge']); // edge: arrow from one item to another
 const CURSOR_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324'];
 const openBoards = new Map(); // id -> { meta, items: Map, clients: Map<conn, { res, user, color }>, timer }
+
+/** Boards are open to every member unless meta.members lists who may see them (owner + admins always can). */
+const canSeeBoard = (user, meta) => !meta.members || user.admin || meta.owner === user.username || meta.members.includes(user.username);
 
 async function loadBoard(id) {
   if (!/^[\w-]{1,60}$/.test(id)) fail(400, 'Bad board id');
@@ -384,7 +387,7 @@ async function boardsApi(req, res, url) {
     for (const e of await readdir(join(DATA, 'boards'), { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
       const b = openBoards.get(e.name) || (await readJson(`boards/${e.name}/board.json`, null));
-      if (b && (b.meta.kind || 'canvas') === (url.searchParams.get('kind') || 'canvas')) list.push({ ...b.meta, items: b.items.size ?? b.items.length, online: openBoards.get(e.name)?.clients.size || 0 });
+      if (b && (b.meta.kind || 'canvas') === (url.searchParams.get('kind') || 'canvas') && canSeeBoard(user, b.meta)) list.push({ ...b.meta, items: b.items.size ?? b.items.length, online: openBoards.get(e.name)?.clients.size || 0 });
     }
     return json(res, list.sort((a, b) => b.updated.localeCompare(a.updated)));
   }
@@ -398,14 +401,29 @@ async function boardsApi(req, res, url) {
     const items = kind === 'kanban' ? ['To do', 'Doing', 'Done'].map((title, order) => ({ id: randomUUID().slice(0, 12), type: 'column', title, order })) : [];
     await mkdir(join(DATA, 'boards', newId, 'assets'), { recursive: true });
     await saveJson(`boards/${newId}/board.json`, { meta, items });
-    logActivity(user, kind === 'kanban' ? 'started the plan' : 'started the moodboard', { board: newId, boardKind: kind, title: name });
+    logActivity(user, kind === 'kanban' ? 'started the plan' : 'started the moodboard', { board: newId, boardKind: kind, title: name, boardMembers: null });
     return json(res, meta);
   }
 
   const b = await loadBoard(id);
+  if (!canSeeBoard(user, b.meta)) fail(404, 'No such board');
 
   if (!sub && req.method === 'PATCH') {
-    b.meta.name = String(JSON.parse(await body(req)).name || '').trim().slice(0, 80) || b.meta.name;
+    const input = JSON.parse(await body(req));
+    if (input.name !== undefined) b.meta.name = String(input.name).trim().slice(0, 80) || b.meta.name;
+    if (input.members !== undefined) {
+      if (b.meta.owner !== user.username && !user.admin) fail(403, 'Only the creator or an admin can change who sees a board');
+      b.meta.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
+      // Anyone who just lost access is disconnected from the board
+      const cfg = await loadConfig();
+      for (const [conn, c] of b.clients) {
+        if (!canSeeBoard({ username: c.user.username, admin: cfg.admins.includes(c.user.username) }, b.meta)) {
+          c.res.write('event: deleted\ndata: {}\n\n');
+          c.res.end();
+          b.clients.delete(conn);
+        }
+      }
+    }
     saveBoardSoon(id, b);
     broadcast(b, 'meta', b.meta);
     return json(res, b.meta);
@@ -418,7 +436,7 @@ async function boardsApi(req, res, url) {
     openBoards.delete(id);
     await mkdir(join(DATA, 'boards-trash'), { recursive: true });
     await rename(join(DATA, 'boards', id), join(DATA, 'boards-trash', `${id}-${stamp()}`)); // recoverable
-    logActivity(user, 'deleted the board', { title: b.meta.name });
+    logActivity(user, 'deleted the board', { title: b.meta.name, boardMembers: b.meta.members ? [b.meta.owner, ...b.meta.members] : null });
     return json(res, { ok: true });
   }
 
@@ -446,7 +464,7 @@ async function boardsApi(req, res, url) {
       if (op.put && validItem(b.meta.kind || 'canvas', op.put)) {
         const before = b.items.get(op.put.id);
         if (op.put.type === 'card' && before?.col !== op.put.col && /done/i.test(b.items.get(op.put.col)?.title || '')) {
-          logActivity(user, 'finished', { board: id, boardKind: 'kanban', title: b.meta.name, card: op.put.title });
+          logActivity(user, 'finished', { board: id, boardKind: 'kanban', title: b.meta.name, card: op.put.title, boardMembers: b.meta.members ? [b.meta.owner, ...b.meta.members] : null });
         }
         b.items.set(op.put.id, op.put);
         applied.push({ put: op.put });
@@ -613,27 +631,39 @@ async function live(req, res, url) {
 
 // ── Activity feed: data/activity.jsonl ─────────────────────────────────
 // ponytail: whole file is re-read for the feed; rotate it if it ever grows past a few MB.
+/** Can this member see this activity entry? (space rights, private boards) */
+function activityVisible(entry, username, cfg) {
+  const admin = cfg.admins.includes(username);
+  if (entry.boardMembers && !admin && !entry.boardMembers.includes(username)) return false;
+  return !entry.space || spacesFor({ username, admin }, cfg, { drives: [] }).some((s) => s.id === entry.space);
+}
+
 async function logActivity(user, action, details = {}) {
   const entry = { id: randomUUID().slice(0, 12), at: new Date().toISOString(), user: user.username, action, ...details };
   await appendFile(join(DATA, 'activity.jsonl'), JSON.stringify(entry) + '\n').catch(console.error);
   const cfg = await loadConfig();
-  emit('activity', entry, (u) => !entry.space || spacesFor({ username: u.username, admin: cfg.admins.includes(u.username) }, cfg, { drives: [] }).some((s) => s.id === entry.space));
+  emit('activity', entry, (u) => activityVisible(entry, u.username, cfg));
 }
 
 async function activity(req, res, url) {
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
-  const visible = new Set(spacesFor(user, cfg, { drives: [] }).map((s) => s.id));
   const lines = (await readFile(join(DATA, 'activity.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean);
-  const entries = lines.map((l) => JSON.parse(l)).filter((e) => !e.space || visible.has(e.space));
+  const entries = lines.map((l) => JSON.parse(l)).filter((e) => activityVisible(e, user.username, cfg));
   return json(res, entries.slice(-150).reverse());
 }
 
 // ── /api/chat: channels + DMs, stored as data/chat/<id>.jsonl ──────────
-// DM ids are "dm~<user>~<user>" (sorted), readable only by those two. Everything else is a public channel.
+// DM ids are "dm~<user>~<user>" (sorted), readable only by those two. Channels are public unless private,
+// in which case only their members (creator included) can see them.
 const CHAT = () => join(DATA, 'chat');
 const REF_KINDS = new Set(['file', 'folder', 'board', 'plan']);
-const canRead = (channel, username) => !channel.startsWith('dm~') || channel.split('~').slice(1).includes(username);
+const canRead = (channel, username, channels = []) => {
+  if (channel.startsWith('dm~')) return channel.split('~').slice(1).includes(username);
+  const c = channels.find((x) => x.id === channel);
+  return !!c && (!c.private || c.members?.includes(username));
+};
+const cleanMembers = (list, creator) => [...new Set([creator, ...(Array.isArray(list) ? list : []).map(String)])].filter((u) => /^[\w.-]{1,64}$/.test(u));
 
 async function loadChannels() {
   const saved = await readJson('chat/channels.json', null);
@@ -670,17 +700,18 @@ async function chat(req, res, url) {
     };
     const dms = files.filter((f) => f.startsWith('dm~') && f.endsWith('.jsonl')).map((f) => f.slice(0, -6)).filter((id) => canRead(id, user.username));
     return json(res, {
-      channels: await Promise.all(channels.map(async (c) => ({ ...c, lastAt: await last(c.id) }))),
+      channels: await Promise.all(channels.filter((c) => canRead(c.id, user.username, channels)).map(async (c) => ({ ...c, lastAt: await last(c.id) }))),
       dms: await Promise.all(dms.map(async (id) => ({ id, with: id.split('~').slice(1).find((n) => n !== user.username) || user.username, lastAt: await last(id) }))),
     });
   }
   if (!channel && req.method === 'POST') {
-    const { name, topic } = JSON.parse(await body(req));
+    const { name, topic, private: isPrivate, members } = JSON.parse(await body(req));
     const id = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || fail(400, 'Give the channel a name');
     if (channels.some((c) => c.id === id)) fail(409, 'That channel already exists');
-    const c = { id, name: id, topic: String(topic || '').slice(0, 200), createdBy: user.username, created: new Date().toISOString() };
-    await saveJson('chat/channels.json', { channels: [...channels, c] });
-    emit('channel', c);
+    const c = { id, name: id, topic: String(topic || '').slice(0, 200), createdBy: user.username, created: new Date().toISOString(), ...(isPrivate ? { private: true, members: cleanMembers(members, user.username) } : {}) };
+    const all = [...channels, c];
+    await saveJson('chat/channels.json', { channels: all });
+    emit('channel', c, (u) => canRead(c.id, u.username, all));
     return json(res, c);
   }
 
@@ -689,8 +720,19 @@ async function chat(req, res, url) {
     const names = channel.split('~').slice(1);
     if (names.length !== 2 || !names.every((n) => /^[\w.-]{1,64}$/.test(n)) || [...names].sort().join('~') !== names.join('~')) fail(400, 'Bad DM id');
     if (!names.includes(user.username)) fail(403, 'Not your conversation');
-  } else if (!channels.some((c) => c.id === channel)) fail(404, 'No such channel');
-  const audience = (u) => canRead(channel, u.username);
+  } else if (!canRead(channel, user.username, channels)) fail(404, 'No such channel');
+  const audience = (u) => canRead(channel, u.username, channels);
+
+  if (!sub && req.method === 'PATCH' && !isDm) {
+    const c = channels.find((x) => x.id === channel);
+    if (c.createdBy !== user.username && !user.admin) fail(403, 'Only the creator or an admin can change this channel');
+    const input = JSON.parse(await body(req));
+    if (input.topic !== undefined) c.topic = String(input.topic).slice(0, 200);
+    if (input.members !== undefined && c.private) c.members = cleanMembers(input.members, c.createdBy);
+    await saveJson('chat/channels.json', { channels });
+    emit('channel', c, (u) => canRead(c.id, u.username, channels));
+    return json(res, c);
+  }
 
   if (!sub && req.method === 'GET') {
     const before = url.searchParams.get('before');

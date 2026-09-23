@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
-import { useApi } from '../utils/api';
+import { useApi, useMe } from '../utils/api';
+import MembersPicker from './MembersPicker';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { Ref, refFromDrop, refIcon, useOpenRef } from '../utils/refs';
@@ -32,6 +33,9 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
   const [status, setStatus] = useState('');
   const [more, setMore] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
+  const [info, setInfo] = useState<{ id: string; name: string; topic?: string; private?: boolean; members?: string[]; createdBy: string } | null>(null);
+  const [editingMembers, setEditingMembers] = useState(false);
+  const { me: account } = useMe();
   const lastTyping = useRef(0);
   const me = liveUser();
 
@@ -48,6 +52,16 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
     if (document.hasFocus()) markRead(channel);
     scrollDown();
   });
+  useEffect(() => {
+    if (!channel.startsWith('dm~')) api('/api/chat').then((d) => setInfo(d.channels.find((c: { id: string }) => c.id === channel) || null), () => {});
+  }, [api, channel]);
+  useLiveEvent('channel', (c) => c.id === channel && setInfo(c));
+  const saveMembers = async (members: string[] | null) => {
+    setEditingMembers(false);
+    try { await api(`/api/chat/${channel}`, { method: 'PATCH', body: JSON.stringify({ members: members || [] }) }); } catch (e) { setStatus((e as Error).message); }
+  };
+  const canManage = !!info && !!account && (info.createdBy === account.username || account.admin);
+
   useLiveEvent('unmessage', ({ channel: c, id }) => c === channel && setMsgs((prev) => prev.filter((m) => m.id !== id)));
   useLiveEvent('typing', ({ channel: c, user }) => c === channel && setTyping((t) => ({ ...t, [user]: Date.now() })));
 
@@ -99,7 +113,27 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
   const typers = Object.keys(typing).filter((u) => u !== me);
 
   return (
-    <div style={shell} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onFocus={() => markRead(channel)}>
+    <div style={{ ...shell, position: 'relative' }} onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onFocus={() => markRead(channel)}>
+      {info && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderBottom: '1px solid #808080' }}>
+          <b>{info.private ? '🔒' : '#'}{info.name}</b>
+          <span style={{ flex: 1, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {info.private ? `${info.members?.length || 0} members` : 'everyone'}{info.topic ? ` · ${info.topic}` : ''}
+          </span>
+          {info.private && canManage && <button style={{ ...button, padding: '0 6px' }} onClick={() => setEditingMembers(true)}>Members...</button>}
+        </div>
+      )}
+      {editingMembers && info && (
+        <MembersPicker
+          title={`Members of #${info.name}`}
+          members={info.members || []}
+          always={info.createdBy}
+          allowEveryone={false}
+          note="Only these members can see this channel."
+          onSave={saveMembers}
+          onClose={() => setEditingMembers(false)}
+        />
+      )}
       <div ref={logRef} style={{ flex: 1, overflow: 'auto', background: '#fff', border: '2px inset #808080', margin: 2, padding: 6, fontFamily: 'Arial, sans-serif', fontSize: 13, lineHeight: 1.45 }}>
         {more && msgs.length > 0 && <div style={{ textAlign: 'center', marginBottom: 6 }}><button style={button} onClick={loadOlder}>Load older messages</button></div>}
         {msgs.length === 0 && <div style={{ color: '#888' }}>No messages yet. Say hi, or drag files, folders and boards in here to share them.</div>}

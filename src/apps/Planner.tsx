@@ -25,7 +25,7 @@ const Planner: React.FC<{ boardId: string; name: string }> = ({ boardId, name })
 };
 
 const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
-  const { items, peers, status, queue, me } = useBoard<PlanItem>(boardId);
+  const { items, peers, status, queue, me, undo, redo, canUndo, canRedo } = useBoard<PlanItem>(boardId);
   const { profiles, byName } = useProfiles();
   const [editing, setEditing] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
@@ -73,9 +73,20 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
   const editCard = editing ? (items[editing] as Card | undefined) : undefined;
 
   return (
-    <div style={{ ...shell, position: 'relative' }}>
+    <div
+      style={{ ...shell, position: 'relative', outline: 'none' }}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if ((e.target as HTMLElement).matches('input, textarea, select') || !(e.ctrlKey || e.metaKey)) return;
+        const k = e.key.toLowerCase();
+        if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+        if (k === 'y') { e.preventDefault(); redo(); }
+      }}
+    >
       <div style={toolbar}>
         <button style={button} onClick={addColumn}>Add column...</button>
+        <button style={button} disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">↶</button>
+        <button style={button} disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', gap: 2 }} title={['you', ...others.map((p) => p.user)].join(', ')}>
           {[me.current?.user, ...others.map((p) => p.user)].filter(Boolean).map((u, i) => <Avatar key={i} username={u!} avatar={byName[u!]?.avatar} size={20} />)}

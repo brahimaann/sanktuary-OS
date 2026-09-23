@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useWindowManager } from '../wm/manager';
-import { useApi } from '../utils/api';
+import { useApi, useMe } from '../utils/api';
+import MembersPicker from './MembersPicker';
 import { isTouch } from './fileTypes';
 import { DRAG_BOARD } from '../utils/refs';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 
-interface BoardMeta { id: string; name: string; owner: string; updated: string; updatedBy: string; items: number; online: number }
+interface BoardMeta { id: string; name: string; owner: string; updated: string; updatedBy: string; items: number; online: number; members?: string[] | null }
 
 /** List of the team's moodboards; opens each one in its own canvas window. */
 const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) => {
@@ -18,6 +19,8 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
   const [boards, setBoards] = useState<BoardMeta[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const { me } = useMe();
 
   const load = useCallback(() => {
     api(`/api/boards?kind=${kind}`).then(setBoards, (e) => setStatus(e.message));
@@ -43,18 +46,25 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
     if (!pick || !name) return;
     try { await api(`/api/boards/${pick.id}`, { method: 'PATCH', body: JSON.stringify({ name }) }); load(); } catch (e) { setStatus((e as Error).message); }
   };
+  const canShare = !!pick && !!me && (pick.owner === me.username || me.admin);
+  const saveSharing = async (members: string[] | null) => {
+    setSharing(false);
+    if (!pick) return;
+    try { await api(`/api/boards/${pick.id}`, { method: 'PATCH', body: JSON.stringify({ members }) }); load(); } catch (e) { setStatus((e as Error).message); }
+  };
   const remove = async () => {
     if (!pick || !window.confirm(`Delete the board "${pick.name}"? An admin can still recover it from data\\boards-trash.`)) return;
     try { await api(`/api/boards/${pick.id}`, { method: 'DELETE' }); setSelected(null); load(); } catch (e) { setStatus((e as Error).message); }
   };
 
   return (
-    <div style={shell}>
+    <div style={{ ...shell, position: 'relative' }}>
       <div style={toolbar}>
         <button style={button} onClick={create}>{plans ? 'New Plan...' : 'New Board...'}</button>
         <button style={button} disabled={!pick} onClick={() => pick && open(pick)}>Open</button>
         <button style={button} disabled={!pick} onClick={rename}>Rename</button>
         <button style={button} disabled={!pick} onClick={remove}>Delete</button>
+        <button style={button} disabled={!canShare} onClick={() => setSharing(true)} title="Choose who can see it (creator or admin)">Sharing...</button>
         <button style={button} onClick={load}>Refresh</button>
       </div>
       <div style={{ flex: 1, overflow: 'auto', background: '#fff', border: '2px inset #808080', margin: '0 2px', padding: 8, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8, alignContent: 'start' }}>
@@ -69,12 +79,22 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
             style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 6, textAlign: 'center', cursor: 'default', userSelect: 'none', background: selected === b.id ? '#000080' : undefined, color: selected === b.id ? '#fff' : undefined }}
           >
             <img src={plans ? '/images/icons/task-32x32.png' : '/images/icons/paint-32x32.png'} alt="" style={{ width: 32, height: 32 }} />
-            <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{b.name}</div>
+            <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{b.members ? '🔒 ' : ''}{b.name}</div>
             <div style={{ fontSize: 10, opacity: 0.8 }}>{b.items} item(s){b.online ? ` · ${b.online} online` : ''}</div>
             <div style={{ fontSize: 10, opacity: 0.8 }}>{new Date(b.updated).toLocaleDateString()} by {b.updatedBy}</div>
           </div>
         ))}
       </div>
+      {sharing && pick && (
+        <MembersPicker
+          title={`Who can see "${pick.name}"?`}
+          members={pick.members ?? null}
+          always={pick.owner}
+          note="Admins can always open every board, to help manage it."
+          onSave={saveSharing}
+          onClose={() => setSharing(false)}
+        />
+      )}
       <div style={statusBar}>{status || `${boards?.length ?? 0} ${plans ? 'plan' : 'board'}(s) — ${isTouch ? 'tap' : 'double-click'} to open · drag one into a chat to share it`}</div>
     </div>
   );

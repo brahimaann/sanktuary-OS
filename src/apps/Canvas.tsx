@@ -13,7 +13,7 @@ import { LogOn, fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 
 export interface Item {
   id: string;
-  type: 'note' | 'text' | 'image' | 'file' | 'link';
+  type: 'note' | 'text' | 'image' | 'file' | 'link' | 'edge';
   x: number; y: number; w: number; h: number; z: number;
   color?: string;
   text?: string;
@@ -21,6 +21,7 @@ export interface Item {
   name?: string;
   ref?: { app: string; dir: string[]; name: string }; // team file this card points at
   url?: string;
+  from?: string; to?: string; // edge: arrow from one item to another (x/y/w/h unused)
 }
 interface View { x: number; y: number; z: number }
 
@@ -38,7 +39,8 @@ const Canvas: React.FC<{ boardId: string; name: string }> = ({ boardId, name }) 
 
 const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
   const { openWindow } = useWindowManager();
-  const { items, peers, status, setStatus, me, queue, flush, sendCursor } = useBoard<Item>(boardId);
+  const { items, peers, status, setStatus, me, queue, flush, sendCursor, undo, redo, remember, snapshot, canUndo, canRedo } = useBoard<Item>(boardId);
+  const [linking, setLinking] = useState<{ from: string; x: number; y: number } | null>(null);
   const [view, setView] = useState<View>(() => {
     try { return JSON.parse(localStorage.getItem(`sk_board_view_${boardId}`) || '') as View; } catch { return { x: 0, y: 0, z: 1 }; }
   });
@@ -141,27 +143,47 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
     const sel = e.shiftKey ? new Set(selected).add(item.id) : selected.has(item.id) ? selected : new Set([item.id]);
     setSelected(sel);
     const z = topZ();
-    const starts = [...sel].map((id) => itemsRef.current[id]).filter(Boolean);
+    const starts = [...sel].map((id) => itemsRef.current[id]).filter((i) => i && i.type !== 'edge');
+    const before = snapshot(starts.map((i) => i.id));
     let moved = false;
     drag(e, (dx, dy) => {
       moved = true;
       const zoom = viewRef.current.z;
-      queue(Object.fromEntries(starts.map((s, i) => [s.id, { ...s, x: s.x + dx / zoom, y: s.y + dy / zoom, z: z + i }])));
-    }, () => { if (moved) flush(); });
+      queue(Object.fromEntries(starts.map((s, i) => [s.id, { ...s, x: s.x + dx / zoom, y: s.y + dy / zoom, z: z + i }])), false, true);
+    }, () => { if (moved) { remember(before); flush(); } });
   };
 
   const onResizeDown = (e: React.PointerEvent, item: Item) => {
     e.stopPropagation();
     const ratio = item.h / item.w;
+    const before = snapshot([item.id]);
     drag(e, (dx, dy) => {
       const zoom = viewRef.current.z;
       const w = Math.max(40, item.w + dx / zoom);
       const h = item.type === 'image' ? w * ratio : Math.max(30, item.h + dy / zoom);
-      queue({ [item.id]: { ...item, w, h } });
-    }, flush);
+      queue({ [item.id]: { ...item, w, h } }, false, true);
+    }, () => { remember(before); flush(); });
+  };
+
+  // Drag from an item's ● handle onto another item to draw an arrow between them
+  const onLinkDown = (e: React.PointerEvent, item: Item) => {
+    e.stopPropagation();
+    let end = toWorld(e.clientX, e.clientY);
+    setLinking({ from: item.id, ...end });
+    drag(e, (_dx, _dy, ev) => { end = toWorld(ev.clientX, ev.clientY); setLinking({ from: item.id, ...end }); }, () => {
+      setLinking(null);
+      const hit = itemAt(end.x, end.y);
+      if (hit && hit.id !== item.id && !Object.values(itemsRef.current).some((x) => x.type === 'edge' && x.from === item.id && x.to === hit.id)) {
+        add({ type: 'edge', from: item.id, to: hit.id, x: 0, y: 0, w: 0, h: 0 });
+      }
+    });
   };
 
   const onPointerMove = (e: React.PointerEvent) => sendCursor(toWorld(e.clientX, e.clientY));
+
+  /** Topmost card under a point (world coordinates). */
+  const itemAt = (x: number, y: number) =>
+    Object.values(itemsRef.current).filter((i) => i.type !== 'edge' && x >= i.x && x <= i.x + i.w && y >= i.y && y <= i.y + i.h).sort((a, b) => b.z - a.z)[0];
 
   // ── Creating items ──
   const uploadAsset = async (file: File) => {
@@ -242,12 +264,17 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
 
   const deleteSelected = () => {
     if (!selected.size) return;
-    queue(Object.fromEntries([...selected].map((id) => [id, null])), true);
+    const doomed = new Set(selected);
+    for (const i of Object.values(items)) if (i.type === 'edge' && (doomed.has(i.from!) || doomed.has(i.to!))) doomed.add(i.id);
+    queue(Object.fromEntries([...doomed].map((id) => [id, null])), true);
     setSelected(new Set());
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (editing) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
+    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); return redo(); }
     if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
     if (e.key === 'Escape') setSelected(new Set());
   };
@@ -270,7 +297,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
   };
 
   const fit = () => {
-    const list = Object.values(items);
+    const list = Object.values(items).filter((i) => i.type !== 'edge');
     const r = port.current!.getBoundingClientRect();
     if (!list.length) return setView({ x: r.width / 2, y: r.height / 2, z: 1 });
     const minX = Math.min(...list.map((i) => i.x)), minY = Math.min(...list.map((i) => i.y));
@@ -304,6 +331,8 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
           <button key={c} title="Note color" onClick={() => queue({ [one.id]: { ...one, color: c } }, true)} style={{ width: 16, height: 16, padding: 0, background: c, border: one.color === c ? '2px solid #000' : '1px solid #808080' }} />
         ))}
         {selected.size > 0 && <button style={button} onClick={deleteSelected}>Delete</button>}
+        <button style={button} disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">↶</button>
+        <button style={button} disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
         <div style={{ flex: 1 }} />
         <button style={button} onClick={() => zoomBy(1 / 1.25)}>−</button>
         <span style={{ minWidth: 38, textAlign: 'center' }}>{Math.round(view.z * 100)}%</span>
@@ -339,7 +368,14 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
         }}
       >
         <div data-world="1" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, transformOrigin: '0 0' }}>
-          {Object.values(items).sort((a, b) => a.z - b.z).map((item) => (
+          <Edges
+            items={items}
+            selected={selected}
+            zoom={view.z}
+            linking={linking}
+            onSelect={(id, add) => { port.current?.focus(); setSelected(add ? new Set(selected).add(id) : new Set([id])); }}
+          />
+          {Object.values(items).filter((i) => i.type !== 'edge').sort((a, b) => a.z - b.z).map((item) => (
             <ItemView
               key={item.id}
               item={item}
@@ -348,6 +384,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
               zoom={view.z}
               onDown={(e) => onItemDown(e, item)}
               onResize={(e) => onResizeDown(e, item)}
+              onLink={selected.size === 1 ? (e) => onLinkDown(e, item) : undefined}
               onOpen={() => openItem(item)}
               onText={(text) => queue({ [item.id]: { ...item, text } })}
               onDoneEditing={() => { setEditing(null); flush(); }}
@@ -376,9 +413,9 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
 
 const ItemView: React.FC<{
   item: Item; selected: boolean; editing: boolean; zoom: number;
-  onDown: (e: React.PointerEvent) => void; onResize: (e: React.PointerEvent) => void; onOpen: () => void;
+  onDown: (e: React.PointerEvent) => void; onResize: (e: React.PointerEvent) => void; onLink?: (e: React.PointerEvent) => void; onOpen: () => void;
   onText: (t: string) => void; onDoneEditing: () => void;
-}> = ({ item, selected, editing, zoom, onDown, onResize, onOpen, onText, onDoneEditing }) => {
+}> = ({ item, selected, editing, zoom, onDown, onResize, onLink, onOpen, onText, onDoneEditing }) => {
   const box: React.CSSProperties = {
     position: 'absolute', left: item.x, top: item.y, width: item.w, height: item.h, zIndex: item.z, boxSizing: 'border-box',
     outline: selected ? `${2 / zoom}px solid #000080` : 'none', outlineOffset: 2 / zoom, cursor: 'move', userSelect: 'none',
@@ -418,7 +455,59 @@ const ItemView: React.FC<{
       {selected && !editing && (
         <div onPointerDown={onResize} style={{ position: 'absolute', right: -6 / zoom, bottom: -6 / zoom, width: 12 / zoom, height: 12 / zoom, background: '#000080', border: `${1 / zoom}px solid #fff`, cursor: 'nwse-resize' }} />
       )}
+      {selected && !editing && onLink && (
+        <div onPointerDown={onLink} title="Drag onto another card to connect them" style={{ position: 'absolute', right: -22 / zoom, top: `calc(50% - ${8 / zoom}px)`, width: 16 / zoom, height: 16 / zoom, borderRadius: '50%', background: '#fff', border: `${2 / zoom}px solid #000080`, cursor: 'crosshair', boxSizing: 'border-box' }} />
+      )}
     </div>
+  );
+};
+
+/** Point where the line from a box's centre towards (tx, ty) leaves the box. */
+function exitPoint(b: Item, tx: number, ty: number) {
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  const dx = tx - cx, dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const t = Math.min(dx ? b.w / 2 / Math.abs(dx) : Infinity, dy ? b.h / 2 / Math.abs(dy) : Infinity);
+  return { x: cx + dx * t, y: cy + dy * t };
+}
+
+/** Arrows between cards, plus the rubber band while you're drawing a new one. */
+const Edges: React.FC<{
+  items: Record<string, Item>; selected: Set<string>; zoom: number;
+  linking: { from: string; x: number; y: number } | null; onSelect: (id: string, add: boolean) => void;
+}> = ({ items, selected, zoom, linking, onSelect }) => {
+  const lines: { id: string; x1: number; y1: number; x2: number; y2: number; sel: boolean }[] = [];
+  for (const e of Object.values(items)) {
+    if (e.type !== 'edge') continue;
+    const a = items[e.from!], b = items[e.to!];
+    if (!a || !b) continue;
+    const p1 = exitPoint(a, b.x + b.w / 2, b.y + b.h / 2);
+    const p2 = exitPoint(b, a.x + a.w / 2, a.y + a.h / 2);
+    lines.push({ id: e.id, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, sel: selected.has(e.id) });
+  }
+  const from = linking && items[linking.from];
+  const w = 2 / zoom;
+  return (
+    <svg style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none', zIndex: 0 }}>
+      <defs>
+        {['#333', '#000080'].map((c) => (
+          <marker key={c} id={`sk-arrow-${c.slice(1)}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 Z" fill={c} />
+          </marker>
+        ))}
+      </defs>
+      {lines.map((l) => (
+        <g key={l.id}>
+          <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.sel ? '#000080' : '#333'} strokeWidth={l.sel ? w * 1.6 : w} markerEnd={`url(#sk-arrow-${l.sel ? '000080' : '333'})`} />
+          <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="transparent" strokeWidth={14 / zoom} style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+            onPointerDown={(ev) => { ev.stopPropagation(); onSelect(l.id, ev.shiftKey); }} />
+        </g>
+      ))}
+      {from && (() => {
+        const p = exitPoint(from, linking!.x, linking!.y);
+        return <line x1={p.x} y1={p.y} x2={linking!.x} y2={linking!.y} stroke="#000080" strokeWidth={w} strokeDasharray={`${6 / zoom} ${4 / zoom}`} markerEnd="url(#sk-arrow-000080)" />;
+      })()}
+    </svg>
   );
 };
 
