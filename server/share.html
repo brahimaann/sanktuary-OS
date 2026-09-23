@@ -136,8 +136,8 @@
         gap: 8px;
         align-items: center;
       }
-      .viewer img,
-      .viewer video {
+      .viewer > img,
+      .viewer > video {
         max-width: 100%;
         max-height: 60vh;
       }
@@ -189,9 +189,9 @@
         border-color: #808080 #fff #fff #808080;
       }
       .mp-lcd {
-        background: #000;
-        color: #00ff40;
-        font-family: 'Lucida Console', 'Courier New', monospace;
+        background: var(--navy);
+        color: #fff;
+        font-weight: 700;
         font-size: 13px;
         padding: 6px 8px;
         display: flex;
@@ -199,7 +199,10 @@
         gap: 8px;
         border: 2px solid;
         border-color: #808080 #fff #fff #808080;
-        text-shadow: 0 0 4px #00ff4088;
+      }
+      .mp-lcd [data-time] {
+        font-variant-numeric: tabular-nums;
+        color: #dfe6ff;
       }
       .mp-lcd .name {
         overflow: hidden;
@@ -281,6 +284,54 @@
       }
       .mp .vol {
         width: 80px;
+      }
+      /* Image Preview window */
+      .ip-stage {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 160px;
+        max-height: 65vh;
+        overflow: auto;
+        /* light checkerboard so transparent PNGs read as transparent */
+        background-image:
+          linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%),
+          linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%);
+        background-size: 16px 16px;
+        background-position:
+          0 0,
+          8px 8px;
+      }
+      .ip-stage img {
+        display: block;
+        image-rendering: auto;
+      }
+      .ip-stage.fit img {
+        max-width: 100%;
+        max-height: calc(65vh - 8px);
+        object-fit: contain;
+      }
+      .ip-stage.fit.small img {
+        min-width: 96px; /* tiny images (icons) are scaled up a little so you can see them */
+        image-rendering: pixelated;
+      }
+      .ip-stage:not(.fit) {
+        align-items: flex-start;
+        justify-content: flex-start;
+      }
+      .ip-count {
+        flex: 1;
+        text-align: center;
+      }
+      .row img.thumb {
+        width: 24px;
+        height: 24px;
+        object-fit: cover;
+        border: 1px solid #808080;
+        background: #fff;
       }
       .err {
         color: #a00000;
@@ -386,15 +437,18 @@
         const media =
           k === 'audio' || k === 'video'
             ? player(name, src, k)
-            : k === 'image'
-              ? `<img src="${src}" alt="">`
-              : k === 'preview'
-                ? `<img src="${base}/thumb?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}" alt="">`
-                : k === 'pdf'
-                  ? `<iframe src="${src}"></iframe>`
-                  : k === 'text'
-                    ? `<iframe src="${src}" style="height:40vh;background:#fff"></iframe>`
-                    : `<div>No preview for this kind of file.${info.download ? '' : ' Downloads are turned off for this link.'}</div>`;
+            : k === 'image' || k === 'preview'
+              ? imageViewer(
+                  name,
+                  k === 'image'
+                    ? src
+                    : `${base}/preview?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}`,
+                )
+              : k === 'pdf'
+                ? `<iframe src="${src}"></iframe>`
+                : k === 'text'
+                  ? `<iframe src="${src}" style="height:40vh;background:#fff"></iframe>`
+                  : `<div>No preview for this kind of file.${info.download ? '' : ' Downloads are turned off for this link.'}</div>`;
         return `<div class="viewer inset">${media}${dl}</div>`;
       }
 
@@ -403,6 +457,8 @@
         play: '<svg viewBox="0 0 12 12"><path d="M2 1 L11 6 L2 11 Z"/></svg>',
         pause: '<svg viewBox="0 0 12 12"><path d="M2 1h3v10H2zM7 1h3v10H7z"/></svg>',
         stop: '<svg viewBox="0 0 12 12"><path d="M2 2h8v8H2z"/></svg>',
+        prev: '<svg viewBox="0 0 12 12"><path d="M10 1 L2 6 L10 11 Z"/></svg>',
+        next: '<svg viewBox="0 0 12 12"><path d="M2 1 L10 6 L2 11 Z"/></svg>',
       };
       const clock = (s) =>
         isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--';
@@ -424,6 +480,51 @@
           </div>
         </div>`;
       }
+      // Win98 Image Preview: fit / actual size, previous / next through the folder's pictures
+      let images = []; // names of the pictures in the open folder, for previous / next
+      let fit = true;
+      function imageViewer(name, src) {
+        const i = images.indexOf(name);
+        const nav = info.isDir && images.length > 1;
+        return `<div class="mp" data-image>
+          <div class="mp-title"><img src="/images/icons/paint-16x16.png" alt="">Image Preview - ${esc(name)}</div>
+          <div class="mp-body">
+            <div class="ip-stage${fit ? ' fit' : ''}"><img src="${src}" alt="${esc(name)}" data-pic></div>
+            <div class="mp-row">
+              ${nav ? `<button class="mp-btn" title="Previous picture" data-step="-1">${glyph.prev}</button>` : ''}
+              <span class="ip-count">${nav ? `${i + 1} of ${images.length}` : ''}</span>
+              ${nav ? `<button class="mp-btn" title="Next picture" data-step="1">${glyph.next}</button>` : ''}
+              <span class="mp-sep"></span>
+              <button data-fit>${fit ? 'Actual size' : 'Fit to window'}</button>
+            </div>
+          </div>
+        </div>`;
+      }
+      function wireImages() {
+        const el = app.querySelector('[data-image]');
+        if (!el) return;
+        const pic = el.querySelector('[data-pic]');
+        const small = () => pic.naturalWidth && pic.naturalWidth < 96 && el.querySelector('.ip-stage').classList.toggle('small', true);
+        pic.complete ? small() : (pic.onload = small);
+        el.querySelector('[data-fit]').onclick = (e) => {
+          fit = !fit;
+          el.querySelector('.ip-stage').classList.toggle('fit', fit);
+          e.target.textContent = fit ? 'Actual size' : 'Fit to window';
+        };
+        el.querySelectorAll('[data-step]').forEach((b) => (b.onclick = () => step(Number(b.dataset.step))));
+      }
+      function step(d) {
+        const i = images.indexOf(selected);
+        if (i < 0 || images.length < 2) return;
+        selected = images[(i + d + images.length) % images.length];
+        folder(true);
+      }
+      document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT') return;
+        if (e.key === 'ArrowRight') step(1);
+        if (e.key === 'ArrowLeft') step(-1);
+      });
+
       function wirePlayers() {
         app.querySelectorAll('[data-player]').forEach((el) => {
           const m = el.querySelector('audio, video');
@@ -461,9 +562,10 @@
       function single() {
         app.innerHTML = header(viewer(info.name));
         wirePlayers();
+        wireImages();
       }
 
-      async function folder() {
+      async function folder(scroll = false) {
         let list;
         try {
           list = await get(`${base}/list?${q()}`);
@@ -471,6 +573,7 @@
           return fail(e);
         }
         list.sort((a, b) => b.isDir - a.isDir || a.name.localeCompare(b.name, undefined, { numeric: true }));
+        images = list.filter((e) => !e.isDir && ['image', 'preview'].includes(kind(e.name))).map((e) => e.name);
         const crumbs = [info.name, ...path]
           .map((p, i) => (i === path.length ? `<b>${esc(p)}</b>` : `<a href="#" data-up="${i}">${esc(p)}</a>`))
           .join(' \\ ');
@@ -481,12 +584,14 @@
             list
               .map(
                 (e, i) =>
-                  `<div class="row${selected === e.name ? ' sel' : ''}" data-i="${i}"><img src="${icon(e.name, e.isDir)}" alt="" width="16" height="16"><span class="n">${esc(e.name)}</span><span class="s">${e.isDir ? '' : size(e.size)}</span></div>`,
+                  `<div class="row${selected === e.name ? ' sel' : ''}" data-i="${i}">${!e.isDir && images.includes(e.name) ? `<img class="thumb" loading="lazy" alt="" src="${base}/thumb?${new URLSearchParams({ path: [...path, e.name].join('/') })}">` : `<img src="${icon(e.name, e.isDir)}" alt="" width="16" height="16">`}<span class="n">${esc(e.name)}</span><span class="s">${e.isDir ? '' : size(e.size)}</span></div>`,
               )
               .join('') || '<div class="row">This folder is empty.</div>'
           }</div>` +
           (selected ? viewer(selected) : '');
         wirePlayers();
+        wireImages();
+        if (scroll) app.querySelector('.viewer')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); // on phones it's below the list
         app.querySelectorAll('[data-up]').forEach((a) =>
           a.addEventListener('click', (ev) => {
             ev.preventDefault();
@@ -500,7 +605,7 @@
             const e = list[Number(row.dataset.i)];
             if (e.isDir) path = [...path, e.name];
             selected = e.isDir ? null : e.name;
-            folder();
+            folder(!e.isDir);
           }),
         );
       }

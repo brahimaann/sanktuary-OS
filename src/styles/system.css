@@ -147,3 +147,100 @@ html {
     filter: brightness(1.05) contrast(1.05);
   }
 }
+
+/* Win98 Media Player controls (src/components/MediaControls.tsx; same look as server/share.html) */
+.w98-mp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.w98-mp-lcd {
+  background: #000080;
+  color: #fff;
+  font-weight: 700;
+  padding: 5px 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border: 2px solid;
+  border-color: #808080 #fff #fff #808080;
+}
+.w98-mp-time {
+  font-variant-numeric: tabular-nums;
+  color: #dfe6ff;
+}
+.w98-mp-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.w98-mp-btn {
+  width: 32px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #fff #000 #000 #fff;
+  box-shadow: inset -1px -1px #808080;
+}
+.w98-mp-btn svg {
+  width: 11px;
+  height: 11px;
+}
+.w98-mp-btn.on,
+.w98-mp-btn:active {
+  border-color: #000 #fff #fff #000;
+  box-shadow: inset 1px 1px #808080;
+  background: #d4d4d4;
+}
+.w98-mp-sep {
+  width: 2px;
+  align-self: stretch;
+  margin: 2px 4px;
+  border-left: 1px solid #808080;
+  border-right: 1px solid #fff;
+}
+.w98-track {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 24px;
+  margin: 0;
+  cursor: pointer;
+}
+.w98-track::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #fff;
+  border: 1px solid;
+  border-color: #808080 #fff #fff #808080;
+  box-shadow: inset 1px 1px #000;
+}
+.w98-track::-moz-range-track {
+  height: 4px;
+  background: #fff;
+  border: 1px solid;
+  border-color: #808080 #fff #fff #808080;
+}
+.w98-track::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 21px;
+  margin-top: -9px;
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #fff #000 #000 #fff;
+  box-shadow: inset -1px -1px #808080;
+}
+.w98-track::-moz-range-thumb {
+  width: 9px;
+  height: 19px;
+  border-radius: 0;
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #fff #000 #000 #fff;
+  box-shadow: inset -1px -1px #808080;
+}

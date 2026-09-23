@@ -976,6 +976,7 @@ async function publicShare(req, res, url) {
     return json(res, await listDir(target));
   }
   if (action === 'thumb') return thumb(res, target);
+  if (action === 'preview') return thumb(res, target, 2400); // PSD / TIFF, which browsers can't show
   if (action === 'zip') {
     if (!l.download || !l.isDir) fail(403, 'Downloads are turned off for this link');
     l.downloads++;

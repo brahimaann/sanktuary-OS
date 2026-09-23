@@ -6,6 +6,7 @@ import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 import { fileIcon, fileKind, needsConversion } from './fileTypes';
 import Avatar from './Avatar';
+import MediaControls from '../components/MediaControls';
 
 interface FilePreviewProps {
   app: string;
@@ -99,16 +100,25 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         ) : kind === 'audio' ? (
           <AudioPreview key={src} src={src} name={name} media={media} comments={comments} onSeek={seek} />
         ) : kind === 'video' ? (
-          <video
+          <div
             key={src}
-            ref={(el) => {
-              media.current = el;
-            }}
-            src={src}
-            controls
-            playsInline
-            style={{ maxWidth: '100%', maxHeight: '100%', background: '#000' }}
-          />
+            style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: 6, padding: 8, boxSizing: 'border-box' }}
+          >
+            <div
+              style={{ flex: 1, minHeight: 0, background: '#000', border: '2px inset #808080', display: 'flex', justifyContent: 'center' }}
+            >
+              <video
+                ref={(el) => {
+                  media.current = el;
+                }}
+                src={src}
+                playsInline
+                onClick={(e) => (e.currentTarget.paused ? e.currentTarget.play() : e.currentTarget.pause())}
+                style={{ maxWidth: '100%', maxHeight: '100%' }}
+              />
+            </div>
+            <MediaControls media={media} src={src} />
+          </div>
         ) : kind === 'pdf' ? (
           <iframe key={src} src={src} title={name} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
         ) : kind === 'doc' ? (
@@ -311,17 +321,17 @@ const AudioPreview: React.FC<{
     const w = (canvas.width = canvas.clientWidth * devicePixelRatio);
     const h = (canvas.height = canvas.clientHeight * devicePixelRatio);
     const g = canvas.getContext('2d')!;
-    g.fillStyle = '#000';
+    g.fillStyle = '#fff';
     g.fillRect(0, 0, w, h);
     const top = Math.max(...peaks) || 1;
     const bar = w / peaks.length;
     peaks.forEach((p, i) => {
       const bh = Math.max(1, (p / top) * h * 0.9);
-      g.fillStyle = i / peaks.length < progress ? '#00ff00' : '#008000';
+      g.fillStyle = i / peaks.length < progress ? '#000080' : '#a0a0a0';
       g.fillRect(i * bar, (h - bh) / 2, Math.max(1, bar - 1), bh);
     });
     if (duration) {
-      g.fillStyle = '#ffff00';
+      g.fillStyle = '#008080';
       for (const c of comments) if (c.t !== null) g.fillRect((c.t / duration) * w - devicePixelRatio, 0, 2 * devicePixelRatio, h);
     }
   }, [peaks, progress, comments, duration]);
@@ -349,18 +359,18 @@ const AudioPreview: React.FC<{
         <img src={fileIcon(name, false, 32)} alt="" style={{ width: 32, height: 32 }} />
         <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
       </div>
-      <div style={{ flex: 1, minHeight: 60, border: '2px inset #808080', background: '#000', position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: 60, border: '2px inset #808080', background: '#fff', position: 'relative' }}>
         {peaks && (
           <canvas
             ref={canvasRef}
             onPointerDown={seekTo}
             style={{ width: '100%', height: '100%', display: 'block', cursor: 'pointer' }}
-            title="Click to jump · yellow lines are comments"
+            title="Click to jump · teal lines are comments"
           />
         )}
         {note && (
           <div
-            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00c000' }}
+            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000080' }}
           >
             {note}
           </div>
@@ -371,13 +381,12 @@ const AudioPreview: React.FC<{
           media.current = el;
         }}
         src={src}
-        controls
         preload="metadata"
-        style={{ width: '100%' }}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
         onTimeUpdate={(e) => setProgress(e.currentTarget.currentTime / (e.currentTarget.duration || 1))}
         onError={() => setNote("This browser can't play this format — use Download.")}
       />
+      <MediaControls media={media} src={src} />
     </div>
   );
 };
