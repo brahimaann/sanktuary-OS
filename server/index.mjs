@@ -291,7 +291,7 @@ async function files(req, res, url) {
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))), transfer);
     if (q.has('thumb')) return thumb(res, target);
-    if (q.has('preview')) return thumb(res, target, 2400);
+    if (q.has('preview')) return thumb(res, target, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
     if (q.has('zip')) return zipFolder(res, target, target === root ? space.name : basename(target), transfer);
     return stream(req, res, q, target, transfer);
   }
@@ -2049,13 +2049,40 @@ async function boardsApi(req, res, url) {
 
   if (sub === 'assets' && req.method === 'PUT') {
     const name = safeName(url.searchParams.get('name'));
-    const stored = randomUUID() + extname(name).toLowerCase();
-    await mkdir(join(DATA, 'boards', id, 'assets'), { recursive: true });
-    await pipeline(req, createWriteStream(join(DATA, 'boards', id, 'assets', stored), BIG_BUFFER));
-    return json(res, { src: `/api/boards/${id}/assets/${stored}`, name });
+    const ext = extname(name).toLowerCase();
+    const uuid = randomUUID();
+    const dir = join(DATA, 'boards', id, 'assets');
+    await mkdir(dir, { recursive: true });
+    // Pictures are shown from a compressed WebP (max 2400 px); the original is kept beside it, untouched.
+    // GIFs stay as they are so animations keep playing.
+    if (THUMBABLE.has(ext) && ext !== '.gif') {
+      const original = join(dir, `${uuid}-original${ext}`);
+      await pipeline(req, createWriteStream(original, BIG_BUFFER));
+      try {
+        const img = await imageInput(original, (await stat(original)).size);
+        await img
+          .rotate()
+          .resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 82 })
+          .toFile(join(dir, `${uuid}.webp`));
+        return json(res, {
+          src: `/api/boards/${id}/assets/${uuid}.webp`,
+          original: `/api/boards/${id}/assets/${uuid}-original${ext}`,
+          name,
+        });
+      } catch {
+        return json(res, { src: `/api/boards/${id}/assets/${uuid}-original${ext}`, name }); // unreadable picture: show the file as it is
+      }
+    }
+    await pipeline(req, createWriteStream(join(dir, uuid + ext), BIG_BUFFER));
+    return json(res, { src: `/api/boards/${id}/assets/${uuid}${ext}`, name });
   }
   if (sub === 'assets' && req.method === 'GET') {
-    return stream(req, res, url.searchParams, join(DATA, 'boards', id, 'assets', safeName(file)));
+    const asset = join(DATA, 'boards', id, 'assets', safeName(file));
+    // ?view: a cached 1600 px WebP for boards made before uploads were compressed
+    if (url.searchParams.has('view') && THUMBABLE.has(extname(asset).toLowerCase()) && !asset.endsWith('.gif'))
+      return thumb(res, asset, 1600);
+    return stream(req, res, url.searchParams, asset);
   }
   fail(404, 'Unknown board action');
 }

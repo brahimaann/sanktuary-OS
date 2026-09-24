@@ -40,6 +40,18 @@ const NOTE_COLORS = ['#fff59d', '#ffcc80', '#f8bbd0', '#b3e5fc', '#c5e1a5', '#e1
 const MAX_ASSET = 95 * 1024 * 1024; // Cloudflare caps a request at 100 MB
 const newId = () => crypto.randomUUID().slice(0, 12);
 
+/**
+ * What a board actually loads for a picture: a compressed WebP, never the full-size original.
+ * New uploads are already WebP; older uploads get the server's cached 1600 px copy (?view), pictures
+ * from team spaces its 1600 px preview. GIFs are left alone so they still animate.
+ */
+const boardImage = (src: string) => {
+  if (!src || /\.(gif|webp)(\?|$)/i.test(src)) return src;
+  if (src.startsWith('/api/boards/')) return `${src}${src.includes('?') ? '&' : '?'}view`;
+  if (src.startsWith('/api/files/')) return `${src.split('?')[0]}?preview=1600`;
+  return src;
+};
+
 const Canvas: React.FC<{ boardId: string; name: string }> = ({ boardId, name }) => {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
@@ -701,7 +713,9 @@ const ItemView: React.FC<{
   } else if (item.type === 'image') {
     body = (
       <img
-        src={item.src}
+        src={boardImage(item.src || '')}
+        loading="lazy"
+        decoding="async"
         alt={item.name}
         draggable={false}
         style={{

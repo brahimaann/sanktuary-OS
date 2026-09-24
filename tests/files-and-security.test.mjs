@@ -585,6 +585,24 @@ try {
 
   // Boards: unsafe links rejected, connection spoofing ignored, bad JSON is a 400
   const board = JSON.parse((await call('alice', '/api/boards', 'POST', { name: 'Sec' })).text);
+
+  // Moodboard pictures are stored compressed for display, with the original kept
+  const { createRequire } = await import('node:module');
+  const sharpLib = createRequire(new URL('../server/package.json', import.meta.url))('sharp');
+  const bigPng = await sharpLib({ create: { width: 3000, height: 2000, channels: 3, background: '#c0c0c0' } })
+    .png()
+    .toBuffer();
+  const asset = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=cover.png`, 'PUT', bigPng, true)).text);
+  check('dragged-on picture is shown as WebP', asset.src.endsWith('.webp') && asset.original.endsWith('-original.png'));
+  const shownPic = Buffer.from(await (await fetch(B + asset.src, { headers: { cookie: cookie('alice') } })).arrayBuffer());
+  const meta = await sharpLib(shownPic).metadata();
+  check('shown copy is shrunk to 2400 px', meta.format === 'webp' && meta.width === 2400);
+  check(
+    'original kept untouched',
+    (await fetch(B + asset.original, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer())).byteLength === bigPng.length,
+  );
+  const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
+  check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
   const ctrl = new AbortController();
   let live = '';
   fetch(`${B}/api/boards/${board.id}/live`, { headers: { cookie: cookie('alice') }, signal: ctrl.signal })
