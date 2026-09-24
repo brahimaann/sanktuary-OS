@@ -15,6 +15,7 @@ export interface Profile {
   instagram?: string;
   website?: string;
   avatar?: number;
+  listed?: boolean;
 }
 
 export const displayName = (p?: Profile, fallback = '') => p?.displayName || p?.username || fallback;

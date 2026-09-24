@@ -52,7 +52,10 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
     try {
       await api('/api/profiles/me', {
         method: 'PUT',
-        body: JSON.stringify(Object.fromEntries([...FIELDS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? '']))),
+        body: JSON.stringify({
+          ...Object.fromEntries([...FIELDS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? ''])),
+          listed: !!draft.listed,
+        }),
       });
       setMsg('Saved.');
     } catch (e) {
@@ -178,6 +181,10 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             onChange={(e) => setDraft({ ...draft, bio: e.target.value })}
             style={{ ...input, resize: 'vertical' }}
           />
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="My Computer on sanktuary.studio, which visitors can open">
+          <input type="checkbox" checked={!!draft.listed} onChange={(e) => setDraft({ ...draft, listed: e.target.checked })} />
+          Show me in the public directory (name, picture, role, about me and links; never your status)
         </label>
         {mySpace && (
           <div style={{ border: '2px groove #fff', padding: 6 }}>

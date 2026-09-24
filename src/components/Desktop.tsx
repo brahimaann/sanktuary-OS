@@ -22,10 +22,9 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
     id: 'my-computer',
     title: 'My Computer',
     icon: '/images/icons/my-computer-32x32.png',
-    appType: 'explorer',
-    appProps: { path: 'C:/' },
-    width: 640,
-    height: 485,
+    appType: 'directory', // the public directory: people, releases, events, writing, shop
+    width: 680,
+    height: 500,
   },
   {
     id: 'recycle',

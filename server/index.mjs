@@ -2383,17 +2383,121 @@ const loadFront = async () =>
 const saveFront = () => (frontSaved = frontSaved.then(() => saveJson('front.json', frontDb)).catch(console.error));
 const joinTries = new Map(); // ip -> { n, since }
 
+async function latestPosts(n) {
+  const blog = await loadBlog();
+  const own = Object.values(blog.posts)
+    .filter((p) => p.published && !p.deleted)
+    .map((p) => ownPostView(p));
+  const fromFeeds = (await Promise.all(blog.feeds.map(readFeed))).flatMap((f) => f.items);
+  return [...own, ...fromFeeds].sort((a, b) => b.date.localeCompare(a.date)).slice(0, n);
+}
+
+/** A profile link as a safe http(s) URL ("@hima" -> https://instagram.com/hima), or null. */
+function publicLink(kind, v) {
+  v = String(v || '').trim();
+  if (!v) return null;
+  const u = /^https?:\/\//i.test(v)
+    ? v
+    : kind === 'instagram'
+      ? `https://instagram.com/${v.replace(/^@/, '')}`
+      : kind === 'soundcloud'
+        ? `https://soundcloud.com/${v}`
+        : `https://${v}`;
+  try {
+    const x = new URL(u);
+    return ['https:', 'http:'].includes(x.protocol) ? x.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// Current members (from Clerk), cached so the public directory doesn't ask Clerk on every visit. A profile
+// left behind by someone who was removed never shows, even if it was marked listed.
+let membersCache = { at: 0, names: new Set() };
+async function currentMembers() {
+  if (Date.now() - membersCache.at < 5 * 60_000) return membersCache.names;
+  const r = await clerk('/users?limit=100&order_by=-created_at').catch(() => null);
+  if (!r?.ok) return membersCache.names; // Clerk unreachable: keep the last list
+  membersCache = { at: Date.now(), names: new Set((await r.json()).map((u) => u.username).filter(Boolean)) };
+  return membersCache.names;
+}
+
+/** Everyone who chose "Show me in the public directory": name, role, bio, links and whether there's a picture. */
+async function listedPeople() {
+  const members = await currentMembers();
+  const files = (await readdir(join(DATA, 'profiles')).catch(() => [])).filter((f) => f.endsWith('.json'));
+  const people = [];
+  for (const f of files) {
+    const username = f.slice(0, -5);
+    if (!members.has(username)) continue;
+    const p = await readJson(`profiles/${f}`, {});
+    if (p.listed !== true) continue;
+    people.push({
+      username,
+      displayName: p.displayName || username,
+      role: p.role || '',
+      bio: p.bio || '',
+      links: Object.fromEntries(['soundcloud', 'instagram', 'website'].map((k) => [k, publicLink(k, p[k])]).filter(([, v]) => v)),
+      avatar: !!p.avatar && existsSync(join(DATA, 'profiles', 'avatars', `${username}.webp`)),
+    });
+  }
+  return people.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
 async function publicApi(req, res, url) {
   const front = await loadFront();
-  const what = url.pathname.split('/')[3];
+  const [, , , what, who] = url.pathname.split('/');
+  // The public directory (My Computer): only what was explicitly made public, plus the shop and writing
+  if (req.method === 'GET' && what === 'directory') {
+    const today = localDate();
+    const tdb = await loadTracks();
+    const count = (r) => Object.values(tdb.tracks).filter((t) => t.release === r.id && !t.deleted).length;
+    const events = Object.values((await loadTimeline()).items)
+      .filter((i) => i.public && !i.members && i.status !== 'Cancelled')
+      .sort((a, b) => a.start.localeCompare(b.start))
+      .map((i) => ({
+        title: i.title,
+        kind: i.kind,
+        start: i.start,
+        end: i.end,
+        time: i.time || '',
+        location: i.location,
+        link: i.link || null,
+        past: (i.end || i.start) < today,
+      }));
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, {
+      intro: front.intro,
+      people: await listedPeople(),
+      releases: Object.values(tdb.releases)
+        .filter((r) => r.public && !r.deleted && !r.members)
+        .map((r) => ({ title: r.title, kind: r.kind, date: r.date, tracks: count(r) }))
+        .sort((a, b) => (b.date || '9').localeCompare(a.date || '9')),
+      events: [
+        ...events.filter((e) => !e.past),
+        ...events
+          .filter((e) => e.past)
+          .reverse()
+          .slice(0, 10),
+      ],
+      posts: await latestPosts(12),
+      products: Object.values((await loadShop()).products)
+        .filter((p) => p.active && !p.deleted)
+        .map((p) => productView(p)),
+      pools: Object.values((await loadPools()).pools)
+        .filter((p) => p.public && p.open && !p.deleted)
+        .map((p) => (({ slug, title, goal, raised, supporters }) => ({ slug, title, goal, raised, supporters }))(poolView(p))),
+    });
+  }
+  if (req.method === 'GET' && what === 'avatar') {
+    const name = /^[\w.-]{1,64}$/.test(who || '') ? who : fail(404, 'Not found');
+    if (!(await listedPeople()).some((p) => p.username === name && p.avatar)) fail(404, 'Not found');
+    res.setHeader('cache-control', 'public, max-age=300');
+    return stream(req, res, url.searchParams, join(DATA, 'profiles', 'avatars', `${name}.webp`));
+  }
   if (req.method === 'GET' && !what) {
     const today = localDate();
-    const blog = await loadBlog();
-    const own = Object.values(blog.posts)
-      .filter((p) => p.published && !p.deleted)
-      .map((p) => ownPostView(p));
-    const fromFeeds = (await Promise.all(blog.feeds.map(readFeed))).flatMap((f) => f.items);
-    const posts = [...own, ...fromFeeds].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+    const posts = await latestPosts(3);
     const events = Object.values((await loadTimeline()).items)
       .filter((i) => i.public && !i.members && i.status !== 'Cancelled' && (i.end || i.start) >= today)
       .sort((a, b) => a.start.localeCompare(b.start))
@@ -4069,6 +4173,7 @@ async function profiles(req, res, url) {
     const input = await jsonBody(req);
     const profile = { ...(await readJson(`profiles/${name}.json`, {})) };
     for (const [k, max] of Object.entries(PROFILE_FIELDS)) if (k in input) profile[k] = String(input[k] ?? '').slice(0, max);
+    if ('listed' in input) profile.listed = input.listed === true; // shown in the public directory (My Computer)
     profile.updated = new Date().toISOString();
     await mkdir(join(DATA, 'profiles'), { recursive: true });
     await saveJson(`profiles/${name}.json`, profile);

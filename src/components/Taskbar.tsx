@@ -177,9 +177,7 @@ export const Taskbar: React.FC = () => {
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() =>
-                  launchApp('explorer-c', 'My Computer', 'explorer', '/images/icons/my-computer-16x16.png', 640, 480, { path: 'C:/' })
-                }
+                onClick={() => launchApp('my-computer', 'My Computer', 'directory', '/images/icons/my-computer-16x16.png', 680, 500)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
                 <img src="/images/icons/my-computer-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />

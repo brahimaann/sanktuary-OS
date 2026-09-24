@@ -951,6 +951,40 @@ try {
     pub1.releases.some((r) => r.title === 'Open EP' && !('members' in r) && !('owner' in r)),
   );
   check('private releases never leak, even marked public', !pub1.releases.some((r) => r.title === 'TSIMY'));
+
+  // Public directory (My Computer): only people who opted in, only what was made public
+  await call('bob', '/api/profiles/me', 'PUT', {
+    displayName: 'Bob B',
+    role: 'Producer',
+    instagram: '@bobmakesbeats',
+    website: 'javascript:alert(1)',
+    status: 'at the dentist',
+    listed: true,
+  });
+  await call('carol', '/api/profiles/me', 'PUT', { displayName: 'Carol', listed: 'yes' }); // only a real true opts in
+  writeFileSync(join(dir, 'data', 'profiles', 'mallory.json'), JSON.stringify({ displayName: 'Mallory', listed: true })); // not a member
+  const dirView = await fetch(B + '/api/public/directory');
+  const dirData = await dirView.json();
+  const bobCard = dirData.people.find((p) => p.username === 'bob');
+  check('directory works without an account', dirView.status === 200);
+  check(
+    'people who opted in are listed, with safe links',
+    bobCard?.displayName === 'Bob B' && bobCard.links.instagram === 'https://instagram.com/bobmakesbeats' && !bobCard.links.website,
+    JSON.stringify(bobCard),
+  );
+  check('away messages stay private', !JSON.stringify(dirData.people).includes('dentist'));
+  check('only people who opted in are listed', !dirData.people.some((p) => ['carol', 'alice', 'mallory'].includes(p.username)));
+  check(
+    'directory: public releases only',
+    dirData.releases.some((r) => r.title === 'Open EP' && r.tracks === 0) && !dirData.releases.some((r) => r.title === 'TSIMY'),
+  );
+  check(
+    'directory: public events only',
+    dirData.events.some((e) => e.title === 'Listening party') && !dirData.events.some((e) => e.title === 'Secret shoot'),
+  );
+  check('directory never shows folders or owners', !/folder|owner|members/.test(JSON.stringify(dirData.releases)));
+  check('avatar of someone not listed is not public', (await fetch(B + '/api/public/avatar/carol')).status === 404);
+  check('avatar name cannot climb', (await fetch(B + '/api/public/avatar/..%2F..%2Fconfig')).status === 404);
   check(
     'join needs a real email',
     (await fetch(B + '/api/public/join', { method: 'POST', body: JSON.stringify({ name: 'Amara', email: 'nope' }) })).status === 400,
