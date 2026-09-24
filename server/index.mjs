@@ -430,7 +430,20 @@ async function zipFolder(res, dir, name, transfer) {
   const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
   if (!items.length) fail(404, 'This folder is empty');
   const size = await folderSize(dir); // the zip's size is only known at the end; this is close enough for a progress bar
-  const tar = spawn(TAR, ['--format', 'zip', '--options', 'zip:compression=store', '--exclude', '.sk-*', '-cf', '-', '-C', dir, ...items]);
+  // "./name" so a file called e.g. "--use-compress-program=..." can never be read as a tar option
+  const tar = spawn(TAR, [
+    '--format',
+    'zip',
+    '--options',
+    'zip:compression=store',
+    '--exclude',
+    '.sk-*',
+    '-cf',
+    '-',
+    '-C',
+    dir,
+    ...items.map((n) => `./${n}`),
+  ]);
   tar.stderr.resume();
   res.on('close', () => tar.kill());
   res.writeHead(200, {

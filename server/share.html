@@ -355,7 +355,7 @@
       <div class="foot">Shared from Sanktuary · sanktuary.studio</div>
     </div>
     <script>
-      const token = location.pathname.split('/')[2];
+      const token = /^[\w-]{32}$/.test(location.pathname.split('/')[2] || '') ? location.pathname.split('/')[2] : 'invalid';
       const base = `/s/${token}`;
       const app = document.getElementById('app');
       const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

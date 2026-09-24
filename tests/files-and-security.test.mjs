@@ -481,6 +481,17 @@ try {
   // Caching: page always re-checked, built assets cached forever
   check('page is no-cache', (await fetch(B + '/')).headers.get('cache-control') === 'no-cache');
 
+  // Folder zips: a file named like a tar option must be zipped as a file, never run as an option
+  mkdirSync(join(drive, 'team', 'optfolder'), { recursive: true });
+  writeFileSync(join(drive, 'team', 'optfolder', '--version'), 'not an option');
+  writeFileSync(join(drive, 'team', 'optfolder', 'song.txt'), 'la la');
+  const optZip = await fetch(B + '/api/files/view/optfolder?zip', { headers: { cookie: cookie('alice') } });
+  const zbytes = Buffer.from(await optZip.arrayBuffer());
+  check(
+    'zip treats "--version" as a file, not a tar option',
+    zip.status === 200 && zbytes.subarray(0, 2).toString() === 'PK' && zbytes.includes('--version') && zbytes.includes('song.txt'),
+  );
+
   // Boards: unsafe links rejected, connection spoofing ignored, bad JSON is a 400
   const board = JSON.parse((await call('alice', '/api/boards', 'POST', { name: 'Sec' })).text);
   const ctrl = new AbortController();
