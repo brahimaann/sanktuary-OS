@@ -91,6 +91,25 @@ const stripeHook = (object, secret = WEBHOOK_SECRET, t = Math.floor(Date.now() /
   return fetch(B + '/api/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': `t=${t},v1=${sig}` }, body: raw });
 };
 
+// A fake RapidRAW engine: echoes what it was sent, answers with real paths like the real one would
+const rawCalls = [];
+const fakeRaw = http
+  .createServer((req, res) => {
+    let raw = '';
+    req.on('data', (d) => (raw += d));
+    req.on('end', () => {
+      const command = req.url.split('/').pop();
+      rawCalls.push({ command, token: req.headers['x-bridge-token'], args: raw ? JSON.parse(raw) : {} });
+      if (req.headers['x-bridge-token'] !== 'raw-token-for-tests-123') return res.writeHead(401).end('bad token');
+      if (command === 'apply_adjustments')
+        return res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(Buffer.from([1, 2, 3]));
+      const args = raw ? JSON.parse(raw) : {};
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ path: args.path, width: 6000, sidecar: args.path ? args.path + '.rrdata' : null }));
+    });
+  })
+  .listen(3193);
+
 const srv = spawn(process.execPath, [SERVER], {
   env: {
     ...process.env,
@@ -104,6 +123,9 @@ const srv = spawn(process.execPath, [SERVER], {
     STRIPE_API_URL: 'http://127.0.0.1:3195',
     STRIPE_SECRET_KEY: 'sk_test_fake',
     STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    RAPIDRAW_BRIDGE: 'http://127.0.0.1:3193',
+    RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
+    RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
   },
 });
 let srvOut = '';
@@ -928,6 +950,37 @@ try {
   check('orders are not in the open admin API', (await call('bob', '/api/business/orders')).status === 401);
   check('shop pages load', (await fetch(B + '/shop')).status === 200 && (await fetch(B + `/shop/${tee.slug}`)).status === 200);
 
+  // RapidRAW editor proxy: allowlisted commands, Sanktuary paths only, rights checked, real paths never leak
+  const raw = (u, command, args) => call(u, `/api/raw/invoke/${command}`, 'POST', args);
+  check('editor needs a login', (await fetch(B + '/api/raw/invoke/load_image', { method: 'POST', body: '{}' })).status === 401);
+  check('commands outside the editor are refused', (await raw('bob', 'delete_folder', { path: 'sk://ed/docs' })).status === 403);
+  check('real paths are refused', (await raw('bob', 'load_image', { path: 'C:/Windows/win.ini' })).status === 400);
+  check('paths cannot climb out of a space', (await raw('bob', 'load_image', { path: 'sk://ed/../../data/config.json' })).status === 400);
+  check('spaces you cannot see are refused', (await raw('carol', 'load_image', { path: 'sk://ed/pic.png' })).status === 404);
+  const opened = await raw('bob', 'load_image', { path: 'sk://ed/pic.png' });
+  const sentPath = rawCalls[rawCalls.length - 1].args.path;
+  check('the engine gets the real path', sentPath.toLowerCase().endsWith(join('drive', 'team', 'pic.png').toLowerCase()));
+  check('the engine gets the token', rawCalls[rawCalls.length - 1].token === 'raw-token-for-tests-123');
+  const openedBody = JSON.parse(opened.text);
+  check(
+    'real paths come back as Sanktuary paths',
+    openedBody.path === 'sk://ed/pic.png' && openedBody.sidecar === 'sk://ed/pic.png.rrdata' && !opened.text.includes(drive.slice(3, 8)),
+  );
+  const preview = await fetch(B + '/api/raw/invoke/apply_adjustments', {
+    method: 'POST',
+    headers: { cookie: cookie('bob') },
+    body: '{"jsAdjustments":{}}',
+  });
+  check('previews stream back as bytes', Buffer.from(await preview.arrayBuffer()).equals(Buffer.from([1, 2, 3])));
+  check('one editor at a time', (await raw('alice', 'load_image', { path: 'sk://view/pic.png' })).status === 423);
+  check(
+    'view rights cannot save edits',
+    (await raw('carol', 'save_metadata_and_update_thumbnail', { path: 'sk://view/pic.png', adjustments: {} })).status !== 200,
+  );
+  const st = JSON.parse((await call('alice', '/api/raw/status')).text);
+  check('status says who is editing', st.busyBy === 'bob' && st.installed === false);
+  check('editor page explains when not installed', /isn't installed/.test(await (await fetch(B + '/apps/rapidraw/')).text()));
+
   // Chat attachments: files sent from a phone / computer straight into a conversation
   const dm = 'dm~alice~bob';
   const sent = JSON.parse((await call('alice', `/api/chat/${dm}/files?name=photo.png`, 'PUT', bigPng, true)).text);
@@ -997,6 +1050,7 @@ try {
   srv.kill();
   clerk.close();
   fakeStripe.close();
+  fakeRaw.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
   console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
   rmSync(dir, { recursive: true, force: true });

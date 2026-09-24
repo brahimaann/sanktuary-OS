@@ -10,7 +10,7 @@ import http from 'node:http';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, statSync } from 'node:fs';
 import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -2603,6 +2603,159 @@ function storePage(req, res, url) {
   return pipeline(createReadStream(STORE_PAGE), res);
 }
 
+// ── /api/raw: the RapidRAW photo editor, running on this PC (github.com/brahimaann/rapidraw-sanktuary) ──
+// The editor UI is served at /apps/rapidraw/ and talks to /api/raw/*; this passes a fixed list of editing
+// commands to the RapidRAW engine's bridge on 127.0.0.1 (RAPIDRAW_BRIDGE, token RAPIDRAW_TOKEN).
+// The browser only ever sees Sanktuary paths ("sk://<space>/<path>"): each one is checked against the member's
+// rights and turned into a real path on the way in, and real paths are turned back on the way out.
+// RapidRAW edits one image at a time, so one member edits at a time (10 minutes idle frees it).
+const RAW_BRIDGE = process.env.RAPIDRAW_BRIDGE || 'http://127.0.0.1:3091';
+const RAW_UI = process.env.RAPIDRAW_UI || 'C:\\homeserver\\rapidraw\\ui';
+const RAW_IDLE = 10 * 60_000;
+let rawSession = null; // { user, at }
+// command -> which arguments are paths, and the rights each needs
+const RAW_COMMANDS = {
+  load_image: { path: 'view' },
+  load_metadata: { path: 'view' },
+  get_image_dimensions: { path: 'view' },
+  list_images_in_dir: { path: 'view' },
+  save_metadata_and_update_thumbnail: { path: 'upload' }, // writes the edit next to the photo (.rrdata)
+  export_images: { paths: 'view', outputFolderOrFile: 'upload', baseOriginFolders: 'view', currentEditPath: 'view' },
+  apply_adjustments: {},
+  generate_uncropped_preview: {},
+  calculate_auto_adjustments: {},
+  get_supported_file_types: {},
+  load_settings: {},
+  load_presets: {},
+};
+
+async function rawApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const status = await loadStatus();
+  const spaces = spacesFor(user, cfg, status).filter((s) => s.online);
+  const action = url.pathname.split('/')[3]; // /api/raw/<invoke|events|file|status>/<command>
+
+  // sk://space/a/b -> checked real path (the spaces used are preferred when mapping answers back)
+  const used = new Set();
+  const toReal = (value, level) => {
+    const m = /^sk:\/\/([\w-]+)\/?(.*)$/.exec(String(value || '')) || fail(400, 'Paths must be Sanktuary paths (sk://...)');
+    const space = spaces.find((s) => s.id === m[1]) || fail(404, 'No such space');
+    used.add(space.id);
+    if (RANK[space.rights] < RANK[level]) fail(403, `You need ${level} rights in ${space.name}`);
+    return locateIn(space, decodeURIComponent(m[2])).abs;
+  };
+  // real paths in answers -> sk://space/...
+  // Deepest root first; among spaces over the same folder, the one this request used
+  const roots = () =>
+    spaces.map((s) => [resolve(s.root).toLowerCase(), s.id]).sort((a, b) => b[0].length - a[0].length || used.has(b[1]) - used.has(a[1]));
+  const toSk = (v) => {
+    if (typeof v === 'string' && /^[a-z]:[\\/]/i.test(v)) {
+      const hit = roots().find(([r]) => v.toLowerCase().startsWith(r));
+      return hit
+        ? `sk://${hit[1]}/${v
+            .slice(hit[0].length)
+            .replace(/^[\\/]+/, '')
+            .split(/[\\/]/)
+            .join('/')}`
+        : '(outside Sanktuary)';
+    }
+    if (Array.isArray(v)) return v.map(toSk);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, toSk(x)]));
+    return v;
+  };
+  const claim = () => {
+    if (rawSession && rawSession.user !== user.username && Date.now() - rawSession.at < RAW_IDLE)
+      fail(423, `The photo editor is in use by ${rawSession.user}. Try again in a few minutes.`);
+    rawSession = { user: user.username, at: Date.now() };
+  };
+  const bridge = (path, init = {}) =>
+    fetch(RAW_BRIDGE + path, {
+      ...init,
+      headers: { 'x-bridge-token': process.env.RAPIDRAW_TOKEN || '', 'content-type': 'application/json', ...init.headers },
+    }).catch(() => fail(503, "The photo editor isn't running on the server right now"));
+
+  if (req.method === 'GET' && action === 'status') {
+    const up = await fetch(RAW_BRIDGE + '/invoke/get_supported_file_types', {
+      method: 'POST',
+      headers: { 'x-bridge-token': process.env.RAPIDRAW_TOKEN || '' },
+      body: '{}',
+      signal: AbortSignal.timeout(3000),
+    })
+      .then((r) => r.ok)
+      .catch(() => false);
+    const busy = rawSession && Date.now() - rawSession.at < RAW_IDLE && rawSession.user !== user.username ? rawSession.user : null;
+    return json(res, { running: up, installed: existsSync(join(RAW_UI, 'index.html')), busyBy: busy });
+  }
+  if (req.method === 'GET' && action === 'file') return stream(req, res, url.searchParams, toReal(url.searchParams.get('path'), 'view'));
+  if (req.method === 'GET' && action === 'events') {
+    claim();
+    const r = await bridge('/events');
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
+    req.on('close', () => r.body?.cancel().catch(() => {}));
+    for await (const chunk of r.body)
+      res.write(
+        Buffer.from(chunk)
+          .toString('utf8')
+          .replace(/[a-z]:\\\\[^"]*/gi, (p) => toSk(p.replace(/\\\\/g, '\\'))),
+      );
+    return res.end();
+  }
+  if (req.method === 'POST' && action === 'invoke') {
+    const command = url.pathname.split('/')[4];
+    const spec = RAW_COMMANDS[command] || fail(403, `${command} isn't available in the Sanktuary editor`);
+    const args = await jsonBody(req);
+    const original = String(args.path || ''); // sk://space/... as the member sent it
+    for (const [key, level] of Object.entries(spec)) {
+      if (args[key] == null) continue;
+      args[key] = Array.isArray(args[key]) ? args[key].map((v) => toReal(v, level)) : toReal(args[key], level);
+    }
+    claim(); // only once the request is known to be allowed
+    const r = await bridge(`/invoke/${command}`, { method: 'POST', body: JSON.stringify(args) });
+    if (!r.ok)
+      fail(
+        r.status === 401 ? 503 : 400,
+        (await r.text()).replace(/[a-z]:[\\/][^\s"']*/gi, (p) => toSk(p)),
+      );
+    if (command === 'save_metadata_and_update_thumbnail') {
+      const [, , space, ...rest] = original.split('/');
+      const s = spaces.find((x) => x.id === space);
+      if (s && s.id !== 'me')
+        logActivity(user, 'edited the photo', { space: s.id, spaceName: s.name, path: decodeURIComponent(rest.join('/')) });
+    }
+    if ((r.headers.get('content-type') || '').includes('json')) return json(res, toSk(await r.json()));
+    res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' });
+    return pipeline(r.body, res);
+  }
+  fail(404, 'Not found');
+}
+
+/** The editor's own page and scripts, from the folder ops/rapidraw/setup.ps1 builds them into. */
+function rawUi(req, res, url) {
+  if (!existsSync(join(RAW_UI, 'index.html'))) {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    return res.end(
+      '<body style="font:13px Tahoma,sans-serif;background:#c0c0c0;padding:16px"><b>The photo editor isn\'t installed on the server yet.</b><p>An admin runs <code>ops\\rapidraw\\setup.ps1</code> on the home server PC.</p></body>',
+    );
+  }
+  const rel = decodeURIComponent(url.pathname.replace(/^\/apps\/rapidraw\/?/, ''));
+  const file = resolve(RAW_UI, rel || 'index.html');
+  const target =
+    inside(resolve(RAW_UI), file) && existsSync(file) && !statSyncSafe(file)?.isDirectory() ? file : join(RAW_UI, 'index.html');
+  res.writeHead(200, {
+    'content-type': MIME[extname(target).toLowerCase()] || 'application/octet-stream',
+    'cache-control': target.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+  });
+  return pipeline(createReadStream(target), res);
+}
+const statSyncSafe = (f) => {
+  try {
+    return statSync(f);
+  } catch {
+    return null;
+  }
+};
+
 // The public blog page: sanktuary.studio/blog (and /blog/<post>), no account needed
 const BLOG_PAGE = new URL('./blog.html', import.meta.url);
 function blogPage(req, res, url) {
@@ -3683,6 +3836,8 @@ const routes = [
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],
+  ['/api/raw/', rawApi],
+  ['/apps/rapidraw', rawUi],
   ['/api/pools', poolsApi],
   ['/api/shop', shopApi],
   ['/api/stripe/webhook', stripeWebhook],

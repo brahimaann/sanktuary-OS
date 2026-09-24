@@ -7,6 +7,7 @@ import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion } from './fileTypes';
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
+import { useWindowManager } from '../wm/manager';
 
 interface FilePreviewProps {
   app: string;
@@ -26,11 +27,14 @@ const WAVEFORM_MAX_BYTES = 80 * 1024 * 1024; // bigger files play fine, they jus
 const TEXT_MAX_BYTES = 2 * 1024 * 1024;
 const OFFICE_MAX_BYTES = 30 * 1024 * 1024; // Word/spreadsheet files are converted in the browser
 const SHEET_MAX_ROWS = 2000;
+// Photos RapidRAW can edit (camera RAW formats too)
+const EDITABLE_PHOTO = /\.(jpe?g|png|tiff?|webp|dng|cr2|cr3|nef|nrw|arw|srf|sr2|raf|orf|rw2|pef|srw|3fr|iiq|erf|kdc|mrw|x3f)$/i;
 export const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 /** Previews a team file (images, audio with waveform, video, PDF, text) with a live comment thread. */
 const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, siblings }) => {
   const { getToken } = useAuth();
+  const { openWindow } = useWindowManager();
   const [name, setName] = useState(initialName);
   const [token, setToken] = useState('');
   const media = useRef<HTMLMediaElement | null>(null);
@@ -85,6 +89,27 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         {(kind === 'pdf' || kind === 'image') && (
           <button style={button} disabled={!token} onClick={() => window.open(needsConversion(name) ? `${src}&preview` : src, '_blank')}>
             Open in new tab
+          </button>
+        )}
+        {EDITABLE_PHOTO.test(name) && (
+          <button
+            style={button}
+            title="Open in the RapidRAW photo editor (runs on the Sanktuary server)"
+            onClick={() =>
+              openWindow({
+                id: `rapidraw-${app}-${path}`,
+                title: `RapidRAW - ${name}`,
+                icon: '/images/icons/paint-16x16.png',
+                appType: 'iframe',
+                appProps: {
+                  src: `/apps/rapidraw/?file=${encodeURIComponent(`sk://${app}/${[...dir, name].map(encodeURIComponent).join('/')}`)}`,
+                },
+                width: 1100,
+                height: 720,
+              })
+            }
+          >
+            Edit photo
           </button>
         )}
         <span style={{ marginLeft: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>
