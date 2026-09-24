@@ -137,6 +137,23 @@ export const Desktop: React.FC = () => {
     });
   }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    // The service worker makes Sanktuary installable with a place in the phone's share menu (and does push)
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+    // Arrived from the share menu: show what was shared and ask where it goes
+    const q = new URLSearchParams(location.search);
+    if (!q.has('share')) return;
+    history.replaceState(null, '', location.pathname);
+    openWindow({
+      id: 'share-in',
+      title: 'Share to Sanktuary',
+      icon: '/images/icons/network-16x16.png',
+      appType: 'share-in',
+      appProps: { missed: q.get('share') === 'missed' },
+      width: 440,
+      height: 460,
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     if (me) startLive();
   }, [me]);
   const [vfsIcons, setVfsIcons] = useState<DesktopIconDef[]>([]);

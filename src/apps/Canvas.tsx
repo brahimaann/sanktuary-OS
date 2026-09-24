@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useWindowManager } from '../wm/manager';
 import { useBoard } from '../utils/useBoard';
+import { useIncoming } from '../utils/incoming';
 import { DRAG_FILE } from '../utils/refs';
 import { dialog } from '../utils/dialog';
 import { fileIcon, fileKind, lightAudio, needsConversion } from './fileTypes';
@@ -295,6 +296,9 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
       }
     }
   };
+
+  // Shared from the phone's share menu: added to the board once it has loaded
+  useIncoming(`canvas:${boardId}`, !!me.current, (s) => s.files.length && addFiles(s.files));
 
   const addTeamFile = async (ref: { app: string; dir: string[]; name: string }, at: { x: number; y: number }) => {
     const src = fileUrl(ref.app, [...ref.dir, ref.name]);

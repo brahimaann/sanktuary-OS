@@ -4148,6 +4148,8 @@ const routes = [
   ['/shop', storePage],
   ['/blog', blogPage],
   ['/s/', publicShare],
+  // Normally the service worker answers the phone's "Share to Sanktuary"; if it wasn't running, say so instead of 404
+  ['/share-target', (req, res) => (req.resume(), res.writeHead(303, { location: '/?share=missed' }).end())],
 ];
 
 http

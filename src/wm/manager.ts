@@ -33,7 +33,8 @@ export type AppType =
   | 'timeline'
   | 'business'
   | 'welcome'
-  | 'new';
+  | 'new'
+  | 'share-in';
 
 export interface WindowInstance {
   id: string;
@@ -249,7 +250,9 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
   setWallpaper: (wp) => set({ wallpaper: wp }),
   setBgColor: (color) => set({ bgColor: color }),
   // 3D Pipes was retired: anyone who had it gets the starfield
-  screensaver: (typeof localStorage !== 'undefined' && localStorage.getItem('hq_os_screensaver') === 'none' ? 'none' : 'starfield') as ScreensaverType,
+  screensaver: (typeof localStorage !== 'undefined' && localStorage.getItem('hq_os_screensaver') === 'none'
+    ? 'none'
+    : 'starfield') as ScreensaverType,
   screensaverTimeout:
     typeof localStorage !== 'undefined' && localStorage.getItem('hq_os_screensaver_timeout')
       ? Number(localStorage.getItem('hq_os_screensaver_timeout'))

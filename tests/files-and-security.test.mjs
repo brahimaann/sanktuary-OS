@@ -536,6 +536,11 @@ try {
   );
   check('bob owns the folders he made', (await call('bob', '/api/files/up/Timeline', 'DELETE')).status === 200);
   check('view rights cannot mkdir', (await call('carol', '/api/files/view/Nope/Deep?mkdir&parents', 'POST')).status === 403);
+  const missedShare = await fetch(B + '/share-target', { method: 'POST', body: 'x'.repeat(1000), redirect: 'manual' });
+  check(
+    'a share the service worker missed says so',
+    missedShare.status === 303 && missedShare.headers.get('location') === '/?share=missed',
+  );
   check(
     "only the release's owner or an admin changes its folder",
     (await call('carol', `/api/tracks/release/${folderAlbum.id}`, 'PATCH', { folder: null })).status === 403,

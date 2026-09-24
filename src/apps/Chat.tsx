@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
+import { useIncoming } from '../utils/incoming';
 import MembersPicker from './MembersPicker';
 import { dialog } from '../utils/dialog';
 import { isTouch } from './fileTypes';
@@ -154,6 +155,12 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
       }
     }
   };
+
+  // Shared from the phone's share menu: attached here, ready to send
+  useIncoming(`chat:${channel}`, true, (s) => {
+    if (s.text) setText((t) => (t ? `${t}\n${s.text}` : s.text));
+    if (s.files.length) attachFromDevice(s.files);
+  });
 
   const onType = (v: string) => {
     setText(v);
