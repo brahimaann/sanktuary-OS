@@ -434,17 +434,14 @@
       function viewer(name) {
         const src = `${base}/file?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}`;
         const k = kind(name);
+        // Lighter copies for viewing: MP3 for WAV/AIFF/FLAC, WebP for photos (the Download button stays the original)
+        const light = `${base}/preview?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}`;
         const dl = info.download ? `<a class="btn" href="${src}&download">${glyph.download}&nbsp;Download ${esc(name)}</a>` : '';
         const media =
           k === 'audio' || k === 'video'
-            ? player(name, src, k)
+            ? player(name, k === 'audio' && /\.(wav|aiff?|flac)$/i.test(name) ? light : src, k)
             : k === 'image' || k === 'preview'
-              ? imageViewer(
-                  name,
-                  k === 'image'
-                    ? src
-                    : `${base}/preview?${new URLSearchParams({ path: [...path, ...(info.isDir ? [name] : [])].join('/') })}`,
-                )
+              ? imageViewer(name, k === 'image' && /\.gif$/i.test(name) ? src : light)
               : k === 'pdf'
                 ? `<iframe src="${src}"></iframe>`
                 : k === 'text'

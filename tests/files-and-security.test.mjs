@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -583,6 +583,60 @@ try {
   check(
     'zip treats "--version" as a file, not a tar option',
     zip.status === 200 && zbytes.subarray(0, 2).toString() === 'PK' && zbytes.includes('--version') && zbytes.includes('song.txt'),
+  );
+
+  // Light audio previews: WAV -> 256 kbps MP3, made once and cached; crafted files refused
+  // stereo 16-bit 44.1 kHz, like a real bounce
+  const wav = (secs, rate = 44100) => {
+    const n = secs * rate;
+    const b = Buffer.alloc(44 + n * 4);
+    b.write('RIFF', 0);
+    b.writeUInt32LE(36 + n * 4, 4);
+    b.write('WAVEfmt ', 8);
+    b.writeUInt32LE(16, 16);
+    b.writeUInt16LE(1, 20);
+    b.writeUInt16LE(2, 22);
+    b.writeUInt32LE(rate, 24);
+    b.writeUInt32LE(rate * 4, 28);
+    b.writeUInt16LE(4, 32);
+    b.writeUInt16LE(16, 34);
+    b.write('data', 36);
+    b.writeUInt32LE(n * 4, 40);
+    for (let i = 0; i < n; i++) {
+      const v = Math.round(Math.sin((i / rate) * 2 * Math.PI * 440) * 8000);
+      b.writeInt16LE(v, 44 + i * 4);
+      b.writeInt16LE(v, 46 + i * 4);
+    }
+    return b;
+  };
+  writeFileSync(join(drive, 'team', 'bounce.wav'), wav(5));
+  const getBin = async (u, path) => {
+    const t = Date.now();
+    const r = await fetch(B + path, { headers: u ? { cookie: cookie(u) } : {} });
+    return { status: r.status, type: r.headers.get('content-type'), bytes: Buffer.from(await r.arrayBuffer()), ms: Date.now() - t };
+  };
+  const mp3 = await getBin('alice', '/api/files/view/bounce.wav?preview');
+  check('WAV preview is an MP3', mp3.status === 200 && mp3.type === 'audio/mpeg');
+  check(
+    'MP3 preview is much smaller than the WAV',
+    mp3.bytes.length > 0 && mp3.bytes.length < statSync(join(drive, 'team', 'bounce.wav')).size / 4,
+    `${mp3.bytes.length} bytes`,
+  );
+  const again = await getBin('alice', '/api/files/view/bounce.wav?preview');
+  check('second request comes from the cache', again.status === 200 && again.bytes.equals(mp3.bytes) && again.ms <= mp3.ms);
+  writeFileSync(join(drive, 'team', 'evil.wav'), ['#EXTM3U', '#EXTINF:1,', 'file:///C:/Windows/win.ini', ''].join('\n'));
+  const evil = await getBin('alice', '/api/files/view/evil.wav?preview');
+  check('a playlist disguised as .wav is refused, nothing leaked', evil.status === 415 && !evil.bytes.toString().includes('[fonts]'));
+  const { link: audioLink } = await mk('bob', 'ed', 'bounce.wav');
+  const shared = await getBin(null, `${audioLink.url}/preview`);
+  check('share link plays the light MP3', shared.status === 200 && shared.type === 'audio/mpeg');
+  const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  writeFileSync(join(drive, 'team', 'real.png'), Buffer.from(png1x1, 'base64'));
+  const photo = await getBin('alice', '/api/files/view/real.png?preview');
+  check('image preview is WebP', photo.status === 200 && photo.type === 'image/webp');
+  check(
+    'a damaged image says it cannot be previewed (not a server error)',
+    (await getBin('alice', '/api/files/view/pic.png?preview')).status === 415,
   );
 
   // Boards: unsafe links rejected, connection spoofing ignored, bad JSON is a 400

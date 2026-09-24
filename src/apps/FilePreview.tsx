@@ -4,7 +4,7 @@ import { useApi } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
-import { fileIcon, fileKind, isTouch, needsConversion } from './fileTypes';
+import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion } from './fileTypes';
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
 
@@ -95,12 +95,19 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         {!src ? null : kind === 'image' ? (
           <img
             key={src}
-            src={needsConversion(name) ? `${src}&preview` : src}
+            src={lightImage(name) ? `${src}&preview` : src}
             alt={name}
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
           />
         ) : kind === 'audio' ? (
-          <AudioPreview key={src} src={src} name={name} media={media} comments={comments} onSeek={seek} />
+          <AudioPreview
+            key={src}
+            src={lightAudio(name) ? `${src}&preview` : src}
+            name={name}
+            media={media}
+            comments={comments}
+            onSeek={seek}
+          />
         ) : kind === 'video' ? (
           <div
             key={src}

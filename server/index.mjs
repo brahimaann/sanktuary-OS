@@ -19,6 +19,7 @@ import { verifyToken } from '@clerk/backend';
 import sharp from 'sharp';
 import webpush from 'web-push';
 import { initializeCanvas, readPsd } from 'ag-psd';
+import ffmpegPath from 'ffmpeg-static';
 
 // ag-psd needs a pixel-buffer factory on the server (there's no canvas); we only read raw composite pixels.
 initializeCanvas(
@@ -224,13 +225,30 @@ function spacesFor(user, cfg, status) {
   });
 }
 
+// Folder sizes (personal-space quotas, zip progress) are cached for a minute and dropped on any write, so
+// refreshing the desktop doesn't re-walk every file on the drive each time.
+const sizeCache = new Map(); // dir -> { size, at }
+const forgetSizes = () => sizeCache.clear();
 async function folderSize(dir) {
-  let total = 0;
-  for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    const p = join(dir, e.name);
-    total += e.isDirectory() ? await folderSize(p) : (await stat(p).catch(() => ({ size: 0 }))).size;
-  }
-  return total;
+  const hit = sizeCache.get(dir);
+  if (hit && Date.now() - hit.at < 60_000) return hit.size;
+  const walk = async (d) => {
+    const entries = await readdir(d, { withFileTypes: true }).catch(() => []);
+    const sizes = await Promise.all(
+      entries.map((e) =>
+        e.isDirectory()
+          ? walk(join(d, e.name))
+          : stat(join(d, e.name)).then(
+              (x) => x.size,
+              () => 0,
+            ),
+      ),
+    );
+    return sizes.reduce((a, b) => a + b, 0);
+  };
+  const size = await walk(dir);
+  sizeCache.set(dir, { size, at: Date.now() });
+  return size;
 }
 
 async function spaceInfo(s) {
@@ -269,6 +287,7 @@ async function files(req, res, url) {
   // Downloads of projects say why: view only / playground copy / check-out
   const purpose = { view: ' (view only)', playground: ' (playground copy)', checkout: ' (checked out)' }[q.get('purpose')] || '';
   const transfer = (action, bytes, path = rel) => logTransfer(req, user, action + purpose, space, path.split(sep).join('/'), bytes);
+  if (req.method !== 'GET') forgetSizes(); // any change to files: cached folder sizes are stale
   if (req.method === 'GET') {
     need('view');
     if (q.has('list')) {
@@ -291,6 +310,8 @@ async function files(req, res, url) {
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))), transfer);
     if (q.has('thumb')) return thumb(res, target);
+    if (q.has('preview') && AUDIO_PREVIEW[extname(target).toLowerCase()])
+      return stream(req, res, new URLSearchParams(), await audioPreviewFile(target));
     if (q.has('preview')) return thumb(res, target, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
     if (q.has('zip')) return zipFolder(res, target, target === root ? space.name : basename(target), transfer);
     return stream(req, res, q, target, transfer);
@@ -434,7 +455,9 @@ async function zipFolder(res, dir, name, transfer) {
   if (!(await stat(dir).catch(() => null))?.isDirectory()) fail(404, 'Not a folder');
   const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
   if (!items.length) fail(404, 'This folder is empty');
-  const size = await folderSize(dir); // the zip's size is only known at the end; this is close enough for a progress bar
+  // Start sending straight away; the size is only for the progress bar, so wait at most 0.4 s for it
+  const sizing = folderSize(dir);
+  const size = await Promise.race([sizing, new Promise((r) => setTimeout(() => r(0), 400))]);
   // "./name" so a file called e.g. "--use-compress-program=..." can never be read as a tar option
   const tar = spawn(TAR, [
     '--format',
@@ -454,9 +477,9 @@ async function zipFolder(res, dir, name, transfer) {
   res.writeHead(200, {
     'content-type': 'application/zip',
     'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name + '.zip')}`,
-    'x-total-bytes': size,
+    ...(size ? { 'x-total-bytes': size } : {}),
   });
-  transfer('downloaded folder (zip)', size);
+  sizing.then((bytes) => transfer('downloaded folder (zip)', bytes));
   return pipeline(tar.stdout, res);
 }
 
@@ -1067,7 +1090,9 @@ async function publicShare(req, res, url) {
     return json(res, await listDir(target));
   }
   if (action === 'thumb') return thumb(res, target);
-  if (action === 'preview') return thumb(res, target, 2400); // PSD / TIFF, which browsers can't show
+  if (action === 'preview' && AUDIO_PREVIEW[extname(target).toLowerCase()])
+    return stream(req, res, new URLSearchParams(), await audioPreviewFile(target));
+  if (action === 'preview') return thumb(res, target, 2400); // lighter images, and PSD / TIFF which browsers can't show
   if (action === 'zip') {
     if (!l.download || !l.isDir) fail(403, 'Downloads are turned off for this link');
     l.downloads++;
@@ -1934,13 +1959,13 @@ const safeName = (name) => (/^[^/\\:\x00-\x1f]+$/.test(name || '') && name !== '
 async function listDir(dir, includeHidden = false) {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => null);
   if (!entries) return includeHidden ? [] : fail(404, 'Not found');
-  const list = [];
-  for (const e of entries) {
-    if (!includeHidden && HIDDEN.test(e.name)) continue;
-    const s = await stat(join(dir, e.name)).catch(() => null);
-    if (s) list.push({ name: e.name, isDir: s.isDirectory(), size: s.size, modified: s.mtime.toISOString() });
-  }
-  return list;
+  // stat every entry at once: ~8x faster than one at a time on a spinning USB drive
+  const stats = await Promise.all(
+    entries.map((e) => (!includeHidden && HIDDEN.test(e.name) ? null : stat(join(dir, e.name)).catch(() => null))),
+  );
+  return entries.flatMap((e, i) =>
+    stats[i] ? [{ name: e.name, isDir: stats[i].isDirectory(), size: stats[i].size, modified: stats[i].mtime.toISOString() }] : [],
+  );
 }
 
 /** Moves the current file into .sk-versions/<path>/<timestamp><ext> so a replace never loses work. */
@@ -2007,16 +2032,98 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   let name = target.split(sep).pop();
   if (staged) {
     await rename(part, target); // check-in files land exactly where they belong in the staging folder
+    forgetSizes();
     transfer('uploaded (check-in)', size, relative(root, target));
     return json(res, { ok: true, name });
   }
   if (q.get('replace')) await keepVersion(root, target);
   else name = freeName(dir, name);
   await rename(part, join(dir, name));
+  forgetSizes();
+  warmAudioPreview(join(dir, name));
   if (!q.get('replace')) await setOwner(space, join(dir, name), user);
   log(q.get('replace') ? 'replaced' : 'uploaded', { path: relative(root, join(dir, name)).split(sep).join('/') });
   transfer(q.get('replace') ? 'replaced' : 'uploaded', size, relative(root, join(dir, name)));
   return json(res, { ok: true, name });
+}
+
+// ── Light audio previews: a 256 kbps MP3 of each WAV/AIFF/FLAC (~1/5 the size), made once and cached ──
+// The input format is forced from the extension and only local files are allowed, so a crafted file can't
+// make ffmpeg probe it as something else (e.g. a playlist that reads other files). At most 2 run at once.
+const AUDIO_PREVIEW = { '.wav': 'wav', '.aif': 'aiff', '.aiff': 'aiff', '.flac': 'flac' };
+const previewJobs = new Map(); // cache file -> Promise
+let transcoding = 0;
+const transcodeQueue = [];
+
+async function audioPreviewFile(file) {
+  const format = AUDIO_PREVIEW[extname(file).toLowerCase()] || fail(415, 'No audio preview for this type');
+  const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
+  const out = join(THUMBS, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|mp3`).digest('hex') + '.mp3');
+  if (existsSync(out)) return out;
+  if (!previewJobs.has(out))
+    previewJobs.set(
+      out,
+      transcode(file, format, out).finally(() => previewJobs.delete(out)),
+    );
+  await previewJobs.get(out);
+  return out;
+}
+
+async function transcode(file, format, out) {
+  if (transcoding >= 2) await new Promise((r) => transcodeQueue.push(r));
+  transcoding++;
+  try {
+    await mkdir(THUMBS, { recursive: true });
+    const tmp = out + '.part';
+    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file', '-f', format, '-i', file];
+    const code = await new Promise((resolve) => {
+      const ff = spawn(ffmpegPath, [...args, '-vn', '-c:a', 'libmp3lame', '-b:a', '256k', '-f', 'mp3', '-y', tmp], { windowsHide: true });
+      const timer = setTimeout(() => ff.kill(), 10 * 60_000);
+      ff.stderr.resume();
+      ff.on('error', () => resolve(-1));
+      ff.on('close', (c) => {
+        clearTimeout(timer);
+        resolve(c);
+      });
+    });
+    if (code !== 0) {
+      await rm(tmp, { force: true });
+      fail(415, "Couldn't make a preview of this audio — use Download");
+    }
+    await rename(tmp, out);
+    pruneCache();
+  } finally {
+    transcoding--;
+    transcodeQueue.shift()?.();
+  }
+}
+
+/** Makes the audio preview in the background right after an upload, so it's ready before anyone presses play. */
+const warmAudioPreview = (file) => AUDIO_PREVIEW[extname(file).toLowerCase()] && audioPreviewFile(file).catch(() => {});
+
+// Keeps the preview/thumbnail cache (cache/thumbs on the SSD) under 20 GB by removing the least recently used.
+let lastPrune = 0;
+async function pruneCache(limit = 20 * 1024 ** 3) {
+  if (Date.now() - lastPrune < 10 * 60_000) return;
+  lastPrune = Date.now();
+  const names = await readdir(THUMBS).catch(() => []);
+  const files = (
+    await Promise.all(
+      names.map((n) =>
+        stat(join(THUMBS, n)).then(
+          (st) => ({ p: join(THUMBS, n), st }),
+          () => null,
+        ),
+      ),
+    )
+  ).filter(Boolean);
+  let total = files.reduce((a, f) => a + f.st.size, 0);
+  if (total <= limit) return;
+  for (const f of files.sort((a, b) => Math.max(a.st.atimeMs, a.st.mtimeMs) - Math.max(b.st.atimeMs, b.st.mtimeMs))) {
+    if (total <= limit * 0.75) break;
+    await rm(f.p, { force: true });
+    total -= f.st.size;
+  }
 }
 
 async function stream(req, res, q, file, transfer) {
@@ -2060,14 +2167,13 @@ async function thumb(res, file, max = 256) {
   if (!existsSync(cached)) {
     await mkdir(THUMBS, { recursive: true });
     const img = await imageInput(file, s.size);
-    await writeFile(
-      cached,
-      await img
-        .rotate()
-        .resize(max, max, { fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: max > 256 ? 85 : 70 })
-        .toBuffer(),
-    );
+    const webp = await img
+      .rotate()
+      .resize(max, max, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: max > 256 ? 85 : 70 })
+      .toBuffer()
+      .catch(() => fail(415, "Couldn't read this image — use Download")); // damaged or unsupported file
+    await writeFile(cached, webp);
   }
   res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'private, max-age=86400' });
   return pipeline(createReadStream(cached), res);

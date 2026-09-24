@@ -19,6 +19,13 @@ export const fileKind = (name: string): FileKind => KINDS[name.split('.').pop()?
 /** Browsers can't show these, so the server converts them (?preview) — see thumb() in server/index.mjs. */
 export const needsConversion = (name: string) => /\.(psd|tiff?)$/i.test(name);
 
+/**
+ * Play / show the server's lighter copy (?preview) instead of the original: a 256 kbps MP3 for WAV/AIFF/FLAC
+ * (~1/5 the size) and a 2400 px WebP for photos and artwork. Download always gets the original.
+ */
+export const lightAudio = (name: string) => /\.(wav|aiff?|flac)$/i.test(name);
+export const lightImage = (name: string) => /\.(jpe?g|png|webp|avif|tiff?|psd)$/i.test(name);
+
 /** Thumbnails are generated server-side for these (see THUMBABLE in server/index.mjs). */
 export const hasThumb = (name: string) => /\.(jpe?g|png|webp|gif|avif|tiff?|psd)$/i.test(name);
 

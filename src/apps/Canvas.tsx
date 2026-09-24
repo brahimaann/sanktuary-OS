@@ -4,7 +4,7 @@ import { useWindowManager } from '../wm/manager';
 import { useBoard } from '../utils/useBoard';
 import { DRAG_FILE } from '../utils/refs';
 import { dialog } from '../utils/dialog';
-import { fileIcon, fileKind, needsConversion } from './fileTypes';
+import { fileIcon, fileKind, lightAudio, needsConversion } from './fileTypes';
 import { LogOn, fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 import AddFileButton from '../components/AddFileButton';
 
@@ -774,7 +774,15 @@ const ItemView: React.FC<{
             </div>
           </div>
         </div>
-        {isAudio && <audio src={item.src} controls preload="none" style={{ width: '100%' }} onPointerDown={(e) => e.stopPropagation()} />}
+        {isAudio && (
+          <audio
+            src={lightAudio(item.name || '') && item.src?.startsWith('/api/files/') ? `${item.src.split('?')[0]}?preview` : item.src}
+            controls
+            preload="none"
+            style={{ width: '100%' }}
+            onPointerDown={(e) => e.stopPropagation()}
+          />
+        )}
       </div>
     );
   }

@@ -173,16 +173,32 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   };
 
   // One chunk via XHR so we get upload progress (fetch can't report it).
-  const putChunk = (target: string, body: Blob, onProgress: (loaded: number) => void) =>
+  const sendChunk = (target: string, body: Blob, onProgress: (loaded: number) => void) =>
     new Promise<void>(async (resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', target);
       xhr.setRequestHeader('Authorization', `Bearer ${await getToken()}`);
       xhr.upload.onprogress = (ev) => onProgress(ev.loaded);
-      xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || `HTTP ${xhr.status}`)));
-      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.onload = () =>
+        xhr.status < 300 ? resolve() : reject(Object.assign(new Error(xhr.responseText || `HTTP ${xhr.status}`), { status: xhr.status }));
+      xhr.onerror = () => reject(Object.assign(new Error('Network error'), { status: 0 }));
       xhr.send(body);
     });
+
+  // A dropped connection or a server hiccup retries just that chunk (after 1, 2, 4, 8 s); the server takes
+  // chunks in any order and a resent chunk simply overwrites itself. Refusals (full, no rights...) don't retry.
+  const putChunk = async (target: string, body: Blob, onProgress: (loaded: number) => void) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await sendChunk(target, body, onProgress);
+      } catch (err) {
+        const status = (err as { status?: number }).status ?? 0;
+        if (attempt >= 4 || (status !== 0 && status !== 429 && status < 500)) throw err;
+        onProgress(0);
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+      }
+    }
+  };
 
   /** Uploads files here, or with stage: into a project's check-in staging (rel is then relative to the project). */
   const uploadAll = async (items: Upload[], stage?: { id: string; project: string[] }): Promise<boolean> => {
