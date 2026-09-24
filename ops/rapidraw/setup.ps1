@@ -66,10 +66,11 @@ Write-Host "engine: $($exe.FullName)"
 
 Step 'Token and start-up task'
 $envFile = Join-Path $repo '.env'
-$token = (Select-String -Path $envFile -Pattern '^RAPIDRAW_TOKEN=(.+)$' -ErrorAction SilentlyContinue).Matches.Groups[1].Value
+$found = Select-String -Path $envFile -Pattern '^RAPIDRAW_TOKEN=(.+)$' -ErrorAction SilentlyContinue
+$token = if ($found) { $found.Matches[0].Groups[1].Value }
 $newToken = -not $token
 if ($newToken) {
-  $token = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 40 | ForEach-Object { [char]$_ })
+  $token = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')   # GUIDs come from the system's secure random source
   Add-Content $envFile "`nRAPIDRAW_TOKEN=$token"
   Write-Host 'Added RAPIDRAW_TOKEN to .env'
 }
