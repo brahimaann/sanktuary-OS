@@ -1186,6 +1186,7 @@ async function tracksApi(req, res, url) {
       if (input.kind !== undefined) r.kind = RELEASE_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
       if (input.date !== undefined) r.date = dateOrNull(input.date);
       if (input.cover !== undefined) r.cover = fileRef(input.cover);
+      if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
       if (input.members !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
         r.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
@@ -1376,6 +1377,7 @@ async function timelineApi(req, res, url) {
     if (input.people !== undefined) i.people = usernameList(input.people);
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
+    if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
     if (input.link !== undefined) {
       const v = String(input.link || '').trim();
       if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
@@ -1753,6 +1755,69 @@ const plainText = (html = '') =>
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+const slugify = (s) =>
+  String(s || '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+
+// Substack post HTML, cut down to plain formatting before it's shown on our site: every tag not on this list is
+// dropped (its text kept), scripts/iframes/forms are removed with their contents, and only https links and
+// pictures survive as attributes. Nothing from the feed can run code on sanktuary.studio.
+const CLEAN_TAGS = {
+  p: [],
+  br: [],
+  hr: [],
+  h1: [],
+  h2: [],
+  h3: [],
+  h4: [],
+  strong: [],
+  b: [],
+  em: [],
+  i: [],
+  u: [],
+  s: [],
+  sup: [],
+  sub: [],
+  blockquote: [],
+  ul: [],
+  ol: [],
+  li: [],
+  pre: [],
+  code: [],
+  figure: [],
+  figcaption: [],
+  a: ['href'],
+  img: ['src', 'alt'],
+};
+const escAttr = (v) => v.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+function cleanHtml(html) {
+  return String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(
+      /<(script|style|iframe|object|embed|noscript|svg|math|form|template|button|select|textarea|video|audio)\b[\s\S]*?<\/\1\s*>/gi,
+      '',
+    )
+    .replace(/<\/?([a-zA-Z][\w-]*)([^>]*)>/g, (whole, name, attrs) => {
+      const t = name.toLowerCase();
+      if (!CLEAN_TAGS[t]) return '';
+      if (whole.startsWith('</')) return ['br', 'hr', 'img'].includes(t) ? '' : `</${t}>`;
+      let out = '';
+      for (const a of CLEAN_TAGS[t]) {
+        const m = attrs.match(new RegExp(`\\s${a}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'));
+        const v = m ? decodeXml(m[1] ?? m[2]).trim() : '';
+        if (a === 'alt' ? v : /^https:\/\//i.test(v)) out += ` ${a}="${escAttr(v)}"`;
+      }
+      if (t === 'a') out += ' target="_blank" rel="noopener noreferrer nofollow"';
+      if (t === 'img') out += ' loading="lazy" referrerpolicy="no-referrer"';
+      return `<${t}${out}>`;
+    });
+}
+
 const tag = (xml, name) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i'))?.[1] ?? '';
 const httpsOnly = (u) => (/^https:\/\//i.test(u || '') ? u : null);
 
@@ -1767,29 +1832,44 @@ async function readFeed(feed) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const xml = (await r.text()).slice(0, 5_000_000);
     const publication = plainText(tag(tag(xml, 'channel').split('<item')[0], 'title')) || feed.name;
-    const items = [...xml.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)].slice(0, 20).map(([item]) => {
-      const content = tag(item, 'content:encoded') || tag(item, 'description');
-      const image =
-        item.match(/<enclosure[^>]+url="([^"]+)"[^>]*type="image/i)?.[1] ||
-        item.match(/<media:content[^>]+url="([^"]+)"/i)?.[1] ||
-        decodeXml(content).match(/<img[^>]+src="([^"]+)"/i)?.[1];
+    // On-site address: /blog/<publication>/<post slug>, e.g. /blog/boroma/what-does-change-look-like
+    const pubSlug = slugify(new URL(feed.url).hostname.replace(/\.substack\.com$/i, '').replace(/^www\./, '')) || slugify(publication);
+    const raw = [...xml.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)].slice(0, 20).map(([item]) => {
+      const content = decodeXml(tag(item, 'content:encoded') || tag(item, 'description'));
       const link = httpsOnly(plainText(tag(item, 'link')));
       return {
-        id: `ss-${createHash('sha1')
-          .update(link || tag(item, 'guid'))
-          .digest('hex')
-          .slice(0, 12)}`,
+        item,
+        content,
+        link,
+        cover: httpsOnly(
+          decodeXml(
+            item.match(/<enclosure[^>]+url="([^"]+)"[^>]*type="image/i)?.[1] || item.match(/<media:content[^>]+url="([^"]+)"/i)?.[1] || '',
+          ),
+        ),
+        firstImage: httpsOnly(decodeXml(content.match(/<img[^>]+src="([^"]+)"/i)?.[1] || '')),
+      };
+    });
+    // Substack falls back to the writer's profile picture when a post has no header image; a "cover" shared
+    // by several posts is that fallback, so those posts get no picture (the title takes the space instead)
+    const seen = raw.reduce((m, r) => m.set(r.cover, (m.get(r.cover) || 0) + 1), new Map());
+    const items = raw.map(({ item, content, link, cover, firstImage }) => {
+      const slug =
+        slugify(new URL(link || 'https://x/').pathname.replace(/^\/p\//, '')) || createHash('sha1').update(item).digest('hex').slice(0, 10);
+      return {
+        id: `ss-${pubSlug}-${slug}`,
         source: 'substack',
         title: plainText(tag(item, 'title')).slice(0, 200),
         excerpt: (plainText(tag(item, 'description')) || plainText(content)).slice(0, 400),
-        image: httpsOnly(decodeXml(image || '')),
-        url: link,
+        image: (cover && seen.get(cover) === 1 ? cover : null) || firstImage || null,
+        url: `/blog/${pubSlug}/${slug}`,
+        external: link,
+        html: cleanHtml(content),
         author: plainText(tag(item, 'dc:creator')) || publication,
         publication,
         date: new Date(plainText(tag(item, 'pubDate')) || Date.now()).toISOString(),
       };
     });
-    const fresh = { at: Date.now(), items: items.filter((i) => i.url && i.title), error: null };
+    const fresh = { at: Date.now(), items: items.filter((i) => i.external && i.title), error: null };
     feedCache.set(feed.url, fresh);
     return fresh;
   } catch (err) {
@@ -1805,7 +1885,7 @@ const ownPostView = (p, full) => ({
   title: p.title,
   excerpt: p.body.replace(/\s+/g, ' ').slice(0, 400),
   image: p.image || null,
-  url: `/blog/${p.id}`,
+  url: `/blog/${p.slug || p.id}`,
   author: p.author,
   publication: 'Sanktuary',
   date: p.published || p.created,
@@ -1822,12 +1902,19 @@ async function blogApi(req, res, url) {
       .filter((p) => p.published && !p.deleted)
       .map((p) => ownPostView(p));
     const fromFeeds = (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items);
-    const posts = [...own, ...fromFeeds].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
+    const posts = [...own, ...fromFeeds.map(({ html, ...rest }) => rest)].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, { posts, writers: db.feeds.map((f) => f.name) });
   }
   if (req.method === 'GET' && what === 'post') {
-    const p = (db.posts[id] && db.posts[id].published && !db.posts[id].deleted && db.posts[id]) || fail(404, 'No such post');
+    // /api/blog/post/<our slug or id>  or  /api/blog/post/<substack publication>/<post slug>
+    const second = url.pathname.split('/')[5];
+    if (second) {
+      const want = `/blog/${id}/${second}`;
+      const hit = (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === want);
+      return hit ? json(res, hit) : fail(404, 'No such post');
+    }
+    const p = Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === id || x.id === id)) || fail(404, 'No such post');
     return json(res, ownPostView(p, true));
   }
   if (req.method === 'GET' && what === 'images') return stream(req, res, url.searchParams, join(DATA, 'blog', 'images', safeName(id)));
@@ -1895,6 +1982,12 @@ async function blogApi(req, res, url) {
       if (input.author !== undefined) p.author = String(input.author).trim().slice(0, 80) || p.author;
       if (input.image !== undefined) p.image = input.image && /^\/api\/blog\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
       if (input.published !== undefined) p.published = input.published ? p.published || new Date().toISOString() : null;
+      // A readable address, fixed once published so shared links keep working: /blog/why-culture-matters
+      if (p.published && !p.slug) {
+        const base = slugify(p.title) || p.id;
+        const taken = new Set(Object.values(db.posts).map((x) => x.slug));
+        p.slug = taken.has(base) ? `${base}-${p.id.slice(0, 4)}` : base;
+      }
       p.updated = new Date().toISOString();
     };
     if (req.method === 'POST' && !id) {
@@ -1927,10 +2020,97 @@ async function blogApi(req, res, url) {
   fail(404, 'Unknown blog action');
 }
 
+// ── /api/public: the front door for visitors without an account — data/front.json ──
+// The Welcome window shows the intro (edited in the Admin Panel), the latest writing, upcoming timeline entries
+// and releases that were explicitly marked public, and a "Join the Village" form. Nothing is public by default.
+let frontDb = null;
+let frontSaved = Promise.resolve();
+const loadFront = async () =>
+  (frontDb ??= await readJson('front.json', {
+    intro:
+      'Sanktuary is a creative home out of the Twin Cities: music, art, fashion and film, built with the people around us. Have a look around, read what we are writing, and if you want in, join the Village.',
+    joins: {},
+  }));
+const saveFront = () => (frontSaved = frontSaved.then(() => saveJson('front.json', frontDb)).catch(console.error));
+const joinTries = new Map(); // ip -> { n, since }
+
+async function publicApi(req, res, url) {
+  const front = await loadFront();
+  const what = url.pathname.split('/')[3];
+  if (req.method === 'GET' && !what) {
+    const today = localDate();
+    const blog = await loadBlog();
+    const own = Object.values(blog.posts)
+      .filter((p) => p.published && !p.deleted)
+      .map((p) => ownPostView(p));
+    const fromFeeds = (await Promise.all(blog.feeds.map(readFeed))).flatMap((f) => f.items);
+    const posts = [...own, ...fromFeeds].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+    const events = Object.values((await loadTimeline()).items)
+      .filter((i) => i.public && !i.members && i.status !== 'Cancelled' && (i.end || i.start) >= today)
+      .sort((a, b) => a.start.localeCompare(b.start))
+      .slice(0, 6)
+      .map((i) => ({ title: i.title, kind: i.kind, start: i.start, end: i.end, location: i.location, link: i.link || null }));
+    const releases = Object.values((await loadTracks()).releases)
+      .filter((r) => r.public && !r.deleted && !r.members)
+      .map((r) => ({ title: r.title, kind: r.kind, date: r.date }))
+      .sort((a, b) => (a.date || '9').localeCompare(b.date || '9'));
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, { intro: front.intro, posts, events, releases });
+  }
+  if (req.method === 'POST' && what === 'join') {
+    const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+    const t = joinTries.get(ip);
+    const tries = t && Date.now() - t.since < 60 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 5) fail(429, 'Thanks! We already got your note. Try again later if you need to.');
+    joinTries.set(ip, { ...tries, n: tries.n + 1 });
+    const input = await jsonBody(req);
+    if (input.website) return json(res, { ok: true }); // honeypot: people never fill the hidden field, bots do
+    const name =
+      String(input.name || '')
+        .trim()
+        .slice(0, 100) || fail(400, 'Tell us your name');
+    const email = String(input.email || '')
+      .trim()
+      .slice(0, 200);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'That email address looks wrong');
+    const j = {
+      id: randomUUID().slice(0, 10),
+      name,
+      email,
+      role: String(input.role || '').slice(0, 60),
+      links: String(input.links || '').slice(0, 300),
+      message: String(input.message || '').slice(0, 2000),
+      at: new Date().toISOString(),
+      status: 'New',
+    };
+    front.joins[j.id] = j;
+    saveFront();
+    const cfg = await loadConfig();
+    for (const a of cfg.admins)
+      await notify(a, `${name} wants to join the Village${j.role ? ` (${j.role})` : ''}. See Admin Panel > Front page.`, {});
+    return json(res, { ok: true });
+  }
+  // Admins: edit the intro, read and answer join requests
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  if (!user.admin) fail(403, 'Administrators only');
+  if (req.method === 'GET' && what === 'admin')
+    return json(res, { intro: front.intro, joins: Object.values(front.joins).sort((a, b) => b.at.localeCompare(a.at)) });
+  if (req.method === 'PATCH' && what === 'admin') {
+    const input = await jsonBody(req);
+    if (input.intro !== undefined) front.intro = String(input.intro).slice(0, 3000);
+    if (input.join && front.joins[input.join.id] && ['New', 'Contacted', 'Joined', 'Archived'].includes(input.join.status))
+      front.joins[input.join.id].status = input.join.status;
+    saveFront();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Not found');
+}
+
 // The public blog page: sanktuary.studio/blog (and /blog/<post>), no account needed
 const BLOG_PAGE = new URL('./blog.html', import.meta.url);
 function blogPage(req, res, url) {
-  if (!/^\/blog(\/[\w-]*)?\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  if (!/^\/blog(\/[\w-]+){0,2}\/?$/.test(url.pathname)) return staticFile(req, res, url);
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
@@ -3006,6 +3186,7 @@ const routes = [
   ['/api/timeline', timelineApi],
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
+  ['/api/public', publicApi],
   ['/blog', blogPage],
   ['/s/', publicShare],
 ];

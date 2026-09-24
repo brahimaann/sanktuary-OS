@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useWindowManager, AppType } from '../wm/manager';
 import { vfs } from '../vfs/fs';
 import { useMe } from '../utils/api';
+import { useAuth } from '@clerk/react';
 import { startLive } from '../utils/live';
 import { dialog } from '../utils/dialog';
 
@@ -147,6 +148,23 @@ const ADMIN_ICON: DesktopIconDef = {
 export const Desktop: React.FC = () => {
   const { openWindow, wallpaper, bgColor } = useWindowManager();
   const { me } = useMe();
+  const { isLoaded, isSignedIn } = useAuth();
+  // Visitors without an account land on the Welcome window (once per visit)
+  useEffect(() => {
+    if (!isLoaded || isSignedIn) return;
+    try {
+      if (sessionStorage.getItem('sk_welcomed')) return;
+      sessionStorage.setItem('sk_welcomed', '1');
+    } catch {}
+    openWindow({
+      id: 'welcome',
+      title: 'Welcome to Sanktuary',
+      icon: '/images/icons/network-16x16.png',
+      appType: 'welcome',
+      width: 520,
+      height: 560,
+    });
+  }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (me) startLive();
   }, [me]);

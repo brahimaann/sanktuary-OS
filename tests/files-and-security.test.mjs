@@ -684,9 +684,11 @@ try {
   await call('alice', `/api/blog/posts/${draft.id}`, 'PATCH', { published: true });
   const publicPosts = (await (await fetch(B + '/api/blog')).json()).posts;
   check(
-    'published post is public',
-    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === `/blog/${draft.id}`),
+    'published post gets a readable address',
+    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === '/blog/why-culture'),
   );
+  check('post readable by its address', (await (await fetch(B + '/api/blog/post/why-culture')).json()).title === 'Why culture');
+  check('two-part blog addresses load the page', (await fetch(B + '/blog/boroma/what-does-change-look-like')).status === 200);
   check('full post readable', (await (await fetch(B + `/api/blog/post/${draft.id}`)).json()).body.includes('Second'));
   check(
     'cover must be one of our images',
@@ -704,6 +706,60 @@ try {
   check(
     'cover image compressed to WebP',
     /^\/api\/blog\/images\/[\w-]+\.webp$/.test(cover.url) && (await fetch(B + cover.url)).status === 200,
+  );
+
+  // Front door: public Welcome data, join form
+  const pub0 = await (await fetch(B + '/api/public')).json();
+  check('welcome loads without an account', typeof pub0.intro === 'string' && pub0.posts.some((p) => p.id === draft.id));
+  const gig = JSON.parse(
+    (await call('bob', '/api/timeline', 'POST', { title: 'Listening party', kind: 'Event', start: day(10), location: 'Mpls' })).text,
+  );
+  const secret = JSON.parse((await call('bob', '/api/timeline', 'POST', { title: 'Secret shoot', kind: 'Shoot', start: day(10) })).text);
+  await call('bob', `/api/timeline/${gig.id}`, 'PATCH', { public: true });
+  const ep = JSON.parse((await call('alice', '/api/tracks/release', 'POST', { title: 'Open EP', kind: 'EP', date: day(30) })).text);
+  await call('alice', `/api/tracks/release/${ep.id}`, 'PATCH', { public: true });
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { public: true }); // still private (members list): must not leak
+  const pub1 = await (await fetch(B + '/api/public')).json();
+  check(
+    'public events show',
+    pub1.events.some((e) => e.title === 'Listening party' && e.location === 'Mpls'),
+  );
+  check('non-public events stay hidden', !pub1.events.some((e) => e.title === 'Secret shoot'));
+  check(
+    'public releases show (title and date only)',
+    pub1.releases.some((r) => r.title === 'Open EP' && !('members' in r) && !('owner' in r)),
+  );
+  check('private releases never leak, even marked public', !pub1.releases.some((r) => r.title === 'TSIMY'));
+  check(
+    'join needs a real email',
+    (await fetch(B + '/api/public/join', { method: 'POST', body: JSON.stringify({ name: 'Amara', email: 'nope' }) })).status === 400,
+  );
+  check(
+    'join works',
+    (
+      await fetch(B + '/api/public/join', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Amara', email: 'amara@example.com', role: 'Photographer' }),
+      })
+    ).status === 200,
+  );
+  await fetch(B + '/api/public/join', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Bot', email: 'bot@example.com', website: 'http://spam' }),
+  });
+  const joins = JSON.parse((await call('alice', '/api/public/admin')).text).joins;
+  check(
+    'join request reaches admins',
+    joins.some((j) => j.name === 'Amara' && j.status === 'New'),
+  );
+  check('bots filling the hidden field are dropped', !joins.some((j) => j.name === 'Bot'));
+  check(
+    'admins are notified of join requests',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /Amara wants to join/.test(n.text)),
+  );
+  check(
+    'visitors cannot read the join list',
+    (await fetch(B + '/api/public/admin')).status === 401 && (await call('bob', '/api/public/admin')).status === 403,
   );
 
   // Chat attachments: files sent from a phone / computer straight into a conversation

@@ -52,7 +52,7 @@ interface Health {
   deploy: { at: string; ok: boolean; commit: string; message: string } | null;
 }
 
-const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Blog', 'Log'] as const;
+const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Log'] as const;
 const RIGHTS: Rights[] = ['none', 'view', 'upload', 'edit'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
@@ -369,6 +369,7 @@ const AdminPanel: React.FC = () => {
 
         {tab === 'Log' && <LogTab />}
         {tab === 'Blog' && <BlogTab />}
+        {tab === 'Front page' && <FrontTab />}
 
         {tab === 'Members' && (
           <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
@@ -770,6 +771,65 @@ const FolderPicker: React.FC<{ drive: string; driveName: string; start: string; 
 type Transfer = { at: string; user: string; action: string; space: string; path: string; bytes: number; ip?: string };
 
 /** Console-style log of every upload and download, newest first. */
+type Join = { id: string; name: string; email: string; role: string; links: string; message: string; at: string; status: string };
+
+/** What visitors see in the Welcome window, and the "Join the Village" requests. */
+const FrontTab: React.FC = () => {
+  const api = useApi();
+  const [d, setD] = useState<{ intro: string; joins: Join[] } | null>(null);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => api('/api/public/admin').then(setD, (e) => setMsg(e.message)), [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const save = (body: object) =>
+    api('/api/public/admin', { method: 'PATCH', body: JSON.stringify(body) }).then(load, (e) => setMsg(e.message));
+  if (!d) return <div>{msg || 'Loading...'}</div>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={hint}>
+        The Welcome window opens for anyone who isn't logged in. It shows this intro, the latest blog posts, and the timeline entries and
+        releases you've ticked <b>Show publicly</b> (in Timeline and Tracks).
+      </p>
+      <fieldset style={fieldset}>
+        <legend>Intro</legend>
+        <textarea
+          key={d.intro}
+          style={{ ...input, width: '100%', minHeight: 90, resize: 'vertical' }}
+          defaultValue={d.intro}
+          onBlur={(e) => e.target.value !== d.intro && save({ intro: e.target.value })}
+        />
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Join requests ({d.joins.filter((j) => j.status === 'New').length} new)</legend>
+        {!d.joins.length && <div style={{ color: '#555' }}>None yet.</div>}
+        {d.joins.map((j) => (
+          <div
+            key={j.id}
+            style={{ background: j.status === 'New' ? '#ffffe1' : '#fff', border: '1px solid #808080', padding: 6, marginBottom: 6 }}
+          >
+            <div style={row}>
+              <b>{j.name}</b>
+              <a href={`mailto:${j.email}`}>{j.email}</a>
+              {j.role && <span>· {j.role}</span>}
+              <span style={{ color: '#555' }}>· {new Date(j.at).toLocaleDateString()}</span>
+              <span style={{ flex: 1 }} />
+              <select style={input} value={j.status} onChange={(e) => save({ join: { id: j.id, status: e.target.value } })}>
+                {['New', 'Contacted', 'Joined', 'Archived'].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            {j.links && <div style={{ wordBreak: 'break-all' }}>{j.links}</div>}
+            {j.message && <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{j.message}</div>}
+          </div>
+        ))}
+      </fieldset>
+      {msg && <div style={{ color: '#a00000' }}>{msg}</div>}
+    </div>
+  );
+};
+
 type BlogPost = {
   id: string;
   title: string;

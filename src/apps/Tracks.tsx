@@ -20,6 +20,7 @@ interface Release {
   date: string | null;
   members: string[] | null;
   owner: string;
+  public?: boolean;
 }
 interface Track {
   id: string;
@@ -181,6 +182,18 @@ const TracksApp: React.FC = () => {
             <button style={button} onClick={() => setSharing(true)} title="Who can see this release">
               {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}...
             </button>
+            <label
+              style={{ display: 'flex', gap: 3, alignItems: 'center' }}
+              title="Announce it in the Welcome window visitors see (title, kind and release date only)"
+            >
+              <input
+                type="checkbox"
+                checked={!!release.public}
+                disabled={!!release.members}
+                onChange={(e) => patchRelease({ public: e.target.checked })}
+              />
+              Announce publicly
+            </label>
           </>
         )}
       </div>

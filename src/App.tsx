@@ -37,6 +37,7 @@ const Planner = lazy(() => import('./apps/Planner'));
 const Tracks = lazy(() => import('./apps/Tracks'));
 const Timeline = lazy(() => import('./apps/Timeline'));
 const Business = lazy(() => import('./apps/Business'));
+const Welcome = lazy(() => import('./apps/Welcome'));
 
 export const App: React.FC = () => {
   const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
@@ -197,6 +198,9 @@ export const App: React.FC = () => {
         break;
       case 'planner':
         content = <Planner boardId={win.appProps?.boardId} name={win.title} />;
+        break;
+      case 'welcome':
+        content = <Welcome />;
         break;
       case 'business':
         content = <Business />;

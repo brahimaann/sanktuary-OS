@@ -157,6 +157,44 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
+      .content img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: 12px auto;
+      }
+      .content blockquote {
+        margin: 0 0 14px;
+        padding: 4px 14px;
+        border-left: 4px solid var(--navy);
+        color: #333;
+      }
+      .content figcaption {
+        font-size: 13px;
+        color: #555;
+        text-align: center;
+      }
+      .content h2,
+      .content h3 {
+        font-family: Georgia, serif;
+        margin: 22px 0 8px;
+      }
+      .content a {
+        color: var(--navy);
+      }
+      .credit {
+        margin-top: 24px;
+        padding-top: 12px;
+        border-top: 1px solid #ccc;
+        font:
+          13px Tahoma,
+          Arial,
+          sans-serif;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
       .empty {
         background: #fff;
         padding: 16px;
@@ -220,9 +258,7 @@
         app.innerHTML =
           shown
             .map(
-              (
-                p,
-              ) => `<a class="post" href="${esc(p.source === 'sanktuary' ? p.url : p.url)}" ${p.source === 'sanktuary' ? 'data-own="' + esc(p.id) + '"' : 'target="_blank" rel="noopener noreferrer"'}>
+              (p) => `<a class="post" href="${esc(p.url)}" data-open>
               ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
               <div style="min-width:0">
                 <div class="meta"><span class="chip" style="background:${p.source === 'sanktuary' ? '#000080' : '#ff6719'}">${p.source === 'sanktuary' ? 'Sanktuary' : 'Substack'}</span>${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
@@ -231,7 +267,7 @@
               </div></a>`,
             )
             .join('') || '<div class="empty">No posts yet. Check back soon.</div>';
-        app.querySelectorAll('[data-own]').forEach(
+        app.querySelectorAll('[data-open]').forEach(
           (a) =>
             (a.onclick = (e) => {
               e.preventDefault();
@@ -249,18 +285,22 @@
           route();
         };
         app.textContent = 'Loading...';
-        const r = await fetch(`/api/blog/post/${encodeURIComponent(id)}`);
+        const r = await fetch(`/api/blog/post/${id.split('/').map(encodeURIComponent).join('/')}`);
         if (!r.ok) return (app.innerHTML = '<div class="empty">This post is not available.</div>');
         const p = await r.json();
         document.title = `${p.title} · Sanktuary Blog`;
-        app.innerHTML = `<article class="reader"><h1>${esc(p.title)}</h1><div class="meta">${esc(p.author)} · ${when(p.date)}</div>
-          ${p.image ? `<img class="cover" src="${esc(p.image)}" alt="">` : ''}${paragraphs(p.body)}</article>`;
+        // Substack posts arrive already cleaned by the server (plain formatting only); ours are plain text
+        const credit = p.external
+          ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
+          : '';
+        app.innerHTML = `<article class="reader"><h1>${esc(p.title)}</h1><div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
+          ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : paragraphs(p.body)}${credit}</article>`;
         scrollTo(0, 0);
       }
 
       async function route() {
-        const id = location.pathname.split('/')[2];
-        if (id) return read(id);
+        const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
+        if (path) return read(path);
         document.title = 'Sanktuary Blog';
         if (!all.length) {
           try {
@@ -278,7 +318,7 @@
         // live: new posts show up while the page is open
         try {
           all = (await (await fetch('/api/blog')).json()).posts;
-          if (!location.pathname.split('/')[2]) list();
+          if (!location.pathname.split('/').slice(2).filter(Boolean).length) list();
         } catch {}
       }, 5 * 60_000);
     </script>

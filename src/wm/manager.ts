@@ -31,7 +31,8 @@ export type AppType =
   | 'planner'
   | 'tracks'
   | 'timeline'
-  | 'business';
+  | 'business'
+  | 'welcome';
 
 export interface WindowInstance {
   id: string;

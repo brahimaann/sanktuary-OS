@@ -28,6 +28,7 @@ interface Entry {
   owner?: string;
   following?: boolean;
   done?: boolean;
+  public?: boolean;
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -288,6 +289,13 @@ const EntryPanel: React.FC<{
         <label style={{ display: 'flex', gap: 3, alignItems: 'center' }} title="Get reminders and updates">
           <input type="checkbox" checked={!!e.following} onChange={(ev) => save({ follow: ev.target.checked })} />
           Follow
+        </label>
+        <label
+          style={{ display: 'flex', gap: 3, alignItems: 'center' }}
+          title="Show it in the Welcome window visitors see (title, kind, date, place, link)"
+        >
+          <input type="checkbox" checked={!!e.public} disabled={!!e.members} onChange={(ev) => save({ public: ev.target.checked })} />
+          Show publicly
         </label>
       </div>
       <fieldset style={fieldset}>
