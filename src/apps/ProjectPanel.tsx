@@ -18,6 +18,17 @@ export interface ProjectInfo {
 type Purpose = 'view' | 'playground' | 'checkout';
 
 const STATUSES = ['Not started', 'In progress', 'In review', 'Done'];
+
+/** Opens the device's file picker (right after a click, which the browser requires) and resolves with the picked files. */
+const pickFiles = () =>
+  new Promise<File[]>((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = () => resolve([...(input.files || [])]);
+    input.addEventListener('cancel', () => resolve([]));
+    input.click();
+  });
 const when = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
 /**
@@ -84,7 +95,31 @@ const ProjectPanel: React.FC<{
     if (!(await uploadStaged(items, stage))) return setMsg('Upload stopped, nothing was changed. Try the check-in again.');
     const q = `&stage=${stage.id}&files=${items.length}&note=${encodeURIComponent(note)}`;
     try {
-      const r = await api(`${base}&action=checkin${q}`, { method: 'POST' });
+      let r = await api(`${base}&action=checkin${q}`, { method: 'POST' });
+      let retry = q; // what a final "check in anyway" sends: grows if samples were added
+      // Ableton: offer to add the missing samples right here (they go into Samples/Imported and the set is relinked)
+      if (r.ok === false && p?.kind === 'Ableton Live' && isDir) {
+        const add = await dialog.confirm(
+          `These samples are used by the set but aren't in the project folder, so they'd be missing for everyone else:\n\n${r.missing.join('\n')}\n\n` +
+            "Add them now? Pick them from your computer: they go into the project's Samples/Imported folder and the set is pointed at them (the untouched set is kept in Backup).",
+          { title: 'Missing samples', icon: 'warning', ok: 'Add the missing files...', cancel: 'Other options' },
+        );
+        if (add) {
+          const extra = await pickFiles();
+          if (extra.length) {
+            setMsg(`Adding ${extra.length} sample(s)...`);
+            const ok = await uploadStaged(
+              extra.map((file) => ({ file, rel: ['Samples', 'Imported', file.name] })),
+              stage,
+            );
+            if (!ok) return setMsg('Upload stopped, nothing was changed. Try the check-in again.');
+            retry = `&stage=${stage.id}&files=${items.length + extra.length}&note=${encodeURIComponent(note)}&relink=1`;
+            r = await api(`${base}&action=checkin${retry}`, {
+              method: 'POST',
+            });
+          }
+        }
+      }
       if (r.ok === false) {
         const go = await dialog.confirm(
           `These files are used by the project but aren't inside it, so they'll be missing for everyone else:\n\n${r.missing.join('\n')}\n\n` +
@@ -97,7 +132,7 @@ const ProjectPanel: React.FC<{
           { title: 'Missing files', icon: 'warning', ok: 'Check in anyway', cancel: 'Cancel' },
         );
         if (!go) return setMsg('Check-in cancelled: it is still checked out to you. Fix the missing files and try again.');
-        await api(`${base}&action=checkin${q}&force=1`, { method: 'POST' });
+        await api(`${base}&action=checkin${retry}&force=1`, { method: 'POST' });
       }
       setNote('');
       setMsg('Checked in. The previous version is kept, and whoever is next in line has been told.');

@@ -14,7 +14,7 @@ import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { verifyToken } from '@clerk/backend';
 import sharp from 'sharp';
 import webpush from 'web-push';
@@ -667,11 +667,44 @@ async function missingFiles(dir) {
     if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf); // .als and .prproj are gzipped XML
     for (const text of [buf.toString('latin1'), buf.toString('utf16le'), buf.subarray(1).toString('utf16le')])
       for (const [ref] of text.matchAll(MEDIA_REF)) {
-        const name = ref.split(/[\\/]/).pop();
+        const name = decodeXml(ref).split(/[\\/]/).pop(); // .als is XML: & arrives as &amp;
         if (!LIBRARY.test(ref) && !have.has(name.toLowerCase())) missing.add(name);
       }
   }
   return [...missing].slice(0, 50);
+}
+
+// "Add the missing files": the files someone picked were uploaded into the project's Samples/Imported folder;
+// point every Ableton sample reference with the same file name at them (project-relative), which is what
+// Live's own "Collect All and Save" writes. Live 11 / 12 .als files; the untouched set goes to Backup/ first.
+async function relinkAbleton(stageDir) {
+  const imported = join(stageDir, 'Samples', 'Imported');
+  const have = new Set((await readdir(imported).catch(() => [])).map((n) => n.toLowerCase()));
+  if (!have.size) return 0;
+  let changed = 0;
+  for (const name of await readdir(stageDir)) {
+    if (extname(name).toLowerCase() !== '.als') continue;
+    const file = join(stageDir, name);
+    const raw = await readFile(file);
+    const xml = (raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw) : raw).toString('utf8');
+    let n = 0;
+    const next = xml.replace(/<FileRef>[\s\S]*?<\/FileRef>/g, (ref) => {
+      const path = ref.match(/<Path Value="([^"]*)"/)?.[1] || '';
+      const base = decodeXml(path).split(/[\\/]/).pop();
+      if (!base || !have.has(base.toLowerCase()) || /<RelativePath Value="Samples\/Imported\//.test(ref)) return ref;
+      n++;
+      const rel = `Samples/Imported/${base.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}`;
+      return ref
+        .replace(/<RelativePathType Value="\d+"\s*\/>/, '<RelativePathType Value="3" />')
+        .replace(/<RelativePath Value="[^"]*"\s*\/>/, `<RelativePath Value="${rel}" />`);
+    });
+    if (!n) continue;
+    await mkdir(join(stageDir, 'Backup'), { recursive: true });
+    await writeFile(join(stageDir, 'Backup', `${basename(name, '.als')} [before Sanktuary relink ${stamp()}].als`), raw);
+    await writeFile(file, gzipSync(Buffer.from(next, 'utf8')));
+    changed += n;
+  }
+  return changed;
 }
 
 // ── Notifications: data/notifications/<user>.jsonl, shown in Profile > My Projects and the tray,
@@ -893,6 +926,8 @@ async function projectsApi(req, res, url) {
     if (isDir && !(await projectKind(stageDir, true)))
       fail(400, `There's no ${p.kind} project file at the top of what you picked. Pick the project folder itself.`);
     if (!isDir && !existsSync(incoming)) fail(400, `Upload ${p.name} itself`);
+    // Files added through "Add the missing files" landed in Samples/Imported: repoint the set at them first
+    if (q.has('relink') && p.kind === 'Ableton Live') await relinkAbleton(stageDir);
     if (!q.has('force')) {
       const missing = await missingFiles(stageDir);
       if (missing.length) return json(res, { ok: false, missing });

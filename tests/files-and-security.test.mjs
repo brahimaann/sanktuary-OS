@@ -6,6 +6,7 @@ import { statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 const SERVER = process.argv[2] || fileURLToPath(new URL('../server/index.mjs', import.meta.url));
 const SECRET = 'sk_test_fake_secret_for_tests';
@@ -185,7 +186,6 @@ try {
   check('move onto an existing name -> 409', (await call('alice', '/api/files/ed/docs/song.txt?move=docs', 'POST')).status === 409);
 
   // Projects: check-out, lock, queue, staged check-in with missing-sample check, turns
-  const { gzipSync } = await import('node:zlib');
   const als = (refs) => gzipSync(`<Ableton>${refs.map((r) => `<FileRef><Path Value="${r}"/></FileRef>`).join('')}</Ableton>`);
   mkdirSync(join(drive, 'team', 'Song A', 'Samples'), { recursive: true });
   writeFileSync(join(drive, 'team', 'Song A', 'Song A.als'), als(['C:/Users/bob/Music/Samples/kick.wav']));
@@ -516,6 +516,36 @@ try {
     ].every((a) => auditLog.some((e) => e.action === a && e.user === 'alice')),
   );
   check('audit records the route', auditLog.some((e) => e.via === 'internet') && auditLog.some((e) => e.via === 'tailscale/local'));
+
+  // "Add the missing files": samples from outside the project are added at check-in and the set is relinked
+  const liveRef = (path, rel, type) =>
+    `<FileRef><RelativePathType Value="${type}" /><RelativePath Value="${rel}" /><Path Value="${path}" /><Type Value="1" /></FileRef>`;
+  mkdirSync(join(drive, 'team', 'Song C'), { recursive: true });
+  const songC = `<Ableton>${liveRef('D:/Loops/snare &amp; clap.wav', '../../Loops/snare &amp; clap.wav', 1)}${liveRef('C:/Users/me/Music/Ableton/User Library/kit.adg', 'kit.adg', 5)}</Ableton>`;
+  writeFileSync(join(drive, 'team', 'Song C', 'Song C.als'), gzipSync(songC));
+  const PC = (action, extra = '') => call('bob', `/api/projects?space=up&path=Song%20C&action=${action}${extra}`, 'POST');
+  await PC('checkout');
+  const stageC = (path, data) => up('bob', 'up', `Song%20C/${path}`, data, '&stage=stage-relink1&project=Song%20C');
+  await stageC('Song%20C.als', gzipSync(songC));
+  const warnC = JSON.parse((await PC('checkin', '&stage=stage-relink1&files=1')).text);
+  check('check-in lists the outside sample', warnC.ok === false && warnC.missing.includes('snare & clap.wav'));
+  await stageC('Samples/Imported/snare%20%26%20clap.wav', 'SNARE');
+  const relinked = await PC('checkin', '&stage=stage-relink1&files=2&relink=1');
+  check('with the file added, check-in goes through', relinked.status === 200 && JSON.parse(relinked.text).ok === true);
+  const liveXml = gunzipSync(readFileSync(join(drive, 'team', 'Song C', 'Song C.als'))).toString();
+  check(
+    'the set now points inside the project',
+    liveXml.includes('<RelativePathType Value="3" /><RelativePath Value="Samples/Imported/snare &amp; clap.wav" />'),
+  );
+  check('library references are left alone', liveXml.includes('<RelativePathType Value="5" /><RelativePath Value="kit.adg" />'));
+  check(
+    'the untouched set is kept in Backup',
+    readdirSync(join(drive, 'team', 'Song C', 'Backup')).some((n) => n.includes('before Sanktuary relink')),
+  );
+  check(
+    'the added sample is in Samples/Imported',
+    readFileSync(join(drive, 'team', 'Song C', 'Samples', 'Imported', 'snare & clap.wav'), 'utf8') === 'SNARE',
+  );
 
   // Folder download as zip, transfer log, admin folder browser
   const zip = await fetch(B + '/api/files/view/docs?zip', { headers: { cookie: cookie('carol') } });
