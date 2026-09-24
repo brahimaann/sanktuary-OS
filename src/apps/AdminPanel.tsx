@@ -19,6 +19,7 @@ interface Config {
   spaces: Space[];
   members: Record<string, { drive?: string; quotaGB?: number }>;
   backup: { drive: string | null; hour: number };
+  cacheDrive?: string | null;
 }
 interface Drive {
   id: string;
@@ -201,6 +202,26 @@ const AdminPanel: React.FC = () => {
                 })}
               </tbody>
             </table>
+            <p style={{ ...hint, marginTop: 10 }}>
+              Preview cache (light MP3s of WAVs, image previews and thumbnails, up to 20 GB):{' '}
+              <select
+                style={input}
+                value={draft.cacheDrive || ''}
+                onChange={(e) =>
+                  edit((c) => {
+                    c.cacheDrive = e.target.value || null;
+                  })
+                }
+              >
+                <option value="">This PC's SSD</option>
+                {driveIds.map((id) => (
+                  <option key={id} value={id}>
+                    {driveName(id)}
+                  </option>
+                ))}
+              </select>{' '}
+              — kept in a hidden <b>.sanktuary-cache</b> folder; while that drive is unplugged the SSD is used.
+            </p>
           </>
         )}
 

@@ -25,7 +25,7 @@ foreach ($j in $jobs) {
   if (-not $src) { $state.results += [ordered]@{ name = $name; ok = $false; note = 'drive not connected' }; continue }
   $from = Join-Path "$src\" $path
   $to = Join-Path "$target\Sanktuary Backup" $name
-  robocopy $from $to /E /XO /XD .sk-trash /R:1 /W:1 /NP /NFL /NDL /LOG+:"$data\backup.log" | Out-Null
+  robocopy $from $to /E /XO /XD .sk-trash .sanktuary-cache /R:1 /W:1 /NP /NFL /NDL /LOG+:"$data\backup.log" | Out-Null
   $code = $LASTEXITCODE
   $state.results += [ordered]@{ name = $name; ok = $code -lt 8; note = if ($code -lt 8) { 'ok' } else { "robocopy error $code (see data/backup.log)" } }
   Save $state

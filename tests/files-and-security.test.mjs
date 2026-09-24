@@ -74,6 +74,7 @@ const srv = spawn(process.execPath, [SERVER], {
     ...process.env,
     PORT: '3196',
     DATA_DIR: join(dir, 'data'),
+    THUMB_CACHE: join(dir, 'cache'), // never touch the real preview cache
     CLERK_SECRET_KEY: SECRET,
     CLERK_API_URL: 'http://127.0.0.1:3197',
     CLERK_JWT_KEY: jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }),
@@ -637,6 +638,17 @@ try {
   check(
     'a damaged image says it cannot be previewed (not a server error)',
     (await getBin('alice', '/api/files/view/pic.png?preview')).status === 415,
+  );
+
+  // Preview cache location (Admin Panel > Drives): only known drives accepted
+  const cfgNow = JSON.parse(readFileSync(join(dir, 'data', 'config.json'), 'utf8'));
+  check(
+    'cache on an unknown drive is refused',
+    (await call('alice', '/api/admin/config', 'PUT', { ...cfgNow, cacheDrive: 'nope' })).status === 400,
+  );
+  check(
+    'previews were cached in the test cache, not the real one',
+    existsSync(join(dir, 'cache')) && readdirSync(join(dir, 'cache')).length > 0,
   );
 
   // Boards: unsafe links rejected, connection spoofing ignored, bad JSON is a 400

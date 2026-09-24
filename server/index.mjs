@@ -33,7 +33,7 @@ const PORT = Number(process.env.PORT || 3080);
 const DIST = resolve(new URL('../dist/', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
 const HOST = process.env.HOST || '127.0.0.1';
 const DATA = process.env.DATA_DIR || resolve(DIST, '../data');
-const THUMBS = process.env.THUMB_CACHE || resolve(DIST, '../cache/thumbs');
+const LOCAL_CACHE = process.env.THUMB_CACHE || resolve(DIST, '../cache/thumbs'); // on the SSD; used when the cache drive is unplugged
 const TUNNEL_READY = process.env.TUNNEL_READY || 'http://127.0.0.1:2000/ready';
 const SITE_ORIGINS = (process.env.SITE_ORIGINS || '').split(',').filter(Boolean);
 const CLERK = process.env.CLERK_API_URL || 'https://api.clerk.com/v1'; // overridable so tests can use a fake Clerk
@@ -2058,7 +2058,7 @@ const transcodeQueue = [];
 async function audioPreviewFile(file) {
   const format = AUDIO_PREVIEW[extname(file).toLowerCase()] || fail(415, 'No audio preview for this type');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
-  const out = join(THUMBS, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|mp3`).digest('hex') + '.mp3');
+  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|mp3`).digest('hex') + '.mp3');
   if (existsSync(out)) return out;
   if (!previewJobs.has(out))
     previewJobs.set(
@@ -2073,7 +2073,7 @@ async function transcode(file, format, out) {
   if (transcoding >= 2) await new Promise((r) => transcodeQueue.push(r));
   transcoding++;
   try {
-    await mkdir(THUMBS, { recursive: true });
+    await mkdir(dirname(out), { recursive: true });
     const tmp = out + '.part';
     const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file', '-f', format, '-i', file];
     const code = await new Promise((resolve) => {
@@ -2091,7 +2091,7 @@ async function transcode(file, format, out) {
       fail(415, "Couldn't make a preview of this audio — use Download");
     }
     await rename(tmp, out);
-    pruneCache();
+    pruneCache(dirname(out));
   } finally {
     transcoding--;
     transcodeQueue.shift()?.();
@@ -2101,17 +2101,27 @@ async function transcode(file, format, out) {
 /** Makes the audio preview in the background right after an upload, so it's ready before anyone presses play. */
 const warmAudioPreview = (file) => AUDIO_PREVIEW[extname(file).toLowerCase()] && audioPreviewFile(file).catch(() => {});
 
-// Keeps the preview/thumbnail cache (cache/thumbs on the SSD) under 20 GB by removing the least recently used.
-let lastPrune = 0;
-async function pruneCache(limit = 20 * 1024 ** 3) {
-  if (Date.now() - lastPrune < 10 * 60_000) return;
-  lastPrune = Date.now();
-  const names = await readdir(THUMBS).catch(() => []);
+/**
+ * Where previews and thumbnails are cached: a hidden .sanktuary-cache folder on the drive picked in
+ * Admin Panel > Drives (cacheDrive), or the SSD while that drive is unplugged or none is picked.
+ */
+async function cacheDir() {
+  const cfg = await loadConfig();
+  const letter = cfg.cacheDrive && (await loadStatus()).drives.find((d) => d.id === cfg.cacheDrive)?.letter;
+  return letter && existsSync(letter + sep) ? join(letter + sep, '.sanktuary-cache') : LOCAL_CACHE;
+}
+
+// Keeps a cache folder under 20 GB by removing the least recently used previews.
+const lastPrune = new Map(); // dir -> time
+async function pruneCache(dir, limit = 20 * 1024 ** 3) {
+  if (Date.now() - (lastPrune.get(dir) || 0) < 10 * 60_000) return;
+  lastPrune.set(dir, Date.now());
+  const names = await readdir(dir).catch(() => []);
   const files = (
     await Promise.all(
       names.map((n) =>
-        stat(join(THUMBS, n)).then(
-          (st) => ({ p: join(THUMBS, n), st }),
+        stat(join(dir, n)).then(
+          (st) => ({ p: join(dir, n), st }),
           () => null,
         ),
       ),
@@ -2163,9 +2173,10 @@ async function imageInput(file, size) {
 async function thumb(res, file, max = 256) {
   if (!THUMBABLE.has(extname(file).toLowerCase())) fail(415, 'No thumbnail');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
-  const cached = join(THUMBS, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|${max}`).digest('hex') + '.webp');
+  const dir = await cacheDir();
+  const cached = join(dir, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|${max}`).digest('hex') + '.webp');
   if (!existsSync(cached)) {
-    await mkdir(THUMBS, { recursive: true });
+    await mkdir(dir, { recursive: true });
     const img = await imageInput(file, s.size);
     const webp = await img
       .rotate()
@@ -2174,6 +2185,7 @@ async function thumb(res, file, max = 256) {
       .toBuffer()
       .catch(() => fail(415, "Couldn't read this image — use Download")); // damaged or unsupported file
     await writeFile(cached, webp);
+    pruneCache(dir);
   }
   res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'private, max-age=86400' });
   return pipeline(createReadStream(cached), res);
@@ -2514,6 +2526,7 @@ function validateConfig(c, user) {
   }
   for (const [name, m] of Object.entries(c.members)) ok(!m.drive || c.drives[m.drive], `Unknown drive for ${name}`);
   ok(c.backup && Number.isInteger(c.backup.hour) && c.backup.hour >= 0 && c.backup.hour < 24, 'Backup hour must be 0-23');
+  ok(!c.cacheDrive || c.drives[c.cacheDrive], 'Unknown drive for the preview cache');
   return c;
 }
 

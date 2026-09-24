@@ -38,6 +38,7 @@ const srv = spawn(process.execPath, [SERVER], {
     ...process.env,
     PORT: '3196',
     DATA_DIR: join(dir, 'data'),
+    THUMB_CACHE: join(dir, 'cache'), // never touch the real preview cache
     CLERK_SECRET_KEY: SECRET,
     CLERK_API_URL: 'http://127.0.0.1:3197',
     SITE_ORIGINS: '',
