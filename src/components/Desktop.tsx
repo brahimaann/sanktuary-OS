@@ -111,6 +111,16 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
   },
   { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
   { id: 'timeline', title: 'Timeline', icon: '/images/icons/task-scheduler-16x16.png', appType: 'timeline', width: 900, height: 600 },
+  // Public: works without an account (the same page as sanktuary.studio/blog)
+  {
+    id: 'blog',
+    title: 'Blog',
+    icon: '/images/icons/news-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/blog' },
+    width: 760,
+    height: 560,
+  },
   { id: 'teams', title: 'Sanktuary Teams', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
 ];
 

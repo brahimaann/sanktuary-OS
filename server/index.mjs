@@ -1683,6 +1683,237 @@ async function businessDocs(req, res, url, user, db, id, sub) {
   fail(405, 'Not allowed');
 }
 
+// ── /api/blog: public blog — Substack writers pulled in live, plus our own posts — data/blog.json ──
+// Anyone can read it (no account). Admins manage the writers and posts from the Admin Panel.
+// Substack posts show title, picture and opening lines and link out for the full piece, so no outside HTML
+// ever runs on sanktuary.studio. Feeds refresh every 10 minutes.
+let blogDb = null;
+let blogSaved = Promise.resolve();
+// Starts with Boroma's own Substack; more writers are added in the Admin Panel
+const loadBlog = async () =>
+  (blogDb ??= await readJson('blog.json', {
+    feeds: [{ url: 'https://boroma.substack.com/feed', name: 'Boroma', added: '2026-09-23T00:00:00.000Z' }],
+    posts: {},
+  }));
+const saveBlog = () => (blogSaved = blogSaved.then(() => saveJson('blog.json', blogDb)).catch(console.error));
+const feedCache = new Map(); // feed url -> { at, items, error }
+const FEED_MINUTES = 10;
+
+/** "hima", "hima.substack.com" or any Substack / RSS URL -> the feed URL. */
+function feedUrl(input) {
+  const v = String(input || '').trim();
+  if (/^[\w-]{1,60}$/.test(v)) return `https://${v}.substack.com/feed`;
+  const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+  const pub = u.hostname === 'open.substack.com' && u.pathname.match(/^\/pub\/([\w-]+)/)?.[1]; // open.substack.com/pub/<name>
+  if (pub) return `https://${pub}.substack.com/feed`;
+  if (u.protocol !== 'https:') fail(400, 'Feeds must be https');
+  // Only public websites: never the PC itself, the home network or Tailscale addresses
+  if (/^(localhost|[\d.]+|\[.*\]|.*\.(local|lan|internal|ts\.net))$/i.test(u.hostname)) fail(400, 'Feeds must be public websites');
+  if (!/\/feed\/?$/.test(u.pathname) && !/\.(xml|rss)$/i.test(u.pathname)) u.pathname = u.pathname.replace(/\/?$/, '/feed');
+  return u.href;
+}
+
+const decodeXml = (s = '') =>
+  s
+    .replace(/^<!\[CDATA\[|\]\]>$/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, '&');
+const plainText = (html = '') =>
+  decodeXml(html.replace(/<!\[CDATA\[|\]\]>/g, ''))
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+const tag = (xml, name) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i'))?.[1] ?? '';
+const httpsOnly = (u) => (/^https:\/\//i.test(u || '') ? u : null);
+
+async function readFeed(feed) {
+  const hit = feedCache.get(feed.url);
+  if (hit && Date.now() - hit.at < FEED_MINUTES * 60_000) return hit;
+  try {
+    const r = await fetch(feed.url, {
+      headers: { 'user-agent': 'Sanktuary blog reader (sanktuary.studio)' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const xml = (await r.text()).slice(0, 5_000_000);
+    const publication = plainText(tag(tag(xml, 'channel').split('<item')[0], 'title')) || feed.name;
+    const items = [...xml.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)].slice(0, 20).map(([item]) => {
+      const content = tag(item, 'content:encoded') || tag(item, 'description');
+      const image =
+        item.match(/<enclosure[^>]+url="([^"]+)"[^>]*type="image/i)?.[1] ||
+        item.match(/<media:content[^>]+url="([^"]+)"/i)?.[1] ||
+        decodeXml(content).match(/<img[^>]+src="([^"]+)"/i)?.[1];
+      const link = httpsOnly(plainText(tag(item, 'link')));
+      return {
+        id: `ss-${createHash('sha1')
+          .update(link || tag(item, 'guid'))
+          .digest('hex')
+          .slice(0, 12)}`,
+        source: 'substack',
+        title: plainText(tag(item, 'title')).slice(0, 200),
+        excerpt: (plainText(tag(item, 'description')) || plainText(content)).slice(0, 400),
+        image: httpsOnly(decodeXml(image || '')),
+        url: link,
+        author: plainText(tag(item, 'dc:creator')) || publication,
+        publication,
+        date: new Date(plainText(tag(item, 'pubDate')) || Date.now()).toISOString(),
+      };
+    });
+    const fresh = { at: Date.now(), items: items.filter((i) => i.url && i.title), error: null };
+    feedCache.set(feed.url, fresh);
+    return fresh;
+  } catch (err) {
+    const stale = { at: Date.now(), items: hit?.items || [], error: err.message };
+    feedCache.set(feed.url, stale);
+    return stale;
+  }
+}
+
+const ownPostView = (p, full) => ({
+  id: p.id,
+  source: 'sanktuary',
+  title: p.title,
+  excerpt: p.body.replace(/\s+/g, ' ').slice(0, 400),
+  image: p.image || null,
+  url: `/blog/${p.id}`,
+  author: p.author,
+  publication: 'Sanktuary',
+  date: p.published || p.created,
+  ...(full ? { body: p.body } : {}),
+});
+
+async function blogApi(req, res, url) {
+  const db = await loadBlog();
+  const [, , , what, id] = url.pathname.split('/'); // /api/blog/<post|images|admin|feeds|posts>/<id>
+
+  // Public reading
+  if (req.method === 'GET' && !what) {
+    const own = Object.values(db.posts)
+      .filter((p) => p.published && !p.deleted)
+      .map((p) => ownPostView(p));
+    const fromFeeds = (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items);
+    const posts = [...own, ...fromFeeds].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, { posts, writers: db.feeds.map((f) => f.name) });
+  }
+  if (req.method === 'GET' && what === 'post') {
+    const p = (db.posts[id] && db.posts[id].published && !db.posts[id].deleted && db.posts[id]) || fail(404, 'No such post');
+    return json(res, ownPostView(p, true));
+  }
+  if (req.method === 'GET' && what === 'images') return stream(req, res, url.searchParams, join(DATA, 'blog', 'images', safeName(id)));
+
+  // Managing: admins only
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  if (!user.admin) fail(403, 'Only admins can manage the blog');
+  if (req.method === 'GET' && what === 'admin') {
+    const feeds = await Promise.all(
+      db.feeds.map(async (f) => ({ ...f, ...(({ error, items }) => ({ error, posts: items.length }))(await readFeed(f)) })),
+    );
+    return json(res, {
+      feeds,
+      posts: Object.values(db.posts)
+        .filter((p) => !p.deleted)
+        .sort((a, b) => b.created.localeCompare(a.created)),
+    });
+  }
+  if (what === 'feeds' && req.method === 'POST') {
+    const input = await jsonBody(req);
+    const u = feedUrl(input.url);
+    if (db.feeds.some((f) => f.url === u)) fail(409, 'Already added');
+    feedCache.delete(u);
+    const feed = {
+      url: u,
+      name:
+        String(input.name || '')
+          .trim()
+          .slice(0, 80) || new URL(u).hostname.replace(/\.substack\.com$/, ''),
+      added: new Date().toISOString(),
+    };
+    const check = await readFeed(feed);
+    if (check.error && !check.items.length) fail(400, `Couldn't read that feed (${check.error}). Check the name or link.`);
+    db.feeds.push(feed);
+    saveBlog();
+    return json(res, { ...feed, posts: check.items.length });
+  }
+  if (what === 'feeds' && req.method === 'DELETE') {
+    const u = url.searchParams.get('url');
+    db.feeds = db.feeds.filter((f) => f.url !== u);
+    saveBlog();
+    return json(res, { ok: true });
+  }
+  if (what === 'images' && req.method === 'PUT') {
+    const name = safeName(url.searchParams.get('name'));
+    if (!THUMBABLE.has(extname(name).toLowerCase())) fail(400, 'Cover images must be pictures');
+    await mkdir(join(DATA, 'blog', 'images'), { recursive: true });
+    const id = randomUUID().slice(0, 12);
+    const original = join(DATA, 'blog', 'images', `${id}-original${extname(name).toLowerCase()}`); // kept as uploaded
+    await pipeline(req, createWriteStream(original));
+    const img = await imageInput(original, (await stat(original)).size).catch(() => fail(400, "That picture couldn't be read"));
+    await img
+      .rotate()
+      .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toFile(join(DATA, 'blog', 'images', `${id}.webp`));
+    return json(res, { url: `/api/blog/images/${id}.webp` });
+  }
+  if (what === 'posts') {
+    const input = req.method === 'POST' || req.method === 'PATCH' ? await jsonBody(req) : {};
+    const apply = (p) => {
+      if (input.title !== undefined) p.title = String(input.title).trim().slice(0, 200) || p.title;
+      if (input.body !== undefined) p.body = String(input.body).slice(0, 100_000);
+      if (input.author !== undefined) p.author = String(input.author).trim().slice(0, 80) || p.author;
+      if (input.image !== undefined) p.image = input.image && /^\/api\/blog\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
+      if (input.published !== undefined) p.published = input.published ? p.published || new Date().toISOString() : null;
+      p.updated = new Date().toISOString();
+    };
+    if (req.method === 'POST' && !id) {
+      const p = {
+        id: randomUUID().slice(0, 10),
+        title: 'Untitled',
+        body: '',
+        author: user.username,
+        image: null,
+        published: null,
+        created: new Date().toISOString(),
+      };
+      apply(p);
+      db.posts[p.id] = p;
+      saveBlog();
+      return json(res, p);
+    }
+    const p = (db.posts[id] && !db.posts[id].deleted && db.posts[id]) || fail(404, 'No such post');
+    if (req.method === 'PATCH') {
+      apply(p);
+      saveBlog();
+      return json(res, p);
+    }
+    if (req.method === 'DELETE') {
+      p.deleted = new Date().toISOString(); // hidden, kept in the file
+      saveBlog();
+      return json(res, { ok: true });
+    }
+  }
+  fail(404, 'Unknown blog action');
+}
+
+// The public blog page: sanktuary.studio/blog (and /blog/<post>), no account needed
+const BLOG_PAGE = new URL('./blog.html', import.meta.url);
+function blogPage(req, res, url) {
+  if (!/^\/blog(\/[\w-]*)?\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'content-security-policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:",
+  });
+  return pipeline(createReadStream(BLOG_PAGE), res);
+}
+
 /** What the file window and Profile need to show about a project. */
 const projectView = (p, me) => ({
   kind: p.kind,
@@ -2655,6 +2886,8 @@ const routes = [
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
   ['/api/business', businessApi],
+  ['/api/blog', blogApi],
+  ['/blog', blogPage],
   ['/s/', publicShare],
 ];
 

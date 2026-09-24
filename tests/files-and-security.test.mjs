@@ -58,6 +58,8 @@ writeFileSync(
   }),
 );
 
+writeFileSync(join(dir, 'data', 'blog.json'), JSON.stringify({ feeds: [], posts: {} })); // no Substack fetches during tests
+
 // Clerk-style session tokens (RS256), for the parts that insist on a real sign-in token (business portal)
 const jwtKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwt = (u, extra = {}) => {
@@ -603,6 +605,40 @@ try {
   );
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
+
+  // Blog: public reading, admin-only writing, drafts hidden, feeds limited to public websites
+  check('blog reads without an account', (await fetch(B + '/api/blog')).status === 200);
+  check('blog page is public', (await fetch(B + '/blog')).status === 200 && (await fetch(B + '/blog/abc123')).status === 200);
+  check('members cannot write posts', (await call('bob', '/api/blog/posts', 'POST', { title: 'x' })).status === 403);
+  const draft = JSON.parse(
+    (await call('alice', '/api/blog/posts', 'POST', { title: 'Why culture', body: 'First line.\n\nSecond https://example.com' })).text,
+  );
+  check('drafts stay hidden', !(await (await fetch(B + '/api/blog')).json()).posts.some((p) => p.id === draft.id));
+  check('draft post page is not public', (await fetch(B + `/api/blog/post/${draft.id}`)).status === 404);
+  await call('alice', `/api/blog/posts/${draft.id}`, 'PATCH', { published: true });
+  const publicPosts = (await (await fetch(B + '/api/blog')).json()).posts;
+  check(
+    'published post is public',
+    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === `/blog/${draft.id}`),
+  );
+  check('full post readable', (await (await fetch(B + `/api/blog/post/${draft.id}`)).json()).body.includes('Second'));
+  check(
+    'cover must be one of our images',
+    (await call('alice', `/api/blog/posts/${draft.id}`, 'PATCH', { image: 'https://evil.example/x.png' })).status === 200 &&
+      !JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === draft.id).image,
+  );
+  for (const bad of [
+    'http://blog.example/feed',
+    'https://127.0.0.1/feed',
+    'https://localhost/feed',
+    'https://boroma.tailab8c2c.ts.net/feed',
+  ])
+    check(`feed refused: ${bad}`, (await call('alice', '/api/blog/feeds', 'POST', { url: bad })).status === 400);
+  const cover = JSON.parse((await call('alice', `/api/blog/images?name=cover.png`, 'PUT', bigPng, true)).text);
+  check(
+    'cover image compressed to WebP',
+    /^\/api\/blog\/images\/[\w-]+\.webp$/.test(cover.url) && (await fetch(B + cover.url)).status === 200,
+  );
 
   // Chat attachments: files sent from a phone / computer straight into a conversation
   const dm = 'dm~alice~bob';

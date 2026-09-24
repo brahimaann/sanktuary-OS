@@ -51,7 +51,7 @@ interface Health {
   deploy: { at: string; ok: boolean; commit: string; message: string } | null;
 }
 
-const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Log'] as const;
+const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Blog', 'Log'] as const;
 const RIGHTS: Rights[] = ['none', 'view', 'upload', 'edit'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
@@ -347,6 +347,7 @@ const AdminPanel: React.FC = () => {
         )}
 
         {tab === 'Log' && <LogTab />}
+        {tab === 'Blog' && <BlogTab />}
 
         {tab === 'Members' && (
           <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
@@ -748,6 +749,194 @@ const FolderPicker: React.FC<{ drive: string; driveName: string; start: string; 
 type Transfer = { at: string; user: string; action: string; space: string; path: string; bytes: number; ip?: string };
 
 /** Console-style log of every upload and download, newest first. */
+type BlogPost = {
+  id: string;
+  title: string;
+  body: string;
+  author: string;
+  image: string | null;
+  published: string | null;
+  created: string;
+};
+type Feed = { url: string; name: string; posts: number; error: string | null };
+
+/** Substack writers pulled onto sanktuary.studio/blog, and our own posts (plain text; blank line = new paragraph). */
+const BlogTab: React.FC = () => {
+  const api = useApi();
+  const [data, setData] = useState<{ feeds: Feed[]; posts: BlogPost[] } | null>(null);
+  const [feed, setFeed] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => api('/api/blog/admin').then(setData, (e) => setMsg(e.message)), [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const run = (p: Promise<unknown>) => p.then(load, (e) => setMsg(e.message));
+  const post = data?.posts.find((p) => p.id === openId);
+  const patch = (body: object) => run(api(`/api/blog/posts/${openId}`, { method: 'PATCH', body: JSON.stringify(body) }));
+  const cover = async (file?: File) => {
+    if (!file) return;
+    try {
+      const { url } = await api(`/api/blog/images?name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file });
+      patch({ image: url });
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  if (!data) return <div>{msg || 'Loading...'}</div>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={hint}>
+        Everything here shows on{' '}
+        <a href="/blog" target="_blank" rel="noopener noreferrer">
+          sanktuary.studio/blog
+        </a>{' '}
+        (public, no account needed) and in the Blog icon on the desktop. Substack posts refresh every 10 minutes and link back to Substack
+        for the full piece.
+      </p>
+      <fieldset style={fieldset}>
+        <legend>Substack writers</legend>
+        {data.feeds.map((f) => (
+          <div key={f.url} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+            <Dot ok={!f.error} /> <b>{f.name}</b>
+            <span style={{ color: '#555', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {f.error ? `can't read it right now (${f.error})` : `${f.posts} posts`} · {f.url}
+            </span>
+            <button style={button} onClick={() => run(api(`/api/blog/feeds?url=${encodeURIComponent(f.url)}`, { method: 'DELETE' }))}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div style={row}>
+          <input
+            style={{ ...input, flex: 1, minWidth: 200 }}
+            placeholder="Substack name or link, e.g. boroma or open.substack.com/pub/boroma"
+            value={feed}
+            onChange={(e) => setFeed(e.target.value)}
+          />
+          <button
+            style={button}
+            disabled={!feed.trim()}
+            onClick={() => {
+              setMsg('Checking the feed...');
+              run(api('/api/blog/feeds', { method: 'POST', body: JSON.stringify({ url: feed }) }).then(() => (setFeed(''), setMsg(''))));
+            }}
+          >
+            Add writer
+          </button>
+        </div>
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Our posts</legend>
+        <div style={{ marginBottom: 6 }}>
+          <button
+            style={button}
+            onClick={() =>
+              api('/api/blog/posts', { method: 'POST', body: JSON.stringify({ title: 'Untitled' }) }).then(
+                (p: BlogPost) => {
+                  setOpenId(p.id);
+                  load();
+                },
+                (e) => setMsg(e.message),
+              )
+            }
+          >
+            New post
+          </button>
+        </div>
+        {data.posts.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => setOpenId(p.id === openId ? null : p.id)}
+            style={{
+              padding: '3px 6px',
+              cursor: 'default',
+              background: p.id === openId ? '#000080' : '#fff',
+              color: p.id === openId ? '#fff' : '#000',
+              borderBottom: '1px solid #eee',
+            }}
+          >
+            <b>{p.title}</b> · {p.author} · {p.published ? `published ${new Date(p.published).toLocaleDateString()}` : 'draft'}
+          </div>
+        ))}
+        {!data.posts.length && <div style={{ color: '#555' }}>No posts yet.</div>}
+      </fieldset>
+      {post && (
+        <fieldset key={post.id} style={fieldset}>
+          <legend>Editing: {post.title}</legend>
+          <label style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+            Title
+            <input
+              style={input}
+              defaultValue={post.title}
+              onBlur={(e) => e.target.value !== post.title && patch({ title: e.target.value })}
+            />
+            Author
+            <input
+              style={input}
+              defaultValue={post.author}
+              onBlur={(e) => e.target.value !== post.author && patch({ author: e.target.value })}
+            />
+            Cover
+            <span style={row}>
+              {post.image ? <img src={post.image} alt="" style={{ height: 48, border: '1px solid #808080' }} /> : 'none'}
+              <label style={{ ...button, display: 'inline-block' }}>
+                Choose picture...
+                <input type="file" accept="image/*" hidden onChange={(e) => (cover(e.target.files?.[0]), (e.target.value = ''))} />
+              </label>
+              {post.image && (
+                <button style={button} onClick={() => patch({ image: null })}>
+                  Remove
+                </button>
+              )}
+            </span>
+          </label>
+          <textarea
+            style={{
+              ...input,
+              width: '100%',
+              minHeight: 220,
+              resize: 'vertical',
+              fontFamily: 'Georgia, serif',
+              fontSize: 14,
+              lineHeight: 1.5,
+            }}
+            defaultValue={post.body}
+            placeholder="Write here. Leave a blank line between paragraphs. https:// links become clickable."
+            onBlur={(e) => e.target.value !== post.body && patch({ body: e.target.value })}
+          />
+          <div style={{ ...row, marginTop: 6 }}>
+            <button style={{ ...button, fontWeight: 700 }} onClick={() => patch({ published: !post.published })}>
+              {post.published ? 'Unpublish (back to draft)' : 'Publish'}
+            </button>
+            {post.published && (
+              <a
+                href={`/blog/${post.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...button, textDecoration: 'none', color: '#000' }}
+              >
+                View on the blog
+              </a>
+            )}
+            <span style={{ flex: 1 }} />
+            <button
+              style={button}
+              onClick={async () =>
+                (await dialog.confirm(`Remove "${post.title}"? It's hidden, not destroyed.`, { icon: 'warning' })) &&
+                run(api(`/api/blog/posts/${post.id}`, { method: 'DELETE' }).then(() => setOpenId(null)))
+              }
+            >
+              Remove post
+            </button>
+          </div>
+        </fieldset>
+      )}
+      {msg && <div style={{ color: '#a00000' }}>{msg}</div>}
+    </div>
+  );
+};
+
 const LogTab: React.FC = () => {
   const api = useApi();
   const [log, setLog] = useState<Transfer[] | null>(null);
