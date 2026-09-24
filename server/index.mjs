@@ -2706,6 +2706,17 @@ async function rawApi(req, res, url) {
     const spec = RAW_COMMANDS[command] || fail(403, `${command} isn't available in the Sanktuary editor`);
     const args = await jsonBody(req);
     const original = String(args.path || ''); // sk://space/... as the member sent it
+    if (command === 'export_images') {
+      // The engine builds export names from these and joins them onto folders without checking: no climbing
+      // out with "..", no drive letters, no separators in the name. "Next to the originals" writes into the
+      // photos' own folders, so it needs upload rights there, not just on the chosen destination.
+      const s = args.exportSettings || {};
+      if (s.filenameTemplate != null && (typeof s.filenameTemplate !== 'string' || /[\\/:]|\.\./.test(s.filenameTemplate)))
+        fail(400, 'File name templates cannot contain / \\ : or ..');
+      if (s.subfolder != null && (typeof s.subfolder !== 'string' || /:|(^|[\\/])\.\.([\\/]|$)/.test(s.subfolder)))
+        fail(400, 'Export subfolders cannot contain .. or a drive letter');
+      if (s.destinationType === 'originalFolder') for (const p of [].concat(args.paths || [])) toReal(p, 'upload');
+    }
     for (const [key, level] of Object.entries(spec)) {
       if (args[key] == null) continue;
       args[key] = Array.isArray(args[key]) ? args[key].map((v) => toReal(v, level)) : toReal(args[key], level);

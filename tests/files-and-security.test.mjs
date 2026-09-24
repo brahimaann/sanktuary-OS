@@ -977,6 +977,32 @@ try {
     'view rights cannot save edits',
     (await raw('carol', 'save_metadata_and_update_thumbnail', { path: 'sk://view/pic.png', adjustments: {} })).status !== 200,
   );
+  const exp = (u, exportSettings, extra = {}) =>
+    raw(u, 'export_images', { paths: ['sk://ed/pic.png'], outputFolderOrFile: 'sk://ed/docs', exportSettings, ...extra });
+  check('export name template cannot climb folders', (await exp('bob', { filenameTemplate: '../../evil' })).status === 400);
+  check(
+    'export subfolder cannot climb folders',
+    (await exp('bob', { destinationType: 'originalFolder', subfolder: '..\\..\\x' })).status === 400,
+  );
+  check(
+    'export subfolder cannot name a drive',
+    (await exp('bob', { destinationType: 'originalFolder', subfolder: 'C:\\Windows' })).status === 400,
+  );
+  check(
+    '"next to originals" needs upload rights on the photos',
+    (
+      await raw('carol', 'export_images', {
+        paths: ['sk://view/pic.png'],
+        outputFolderOrFile: 'sk://view/docs',
+        exportSettings: { destinationType: 'originalFolder', subfolder: 'Exports' },
+      })
+    ).status === 403,
+  );
+  check(
+    'a normal export still goes through',
+    (await exp('bob', { destinationType: 'originalFolder', subfolder: 'Exports/Web', filenameTemplate: '{original_filename}_web' }))
+      .status === 200,
+  );
   const st = JSON.parse((await call('alice', '/api/raw/status')).text);
   check('status says who is editing', st.busyBy === 'bob' && st.installed === false);
   check('editor page explains when not installed', /isn't installed/.test(await (await fetch(B + '/apps/rapidraw/')).text()));
