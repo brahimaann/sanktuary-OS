@@ -39,6 +39,15 @@ const STUDIO_MENU: MenuItem[] = [
     height: 600,
   },
   { id: 'moodboards', label: 'Moodboards', title: 'Moodboards', appType: 'boards', icon: icon('paint-32x32.png'), width: 560, height: 420 },
+  {
+    id: 'producer',
+    label: 'Producer',
+    title: 'Producer',
+    appType: 'producer',
+    icon: icon('convert-audio-32x32.png'),
+    width: 720,
+    height: 560,
+  },
   { id: 'teams', label: 'Messages', title: 'Messages', appType: 'teams', icon: icon('outlook-express-32x32.png'), width: 300, height: 520 },
 ];
 const VISITOR_MENU: MenuItem[] = [
@@ -52,6 +61,15 @@ const VISITOR_MENU: MenuItem[] = [
     height: 560,
     bold: true,
     props: { tour: true },
+  },
+  {
+    id: 'producer',
+    label: 'Producer',
+    title: 'Producer',
+    appType: 'producer',
+    icon: icon('convert-audio-32x32.png'),
+    width: 720,
+    height: 560,
   },
   { id: 'profile-me', label: 'Log On...', title: 'Log On', appType: 'profile', icon: icon('logoff-32x32.png'), width: 420, height: 520 },
 ];

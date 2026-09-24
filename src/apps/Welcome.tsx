@@ -41,6 +41,11 @@ const VISITOR_TOUR: Step[] = [
     open: win('my-computer', 'My Computer', 'directory', 'my-computer-16x16.png', 680, 500),
   },
   {
+    title: 'Producer: tools for making music',
+    text: 'Drop in a song to get its tempo, key and loudness, compare your mix with a reference, get delay and reverb times for your tempo, and read chains, tips and free tools. Your file stays on your device.',
+    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png', 720, 560),
+  },
+  {
     title: 'Read the blog',
     text: 'Essays and notes from the studio, readable right here.',
     open: win('blog', 'Blog', 'iframe', 'news-16x16.png', 760, 560, { src: '/blog' }),
@@ -85,6 +90,11 @@ const MEMBER_TOUR: Step[] = [
     title: 'Messages',
     text: 'Channels and direct messages. Attach files from your phone or from the drives.',
     open: win('teams', 'Messages', 'teams', 'outlook-express-16x16.png', 300, 520),
+  },
+  {
+    title: 'Producer',
+    text: 'Tempo, key and loudness of any bounce (from your device or Team Files), a reference comparison, delay and reverb times, and a guide. Save the tempo and key straight onto a track.',
+    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png', 720, 560),
   },
   {
     title: 'Edit photos',

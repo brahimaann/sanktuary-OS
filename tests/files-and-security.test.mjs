@@ -126,7 +126,7 @@ const srv = spawn(process.execPath, [SERVER], {
     RAPIDRAW_BRIDGE: 'http://127.0.0.1:3193',
     RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
     RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
-    AUTO_SCAN_MS: '150',
+    AUTO_SCAN_MS: '400', // long enough for a test to set a bounce by hand right after uploading it
   },
 });
 let srvOut = '';
@@ -405,6 +405,18 @@ try {
   // Release folders: files fill Tracks in
   const albumDir = join(drive, 'team', 'Albums', 'Folder Album');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Scans run in the background after an upload: poll (up to 6 s) instead of guessing how long they take
+  const until = async (fn, ms = 6000) => {
+    for (const end = Date.now() + ms; ; await wait(100)) {
+      const v = await fn();
+      if (v || Date.now() > end) return v;
+    }
+  };
+  const tracksWhen = (ok) =>
+    until(async () => {
+      const x = await tracksOf('bob', folderAlbum.id);
+      return ok(x) ? x : null;
+    });
   const tracksOf = async (u, rid) => JSON.parse((await call(u, '/api/tracks')).text).tracks.filter((t) => t.release === rid);
   const newRel = (u, body) => call(u, '/api/tracks/release', 'POST', body);
   check(
@@ -443,8 +455,7 @@ try {
     !JSON.parse((await call('bob', '/api/tracks')).text).releases.some((r) => 'folderKey' in r),
   );
   await up('bob', 'up', 'Albums/Folder Album/Bounces/03 Summer Nights v1.wav', 'RIFF1');
-  await wait(700);
-  let fts = await tracksOf('bob', folderAlbum.id);
+  let fts = (await tracksWhen((x) => x.length)) || [];
   check(
     'an uploaded bounce becomes a track',
     fts.length === 1 && fts[0].title === 'Summer Nights' && fts[0].n === 3 && fts[0].bounce?.path.endsWith('v1.wav'),
@@ -454,8 +465,11 @@ try {
   await up('bob', 'up', 'Albums/Folder Album/Bounces/Summer_Nights_v2_master.wav', 'RIFF2');
   await up('bob', 'up', 'Albums/Folder Album/Bounces/Summer Nights (Instrumental) v9.wav', 'RIFF9');
   await up('bob', 'up', 'Albums/Folder Album/Bounces/HIMA - Late Drive.mp3', 'ID3');
-  await wait(700);
-  fts = await tracksOf('bob', folderAlbum.id);
+  fts =
+    (await tracksWhen(
+      (x) =>
+        x.some((t) => t.title === 'HIMA Late Drive') && x.find((t) => t.title === 'Summer Nights')?.bounce?.path.endsWith('v2_master.wav'),
+    )) || (await tracksOf('bob', folderAlbum.id));
   const nights = fts.find((t) => t.title === 'Summer Nights');
   check('a newer version becomes the current bounce', nights?.bounce?.path.endsWith('Summer_Nights_v2_master.wav'), nights?.bounce?.path);
   check('an instrumental does not take over', !/Instrumental/.test(nights?.bounce?.path || ''));
@@ -505,21 +519,22 @@ try {
   await call('bob', `/api/tracks/track/${drive2.id}`, 'PATCH', { bounce: { space: 'up', path: 'docs/new.txt' } });
   await up('bob', 'up', 'Albums/Folder Album/Bounces/HIMA - Late Drive v2.mp3', 'ID3');
   await up('bob', 'up', 'docs/Elsewhere Song.wav', 'RIFF'); // outside the folder: not a track
-  await wait(700);
+  await wait(1500); // nothing should happen: give a scan time to (wrongly) run
   fts = await tracksOf('bob', folderAlbum.id);
   check('a bounce picked by hand is not replaced', fts.find((t) => t.id === drive2.id)?.bounce?.path === 'docs/new.txt');
   check('files outside the folder are ignored', !fts.some((t) => /Elsewhere/.test(t.title)));
   check(
     'a moved-in file is picked up',
     (await call('bob', '/api/files/up/docs/Elsewhere Song.wav?move=Albums/Folder Album/Bounces', 'POST')).status === 200 &&
-      (await wait(700), (await tracksOf('bob', folderAlbum.id)).some((t) => t.title === 'Elsewhere Song')),
+      !!(await tracksWhen((x) => x.some((t) => t.title === 'Elsewhere Song'))),
   );
   const hand = JSON.parse((await call('bob', '/api/tracks/track', 'POST', { release: folderAlbum.id, title: 'Golden Hour' })).text);
   await up('bob', 'up', 'Albums/Folder Album/Bounces/gh_rough.wav', 'RIFF');
   await call('bob', `/api/tracks/track/${hand.id}`, 'PATCH', { bounce: { space: 'up', path: 'Albums/Folder Album/Bounces/gh_rough.wav' } });
   await up('bob', 'up', 'Albums/Folder Album/Bounces/gh v2.wav', 'RIFF');
-  await wait(700);
-  fts = await tracksOf('bob', folderAlbum.id);
+  fts =
+    (await tracksWhen((x) => x.find((t) => t.id === hand.id)?.bounce?.path.endsWith('gh v2.wav'))) ||
+    (await tracksOf('bob', folderAlbum.id));
   check(
     'a bounce with an odd name stays with its track and gets its new versions',
     !fts.some((t) => t.title === 'gh') && fts.find((t) => t.id === hand.id)?.bounce?.path.endsWith('gh v2.wav'),

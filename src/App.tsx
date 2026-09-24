@@ -41,6 +41,7 @@ const Welcome = lazy(() => import('./apps/Welcome'));
 const NewThing = lazy(() => import('./apps/NewThing'));
 const ShareIn = lazy(() => import('./apps/ShareIn'));
 const Directory = lazy(() => import('./apps/Directory'));
+const Producer = lazy(() => import('./apps/Producer'));
 
 export const App: React.FC = () => {
   const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
@@ -216,6 +217,9 @@ export const App: React.FC = () => {
         break;
       case 'new':
         content = <NewThing kind={win.appProps?.kind} />;
+        break;
+      case 'producer':
+        content = <Producer />;
         break;
       case 'directory':
         content = <Directory />;

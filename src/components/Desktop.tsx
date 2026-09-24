@@ -46,6 +46,7 @@ const PUBLIC_ICONS: DesktopIconDef[] = [
     width: 680,
     height: 500,
   },
+  { id: 'producer', title: 'Producer', icon: '/images/icons/convert-audio-32x32.png', appType: 'producer', width: 720, height: 560 },
   {
     id: 'blog',
     title: 'Blog',
