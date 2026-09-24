@@ -14,7 +14,7 @@ const Network: React.FC = () => {
   const { openWindow } = useWindowManager();
 
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
-  if (!isSignedIn) return <LogOn name="Sanktuary Network" />;
+  if (!isSignedIn) return <LogOn name="Team Files" />;
 
   const open = (s: SpaceInfo) =>
     openWindow({

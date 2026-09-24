@@ -44,11 +44,11 @@ interface Activity {
 
 const TABS = ['Buddies', 'Channels', 'Activity'] as const;
 
-/** Sanktuary Teams: AIM-style buddy list, channels + DMs, and the team activity feed. */
+/** Messages (was Sanktuary Teams): AIM-style buddy list, channels + DMs, and the team activity feed. */
 const Teams: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
-  if (!isSignedIn) return <LogOn name="Sanktuary Teams" />;
+  if (!isSignedIn) return <LogOn name="Messages" />;
   return <BuddyList />;
 };
 

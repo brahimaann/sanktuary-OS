@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { useWindowManager } from '../wm/manager';
+import React, { useEffect, useRef, useState } from 'react';
+import { useAuth } from '@clerk/react';
+import { useWindowManager, AppType } from '../wm/manager';
 import { button, shell, statusBar } from './TeamFiles';
 import RetroIcon, { IconLabel } from '../components/RetroIcon';
 
@@ -13,11 +14,132 @@ interface Front {
 const day = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 const until = (d: string) => Math.round((Date.parse(d) - Date.parse(new Date().toLocaleDateString('en-CA'))) / 864e5);
 
-/** The front door for visitors: who we are, latest writing, what's coming up, and a way to join. No account needed. */
-const Welcome: React.FC = () => {
+// The tour: a few steps that say what each part is for, each with a "Show me" that opens it. Visitors get the
+// public side; members get the studio side (and it opens once on their first visit after logging on).
+interface Step {
+  title: string;
+  text: string;
+  open?: { id: string; title: string; appType: AppType; icon: string; appProps?: object; width: number; height: number };
+}
+const win = (id: string, title: string, appType: AppType, icon: string, width = 760, height = 560, appProps?: object) => ({
+  id,
+  title,
+  appType,
+  icon: `/images/icons/${icon}`,
+  width,
+  height,
+  appProps,
+});
+const VISITOR_TOUR: Step[] = [
+  {
+    title: 'This is a desktop',
+    text: 'Everything here opens in windows, like an old PC. Double-click an icon (tap on a phone) to open it; drag a window by its blue title bar; the Start button, bottom left, lists everything.',
+  },
+  {
+    title: 'My Computer: who we are',
+    text: 'The directory: the people in the collective, what we have out and coming, events, writing, the shop.',
+    open: win('my-computer', 'My Computer', 'directory', 'my-computer-16x16.png', 680, 500),
+  },
+  {
+    title: 'Read the blog',
+    text: 'Essays and notes from the studio, readable right here.',
+    open: win('blog', 'Blog', 'iframe', 'news-16x16.png', 760, 560, { src: '/blog' }),
+  },
+  {
+    title: 'Shop and money pools',
+    text: 'Merch and digital releases, and pools that fund what we make next. Payments go through Stripe.',
+    open: win('shop', 'Shop', 'iframe', 'favorites-16x16.png', 760, 560, { src: '/shop' }),
+  },
+  {
+    title: 'Join the Village',
+    text: 'Artist, engineer, photographer or fan: tell us about you at the bottom of this window and we will reach out.',
+  },
+];
+const MEMBER_TOUR: Step[] = [
+  {
+    title: 'New... adds anything',
+    text: 'A release, a song, a shoot, a show, a drop. It asks two or three things and understands dates like "next sat 8pm". Releases get their folders made for you.',
+    open: win('new', 'New', 'new', 'file-32x32.png', 460, 420),
+  },
+  {
+    title: 'Team Files: the shared drives',
+    text: 'Upload by dragging files in, drag to move, right-click for more. Projects (Ableton, FL, Premiere, After Effects, PSD, AI) open read-only; Download asks whether you are just looking, trying things out, or checking it out so nobody else edits at the same time.',
+    open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png', 560, 420),
+  },
+  {
+    title: 'Tracks fill themselves in',
+    text: 'Drop bounces into a release\'s folder (or onto Tracks): "03 Song v4.wav" becomes track 3 with v4 as its bounce. Projects, stems, BPM and the cover are linked by name.',
+    open: win('tracks', 'Tracks', 'tracks', 'media-player-16x16.png', 900, 600),
+  },
+  {
+    title: 'Timeline: shoots, shows, drops',
+    text: 'One calendar for everything with a date, release days included. People on an entry get reminded the day before.',
+    open: win('timeline', 'Timeline', 'timeline', 'task-scheduler-16x16.png', 900, 600),
+  },
+  {
+    title: 'Moodboards and the Planner',
+    text: 'Moodboards: drag images, audio and files onto a shared canvas. Planner: to-do boards. Both update live for everyone.',
+    open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png', 560, 420),
+  },
+  {
+    title: 'Messages',
+    text: 'Channels and direct messages. Attach files from your phone or from the drives.',
+    open: win('teams', 'Messages', 'teams', 'outlook-express-16x16.png', 300, 520),
+  },
+  {
+    title: 'Edit photos',
+    text: 'Open a photo or camera RAW file in Team Files and press Edit photo: a full RAW editor, running on the studio PC.',
+  },
+  {
+    title: 'Your profile and your phone',
+    text: 'Set your picture and links, choose whether you show in the public directory, see your projects and turn on notifications. On Android, Add to Home screen puts Sanktuary in your share menu.',
+    open: win('profile-me', 'My Profile', 'profile', 'my-documents-16x16.png', 420, 520),
+  },
+];
+
+const Tour: React.FC<{ member: boolean }> = ({ member }) => {
   const { openWindow } = useWindowManager();
+  const steps = member ? MEMBER_TOUR : VISITOR_TOUR;
+  const [i, setI] = useState(0);
+  useEffect(() => setI(0), [member]);
+  const s = steps[Math.min(i, steps.length - 1)];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ ...panel, fontSize: 12, minHeight: 86 }}>
+        <div style={{ color: '#666', fontSize: 10 }}>
+          Step {i + 1} of {steps.length}
+        </div>
+        <b style={{ color: '#000080' }}>{s.title}</b>
+        <div style={{ marginTop: 4, lineHeight: 1.45 }}>{s.text}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button style={button} disabled={i === 0} onClick={() => setI(i - 1)}>
+          ‹ Back
+        </button>
+        <button style={{ ...button, fontWeight: 700 }} disabled={i === steps.length - 1} onClick={() => setI(i + 1)}>
+          Next ›
+        </button>
+        <span style={{ flex: 1 }} />
+        {s.open && (
+          <button style={button} onClick={() => openWindow(s.open!)}>
+            <IconLabel icon="external">Show me</IconLabel>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** The front door: who we are, a tour, latest writing, what's coming up, and a way to join. No account needed. */
+const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
+  const { openWindow } = useWindowManager();
+  const { isSignedIn } = useAuth();
   const [f, setF] = useState<Front | null>(null);
   const [joining, setJoining] = useState(false);
+  const tourBox = useRef<HTMLFieldSetElement>(null);
+  useEffect(() => {
+    if (tour) tourBox.current?.scrollIntoView({ block: 'start' });
+  }, [tour]);
   useEffect(() => {
     fetch('/api/public')
       .then((r) => r.json())
@@ -45,6 +167,10 @@ const Welcome: React.FC = () => {
           </div>
         </div>
         <div style={{ ...panel, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{f ? f.intro : 'Loading...'}</div>
+
+        <Section title={isSignedIn ? 'How the studio works' : 'Take the tour'} refEl={tourBox}>
+          <Tour member={!!isSignedIn} />
+        </Section>
 
         {f && f.releases.length > 0 && (
           <Section title="On the way">
@@ -160,7 +286,26 @@ const Welcome: React.FC = () => {
           )}
         </Section>
       </div>
-      <div style={statusBar}>Already a member? Open Sanktuary Network or your profile and log on.</div>
+      <div style={{ ...statusBar, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ flex: 1 }}>{isSignedIn ? "You're logged on." : 'Already a member?'}</span>
+        {!isSignedIn && (
+          <button
+            style={button}
+            onClick={() =>
+              openWindow({
+                id: 'profile-me',
+                title: 'Log On',
+                icon: '/images/icons/network-16x16.png',
+                appType: 'profile',
+                width: 420,
+                height: 520,
+              })
+            }
+          >
+            <IconLabel icon="login">Log on...</IconLabel>
+          </button>
+        )}
+      </div>
     </div>
   );
 };
@@ -226,8 +371,15 @@ const JoinForm: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   );
 };
 
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <fieldset style={{ border: '2px groove #fff', margin: 0, padding: '4px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+const Section: React.FC<{ title: string; children: React.ReactNode; refEl?: React.Ref<HTMLFieldSetElement> }> = ({
+  title,
+  children,
+  refEl,
+}) => (
+  <fieldset
+    ref={refEl}
+    style={{ border: '2px groove #fff', margin: 0, padding: '4px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
+  >
     <legend style={{ fontWeight: 700 }}>{title}</legend>
     {children}
   </fieldset>

@@ -851,11 +851,11 @@ export const LogOn: React.FC<{ name: string }> = ({ name }) => {
         <img src="/images/icons/network-32x32.png" alt="" style={{ width: 32, height: 32 }} />
         <div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Enter Network Password</div>
-          <div>{name} is for the Sanktuary team. Log on with your operator ID and access code.</div>
+          <div>{name} is for Sanktuary members. Log on with your username and password.</div>
         </div>
       </div>
       <label style={field}>
-        Operator ID:
+        Username (operator ID):
         <input
           style={inputBox}
           value={nickname}
@@ -866,7 +866,7 @@ export const LogOn: React.FC<{ name: string }> = ({ name }) => {
         />
       </label>
       <label style={field}>
-        Access code:
+        Password (access code):
         <input
           style={inputBox}
           type="password"

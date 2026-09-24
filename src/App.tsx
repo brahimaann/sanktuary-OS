@@ -203,7 +203,7 @@ export const App: React.FC = () => {
         content = <Planner boardId={win.appProps?.boardId} name={win.title} />;
         break;
       case 'welcome':
-        content = <Welcome />;
+        content = <Welcome tour={win.appProps?.tour} />;
         break;
       case 'business':
         content = <Business />;

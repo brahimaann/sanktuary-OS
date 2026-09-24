@@ -1,10 +1,63 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useAuth } from '@clerk/react';
 import { useWindowManager, AppType } from '../wm/manager';
 import sound from '../utils/sound';
 import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
 
+interface MenuItem {
+  id: string;
+  label: string;
+  title: string;
+  appType: AppType;
+  icon: string;
+  width: number;
+  height: number;
+  props?: object;
+  bold?: boolean;
+}
+const icon = (n: string) => `/images/icons/${n}`;
+const STUDIO_MENU: MenuItem[] = [
+  { id: 'new', label: 'New...', title: 'New', appType: 'new', icon: icon('file-32x32.png'), width: 460, height: 420, bold: true },
+  {
+    id: 'sanktuary-network',
+    label: 'Team Files',
+    title: 'Team Files',
+    appType: 'network',
+    icon: icon('network-32x32.png'),
+    width: 560,
+    height: 420,
+  },
+  { id: 'tracks', label: 'Tracks', title: 'Tracks', appType: 'tracks', icon: icon('media-player-32x32.png'), width: 900, height: 600 },
+  {
+    id: 'timeline',
+    label: 'Timeline',
+    title: 'Timeline',
+    appType: 'timeline',
+    icon: icon('task-scheduler-16x16.png'),
+    width: 900,
+    height: 600,
+  },
+  { id: 'moodboards', label: 'Moodboards', title: 'Moodboards', appType: 'boards', icon: icon('paint-32x32.png'), width: 560, height: 420 },
+  { id: 'teams', label: 'Messages', title: 'Messages', appType: 'teams', icon: icon('outlook-express-32x32.png'), width: 300, height: 520 },
+];
+const VISITOR_MENU: MenuItem[] = [
+  {
+    id: 'welcome',
+    label: 'Welcome & tour',
+    title: 'Welcome to Sanktuary',
+    appType: 'welcome',
+    icon: icon('help-32x32.png'),
+    width: 520,
+    height: 560,
+    bold: true,
+    props: { tour: true },
+  },
+  { id: 'profile-me', label: 'Log On...', title: 'Log On', appType: 'profile', icon: icon('logoff-32x32.png'), width: 420, height: 520 },
+];
+
 export const Taskbar: React.FC = () => {
+  const { isSignedIn } = useAuth();
   const { windows, startMenuOpen, setStartMenuOpen, openWindow, focusWindow, minimizeWindow } = useWindowManager();
 
   const [timeStr, setTimeStr] = useState('');
@@ -166,15 +219,19 @@ export const Taskbar: React.FC = () => {
 
           {/* Menu Items */}
           <ul className="flex-1 list-none p-1 m-0 text-xs">
-            <li className="hover:bg-[#000080] hover:text-white group">
-              <button
-                onClick={() => launchApp('new', 'New', 'new', '/images/icons/file-32x32.png', 460, 420)}
-                className="w-full text-left py-1 px-2 flex items-center font-bold"
-              >
-                <img src="/images/icons/file-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
-                New...
-              </button>
-            </li>
+            {/* Members: the studio first. Visitors: the tour and the way in. */}
+            {(isSignedIn ? STUDIO_MENU : VISITOR_MENU).map((m) => (
+              <li key={m.id} className="hover:bg-[#000080] hover:text-white group">
+                <button
+                  onClick={() => launchApp(m.id, m.title, m.appType, m.icon, m.width, m.height, m.props)}
+                  className={`w-full text-left py-1 px-2 flex items-center ${m.bold ? 'font-bold' : ''}`}
+                >
+                  <img src={m.icon} alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                  <span>{m.label}</span>
+                </button>
+              </li>
+            ))}
+            <hr className="my-1 border-t border-gray-400 border-b border-white" />
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
                 onClick={() => launchApp('my-computer', 'My Computer', 'directory', '/images/icons/my-computer-16x16.png', 680, 500)}
@@ -285,14 +342,14 @@ const TeamsTray: React.FC = () => {
         setUnread(0);
         openWindow({
           id: 'teams',
-          title: 'Sanktuary Teams',
+          title: 'Messages',
           icon: '/images/icons/outlook-express-16x16.png',
           appType: 'teams',
           width: 300,
           height: 520,
         });
       }}
-      title={`${unread} new message(s) — open Sanktuary Teams`}
+      title={`${unread} new message(s) — open Messages`}
       className="mr-2 cursor-pointer border-none bg-transparent outline-none flex items-center gap-1"
     >
       <img src="/images/icons/mail-16x16.png" alt="" style={{ width: 16, height: 16 }} />

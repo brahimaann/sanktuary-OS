@@ -16,8 +16,28 @@ interface DesktopIconDef {
   height?: number;
 }
 
-const DEFAULT_ICONS: DesktopIconDef[] = [
-  // Column 1
+// Studio apps: members only, so visitors aren't shown doors they can't open. First column when logged on.
+const STUDIO_ICONS: DesktopIconDef[] = [
+  { id: 'new', title: 'New...', icon: '/images/icons/file-32x32.png', appType: 'new', width: 460, height: 420 },
+  { id: 'sanktuary-network', title: 'Team Files', icon: '/images/icons/network-32x32.png', appType: 'network', width: 560, height: 420 },
+  { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
+  { id: 'timeline', title: 'Timeline', icon: '/images/icons/task-scheduler-16x16.png', appType: 'timeline', width: 900, height: 600 },
+  { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
+  {
+    id: 'planner',
+    title: 'Planner',
+    icon: '/images/icons/task-32x32.png',
+    appType: 'boards',
+    appProps: { kind: 'kanban' },
+    width: 560,
+    height: 420,
+  },
+  { id: 'teams', title: 'Messages', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
+];
+
+// The front door: works without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)
+const PUBLIC_ICONS: DesktopIconDef[] = [
+  { id: 'welcome', title: 'Welcome', icon: '/images/icons/help-32x32.png', appType: 'welcome', width: 520, height: 560 },
   {
     id: 'my-computer',
     title: 'My Computer',
@@ -27,14 +47,37 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
     height: 500,
   },
   {
-    id: 'recycle',
-    title: 'Recycle Bin',
-    icon: '/images/icons/recycle-bin-32x32.png',
-    appType: 'explorer',
-    appProps: { path: 'C:/Recycled' },
-    width: 640,
-    height: 480,
+    id: 'blog',
+    title: 'Blog',
+    icon: '/images/icons/news-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/blog' },
+    width: 760,
+    height: 560,
   },
+  {
+    id: 'shop',
+    title: 'Shop',
+    icon: '/images/icons/favorites-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/shop' },
+    width: 760,
+    height: 560,
+  },
+];
+
+// Visitors: the way in for members
+const LOG_ON_ICON: DesktopIconDef = {
+  id: 'profile-me',
+  title: 'Log On',
+  icon: '/images/icons/logoff-32x32.png',
+  appType: 'profile',
+  width: 420,
+  height: 520,
+};
+
+// Extras and games, last
+const EXTRA_ICONS: DesktopIconDef[] = [
   {
     id: 'ie',
     title: 'Internet Explorer',
@@ -46,53 +89,16 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
   },
   { id: 'africaonly', title: 'AfricaOnly.TV', icon: '/images/icons/video-32x32.png', appType: 'africaonly', width: 900, height: 620 },
   { id: 'notepad', title: 'Notepad', icon: '/images/icons/notepad-32x32.png', appType: 'notepad', width: 480, height: 360 },
-
-  // Games
   { id: 'pong', title: 'Pong', icon: '/images/icons/pinball-32x32.png', appType: 'pong', width: 520, height: 380 },
-
-  // Team spaces on the home server (Clerk sign-in required)
   {
-    id: 'sanktuary-network',
-    title: 'Sanktuary Network',
-    icon: '/images/icons/network-32x32.png',
-    appType: 'network',
-    width: 560,
-    height: 420,
+    id: 'recycle',
+    title: 'Recycle Bin',
+    icon: '/images/icons/recycle-bin-32x32.png',
+    appType: 'explorer',
+    appProps: { path: 'C:/Recycled' },
+    width: 640,
+    height: 480,
   },
-  { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
-  {
-    id: 'planner',
-    title: 'Planner',
-    icon: '/images/icons/task-32x32.png',
-    appType: 'boards',
-    appProps: { kind: 'kanban' },
-    width: 560,
-    height: 420,
-  },
-  { id: 'new', title: 'New...', icon: '/images/icons/file-32x32.png', appType: 'new', width: 460, height: 420 },
-  { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
-  { id: 'timeline', title: 'Timeline', icon: '/images/icons/task-scheduler-16x16.png', appType: 'timeline', width: 900, height: 600 },
-  // Public: these work without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)
-  { id: 'welcome', title: 'Welcome', icon: '/images/icons/help-32x32.png', appType: 'welcome', width: 520, height: 560 },
-  {
-    id: 'shop',
-    title: 'Shop',
-    icon: '/images/icons/favorites-32x32.png',
-    appType: 'iframe',
-    appProps: { src: '/shop' },
-    width: 760,
-    height: 560,
-  },
-  {
-    id: 'blog',
-    title: 'Blog',
-    icon: '/images/icons/news-32x32.png',
-    appType: 'iframe',
-    appProps: { src: '/blog' },
-    width: 760,
-    height: 560,
-  },
-  { id: 'teams', title: 'Sanktuary Teams', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
 ];
 
 // Only shown to admins (see useMe)
@@ -135,6 +141,25 @@ export const Desktop: React.FC = () => {
       height: 560,
     });
   }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Members: the studio tour opens once, the first time they're logged on in this browser
+    if (!isSignedIn) return;
+    try {
+      if (localStorage.getItem('sk_member_tour')) return;
+      localStorage.setItem('sk_member_tour', '1');
+    } catch {
+      return;
+    }
+    openWindow({
+      id: 'welcome',
+      title: 'Welcome to Sanktuary',
+      icon: '/images/icons/help-16x16.png',
+      appType: 'welcome',
+      appProps: { tour: true },
+      width: 520,
+      height: 560,
+    });
+  }, [isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // The service worker makes Sanktuary installable with a place in the phone's share menu (and does push)
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -256,7 +281,10 @@ export const Desktop: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds, vfsIcons]);
 
-  const allIcons = [...DEFAULT_ICONS, ...(me?.admin ? [ADMIN_ICON, BUSINESS_ICON] : []), ...vfsIcons];
+  // Logged on: studio apps first, then the front door (+ admin tools), then extras. Visitors: front door, Log On, extras.
+  const allIcons = isSignedIn
+    ? [...STUDIO_ICONS, ...PUBLIC_ICONS, ...(me?.admin ? [ADMIN_ICON, BUSINESS_ICON] : []), ...EXTRA_ICONS, ...vfsIcons]
+    : [...PUBLIC_ICONS, LOG_ON_ICON, ...EXTRA_ICONS, ...vfsIcons];
 
   // Marquee Selection Logic / Clicking background
   const handlePointerDown = (e: React.PointerEvent) => {
