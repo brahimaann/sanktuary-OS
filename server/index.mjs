@@ -2332,7 +2332,7 @@ async function activity(req, res, url) {
 // DM ids are "dm~<user>~<user>" (sorted), readable only by those two. Channels are public unless private,
 // in which case only their members (creator included) can see them.
 const CHAT = () => join(DATA, 'chat');
-const REF_KINDS = new Set(['file', 'folder', 'board', 'plan']);
+const REF_KINDS = new Set(['file', 'folder', 'board', 'plan', 'attachment']); // attachment: uploaded into the chat itself
 const canRead = (channel, username, channels = []) => {
   if (channel.startsWith('dm~')) return channel.split('~').slice(1).includes(username);
   const c = channels.find((x) => x.id === channel);
@@ -2366,7 +2366,7 @@ async function readMessages(channel) {
 
 async function chat(req, res, url) {
   const user = await currentUser(req, url, await loadConfig());
-  const [, , , channel, sub] = url.pathname.split('/'); // /api/chat/<channel>/<typing|msgId>
+  const [, , , channel, sub, file] = url.pathname.split('/'); // /api/chat/<channel>/<typing|msgId|files>/<file>
   const { channels } = await loadChannels();
 
   if (!channel && req.method === 'GET') {
@@ -2429,6 +2429,37 @@ async function chat(req, res, url) {
   } else if (!canRead(channel, user.username, channels)) fail(404, 'No such channel');
   const audience = (u) => canRead(channel, u.username, channels);
 
+  // Files sent from a phone or computer straight into the conversation (data/chat/files/<channel>/).
+  // Only people who can read the conversation can fetch them. Pictures get a compressed copy to show.
+  if (sub === 'files') {
+    const dir = join(CHAT(), 'files', channel);
+    if (req.method === 'GET' && file) return stream(req, res, url.searchParams, join(dir, safeName(file)));
+    if (req.method === 'PUT' && !file) {
+      if (Number(req.headers['content-length'] || 0) > MAX_CHUNK)
+        fail(413, 'Files sent in chat must be under 95 MB: put bigger ones in a space and share that');
+      const name = safeName(url.searchParams.get('name'));
+      const ext = extname(name).toLowerCase();
+      const id = randomUUID();
+      await mkdir(dir, { recursive: true });
+      const saved = join(dir, id + (/^\.\w{1,8}$/.test(ext) ? ext : ''));
+      await pipeline(req, createWriteStream(saved, BIG_BUFFER));
+      const base = `/api/chat/${channel}/files/`;
+      if (THUMBABLE.has(ext) && ext !== '.gif') {
+        try {
+          const img = await imageInput(saved, (await stat(saved)).size);
+          await img
+            .rotate()
+            .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 82 })
+            .toFile(join(dir, `${id}-view.webp`));
+          return json(res, { url: `${base}${id}-view.webp`, original: base + basename(saved), name, image: true });
+        } catch {} // not a readable picture: send it as a plain file
+      }
+      return json(res, { url: base + basename(saved), name, image: ext === '.gif' });
+    }
+    fail(405, 'Not allowed');
+  }
+
   if (!sub && req.method === 'PATCH' && !isDm) {
     const c = channels.find((x) => x.id === channel);
     if (c.createdBy !== user.username && !user.admin) fail(403, 'Only the creator or an admin can change this channel');
@@ -2458,7 +2489,14 @@ async function chat(req, res, url) {
         dir: Array.isArray(r.dir) ? r.dir.map(String) : undefined,
         name: r.name,
         boardId: r.boardId,
-      }));
+        // Only this conversation's own uploads can be attached, so a message can't point anywhere else
+        ...(r.kind === 'attachment' &&
+        typeof r.url === 'string' &&
+        new RegExp(`^/api/chat/${channel.replace(/[^\w~-]/g, '')}/files/[\\w-]+\\.\\w{1,8}$`).test(r.url)
+          ? { url: r.url, image: !!r.image }
+          : {}),
+      }))
+      .filter((r) => r.kind !== 'attachment' || r.url);
     if (!text.trim() && !refs.length) fail(400, 'Empty message');
     const msg = { id: randomUUID().slice(0, 12), channel, user: user.username, at: new Date().toISOString(), text, refs };
     await mkdir(CHAT(), { recursive: true });

@@ -3,12 +3,14 @@ import { fileIcon } from '../apps/fileTypes';
 
 /** A link to something in Sanktuary: a team file or folder, a moodboard, or a plan. */
 export interface Ref {
-  kind: 'file' | 'folder' | 'board' | 'plan';
+  kind: 'file' | 'folder' | 'board' | 'plan' | 'attachment'; // attachment: a file uploaded straight into a chat
   title: string;
   app?: string; // space id (file/folder)
   dir?: string[]; // parent folders (file/folder)
   name?: string; // file/folder name
   boardId?: string; // board/plan
+  url?: string; // attachment
+  image?: boolean; // attachment: show it inline
 }
 
 export const DRAG_FILE = 'application/x-sk-file'; // dragged out of a team files window
@@ -36,13 +38,15 @@ export const refIcon = (r: Ref) =>
       ? '/images/icons/paint-16x16.png'
       : r.kind === 'plan'
         ? '/images/icons/task-16x16.png'
-        : fileIcon(r.name || '', false);
+        : fileIcon(r.name || r.title || '', false);
 
 /** Opens a ref in the right window. */
 export function useOpenRef() {
   const { openWindow } = useWindowManager();
   return (r: Ref) => {
-    if (r.kind === 'file' && r.app && r.name) {
+    if (r.kind === 'attachment' && r.url) {
+      window.open(r.url, '_blank', 'noopener');
+    } else if (r.kind === 'file' && r.app && r.name) {
       openWindow({
         id: `preview-${r.app}-${[...(r.dir || []), r.name].join('/')}`,
         title: r.name,

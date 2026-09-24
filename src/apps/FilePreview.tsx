@@ -4,7 +4,7 @@ import { useApi } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
-import { fileIcon, fileKind, needsConversion } from './fileTypes';
+import { fileIcon, fileKind, isTouch, needsConversion } from './fileTypes';
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
 
@@ -35,6 +35,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const [token, setToken] = useState('');
   const media = useRef<HTMLMediaElement | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [videoNote, setVideoNote] = useState('');
   const index = siblings.indexOf(name);
   const kind = fileKind(name);
   const src = token ? `${fileUrl(app, [...dir, name])}?t=${token}` : '';
@@ -42,6 +43,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
 
   useEffect(() => {
     let live = true;
+    setVideoNote('');
     getToken().then((t) => live && setToken(t || ''));
     return () => {
       live = false;
@@ -105,19 +107,32 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
             style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: 6, padding: 8, boxSizing: 'border-box' }}
           >
             <div
-              style={{ flex: 1, minHeight: 0, background: '#000', border: '2px inset #808080', display: 'flex', justifyContent: 'center' }}
+              style={{
+                flex: 1,
+                minHeight: isTouch ? 220 : 0, // small phone windows mustn't squash the video to nothing
+                background: '#000',
+                border: '2px inset #808080',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
             >
               <video
                 ref={(el) => {
                   media.current = el;
                 }}
-                src={src}
+                // Phones get their own player (tap to play, full screen, AirPlay...); computers the Win98 one
+                src={isTouch ? `${src}#t=0.001` : src}
+                controls={isTouch}
                 playsInline
-                onClick={(e) => (e.currentTarget.paused ? e.currentTarget.play() : e.currentTarget.pause())}
-                style={{ maxWidth: '100%', maxHeight: '100%' }}
+                preload="metadata"
+                onClick={isTouch ? undefined : (e) => (e.currentTarget.paused ? e.currentTarget.play() : e.currentTarget.pause())}
+                onError={() => setVideoNote("This device can't play this video's format. Use Download to open it in another app.")}
+                style={{ maxWidth: '100%', maxHeight: '100%', width: isTouch ? '100%' : undefined }}
               />
             </div>
-            <MediaControls media={media} src={src} />
+            {videoNote && <div style={{ color: '#a00000' }}>{videoNote}</div>}
+            {!isTouch && <MediaControls media={media} src={src} />}
           </div>
         ) : kind === 'pdf' ? (
           <iframe key={src} src={src} title={name} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
@@ -159,7 +174,7 @@ const Comments: React.FC<{
   const api = useApi();
   const { byName } = useProfiles();
   const [text, setText] = useState('');
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!isTouch); // phones: collapsed so the picture/video gets the room
   const [err, setErr] = useState('');
   const q = `space=${encodeURIComponent(app)}&path=${encodeURIComponent(path)}`;
 

@@ -603,6 +603,30 @@ try {
   );
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
+
+  // Chat attachments: files sent from a phone / computer straight into a conversation
+  const dm = 'dm~alice~bob';
+  const sent = JSON.parse((await call('alice', `/api/chat/${dm}/files?name=photo.png`, 'PUT', bigPng, true)).text);
+  check(
+    'chat picture gets a compressed copy to show',
+    sent.image === true && sent.url.endsWith('-view.webp') && sent.original.endsWith('.png'),
+  );
+  check('the other person can open it', (await fetch(B + sent.url, { headers: { cookie: cookie('bob') } })).status === 200);
+  check('outsiders cannot open it', (await fetch(B + sent.url, { headers: { cookie: cookie('carol') } })).status === 403);
+  check('outsiders cannot upload into it', (await call('carol', `/api/chat/${dm}/files?name=x.txt`, 'PUT', 'x', true)).status === 403);
+  const withFile = JSON.parse(
+    (
+      await call('alice', `/api/chat/${dm}`, 'POST', {
+        text: 'cover idea',
+        refs: [
+          { kind: 'attachment', title: 'photo.png', url: sent.url, image: true },
+          { kind: 'attachment', title: 'sneaky', url: '/api/chat/general/files/abc.png' },
+        ],
+      })
+    ).text,
+  );
+  check('message carries its own attachment', withFile.refs.length === 1 && withFile.refs[0].url === sent.url && withFile.refs[0].image);
+  check('attachments from other chats are dropped', !withFile.refs.some((r) => r.url?.includes('/general/')));
   const ctrl = new AbortController();
   let live = '';
   fetch(`${B}/api/boards/${board.id}/live`, { headers: { cookie: cookie('alice') }, signal: ctrl.signal })

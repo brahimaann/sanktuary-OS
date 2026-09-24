@@ -6,6 +6,7 @@ import { DRAG_FILE } from '../utils/refs';
 import { dialog } from '../utils/dialog';
 import { fileIcon, fileKind, needsConversion } from './fileTypes';
 import { LogOn, fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
+import AddFileButton from '../components/AddFileButton';
 
 /**
  * Infinite, live-shared moodboard canvas (Figma / Obsidian Canvas style).
@@ -411,9 +412,14 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
         <button style={button} onClick={() => add({ type: 'text', ...center(), w: 320, h: 60, text: 'Title' })}>
           Text
         </button>
-        <button style={button} onClick={() => imageInput.current?.click()}>
-          Image / File...
-        </button>
+        <AddFileButton
+          style={button}
+          onDevice={(files) => addFiles(files)}
+          onServer={(r) => {
+            const parts = r.path.split('/');
+            addTeamFile({ app: r.space, dir: parts.slice(0, -1), name: parts[parts.length - 1] }, center());
+          }}
+        />
         <button
           style={button}
           onClick={async () => {

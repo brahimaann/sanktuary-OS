@@ -3,11 +3,13 @@ import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
 import MembersPicker from './MembersPicker';
 import { dialog } from '../utils/dialog';
+import { isTouch } from './fileTypes';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { Ref, refFromDrop, refIcon, useOpenRef } from '../utils/refs';
 import Avatar from './Avatar';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
+import AddFileButton from '../components/AddFileButton';
 
 export interface Message {
   id: string;
@@ -139,6 +141,20 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
     }
   };
 
+  // Files picked from the phone / computer are uploaded into this conversation, then sent with the message
+  const attachFromDevice = async (files: File[]) => {
+    for (const f of files.slice(0, 10)) {
+      setStatus(`Uploading ${f.name}...`);
+      try {
+        const a = await api(`/api/chat/${channel}/files?name=${encodeURIComponent(f.name)}`, { method: 'PUT', body: f });
+        setRefs((prev) => [...prev, { kind: 'attachment' as const, title: a.name, url: a.url, image: a.image }].slice(0, 10));
+        setStatus('');
+      } catch (e) {
+        setStatus((e as Error).message);
+      }
+    }
+  };
+
   const onType = (v: string) => {
     setText(v);
     if (Date.now() - lastTyping.current > 3000) {
@@ -250,9 +266,27 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
                     </button>
                   )}
                   {m.text && <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{linkify(m.text)}</div>}
-                  {m.refs?.map((r, j) => (
-                    <RefChip key={j} r={r} onOpen={() => openRef(r)} />
-                  ))}
+                  {m.refs?.map((r, j) =>
+                    r.kind === 'attachment' && r.image ? (
+                      <img
+                        key={j}
+                        src={r.url}
+                        alt={r.title}
+                        loading="lazy"
+                        onClick={() => openRef(r)}
+                        style={{
+                          display: 'block',
+                          maxWidth: 'min(260px, 100%)',
+                          maxHeight: 260,
+                          marginTop: 3,
+                          border: '1px solid #808080',
+                          cursor: 'pointer',
+                        }}
+                      />
+                    ) : (
+                      <RefChip key={j} r={r} onOpen={() => openRef(r)} />
+                    ),
+                  )}
                 </div>
               </div>
             </React.Fragment>
@@ -269,7 +303,18 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
           ))}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 4, padding: 4 }}>
+      <div style={{ display: 'flex', gap: 4, padding: 4, alignItems: 'stretch' }}>
+        <AddFileButton
+          up
+          label={isTouch ? '' : 'File...'}
+          style={{ ...button, height: '100%' }}
+          onDevice={attachFromDevice}
+          onServer={(r) => {
+            const parts = r.path.split('/');
+            const name = parts[parts.length - 1];
+            setRefs((prev) => [...prev, { kind: 'file' as const, title: name, app: r.space, dir: parts.slice(0, -1), name }].slice(0, 10));
+          }}
+        />
         <textarea
           value={text}
           onChange={(e) => onType(e.target.value)}

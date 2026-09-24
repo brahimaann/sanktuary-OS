@@ -260,3 +260,27 @@ button:disabled {
   text-shadow: 1px 1px 0 #fff;
   cursor: default;
 }
+
+/* Notification pop-ups (src/components/Notifications.tsx): the title bar blinks a few times, then stays */
+@keyframes sk-blink {
+  0%, 100% { background: linear-gradient(90deg, #000080, #1084d0); }
+  50% { background: #808080; }
+}
+.sk-toast .sk-toast-title {
+  animation: sk-blink 0.6s steps(1) 4;
+}
+.sk-toast {
+  animation: sk-pop 0.15s ease-out;
+}
+@keyframes sk-pop {
+  from { transform: translateY(8px); opacity: 0; }
+}
+@keyframes sk-ring {
+  0%, 60%, 100% { transform: rotate(0); }
+  10%, 30% { transform: rotate(-14deg); }
+  20%, 40% { transform: rotate(14deg); }
+}
+.sk-bell-ring {
+  animation: sk-ring 2.5s ease-in-out infinite;
+  transform-origin: 50% 10%;
+}

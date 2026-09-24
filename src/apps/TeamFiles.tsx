@@ -83,6 +83,15 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   const skipClick = useRef(false);
   const [projectFor, setProjectFor] = useState<{ entry: Entry; mode: 'info' | 'download' } | null>(null);
   const [lockedBy, setLockedBy] = useState<{ user: string; project: string } | null>(null);
+  // Phones / narrow windows: one column (name, then size and date underneath), never a sideways scroll
+  const listRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (!listRef.current) return;
+    const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < 520));
+    ro.observe(listRef.current);
+    return () => ro.disconnect();
+  }, [isSignedIn]);
 
   // Explorer-style history: Back/Forward walk it, any other navigation starts a new branch
   const go = (to: string[]) => {
@@ -563,13 +572,19 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         <span style={{ color: '#444', marginRight: 6 }}>Address</span>
         <div style={addressBox}>\\SANKTUARY\{[name, ...path].join('\\')}</div>
       </div>
-      <div style={{ ...listBox, position: 'relative' }} onPointerMove={touchMove} onPointerUp={touchEnd} onPointerCancel={touchEnd}>
+      <div
+        ref={listRef}
+        style={{ ...listBox, position: 'relative', overflowX: 'hidden' }}
+        onPointerMove={touchMove}
+        onPointerUp={touchEnd}
+        onPointerCancel={touchEnd}
+      >
         {view === 'list' ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                {['Name', 'Size', 'Modified'].map((h) => (
-                  <th key={h} style={th}>
+                {(narrow ? ['Name'] : ['Name', 'Size', 'Modified']).map((h) => (
+                  <th key={h} style={{ ...th, width: h === 'Size' ? 80 : h === 'Modified' ? 150 : undefined }}>
                     {h}
                   </th>
                 ))}
@@ -578,7 +593,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             <tbody>
               {entries.map((e) => (
                 <tr key={e.name} {...rowProps(e)}>
-                  <td style={td}>
+                  <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     <img
                       src={fileIcon(e.name, e.isDir)}
                       alt=""
@@ -586,9 +601,19 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                     />
                     {e.name}
                     {e.project && <ProjectTag p={e.project} />}
+                    {narrow && (
+                      <div style={{ fontSize: 10, opacity: 0.7, marginLeft: 20 }}>
+                        {e.isDir ? '' : `${formatSize(e.size)} · `}
+                        {new Date(e.modified).toLocaleDateString()}
+                      </div>
+                    )}
                   </td>
-                  <td style={td}>{e.isDir ? '' : formatSize(e.size)}</td>
-                  <td style={td}>{new Date(e.modified).toLocaleString()}</td>
+                  {!narrow && <td style={{ ...td, width: 80 }}>{e.isDir ? '' : formatSize(e.size)}</td>}
+                  {!narrow && (
+                    <td style={{ ...td, width: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {new Date(e.modified).toLocaleString()}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
