@@ -4,6 +4,7 @@ import { useApi, Rights } from '../utils/api';
 import { formatSize } from './fileTypes';
 import { dialog } from '../utils/dialog';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
+import FilePicker from '../components/FilePicker';
 
 interface Space {
   id: string;
@@ -52,7 +53,7 @@ interface Health {
   deploy: { at: string; ok: boolean; commit: string; message: string } | null;
 }
 
-const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Log'] as const;
+const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Shop & pool', 'Log'] as const;
 const RIGHTS: Rights[] = ['none', 'view', 'upload', 'edit'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
@@ -370,6 +371,7 @@ const AdminPanel: React.FC = () => {
         {tab === 'Log' && <LogTab />}
         {tab === 'Blog' && <BlogTab />}
         {tab === 'Front page' && <FrontTab />}
+        {tab === 'Shop & pool' && <ShopTab />}
 
         {tab === 'Members' && (
           <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
@@ -771,6 +773,322 @@ const FolderPicker: React.FC<{ drive: string; driveName: string; start: string; 
 type Transfer = { at: string; user: string; action: string; space: string; path: string; bytes: number; ip?: string };
 
 /** Console-style log of every upload and download, newest first. */
+type Pool = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  goal: number;
+  deadline: string | null;
+  public: boolean;
+  open: boolean;
+  raised: number;
+  supporters: number;
+  payments: boolean;
+};
+type Product = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  price: number;
+  kind: 'physical' | 'digital';
+  image: string | null;
+  stock: number | null;
+  active: boolean;
+  soldOut: boolean;
+  file: { space: string; path: string } | null;
+};
+
+/** Money pools (public counter at sanktuary.studio/pool/...) and the shop's products. Orders are in Business > Orders. */
+const ShopTab: React.FC = () => {
+  const api = useApi();
+  const [pools, setPools] = useState<Pool[] | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [openPool, setOpenPool] = useState<string | null>(null);
+  const [openProduct, setOpenProduct] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => {
+    api('/api/pools').then(setPools, (e) => setMsg(e.message));
+    api('/api/shop/admin').then(setProducts, (e) => setMsg(e.message));
+  }, [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const run = (p: Promise<unknown>) =>
+    p.then(
+      () => (setMsg(''), load()),
+      (e) => setMsg(e.message),
+    );
+  const patchPool = (id: string, body: object) => run(api(`/api/pools/${id}`, { method: 'PATCH', body: JSON.stringify(body) }));
+  const patchProduct = (id: string, body: object) => run(api(`/api/shop/products/${id}`, { method: 'PATCH', body: JSON.stringify(body) }));
+  const pool = pools?.find((p) => p.id === openPool);
+  const product = products.find((p) => p.id === openProduct);
+  const usd = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  if (!pools) return <div>{msg || 'Loading...'}</div>;
+  const payments = pools[0]?.payments ?? true;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {!payments && (
+        <p style={{ ...hint, background: '#ffffe1', padding: 6, border: '1px solid #808080' }}>
+          Payments aren't switched on yet. In your Stripe dashboard: copy the <b>secret key</b>, and add a webhook for{' '}
+          <b>checkout.session.completed</b> pointing at <b>https://sanktuary.studio/api/stripe/webhook</b>. Then put{' '}
+          <b>STRIPE_SECRET_KEY</b> and <b>STRIPE_WEBHOOK_SECRET</b> in the server's .env yourself and restart it. Everything else works
+          already.
+        </p>
+      )}
+      <fieldset style={fieldset}>
+        <legend>Pools</legend>
+        <div style={{ marginBottom: 6 }}>
+          <button
+            style={button}
+            onClick={async () => {
+              const title = (await dialog.prompt('What is the pool for? (e.g. "Studio monitors")', '', { title: 'New pool' }))?.trim();
+              if (title)
+                api('/api/pools', { method: 'POST', body: JSON.stringify({ title }) }).then(
+                  (p: Pool) => (setOpenPool(p.id), load()),
+                  (e) => setMsg(e.message),
+                );
+            }}
+          >
+            New pool...
+          </button>
+        </div>
+        {pools.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => setOpenPool(p.id === openPool ? null : p.id)}
+            style={{ ...pickRow, background: p.id === openPool ? '#000080' : '#fff', color: p.id === openPool ? '#fff' : '#000' }}
+          >
+            <b>{p.title}</b> · {usd(p.raised)}
+            {p.goal ? ` of ${usd(p.goal)}` : ''} · {p.supporters} supporters · {p.public ? 'public' : 'members only'}
+            {p.open ? '' : ' · closed'}
+          </div>
+        ))}
+        {pool && (
+          <div key={pool.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 6, alignItems: 'center', marginTop: 8 }}>
+            Title
+            <input
+              style={input}
+              defaultValue={pool.title}
+              onBlur={(e) => e.target.value !== pool.title && patchPool(pool.id, { title: e.target.value })}
+            />
+            About
+            <textarea
+              style={{ ...input, resize: 'vertical' }}
+              rows={3}
+              defaultValue={pool.description}
+              onBlur={(e) => e.target.value !== pool.description && patchPool(pool.id, { description: e.target.value })}
+            />
+            Goal ($)
+            <input
+              style={{ ...input, width: 110 }}
+              type="number"
+              min={0}
+              defaultValue={pool.goal || ''}
+              onBlur={(e) => Number(e.target.value) !== pool.goal && patchPool(pool.id, { goal: e.target.value || 0 })}
+            />
+            Until
+            <input
+              style={{ ...input, width: 150 }}
+              type="date"
+              defaultValue={pool.deadline || ''}
+              onChange={(e) => patchPool(pool.id, { deadline: e.target.value || null })}
+            />
+            <span />
+            <span style={row}>
+              <label>
+                <input type="checkbox" checked={pool.public} onChange={(e) => patchPool(pool.id, { public: e.target.checked })} /> Public
+                (fans can put in too)
+              </label>
+              <label>
+                <input type="checkbox" checked={pool.open} onChange={(e) => patchPool(pool.id, { open: e.target.checked })} /> Open
+              </label>
+              <a href={`/pool/${pool.slug}`} target="_blank" rel="noopener noreferrer">
+                Open its page
+              </a>
+            </span>
+            <span />
+            <span style={row}>
+              <button
+                style={button}
+                onClick={async () => {
+                  const amount = await dialog.prompt('Amount given outside Stripe (cash, Zelle...):', '', { title: 'Add a contribution' });
+                  if (!amount) return;
+                  const name =
+                    (await dialog.prompt('From (name, or leave empty for anonymous):', '', { title: 'Add a contribution' })) ?? '';
+                  run(
+                    api(`/api/pools/${pool.id}/manual`, {
+                      method: 'POST',
+                      body: JSON.stringify({ amount, name: name || 'Anonymous', anonymous: !name }),
+                    }),
+                  );
+                }}
+              >
+                Add cash / Zelle...
+              </button>
+              <button
+                style={button}
+                onClick={async () =>
+                  (await dialog.confirm(`Remove the pool "${pool.title}"? Its record is kept.`, { icon: 'warning' })) &&
+                  run(api(`/api/pools/${pool.id}`, { method: 'DELETE' }).then(() => setOpenPool(null)))
+                }
+              >
+                Remove
+              </button>
+            </span>
+          </div>
+        )}
+      </fieldset>
+
+      <fieldset style={fieldset}>
+        <legend>Shop</legend>
+        <div style={{ ...row, marginBottom: 6 }}>
+          <button
+            style={button}
+            onClick={async () => {
+              const title = (await dialog.prompt('Product name:', '', { title: 'New product' }))?.trim();
+              if (title)
+                api('/api/shop/products', { method: 'POST', body: JSON.stringify({ title }) }).then(
+                  (p: Product) => (setOpenProduct(p.id), load()),
+                  (e) => setMsg(e.message),
+                );
+            }}
+          >
+            New product...
+          </button>
+          <a href="/shop" target="_blank" rel="noopener noreferrer">
+            Open the shop
+          </a>
+        </div>
+        {products.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => setOpenProduct(p.id === openProduct ? null : p.id)}
+            style={{ ...pickRow, background: p.id === openProduct ? '#000080' : '#fff', color: p.id === openProduct ? '#fff' : '#000' }}
+          >
+            <b>{p.title}</b> · {usd(p.price)} · {p.kind} · {p.stock === null ? 'unlimited' : `${p.stock} left`} ·{' '}
+            {p.active ? 'on sale' : 'hidden'}
+          </div>
+        ))}
+        {product && (
+          <div key={product.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 6, alignItems: 'center', marginTop: 8 }}>
+            Name
+            <input
+              style={input}
+              defaultValue={product.title}
+              onBlur={(e) => e.target.value !== product.title && patchProduct(product.id, { title: e.target.value })}
+            />
+            About
+            <textarea
+              style={{ ...input, resize: 'vertical' }}
+              rows={3}
+              defaultValue={product.description}
+              onBlur={(e) => e.target.value !== product.description && patchProduct(product.id, { description: e.target.value })}
+            />
+            Price ($)
+            <input
+              style={{ ...input, width: 110 }}
+              type="number"
+              min={0.5}
+              step="0.01"
+              defaultValue={product.price}
+              onBlur={(e) => Number(e.target.value) !== product.price && patchProduct(product.id, { price: e.target.value })}
+            />
+            Kind
+            <select
+              style={{ ...input, width: 200 }}
+              value={product.kind}
+              onChange={(e) => patchProduct(product.id, { kind: e.target.value })}
+            >
+              <option value="physical">Physical (shipped)</option>
+              <option value="digital">Digital (download)</option>
+            </select>
+            Stock
+            <input
+              style={{ ...input, width: 110 }}
+              type="number"
+              min={0}
+              placeholder="unlimited"
+              defaultValue={product.stock ?? ''}
+              onBlur={(e) => patchProduct(product.id, { stock: e.target.value === '' ? null : e.target.value })}
+            />
+            Picture
+            <span style={row}>
+              {product.image ? <img src={product.image} alt="" style={{ height: 48, border: '1px solid #808080' }} /> : 'none'}
+              <label style={{ ...button, display: 'inline-block' }}>
+                Choose picture...
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!f) return;
+                    try {
+                      const { url } = await api(`/api/shop/images?name=${encodeURIComponent(f.name)}`, { method: 'PUT', body: f });
+                      patchProduct(product.id, { image: url });
+                    } catch (err) {
+                      setMsg((err as Error).message);
+                    }
+                  }}
+                />
+              </label>
+            </span>
+            {product.kind === 'digital' && (
+              <>
+                Delivers
+                <span style={row}>
+                  {product.file ? <b>{product.file.path}</b> : <span style={{ color: '#a00000' }}>pick the file or folder buyers get</span>}
+                  <button style={button} onClick={() => setPicking(true)}>
+                    Choose...
+                  </button>
+                </span>
+              </>
+            )}
+            <span />
+            <span style={row}>
+              <label>
+                <input type="checkbox" checked={product.active} onChange={(e) => patchProduct(product.id, { active: e.target.checked })} />{' '}
+                On sale
+              </label>
+              <a href={`/shop/${product.slug}`} target="_blank" rel="noopener noreferrer">
+                Open its page
+              </a>
+              <span style={{ flex: 1 }} />
+              <button
+                style={button}
+                onClick={async () =>
+                  (await dialog.confirm(`Remove "${product.title}" from the shop? Its orders are kept.`, { icon: 'warning' })) &&
+                  run(api(`/api/shop/products/${product.id}`, { method: 'DELETE' }).then(() => setOpenProduct(null)))
+                }
+              >
+                Remove
+              </button>
+            </span>
+          </div>
+        )}
+      </fieldset>
+      {picking && product && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100000 }}>
+          <FilePicker
+            title="What do buyers download?"
+            mode="file"
+            onPick={(r) => {
+              setPicking(false);
+              if (r) patchProduct(product.id, { file: r });
+            }}
+          />
+        </div>
+      )}
+      {msg && <div style={{ color: '#a00000' }}>{msg}</div>}
+    </div>
+  );
+};
+
 type Join = { id: string; name: string; email: string; role: string; links: string; message: string; at: string; status: string };
 
 /** What visitors see in the Welcome window, and the "Join the Village" requests. */

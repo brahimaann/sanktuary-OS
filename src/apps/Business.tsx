@@ -58,7 +58,7 @@ interface Settings {
   payment: string;
 }
 
-const TABS = ['Overview', 'Clients', 'Jobs', 'Invoices', 'Documents', 'Access log'] as const;
+const TABS = ['Overview', 'Clients', 'Jobs', 'Invoices', 'Orders', 'Documents', 'Access log'] as const;
 const usd = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 const total = (i: Invoice) => i.items.reduce((n, it) => n + it.qty * it.rate, 0);
 const STATUSES = {
@@ -172,6 +172,7 @@ const BusinessApp: React.FC = () => {
         {tab === 'Jobs' && <Jobs {...shared} />}
         {tab === 'Invoices' && <Invoices {...shared} b={b} />}
         {tab === 'Documents' && <Documents b={b} clients={clients} clientName={clientName} setMsg={setMsg} />}
+        {tab === 'Orders' && <Orders b={b} setMsg={setMsg} />}
         {tab === 'Access log' && <AccessLog b={b} />}
       </div>
       <div style={statusBar}>{msg || 'Private: admins with two-step verification only. Every access is logged.'}</div>
@@ -724,6 +725,85 @@ const Documents: React.FC<{ b: B; clients: Client[]; clientName: (id: string | n
           </tbody>
         </table>
       </div>
+    </div>
+  );
+};
+
+type Order = {
+  id: string;
+  title: string;
+  kind: string;
+  qty: number;
+  amount: number;
+  status: string;
+  paid?: string;
+  note?: string;
+  customer?: {
+    name: string;
+    email: string;
+    shipTo: string | null;
+    address: { line1?: string; line2?: string; city?: string; state?: string; postal_code?: string; country?: string } | null;
+  };
+};
+
+/** Shop orders: who bought what, where to ship it, and where it's at. */
+const Orders: React.FC<{ b: B; setMsg: (m: string) => void }> = ({ b, setMsg }) => {
+  const [orders, setOrders] = useState<Order[] | null>(null);
+  const load = useCallback(() => b('/orders').then(setOrders, (e) => setMsg(e.message)), [b, setMsg]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!orders) return <div>Loading...</div>;
+  if (!orders.length) return <div>No orders yet. Products are set up in Admin Panel &gt; Shop &amp; pool.</div>;
+  const todo = orders.filter((o) => o.status === 'Paid');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div>
+        <b>{todo.length}</b> to ship · {orders.length} orders ·{' '}
+        {usd(orders.filter((o) => o.status !== 'Refunded').reduce((n, o) => n + o.amount, 0))} total
+      </div>
+      {orders.map((o) => {
+        const a = o.customer?.address;
+        return (
+          <div
+            key={o.id}
+            style={{ ...box, background: o.status === 'Paid' ? '#ffffe1' : '#fff', display: 'flex', flexDirection: 'column', gap: 4 }}
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <b>
+                {o.qty} × {o.title}
+              </b>
+              <span>{usd(o.amount)}</span>
+              <span style={{ color: '#555' }}>{o.paid ? new Date(o.paid).toLocaleString() : ''}</span>
+              <span style={{ flex: 1 }} />
+              <select
+                style={input}
+                value={o.status}
+                onChange={(e) =>
+                  b(`/orders/${o.id}`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) }).then(load, (err) =>
+                    setMsg(err.message),
+                  )
+                }
+              >
+                {['Paid', 'Shipped', 'Delivered', 'Refunded'].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              {o.customer?.name} · <a href={`mailto:${o.customer?.email}`}>{o.customer?.email}</a>
+              {o.kind === 'digital' && ' · digital, delivered automatically'}
+            </div>
+            {a && (
+              <div style={{ whiteSpace: 'pre-line', fontFamily: 'Consolas, monospace' }}>
+                {[o.customer?.shipTo, a.line1, a.line2, [a.city, a.state, a.postal_code].filter(Boolean).join(' '), a.country]
+                  .filter(Boolean)
+                  .join('\n')}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 };

@@ -8,6 +8,7 @@ interface Front {
   posts: { id: string; title: string; excerpt: string; url: string; image: string | null; publication: string; date: string }[];
   events: { title: string; kind: string; start: string; end: string | null; location: string; link: string | null }[];
   releases: { title: string; kind: string; date: string | null }[];
+  pools?: { slug: string; title: string; goal: number; raised: number; supporters: number }[];
 }
 const day = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 const until = (d: string) => Math.round((Date.parse(d) - Date.parse(new Date().toLocaleDateString('en-CA'))) / 864e5);
@@ -89,11 +90,60 @@ const Welcome: React.FC = () => {
                 </div>
               </div>
             ))}
-            <div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                style={button}
+                onClick={() =>
+                  openWindow({
+                    id: 'shop',
+                    title: 'Shop',
+                    icon: '/images/icons/favorites-16x16.png',
+                    appType: 'iframe',
+                    appProps: { src: '/shop' },
+                    width: 760,
+                    height: 560,
+                  })
+                }
+              >
+                <IconLabel icon="external">Shop</IconLabel>
+              </button>
               <button style={button} onClick={() => openBlog()}>
                 <IconLabel icon="external">Read the blog</IconLabel>
               </button>
             </div>
+          </Section>
+        )}
+
+        {f && (f.pools?.length || 0) > 0 && (
+          <Section title="Help us get there">
+            {f.pools!.map((p) => (
+              <div key={p.slug} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                  <b style={{ flex: 1 }}>{p.title}</b>
+                  <span>
+                    ${Math.round(p.raised).toLocaleString()}
+                    {p.goal ? ` of $${Math.round(p.goal).toLocaleString()}` : ''}
+                  </span>
+                </div>
+                {p.goal > 0 && (
+                  <div style={{ height: 14, background: '#fff', border: '2px inset #808080', padding: 1 }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(100, (p.raised / p.goal) * 100)}%`,
+                        background: 'repeating-linear-gradient(90deg,#000080 0 8px,transparent 8px 10px)',
+                      }}
+                    />
+                  </div>
+                )}
+                <div>
+                  <a href={`/pool/${p.slug}`} target="_blank" rel="noopener noreferrer">
+                    Put in
+                  </a>{' '}
+                  · {p.supporters} supporters
+                </div>
+              </div>
+            ))}
           </Section>
         )}
 

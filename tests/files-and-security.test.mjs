@@ -69,6 +69,27 @@ const jwt = (u, extra = {}) => {
   return `${body}.${createSign('RSA-SHA256').update(body).sign(jwtKeys.privateKey, 'base64url')}`;
 };
 
+// A fake Stripe: records Checkout requests and hands back a session
+const stripeCalls = [];
+const fakeStripe = http
+  .createServer((req, res) => {
+    let raw = '';
+    req.on('data', (d) => (raw += d));
+    req.on('end', () => {
+      const form = new URLSearchParams(raw);
+      stripeCalls.push({ path: req.url, auth: req.headers.authorization, form });
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ id: `cs_test_${stripeCalls.length}`, url: `https://checkout.stripe.test/${stripeCalls.length}` }));
+    });
+  })
+  .listen(3195);
+const WEBHOOK_SECRET = 'whsec_test_secret';
+const stripeHook = (object, secret = WEBHOOK_SECRET, t = Math.floor(Date.now() / 1000)) => {
+  const raw = JSON.stringify({ type: 'checkout.session.completed', data: { object } });
+  const sig = createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex');
+  return fetch(B + '/api/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': `t=${t},v1=${sig}` }, body: raw });
+};
+
 const srv = spawn(process.execPath, [SERVER], {
   env: {
     ...process.env,
@@ -79,6 +100,9 @@ const srv = spawn(process.execPath, [SERVER], {
     CLERK_API_URL: 'http://127.0.0.1:3197',
     CLERK_JWT_KEY: jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }),
     SITE_ORIGINS: '',
+    STRIPE_API_URL: 'http://127.0.0.1:3195',
+    STRIPE_SECRET_KEY: 'sk_test_fake',
+    STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
   },
 });
 let srvOut = '';
@@ -762,6 +786,118 @@ try {
     (await fetch(B + '/api/public/admin')).status === 401 && (await call('bob', '/api/public/admin')).status === 403,
   );
 
+  // Pool: public counter, Stripe Checkout, signed webhooks only, each payment counted once
+  check('members cannot create pools', (await call('bob', '/api/pools', 'POST', { title: 'x' })).status === 403);
+  const pool = JSON.parse((await call('alice', '/api/pools', 'POST', { title: 'Studio monitors' })).text);
+  await call('alice', `/api/pools/${pool.id}`, 'PATCH', { goal: 600 });
+  check('private pool hidden from visitors', (await fetch(B + `/api/pools/${pool.slug}`)).status === 404);
+  await call('alice', `/api/pools/${pool.id}`, 'PATCH', { public: true });
+  check('public pool visible to visitors', (await (await fetch(B + `/api/pools/${pool.slug}`)).json()).goal === 600);
+  check(
+    'give amount limits',
+    (await fetch(B + `/api/pools/${pool.slug}/give`, { method: 'POST', body: JSON.stringify({ amount: 0.2 }) })).status === 400,
+  );
+  const give = await (
+    await fetch(B + `/api/pools/${pool.slug}/give`, { method: 'POST', body: JSON.stringify({ amount: 25, name: 'Amara', message: 'go!' }) })
+  ).json();
+  const giveCall = stripeCalls[stripeCalls.length - 1];
+  check('give opens Stripe Checkout', give.url.startsWith('https://checkout.stripe.test/') && giveCall.auth === 'Bearer sk_test_fake');
+  check(
+    'Checkout gets the right amount',
+    giveCall.form.get('line_items[0][price_data][unit_amount]') === '2500' && giveCall.form.get('metadata[pool]') === pool.id,
+  );
+  const paidSession = {
+    id: 'cs_pool_1',
+    payment_status: 'paid',
+    amount_total: 2500,
+    metadata: { pool: pool.id, name: 'Amara', message: 'go!' },
+  };
+  check(
+    'unsigned webhook refused',
+    (
+      await fetch(B + '/api/stripe/webhook', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'checkout.session.completed', data: { object: paidSession } }),
+      })
+    ).status === 400,
+  );
+  check('forged webhook refused', (await stripeHook(paidSession, 'whsec_wrong')).status === 400);
+  check('stale webhook refused', (await stripeHook(paidSession, WEBHOOK_SECRET, Math.floor(Date.now() / 1000) - 3600)).status === 400);
+  check('signed webhook accepted', (await stripeHook(paidSession)).status === 200);
+  await stripeHook(paidSession); // Stripe retries: must not count twice
+  await stripeHook({
+    id: 'cs_pool_2',
+    payment_status: 'paid',
+    amount_total: 1000,
+    metadata: { pool: pool.id, name: 'Shy', anonymous: '1' },
+  });
+  const poolNow = await (await fetch(B + `/api/pools/${pool.slug}`)).json();
+  check('counter adds each payment once', poolNow.raised === 35 && poolNow.supporters === 2);
+  check('anonymous stays anonymous', poolNow.recent.some((r) => r.name === 'Anonymous') && !poolNow.recent.some((r) => r.name === 'Shy'));
+  await call('alice', `/api/pools/${pool.id}/manual`, 'POST', { amount: 40, name: 'Cash at the show' });
+  check('admins can add cash by hand', (await (await fetch(B + `/api/pools/${pool.slug}`)).json()).raised === 75);
+  check('public page loads', (await fetch(B + `/pool/${pool.slug}`)).status === 200);
+
+  // Shop: digital delivery through a private download link, stock counts down, orders only in the portal
+  check('members cannot add products', (await call('bob', '/api/shop/products', 'POST', { title: 'x' })).status === 403);
+  const beat = JSON.parse((await call('alice', '/api/shop/products', 'POST', { title: 'Beat pack', kind: 'digital', price: 15 })).text);
+  check(
+    'digital product needs its file before going on sale',
+    (await call('alice', `/api/shop/products/${beat.id}`, 'PATCH', { active: true })).status === 400,
+  );
+  await call('alice', `/api/shop/products/${beat.id}`, 'PATCH', { file: { space: 'ed', path: 'docs/song.txt' }, active: true });
+  const tee = JSON.parse(
+    (await call('alice', '/api/shop/products', 'POST', { title: 'Village tee', kind: 'physical', price: 30, stock: 2 })).text,
+  );
+  await call('alice', `/api/shop/products/${tee.id}`, 'PATCH', { active: true });
+  const shopList = await (await fetch(B + '/api/shop')).json();
+  check(
+    'shop lists products to visitors',
+    shopList.products.length === 2 && !('file' in shopList.products[0]) && !('stock' in shopList.products[0]),
+  );
+  check(
+    'cannot buy more than in stock',
+    (await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":3}' })).status === 409,
+  );
+  await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2}' });
+  const teeCall = stripeCalls[stripeCalls.length - 1];
+  check('merch asks Stripe for a shipping address', teeCall.form.get('shipping_address_collection[allowed_countries][0]') === 'US');
+  await fetch(B + `/api/shop/${beat.slug}/buy`, { method: 'POST', body: '{}' });
+  const beatSession = `cs_test_${stripeCalls.length}`;
+  const beatOrder = stripeCalls[stripeCalls.length - 1].form.get('metadata[order]');
+  check('order is pending until Stripe confirms', (await (await fetch(B + `/api/shop/order/${beatSession}`)).json()).download === null);
+  await stripeHook({
+    id: beatSession,
+    payment_status: 'paid',
+    amount_total: 1500,
+    customer_details: { name: 'Amara', email: 'amara@example.com' },
+    metadata: { order: beatOrder },
+  });
+  const delivered = await (await fetch(B + `/api/shop/order/${beatSession}`)).json();
+  check(
+    'paid digital order gets a download link',
+    delivered.status === 'Delivered' && /^\/s\/[\w-]{32}$/.test(delivered.download?.url || ''),
+  );
+  check('the download works', (await (await fetch(B + `${delivered.download.url}/file?download`)).text()) === 'v2');
+  const teeSession = `cs_test_${stripeCalls.indexOf(teeCall) + 1}`;
+  await stripeHook({
+    id: teeSession,
+    payment_status: 'paid',
+    amount_total: 6000,
+    customer_details: { name: 'Kofi', email: 'k@example.com' },
+    shipping_details: { name: 'Kofi', address: { line1: '1 Main St', city: 'Minneapolis' } },
+    metadata: { order: teeCall.form.get('metadata[order]') },
+  });
+  check('stock counts down', (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === tee.id).soldOut === true);
+  check('order lookup needs the exact session', (await fetch(B + '/api/shop/order/cs_guess')).status === 404);
+  const orders = JSON.parse((await biz('alice', '/orders')).text);
+  check(
+    'orders with addresses show in the Business portal',
+    orders.some((o) => o.customer?.address?.city === 'Minneapolis') && orders.length === 2,
+  );
+  check('orders are not in the open admin API', (await call('bob', '/api/business/orders')).status === 401);
+  check('shop pages load', (await fetch(B + '/shop')).status === 200 && (await fetch(B + `/shop/${tee.slug}`)).status === 200);
+
   // Chat attachments: files sent from a phone / computer straight into a conversation
   const dm = 'dm~alice~bob';
   const sent = JSON.parse((await call('alice', `/api/chat/${dm}/files?name=photo.png`, 'PUT', bigPng, true)).text);
@@ -830,6 +966,7 @@ try {
 } finally {
   srv.kill();
   clerk.close();
+  fakeStripe.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
   console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
   rmSync(dir, { recursive: true, force: true });

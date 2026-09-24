@@ -1573,6 +1573,29 @@ async function businessApi(req, res, url) {
     return json(res, db.settings);
   }
   if (kind === 'docs') return businessDocs(req, res, url, user, db, id, sub);
+  if (kind === 'orders') {
+    // Shop orders live here (not the Admin Panel) because they carry customers' names and addresses
+    const shop = await loadShop();
+    if (req.method === 'GET') {
+      await audit(req, user, 'listed shop orders');
+      return json(
+        res,
+        Object.values(shop.orders)
+          .filter((o) => o.status !== 'Pending')
+          .sort((a, b) => (b.paid || '').localeCompare(a.paid || '')),
+      );
+    }
+    if (req.method === 'PATCH' && shop.orders[id]) {
+      const { status, note } = await jsonBody(req);
+      if (status !== undefined)
+        shop.orders[id].status = ['Paid', 'Shipped', 'Delivered', 'Refunded'].includes(status) ? status : fail(400, 'Bad status');
+      if (note !== undefined) shop.orders[id].note = String(note).slice(0, 500);
+      saveShop();
+      await audit(req, user, `set order ${id} to ${shop.orders[id].status}`);
+      return json(res, shop.orders[id]);
+    }
+    fail(404, 'No such order');
+  }
 
   const spec = BIZ_KINDS[kind] || fail(404, 'Unknown section');
   const coll = db[kind];
@@ -2054,8 +2077,11 @@ async function publicApi(req, res, url) {
       .filter((r) => r.public && !r.deleted && !r.members)
       .map((r) => ({ title: r.title, kind: r.kind, date: r.date }))
       .sort((a, b) => (a.date || '9').localeCompare(b.date || '9'));
+    const pools = Object.values((await loadPools()).pools)
+      .filter((p) => p.public && p.open && !p.deleted)
+      .map((p) => (({ slug, title, goal, raised, supporters }) => ({ slug, title, goal, raised, supporters }))(poolView(p)));
     res.setHeader('cache-control', 'public, max-age=60');
-    return json(res, { intro: front.intro, posts, events, releases });
+    return json(res, { intro: front.intro, posts, events, releases, pools });
   }
   if (req.method === 'POST' && what === 'join') {
     const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
@@ -2105,6 +2131,441 @@ async function publicApi(req, res, url) {
     return json(res, { ok: true });
   }
   fail(404, 'Not found');
+}
+
+// ── Stripe (payments for the pool, and later the shop) ─────────────────
+// Needs STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET in .env. Card details only ever go to Stripe's own Checkout
+// page; money is counted only when Stripe's signed webhook confirms the payment. No Stripe library: two calls.
+const STRIPE = process.env.STRIPE_API_URL || 'https://api.stripe.com/v1'; // overridable so tests can use a fake
+const stripeReady = () => !!process.env.STRIPE_SECRET_KEY;
+async function stripe(path, form) {
+  const body = new URLSearchParams();
+  const add = (prefix, v) =>
+    v !== null && typeof v === 'object'
+      ? Object.entries(v).forEach(([k, x]) => add(prefix ? `${prefix}[${k}]` : k, x))
+      : v !== undefined && body.append(prefix, String(v));
+  add('', form);
+  const r = await fetch(STRIPE + path, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const out = await r.json();
+  if (!r.ok) fail(502, `Stripe: ${out.error?.message || r.status}`);
+  return out;
+}
+/** Stripe-Signature: t=<time>,v1=<hmac of "t.body"> — refuse anything unsigned, forged or older than 5 minutes. */
+function stripeEvent(raw, header) {
+  const parts = Object.fromEntries(
+    String(header || '')
+      .split(',')
+      .map((kv) => kv.split('=')),
+  );
+  const expected = createHmac('sha256', process.env.STRIPE_WEBHOOK_SECRET || '')
+    .update(`${parts.t}.${raw}`)
+    .digest('hex');
+  const ok = parts.v1 && parts.v1.length === expected.length && timingSafeEqual(Buffer.from(parts.v1), Buffer.from(expected));
+  if (!process.env.STRIPE_WEBHOOK_SECRET || !ok || Math.abs(Date.now() / 1000 - Number(parts.t)) > 300) fail(400, 'Bad signature');
+  return JSON.parse(raw);
+}
+const siteOrigin = (req) => (SITE_ORIGINS[0] || `http://${req.headers.host}`).replace(/\/$/, '');
+
+// ── /api/pools: the team money pool — data/pools.json ──
+// Goals the team (and fans, when public) put money toward: a challenge, an event, gear. Public counter and
+// progress bar; supporters can stay anonymous. Admins can add cash / Zelle contributions by hand.
+let poolsDb = null;
+let poolsSaved = Promise.resolve();
+const loadPools = async () => (poolsDb ??= await readJson('pools.json', { pools: {}, handled: [] }));
+const savePools = () => (poolsSaved = poolsSaved.then(() => saveJson('pools.json', poolsDb)).catch(console.error));
+const poolView = (p, admin) => ({
+  id: p.id,
+  slug: p.slug,
+  title: p.title,
+  description: p.description,
+  goal: p.goal,
+  deadline: p.deadline,
+  public: p.public,
+  open: p.open,
+  raised: p.contributions.reduce((n, c) => n + c.amount, 0),
+  supporters: p.contributions.length,
+  recent: p.contributions
+    .slice(-12)
+    .reverse()
+    .map((c) => ({
+      name: c.anonymous ? 'Anonymous' : c.name,
+      amount: c.amount,
+      message: c.message,
+      at: c.at,
+      ...(admin ? { how: c.how } : {}),
+    })),
+  payments: stripeReady(),
+});
+
+async function poolsApi(req, res, url) {
+  const db = await loadPools();
+  const [, , , id, action] = url.pathname.split('/'); // /api/pools/<id|slug>/<give>
+  const cfg = await loadConfig();
+  let user = null;
+  try {
+    user = await currentUser(req, url, cfg);
+  } catch {} // visitors can see and give to public pools
+
+  const find = (key) =>
+    Object.values(db.pools).find((p) => !p.deleted && (p.id === key || p.slug === key) && (p.public || user)) || fail(404, 'No such pool');
+  if (req.method === 'GET' && !id) {
+    return json(
+      res,
+      Object.values(db.pools)
+        .filter((p) => !p.deleted && (p.public || user))
+        .map((p) => poolView(p, user?.admin)),
+    );
+  }
+  if (req.method === 'GET' && id) return json(res, poolView(find(id), user?.admin));
+
+  if (req.method === 'POST' && action === 'give') {
+    const p = find(id);
+    if (!p.open) fail(409, 'This pool is closed');
+    if (!stripeReady()) fail(503, "Payments aren't set up yet");
+    const input = await jsonBody(req);
+    const amount = Math.round(Number(input.amount) * 100) / 100;
+    if (!(amount >= 1 && amount <= 10000)) fail(400, 'Give between $1 and $10,000');
+    const session = await stripe('/checkout/sessions', {
+      mode: 'payment',
+      line_items: {
+        0: {
+          quantity: 1,
+          price_data: { currency: 'usd', unit_amount: Math.round(amount * 100), product_data: { name: `Sanktuary pool: ${p.title}` } },
+        },
+      },
+      success_url: `${siteOrigin(req)}/pool/${p.slug}?thanks=1`,
+      cancel_url: `${siteOrigin(req)}/pool/${p.slug}`,
+      metadata: {
+        pool: p.id,
+        name: String(input.name || user?.username || '').slice(0, 60),
+        anonymous: input.anonymous ? '1' : '',
+        message: String(input.message || '').slice(0, 200),
+      },
+    });
+    return json(res, { url: session.url });
+  }
+
+  if (!user?.admin) fail(user ? 403 : 401, 'Only admins can set up pools');
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const title =
+      String(input.title || '')
+        .trim()
+        .slice(0, 100) || fail(400, 'Give the pool a name');
+    const base = slugify(title) || randomUUID().slice(0, 6);
+    const slug = Object.values(db.pools).some((x) => x.slug === base) ? `${base}-${randomUUID().slice(0, 4)}` : base;
+    const p = {
+      id: randomUUID().slice(0, 10),
+      slug,
+      title,
+      description: '',
+      goal: 0,
+      deadline: null,
+      public: false,
+      open: true,
+      contributions: [],
+      created: new Date().toISOString(),
+      createdBy: user.username,
+    };
+    db.pools[p.id] = p;
+    savePools();
+    return json(res, poolView(p, true));
+  }
+  const p = find(id);
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    if (input.title !== undefined) p.title = String(input.title).trim().slice(0, 100) || p.title;
+    if (input.description !== undefined) p.description = String(input.description).slice(0, 3000);
+    if (input.goal !== undefined) p.goal = Math.max(0, money(input.goal));
+    if (input.deadline !== undefined) p.deadline = dateOrNull(input.deadline);
+    if (input.public !== undefined) p.public = !!input.public;
+    if (input.open !== undefined) p.open = !!input.open;
+    savePools();
+    return json(res, poolView(p, true));
+  }
+  if (req.method === 'POST' && action === 'manual') {
+    // Cash, Zelle, Venmo... given outside Stripe, so the counter stays honest
+    const input = await jsonBody(req);
+    const amount = money(input.amount);
+    if (!(amount > 0)) fail(400, 'Amount must be more than 0');
+    p.contributions.push({
+      amount,
+      name: String(input.name || 'Someone').slice(0, 60),
+      anonymous: !!input.anonymous,
+      message: String(input.message || '').slice(0, 200),
+      at: new Date().toISOString(),
+      how: `added by ${user.username}`,
+    });
+    savePools();
+    return json(res, poolView(p, true));
+  }
+  if (req.method === 'DELETE') {
+    p.deleted = new Date().toISOString(); // hidden, contributions kept
+    savePools();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown pool action');
+}
+
+/** Stripe calls this after a payment. Only signed events count, and each payment only once. */
+async function stripeWebhook(req, res) {
+  const raw = await body(req);
+  const event = stripeEvent(raw, req.headers['stripe-signature']);
+  if (event.type === 'checkout.session.completed') {
+    const s = event.data.object;
+    const db = await loadPools();
+    const p = s.metadata?.pool && db.pools[s.metadata.pool];
+    if (p && s.payment_status === 'paid' && !db.handled.includes(s.id)) {
+      db.handled.push(s.id);
+      const amount = (s.amount_total || 0) / 100;
+      const name = s.metadata.name || s.customer_details?.name || 'Someone';
+      p.contributions.push({
+        amount,
+        name,
+        anonymous: !!s.metadata.anonymous,
+        message: s.metadata.message || '',
+        at: new Date().toISOString(),
+        how: 'stripe',
+        session: s.id,
+      });
+      savePools();
+      const cfg = await loadConfig();
+      for (const a of cfg.admins) await notify(a, `${s.metadata.anonymous ? 'Someone' : name} put $${amount} into "${p.title}".`, {});
+    }
+    if (s.metadata?.order) await shopPaid(s); // the shop (below)
+  }
+  return json(res, { received: true });
+}
+
+// ── /api/shop: merch and digital products — data/shop.json ──
+// Physical items: Stripe collects the shipping address; orders show in the Business portal to fulfil.
+// Digital items: the file (or folder) in a space is delivered as a private download link (the share-link
+// system: 7 days, shown on the thank-you page). Stock counts down on each paid order.
+let shopDb = null;
+let shopSaved = Promise.resolve();
+const loadShop = async () => (shopDb ??= await readJson('shop.json', { products: {}, orders: {} }));
+const saveShop = () => (shopSaved = shopSaved.then(() => saveJson('shop.json', shopDb)).catch(console.error));
+const productView = (p, admin) => ({
+  id: p.id,
+  slug: p.slug,
+  title: p.title,
+  description: p.description,
+  price: p.price,
+  kind: p.kind,
+  image: p.image,
+  soldOut: p.stock !== null && p.stock <= 0,
+  ...(admin ? { stock: p.stock, active: p.active, file: p.file ? { space: p.file.space, path: p.file.path } : null } : {}),
+});
+
+async function shopApi(req, res, url) {
+  const db = await loadShop();
+  const [, , , a, b] = url.pathname.split('/'); // /api/shop/<slug|order|admin|images|products>/<id>
+  if (req.method === 'GET' && !a)
+    return json(res, {
+      products: Object.values(db.products)
+        .filter((p) => p.active && !p.deleted)
+        .map((p) => productView(p)),
+      payments: stripeReady(),
+    });
+  if (req.method === 'GET' && a === 'images') return stream(req, res, url.searchParams, join(DATA, 'shop', 'images', safeName(b)));
+  if (req.method === 'GET' && a === 'order') {
+    // The thank-you page looks its order up by Stripe's session id (unguessable, only the buyer has it)
+    const o = Object.values(db.orders).find((x) => x.session === b) || fail(404, 'No such order');
+    const links = await loadLinks();
+    const dl =
+      o.download && links[o.download] && !links[o.download].revoked
+        ? { url: `/s/${o.download}`, expires: links[o.download].expires }
+        : null;
+    return json(res, {
+      status: o.status,
+      title: o.title,
+      qty: o.qty,
+      amount: o.amount,
+      kind: o.kind,
+      download: o.status !== 'Pending' ? dl : null,
+    });
+  }
+  if (req.method === 'POST' && b === 'buy') {
+    const p =
+      Object.values(db.products).find((x) => (x.id === a || x.slug === a) && x.active && !x.deleted) || fail(404, 'No such product');
+    if (!stripeReady()) fail(503, "The shop isn't taking payments yet");
+    const qty = Math.max(1, Math.min(10, Math.floor(Number((await jsonBody(req)).qty) || 1)));
+    if (p.stock !== null && p.stock < qty) fail(409, p.stock ? `Only ${p.stock} left` : 'Sold out');
+    const order = {
+      id: randomUUID().slice(0, 10),
+      product: p.id,
+      title: p.title,
+      kind: p.kind,
+      qty,
+      amount: p.price * qty,
+      status: 'Pending',
+      created: new Date().toISOString(),
+    };
+    const session = await stripe('/checkout/sessions', {
+      mode: 'payment',
+      line_items: {
+        0: { quantity: qty, price_data: { currency: 'usd', unit_amount: Math.round(p.price * 100), product_data: { name: p.title } } },
+      },
+      ...(p.kind === 'physical' ? { shipping_address_collection: { allowed_countries: { 0: 'US', 1: 'CA' } } } : {}),
+      success_url: `${siteOrigin(req)}/shop/thanks?session={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteOrigin(req)}/shop/${p.slug}`,
+      metadata: { order: order.id },
+    });
+    order.session = session.id;
+    db.orders[order.id] = order;
+    saveShop();
+    return json(res, { url: session.url });
+  }
+
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  if (!user.admin) fail(403, 'Only admins can manage the shop');
+  if (a === 'images' && req.method === 'PUT') {
+    const name = safeName(url.searchParams.get('name'));
+    if (!THUMBABLE.has(extname(name).toLowerCase())) fail(400, 'Product images must be pictures');
+    await mkdir(join(DATA, 'shop', 'images'), { recursive: true });
+    const id = randomUUID().slice(0, 12);
+    const original = join(DATA, 'shop', 'images', `${id}-original${extname(name).toLowerCase()}`); // kept as uploaded
+    await pipeline(req, createWriteStream(original));
+    const img = await imageInput(original, (await stat(original)).size).catch(() => fail(400, "That picture couldn't be read"));
+    await img
+      .rotate()
+      .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toFile(join(DATA, 'shop', 'images', `${id}.webp`));
+    return json(res, { url: `/api/shop/images/${id}.webp` });
+  }
+  if (a === 'admin' && req.method === 'GET')
+    return json(
+      res,
+      Object.values(db.products)
+        .filter((p) => !p.deleted)
+        .map((p) => productView(p, true)),
+    );
+  if (a === 'products') {
+    const input = req.method === 'POST' || req.method === 'PATCH' ? await jsonBody(req) : {};
+    const apply = async (p) => {
+      if (input.title !== undefined) p.title = String(input.title).trim().slice(0, 120) || p.title;
+      if (input.description !== undefined) p.description = String(input.description).slice(0, 4000);
+      if (input.price !== undefined) p.price = Math.max(0.5, money(input.price));
+      if (input.kind !== undefined) p.kind = input.kind === 'digital' ? 'digital' : 'physical';
+      if (input.stock !== undefined)
+        p.stock = input.stock === null || input.stock === '' ? null : Math.max(0, Math.floor(Number(input.stock) || 0));
+      if (input.active !== undefined) p.active = !!input.active;
+      if (input.image !== undefined) p.image = input.image && /^\/api\/shop\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
+      if (input.file !== undefined) {
+        // Digital product: remember where the file is on its drive, so the delivery link survives spaces changing
+        if (!input.file) p.file = null;
+        else {
+          const ref = fileRef(input.file);
+          const space = spacesFor(user, cfg, await loadStatus()).find((s) => s.id === ref.space) || fail(404, 'No such space');
+          if (!space.online) fail(503, 'Drive offline');
+          const { abs } = locateIn(space, ref.path);
+          const s = (await stat(abs).catch(() => null)) || fail(404, 'That file is gone');
+          p.file = { ...ref, drive: space.drive, dpath: relative(space.driveRoot, abs).split(sep).join('/'), isDir: s.isDirectory() };
+        }
+      }
+    };
+    if (req.method === 'POST' && !b) {
+      const title =
+        String(input.title || '')
+          .trim()
+          .slice(0, 120) || fail(400, 'Give the product a name');
+      const base = slugify(title) || randomUUID().slice(0, 6);
+      const p = {
+        id: randomUUID().slice(0, 10),
+        slug: Object.values(db.products).some((x) => x.slug === base) ? `${base}-${randomUUID().slice(0, 4)}` : base,
+        title,
+        description: '',
+        price: 20,
+        kind: 'physical',
+        stock: null,
+        image: null,
+        file: null,
+        active: false,
+        created: new Date().toISOString(),
+      };
+      await apply(p);
+      db.products[p.id] = p;
+      saveShop();
+      return json(res, productView(p, true));
+    }
+    const p = (db.products[b] && !db.products[b].deleted && db.products[b]) || fail(404, 'No such product');
+    if (req.method === 'PATCH') {
+      await apply(p);
+      if (p.active && p.kind === 'digital' && !p.file) fail(400, 'Pick the file to deliver before putting a digital product on sale');
+      saveShop();
+      return json(res, productView(p, true));
+    }
+    if (req.method === 'DELETE') {
+      p.deleted = new Date().toISOString(); // hidden, kept with its orders
+      saveShop();
+      return json(res, { ok: true });
+    }
+  }
+  fail(404, 'Unknown shop action');
+}
+
+/** Called from the Stripe webhook when an order is paid: mark it, count stock down, deliver digital files. */
+async function shopPaid(s) {
+  const db = await loadShop();
+  const o = db.orders[s.metadata.order];
+  if (!o || o.status !== 'Pending' || s.payment_status !== 'paid') return;
+  const p = db.products[o.product];
+  o.status = o.kind === 'digital' ? 'Delivered' : 'Paid';
+  o.paid = new Date().toISOString();
+  o.amount = (s.amount_total || 0) / 100;
+  o.customer = {
+    name: s.customer_details?.name || '',
+    email: s.customer_details?.email || '',
+    address: s.shipping_details?.address || s.customer_details?.address || null,
+    shipTo: s.shipping_details?.name || null,
+  };
+  if (p && p.stock !== null) p.stock = Math.max(0, p.stock - o.qty);
+  if (p?.kind === 'digital' && p.file) {
+    const token = randomBytes(24).toString('base64url');
+    (await loadLinks())[token] = {
+      drive: p.file.drive,
+      dpath: p.file.dpath,
+      name: p.file.dpath.split('/').pop(),
+      isDir: p.file.isDir,
+      createdBy: 'shop',
+      created: new Date().toISOString(),
+      expires: new Date(Date.now() + 7 * 864e5).toISOString(),
+      password: null,
+      download: true,
+      views: 0,
+      downloads: 0,
+      order: o.id,
+    };
+    saveLinks();
+    o.download = token;
+  }
+  saveShop();
+  const cfg = await loadConfig();
+  for (const a of cfg.admins)
+    await notify(
+      a,
+      `New order: ${o.qty} × ${o.title} ($${o.amount})${o.kind === 'physical' ? ' — ship it from Business > Orders' : ' (delivered automatically)'}.`,
+      {},
+    );
+}
+
+// The public pool and shop pages (no account): /pool/<slug>, /shop, /shop/<product>, /shop/thanks
+const STORE_PAGE = new URL('./store.html', import.meta.url);
+function storePage(req, res, url) {
+  if (!/^\/(pool|shop)(\/[\w-]+)?\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'content-security-policy':
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'none'",
+  });
+  return pipeline(createReadStream(STORE_PAGE), res);
 }
 
 // The public blog page: sanktuary.studio/blog (and /blog/<post>), no account needed
@@ -3187,6 +3648,11 @@ const routes = [
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],
+  ['/api/pools', poolsApi],
+  ['/api/shop', shopApi],
+  ['/api/stripe/webhook', stripeWebhook],
+  ['/pool/', storePage],
+  ['/shop', storePage],
   ['/blog', blogPage],
   ['/s/', publicShare],
 ];

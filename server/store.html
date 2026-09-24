@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sanktuary</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      :root {
+        --face: #c0c0c0;
+        --navy: #000080;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #008080;
+        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+        font-size: 13px;
+        color: #000;
+        display: flex;
+        justify-content: center;
+        padding: 24px 12px;
+      }
+      .wrap {
+        width: min(820px, 100%);
+      }
+      .win {
+        background: var(--face);
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: 1px 1px 0 #000;
+      }
+      .title {
+        background: linear-gradient(90deg, var(--navy), #1084d0);
+        color: #fff;
+        font-weight: 700;
+        padding: 4px 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .title a {
+        color: #fff;
+        text-decoration: none;
+      }
+      .body {
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .inset {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        padding: 12px;
+      }
+      .btn {
+        font: inherit;
+        padding: 4px 12px;
+        min-height: 30px;
+        background: var(--face);
+        color: #000;
+        text-decoration: none;
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset -1px -1px #808080;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .btn.on,
+      .btn:active {
+        border-color: #000 #fff #fff #000;
+        box-shadow: inset 1px 1px #808080;
+        background: #d4d4d4;
+      }
+      .btn.big {
+        font-weight: 700;
+        min-height: 36px;
+        padding: 6px 18px;
+      }
+      .btn:disabled {
+        color: #808080;
+        text-shadow: 1px 1px #fff;
+        cursor: default;
+      }
+      input,
+      textarea {
+        font: inherit;
+        padding: 5px;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        background: #fff;
+        min-width: 0;
+      }
+      h1 {
+        font:
+          700 22px Georgia,
+          serif;
+        margin: 0;
+      }
+      .muted {
+        color: #555;
+      }
+      /* Win98 progress bar: navy blocks in a sunken track */
+      .bar {
+        height: 22px;
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        padding: 2px;
+      }
+      .bar div {
+        height: 100%;
+        background: repeating-linear-gradient(90deg, var(--navy) 0 10px, transparent 10px 12px);
+        transition: width 0.6s;
+      }
+      .big-number {
+        font:
+          700 26px Arial,
+          sans-serif;
+        color: var(--navy);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 10px;
+      }
+      .card {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        color: inherit;
+        text-decoration: none;
+        display: flex;
+        flex-direction: column;
+      }
+      .card img,
+      .product img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        background: #eee;
+        display: block;
+      }
+      .card .t {
+        padding: 8px;
+      }
+      .note {
+        background: #ffffe1;
+        border: 1px solid #808080;
+        padding: 8px;
+      }
+      .err {
+        color: #a00000;
+      }
+      .product {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 14px;
+      }
+      @media (max-width: 600px) {
+        .product {
+          grid-template-columns: 1fr;
+        }
+      }
+      .foot {
+        color: #fff;
+        text-align: center;
+        margin-top: 10px;
+        font-size: 11px;
+        opacity: 0.85;
+      }
+      .foot a {
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="win">
+        <div class="title"><span id="t">Sanktuary</span></div>
+        <div class="body" id="app">Loading...</div>
+      </div>
+      <div class="foot"><a href="/">Enter Sanktuary</a> · <a href="/shop">Shop</a> · <a href="/blog">Blog</a> · payments by Stripe</div>
+    </div>
+    <script>
+      const app = document.getElementById('app');
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+      const usd = (n) => Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+      const para = (t) => esc(t).replace(/\n/g, '<br>');
+      const [, section, slug] = location.pathname.split('/');
+      const q = new URLSearchParams(location.search);
+      const title = (t) => {
+        document.getElementById('t').textContent = t;
+        document.title = `${t} · Sanktuary`;
+      };
+      async function get(url, opts) {
+        const r = await fetch(url, opts);
+        if (!r.ok) throw new Error((await r.text()) || `Error ${r.status}`);
+        return r.json();
+      }
+      const fail = (e) => (app.innerHTML = `<div class="inset err"><b>${esc(e.message)}</b></div>`);
+
+      // ── Pool ──
+      async function pool() {
+        let p;
+        try {
+          p = await get(`/api/pools/${encodeURIComponent(slug)}`);
+        } catch (e) {
+          return fail(e);
+        }
+        title(p.title);
+        const pct = p.goal ? Math.min(100, (p.raised / p.goal) * 100) : 0;
+        app.innerHTML = `
+          ${q.has('thanks') ? '<div class="note"><b>Thank you!</b> Your contribution shows up here as soon as Stripe confirms it, usually within a few seconds.</div>' : ''}
+          <div class="inset"><h1>${esc(p.title)}</h1>${p.description ? `<p>${para(p.description)}</p>` : ''}
+            <div class="row" style="justify-content:space-between;margin:10px 0 6px"><span class="big-number">${usd(p.raised)}</span><span class="muted">${p.goal ? `of ${usd(p.goal)} goal` : ''} · ${p.supporters} supporter${p.supporters === 1 ? '' : 's'}${p.deadline ? ` · until ${new Date(p.deadline + 'T12:00').toLocaleDateString()}` : ''}</span></div>
+            ${p.goal ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ''}
+          </div>
+          ${p.open ? giveForm(p) : '<div class="note">This pool is closed. Thank you to everyone who put in.</div>'}
+          ${p.recent.length ? `<div class="inset"><b>Recent supporters</b>${p.recent.map((r) => `<div style="margin-top:6px"><b>${esc(r.name)}</b> ${usd(r.amount)}${r.message ? ` · <span class="muted">${esc(r.message)}</span>` : ''}</div>`).join('')}</div>` : ''}`;
+        wireGive(p);
+        if (q.has('thanks')) setTimeout(pool, 6000); // pick up the confirmed payment
+      }
+      const giveForm = (p) =>
+        !p.payments
+          ? '<div class="note">Online contributions open soon.</div>'
+          : `<div class="inset"><b>Put in</b>
+          <div class="row" style="margin:8px 0">${[5, 10, 25, 50, 100].map((a) => `<button class="btn" data-amt="${a}">${usd(a)}</button>`).join('')}
+            <input id="amt" type="number" min="1" max="10000" step="1" placeholder="Other" style="width:90px"></div>
+          <div class="row"><input id="nm" placeholder="Your name (optional)" style="flex:1;min-width:150px"><label class="row" style="gap:4px"><input type="checkbox" id="anon"> Stay anonymous</label></div>
+          <div class="row" style="margin-top:6px"><input id="msg" placeholder="Message (optional)" maxlength="200" style="flex:1"></div>
+          <div class="row" style="margin-top:10px"><button class="btn big" id="go">Continue to secure payment</button><span class="muted">Card details go to Stripe, never to us.</span></div>
+          <div class="err" id="e"></div></div>`;
+      function wireGive(p) {
+        const amt = document.getElementById('amt');
+        if (!amt) return;
+        document.querySelectorAll('[data-amt]').forEach(
+          (b) =>
+            (b.onclick = () => {
+              document.querySelectorAll('[data-amt]').forEach((x) => x.classList.remove('on'));
+              b.classList.add('on');
+              amt.value = b.dataset.amt;
+            }),
+        );
+        document.getElementById('go').onclick = async (ev) => {
+          ev.target.disabled = true;
+          try {
+            const r = await get(`/api/pools/${encodeURIComponent(p.slug)}/give`, {
+              method: 'POST',
+              body: JSON.stringify({
+                amount: amt.value,
+                name: document.getElementById('nm').value,
+                anonymous: document.getElementById('anon').checked,
+                message: document.getElementById('msg').value,
+              }),
+            });
+            location.href = r.url; // Stripe Checkout
+          } catch (e) {
+            document.getElementById('e').textContent = e.message;
+            ev.target.disabled = false;
+          }
+        };
+      }
+
+      // ── Shop ──
+      async function shop() {
+        title('Shop');
+        let s;
+        try {
+          s = await get('/api/shop');
+        } catch (e) {
+          return fail(e);
+        }
+        app.innerHTML = s.products.length
+          ? `<div class="grid">${s.products
+              .map(
+                (p) => `<a class="card" href="/shop/${esc(p.slug)}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : ''}
+                <div class="t"><b>${esc(p.title)}</b><div class="muted">${p.soldOut ? 'Sold out' : usd(p.price)} · ${p.kind === 'digital' ? 'digital download' : 'shipped'}</div></div></a>`,
+              )
+              .join('')}</div>`
+          : '<div class="inset">Nothing for sale yet. Check back soon.</div>';
+      }
+      async function product() {
+        let s;
+        try {
+          s = await get('/api/shop');
+        } catch (e) {
+          return fail(e);
+        }
+        const p = s.products.find((x) => x.slug === slug);
+        if (!p) return fail(new Error('This item is not available.'));
+        title(p.title);
+        app.innerHTML = `<div class="inset product">${p.image ? `<img src="${esc(p.image)}" alt="">` : '<div></div>'}
+          <div><h1>${esc(p.title)}</h1><div class="big-number" style="margin:8px 0">${usd(p.price)}</div>
+          <div class="muted">${p.kind === 'digital' ? 'Digital: you get a private download link right after paying.' : 'Shipped to the US and Canada. Stripe asks for your address.'}</div>
+          ${p.description ? `<p>${para(p.description)}</p>` : ''}
+          ${
+            p.soldOut
+              ? '<div class="note">Sold out.</div>'
+              : !s.payments
+                ? '<div class="note">The shop opens for orders soon.</div>'
+                : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? 'Qty <input id="qty" type="number" min="1" max="10" value="1" style="width:60px">' : ''}
+                  <button class="btn big" id="buy">Buy</button></div><div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
+          }</div></div><div><a class="btn" href="/shop">&larr; All items</a></div>`;
+        const buy = document.getElementById('buy');
+        if (buy)
+          buy.onclick = async () => {
+            buy.disabled = true;
+            try {
+              const r = await get(`/api/shop/${encodeURIComponent(p.slug)}/buy`, {
+                method: 'POST',
+                body: JSON.stringify({ qty: document.getElementById('qty')?.value || 1 }),
+              });
+              location.href = r.url;
+            } catch (e) {
+              document.getElementById('e').textContent = e.message;
+              buy.disabled = false;
+            }
+          };
+      }
+      async function thanks(tries = 0) {
+        title('Thank you');
+        const id = q.get('session') || '';
+        let o;
+        try {
+          o = await get(`/api/shop/order/${encodeURIComponent(id)}`);
+        } catch (e) {
+          return fail(e);
+        }
+        if (o.status === 'Pending' && tries < 15) {
+          app.innerHTML = '<div class="inset">Confirming your payment with Stripe...</div>';
+          return setTimeout(() => thanks(tries + 1), 2000);
+        }
+        app.innerHTML = `<div class="inset"><h1>Thank you!</h1><p>${o.qty} × <b>${esc(o.title)}</b> · ${usd(o.amount)}</p>
+          ${
+            o.download
+              ? `<p><a class="btn big" href="${esc(o.download.url)}">Download your files</a></p><p class="muted">This link is yours for 7 days (until ${new Date(o.download.expires).toLocaleDateString()}). Bookmark it or download now.</p>`
+              : o.kind === 'digital'
+                ? '<p class="muted">Your payment is still being confirmed. Refresh this page in a minute to get your download.</p>'
+                : '<p>We will ship it soon. Stripe emails your receipt.</p>'
+          }</div><div><a class="btn" href="/shop">Back to the shop</a></div>`;
+      }
+
+      if (section === 'pool' && slug) pool();
+      else if (section === 'shop' && slug === 'thanks') thanks();
+      else if (section === 'shop' && slug) product();
+      else shop();
+    </script>
+  </body>
+</html>

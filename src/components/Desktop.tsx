@@ -112,7 +112,17 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
   },
   { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
   { id: 'timeline', title: 'Timeline', icon: '/images/icons/task-scheduler-16x16.png', appType: 'timeline', width: 900, height: 600 },
-  // Public: works without an account (the same page as sanktuary.studio/blog)
+  // Public: these work without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)
+  { id: 'welcome', title: 'Welcome', icon: '/images/icons/help-32x32.png', appType: 'welcome', width: 520, height: 560 },
+  {
+    id: 'shop',
+    title: 'Shop',
+    icon: '/images/icons/favorites-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/shop' },
+    width: 760,
+    height: 560,
+  },
   {
     id: 'blog',
     title: 'Blog',
