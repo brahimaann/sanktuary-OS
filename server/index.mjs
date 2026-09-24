@@ -331,6 +331,13 @@ async function files(req, res, url) {
   if (req.method !== 'GET') await assertUnlocked(space, target, user.username);
   if (req.method === 'POST' && q.has('mkdir')) {
     need('upload');
+    if (q.has('parents')) {
+      // Whole path at once (the New... window's folders); fine if it's already there. Every level made is theirs.
+      const made = (await mkdir(target, { recursive: true }))?.replace(/^\\\\\?\\/, ''); // Windows: \\?\C:\...
+      for (let d = target; made && inside(made, d); d = dirname(d)) await setOwner(space, d, user);
+      log('made folder');
+      return json(res, { ok: true });
+    }
     await mkdir(target);
     await setOwner(space, target, user);
     log('made folder');
@@ -343,6 +350,7 @@ async function files(req, res, url) {
     await rename(target, to);
     await moveOwners(space, target, to);
     await moveProjects(space, target, to);
+    autoScan(space, to, user.username).catch(console.error);
     log('renamed', { to: q.get('rename') });
     return json(res, { ok: true });
   }
@@ -361,6 +369,7 @@ async function files(req, res, url) {
     await rename(target, to);
     await moveOwners(space, target, to);
     await moveProjects(space, target, to);
+    autoScan(space, to, user.username).catch(console.error);
     log('moved', { to: relative(root, to).split(sep).join('/') });
     return json(res, { ok: true });
   }
@@ -1185,7 +1194,9 @@ async function tracksApi(req, res, url) {
   };
 
   if (req.method === 'GET' && !what) {
-    const releases = Object.values(db.releases).filter((r) => canSeeRelease(user, r));
+    const releases = Object.values(db.releases)
+      .filter((r) => canSeeRelease(user, r))
+      .map(({ folderKey, ...r }) => r); // folderKey: internal (drive id + path)
     const ids = new Set(releases.map((r) => r.id));
     const tracks = Object.values(db.tracks)
       .filter((t) => !t.deleted && ids.has(t.release))
@@ -1210,13 +1221,28 @@ async function tracksApi(req, res, url) {
         owner: me,
         created: new Date().toISOString(),
       };
+      // Optional folder: an existing one to read from, or (setup) a new one with Bounces / Stems / Projects / Artwork
+      if (input.folder) await linkReleaseFolder(r, input.folder, user, cfg, !!input.setup);
       db.releases[r.id] = r;
+      const found = r.folder ? await scanRelease(r, me) : null;
       changed(r);
-      return json(res, r);
+      return json(res, { ...r, folderKey: undefined, found });
     }
     const r = (db.releases[id] && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
+    if (req.method === 'POST' && url.searchParams.has('scan')) {
+      if (!r.folder) fail(400, 'Link the release to a folder first');
+      await releaseSpace(r.folder.space, user, cfg); // still allowed to see that folder?
+      const found = await scanRelease(r, me);
+      changed(r);
+      return json(res, found);
+    }
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);
+      if (input.folder !== undefined) {
+        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change its folder');
+        if (input.folder === null) r.folder = r.folderKey = null;
+        else await linkReleaseFolder(r, input.folder, user, cfg, !!input.setup);
+      }
       if (input.title !== undefined) r.title = String(input.title).trim().slice(0, 80) || r.title;
       if (input.kind !== undefined) r.kind = RELEASE_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
       if (input.date !== undefined) r.date = dateOrNull(input.date);
@@ -1226,8 +1252,9 @@ async function tracksApi(req, res, url) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
         r.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
       }
+      const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
-      return json(res, r);
+      return json(res, { ...r, folderKey: undefined, found });
     }
     if (req.method === 'DELETE') {
       if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can delete it');
@@ -1243,31 +1270,7 @@ async function tracksApi(req, res, url) {
       const r =
         (db.releases[input.release] && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
         fail(404, 'No such release');
-      const n = Object.values(db.tracks).filter((t) => t.release === r.id && !t.deleted).length + 1;
-      const t = {
-        id: randomUUID().slice(0, 10),
-        release: r.id,
-        n,
-        title:
-          String(input.title || '')
-            .trim()
-            .slice(0, 80) || `Track ${n}`,
-        status: 'Idea',
-        bpm: '',
-        key: '',
-        credits: '',
-        notes: '',
-        deadline: null,
-        bounce: null,
-        project: null,
-        stems: null,
-        links: {},
-        followers: [me],
-        history: [{ at: new Date().toISOString(), user: me, action: 'added the track' }],
-        updated: new Date().toISOString(),
-        updatedBy: me,
-      };
-      db.tracks[t.id] = t;
+      const t = newTrack(db, r, input.title, me, 'added the track');
       changed(r);
       return json(res, t);
     }
@@ -1322,6 +1325,291 @@ async function tracksApi(req, res, url) {
   }
   fail(404, 'Unknown tracks action');
 }
+
+function newTrack(db, r, title, by, action) {
+  const live = Object.values(db.tracks).filter((t) => t.release === r.id && !t.deleted);
+  const n = live.reduce((m, t) => Math.max(m, t.n), 0) + 1;
+  const now = new Date().toISOString();
+  const t = {
+    id: randomUUID().slice(0, 10),
+    release: r.id,
+    n,
+    title:
+      String(title || '')
+        .trim()
+        .slice(0, 80) || `Track ${n}`,
+    status: 'Idea',
+    bpm: '',
+    key: '',
+    credits: '',
+    notes: '',
+    deadline: null,
+    bounce: null,
+    project: null,
+    stems: null,
+    links: {},
+    followers: [by],
+    history: [{ at: now, user: by, action }],
+    updated: now,
+    updatedBy: by,
+  };
+  db.tracks[t.id] = t;
+  return t;
+}
+
+// ── Release folders: the files fill Tracks in ──
+// A release can point at a folder in a team space. Scanning it (when it's linked, on "Scan folder", and a few
+// seconds after anyone uploads, moves or renames something into it) turns audio files into tracks
+// ("03 Summer I Missed You v4.wav" -> track 3 "Summer I Missed You", that file as the current bounce; a v5 later
+// becomes the new current bounce and followers hear about it), links project folders and stems whose names match a
+// song, reads the BPM from Ableton sets, and uses an image in Artwork as the cover. A scan only fills what's empty
+// or what an earlier scan set from inside the folder, so nothing picked by hand is replaced. Personal spaces can't
+// be used: "me" is a different folder for every member.
+const RELEASE_SUBFOLDERS = ['Bounces', 'Stems', 'Projects', 'Artwork'];
+const BOUNCE_EXT = new Set(['.wav', '.aif', '.aiff', '.flac', '.mp3', '.m4a', '.ogg']);
+const LOSSLESS_EXT = new Set(['.wav', '.aif', '.aiff', '.flac']);
+const ART_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.psd']);
+const SONG_NOISE = new Set(
+  'master mastered mix mixed mixdown bounce bounced final rough demo wip ref reference project stems stem version v'.split(' '),
+);
+const SONG_VARIANT = /\b(?:instrumental|inst|a ?capp?ella|acc?apella|clean|tv track|radio edit|sped up|slowed)\b/gi;
+const SCAN_LIMIT = 4000; // entries walked per scan
+const WINDOWS_NAME = /^[^<>:"|?*\\/\x00-\x1f]+$/;
+
+/** "03 - Summer I Missed You (v4) master.wav" -> { key: "summer i missed you", title, n: 3, version: 4, variant } */
+function songName(name, isFile = true) {
+  let base = isFile ? name.slice(0, name.length - extname(name).length) : name;
+  const n = Number(base.match(/^(\d{1,2})(?=[\s._)-])/)?.[1]) || null;
+  base = base.replace(/^\d{1,2}[\s._)-]+/, '');
+  const version = Number(base.match(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i)?.[1]) || 0;
+  const plain = base.replace(/_/g, ' ');
+  const variant = new RegExp(SONG_VARIANT.source, 'i').test(plain);
+  const words = plain
+    .replace(SONG_VARIANT, ' ')
+    .split(/[^\p{L}\p{N}']+/u)
+    .filter(Boolean);
+  const kept = words.filter((w, i) => {
+    const l = w.toLowerCase();
+    if (SONG_NOISE.has(l) || /^v\d{1,3}$/.test(l) || /^\d{6,8}$/.test(l)) return false; // noise, v4, 20260924
+    return !(/^\d{1,3}$/.test(l) && /^(v|version)$/i.test(words[i - 1] || '')); // the 4 of "version 4"
+  });
+  return { key: kept.join(' ').toLowerCase(), title: kept.join(' ').slice(0, 80), n, version, variant };
+}
+
+/** The BPM an Ableton set was saved at ("" if it can't be read). */
+async function alsTempo(file) {
+  try {
+    if ((await stat(file)).size > 50 * 1024 ** 2) return '';
+    const raw = await readFile(file);
+    const xml = (raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw, { maxOutputLength: 512 * 1024 ** 2 }) : raw).toString('utf8');
+    const v = Number(xml.match(/<Tempo>[\s\S]{0,2000}?<Manual Value="([\d.]+)"/)?.[1]);
+    return v > 20 && v < 999 ? String(Math.round(v * 100) / 100) : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The member's view of a team space for a release folder: needs `level` rights there. */
+async function releaseSpace(spaceId, user, cfg, level = 'view') {
+  if (spaceId === 'me') fail(400, 'Use a team space for a release folder (My Space looks different to everyone else)');
+  const space = spacesFor(user, cfg, await loadStatus()).find((s) => s.id === spaceId) || fail(404, 'No such space');
+  if (!space.online) fail(503, 'Drive offline');
+  if (RANK[space.rights] < RANK[level]) fail(403, `You need ${level} rights in ${space.name}`);
+  return space;
+}
+
+async function linkReleaseFolder(r, ref, user, cfg, setup) {
+  const f = fileRef(ref) || fail(400, 'Pick a folder');
+  const space = await releaseSpace(f.space, user, cfg, setup ? 'upload' : 'view');
+  const { root, abs } = locateIn(space, f.path);
+  if (setup) {
+    if (abs === root) fail(400, 'Pick a folder inside the space');
+    if (f.path.split('/').some((p) => p && (!WINDOWS_NAME.test(p) || /[. ]$/.test(p))))
+      fail(400, 'Folder names can\'t use < > : " | ? * or end in a dot');
+    await assertUnlocked(space, abs, user.username);
+    for (const d of [abs, ...RELEASE_SUBFOLDERS.map((n) => join(abs, n))])
+      if (!existsSync(d)) {
+        await mkdir(d, { recursive: true });
+        await setOwner(space, d, user);
+      }
+    forgetSizes();
+  } else if (!(await stat(abs).catch(() => null))?.isDirectory()) fail(404, 'No such folder');
+  r.folder = { space: f.space, path: relative(root, abs).split(sep).join('/') };
+  r.folderKey = ownerKey(space, abs);
+}
+
+const scanning = new Map(); // release id -> running scan (one at a time per release)
+function scanRelease(r, by) {
+  const run = (scanning.get(r.id) || Promise.resolve()).then(() => scanReleaseNow(r, by));
+  const tail = run.catch(() => {});
+  scanning.set(r.id, tail);
+  tail.then(() => scanning.get(r.id) === tail && scanning.delete(r.id));
+  return run;
+}
+
+async function scanReleaseNow(r, by) {
+  const found = { added: [], bounces: [], projects: 0, stems: 0, bpm: 0, cover: false, skipped: 0 };
+  const cfg = await loadConfig();
+  // The folder is read as the server (not as whoever triggered the scan); what members then open from a track
+  // still goes through their own space rights.
+  const space = spacesFor({ username: '', admin: true }, cfg, await loadStatus()).find((s) => s.id === r.folder?.space);
+  if (!space?.online || space.id === 'me') return { ...found, offline: true };
+  const { abs: dir } = locateIn(space, r.folder.path);
+
+  const bounces = []; // { rel, name, mtime }
+  const projects = []; // { rel, keys: Set, als: [abs] }
+  const stems = []; // { rel, key }
+  const art = []; // rel
+  let walked = 0;
+  const walk = async (d, rel, depth, zone) => {
+    for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+      if (++walked > SCAN_LIMIT) return;
+      if (HIDDEN.test(e.name)) continue;
+      const abs = join(d, e.name);
+      const r2 = rel ? `${rel}/${e.name}` : e.name;
+      const ext = extname(e.name).toLowerCase();
+      if (e.isDirectory()) {
+        if (/^(samples|backup|ableton project info)$/i.test(e.name)) continue;
+        const kind = await projectKind(abs, true);
+        if (kind) {
+          const inner = (await readdir(abs).catch(() => [])).filter((n) => PROJECT_FILES[extname(n).toLowerCase()]);
+          const keys = new Set([songName(e.name, false).key, ...inner.map((n) => songName(n).key)].filter(Boolean));
+          projects.push({ rel: r2, keys, als: inner.filter((n) => /\.als$/i.test(n)).map((n) => join(abs, n)) });
+          continue;
+        }
+        const isStems = /\bstems?\b/i.test(e.name);
+        if (zone === 'stems-list' || (isStems && songName(e.name, false).key)) {
+          stems.push({ rel: r2, key: songName(e.name, false).key }); // "Stems/Summer" or "Summer Stems"
+          continue;
+        }
+        const next = isStems
+          ? 'stems-list'
+          : /^projects?$/i.test(e.name)
+            ? 'projects'
+            : /^(artwork|art|covers?|visuals?|photos?)$/i.test(e.name)
+              ? 'art'
+              : zone;
+        if (depth < 4) await walk(abs, r2, depth + 1, next);
+        continue;
+      }
+      if (zone === 'stems-list' && ext === '.zip') stems.push({ rel: r2, key: songName(e.name).key });
+      else if (zone === 'art' && ART_EXT.has(ext)) art.push(r2);
+      else if (zone === 'bounces' && BOUNCE_EXT.has(ext)) {
+        const s = await stat(abs).catch(() => null);
+        if (s) bounces.push({ rel: r2, name: e.name, mtime: s.mtimeMs });
+      }
+    }
+  };
+  await walk(dir, '', 0, 'bounces');
+  if (walked > SCAN_LIMIT) found.skipped = walked - SCAN_LIMIT;
+
+  const ref = (rel) => ({ space: r.folder.space, path: [r.folder.path, rel].filter(Boolean).join('/') });
+  const fromFolder = (x) => !!x && x.space === r.folder.space && (!r.folder.path || x.path.startsWith(r.folder.path + '/'));
+  const songs = new Map(); // key -> { title, n, files }
+  for (const b of bounces) {
+    const s = songName(b.name);
+    if (!s.key) continue;
+    const g = songs.get(s.key) || { title: s.title, n: s.n, files: [] };
+    g.n ??= s.n;
+    g.files.push({ ...b, ...s });
+    songs.set(s.key, g);
+  }
+
+  const db = await loadTracks();
+  const live = () => Object.values(db.tracks).filter((t) => t.release === r.id && !t.deleted);
+  const byKey = new Map(live().map((t) => [songName(t.title, false).key, t]));
+  const byBounce = new Map(live().flatMap((t) => (t.bounce ? [[`${t.bounce.space}|${t.bounce.path}`, t]] : [])));
+  const now = new Date().toISOString();
+  const log = (t, action) => {
+    t.history = [{ at: now, user: by, action }, ...t.history].slice(0, 100);
+    t.updated = now;
+    t.updatedBy = by;
+  };
+  const news = [];
+  const ordered = [...songs.entries()].sort(([, a], [, b]) => (a.n ?? 99) - (b.n ?? 99) || a.title.localeCompare(b.title));
+  for (const [key, g] of ordered) {
+    // A track whose bounce is one of these files owns the song, whatever its title ("sn_final3.wav" picked for
+    // "Summer Nights" keeps getting its newer versions instead of becoming a track called "sn").
+    let t = g.files.map((f) => byBounce.get(`${r.folder.space}|${ref(f.rel).path}`)).find(Boolean) || byKey.get(key);
+    if (!t) {
+      t = newTrack(db, r, g.title, by, 'added it from the release folder');
+      if (g.n && !live().some((x) => x !== t && x.n === g.n)) t.n = g.n;
+      byKey.set(key, t);
+      found.added.push(t.title);
+    }
+    const best = g.files.sort(
+      (a, b) =>
+        a.variant - b.variant ||
+        b.version - a.version ||
+        b.mtime - a.mtime ||
+        LOSSLESS_EXT.has(extname(b.name).toLowerCase()) - LOSSLESS_EXT.has(extname(a.name).toLowerCase()),
+    )[0];
+    const next = ref(best.rel);
+    if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path) {
+      const first = !t.bounce;
+      t.bounce = next;
+      log(t, `set the bounce to ${next.path} (from the release folder)`);
+      found.bounces.push(best.name);
+      if (!first) news.push([t, `New bounce of ${t.title}: ${best.name} (${by}).`]);
+    }
+  }
+  for (const t of live()) {
+    const key = songName(t.title, false).key;
+    if (!key) continue;
+    const p = projects.find((x) => x.keys.has(key));
+    if (p && !t.project) {
+      t.project = ref(p.rel);
+      log(t, `linked the project ${p.rel.split('/').pop()}`);
+      found.projects++;
+    }
+    if (p && !t.bpm && p.als.length) {
+      const set = p.als.find((f) => songName(basename(f)).key === key) || p.als[0];
+      const bpm = await alsTempo(set);
+      if (bpm) {
+        t.bpm = bpm;
+        log(t, `read ${bpm} BPM from ${basename(set)}`);
+        found.bpm++;
+      }
+    }
+    const s = stems.find((x) => x.key === key);
+    if (s && !t.stems) {
+      t.stems = ref(s.rel);
+      log(t, `linked the stems ${s.rel.split('/').pop()}`);
+      found.stems++;
+    }
+  }
+  if (!r.cover && art.length) {
+    r.cover = ref(art.find((a) => /cover|front|final/i.test(a.split('/').pop())) || art[0]);
+    found.cover = true;
+  }
+  const any = found.added.length || found.bounces.length || found.projects || found.stems || found.bpm || found.cover;
+  if (any) {
+    saveTracks();
+    emit('tracks', { release: r.id }, (u) => canSeeRelease({ username: u.username, admin: cfg.admins.includes(u.username) }, r));
+  }
+  for (const [t, text] of news) for (const u of t.followers) if (u !== by) await notify(u, text, { track: t.id });
+  return found;
+}
+
+/** After an upload / move / rename: if it landed in a release's folder, rescan that release (debounced, so a
+ * folder of 40 files is one scan). Runs in the background; the upload has already answered. */
+const autoScans = new Map(); // release id -> timer
+async function autoScan(space, abs, by) {
+  if (space.id === 'me') return;
+  const k = ownerKey(space, abs);
+  for (const r of Object.values((await loadTracks()).releases)) {
+    if (r.deleted || !r.folderKey || !(k + '/').startsWith(r.folderKey + '/')) continue;
+    clearTimeout(autoScans.get(r.id));
+    autoScans.set(
+      r.id,
+      setTimeout(() => {
+        autoScans.delete(r.id);
+        scanRelease(r, by).catch(console.error);
+      }, AUTO_SCAN_MS).unref(),
+    );
+  }
+}
+const AUTO_SCAN_MS = Number(process.env.AUTO_SCAN_MS || 3000);
 
 /** Deadline reminders: 3 days before and on the day before, to everyone following the track. */
 async function trackDeadlines() {
@@ -1408,6 +1696,8 @@ async function timelineApi(req, res, url) {
       i.alerted = null;
     }
     if (input.end !== undefined) i.end = dateOrNull(input.end);
+    if (input.time !== undefined)
+      i.time = !input.time ? '' : /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time) ? input.time : fail(400, 'Times look like 20:00');
     if (i.end && i.end < i.start) fail(400, "The end date can't be before the start");
     if (input.people !== undefined) i.people = usernameList(input.people);
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
@@ -1429,6 +1719,7 @@ async function timelineApi(req, res, url) {
       status: 'Planned',
       start: null,
       end: null,
+      time: '',
       people: [me],
       location: '',
       notes: '',
@@ -2882,6 +3173,7 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   forgetSizes();
   warmAudioPreview(join(dir, name));
   if (!q.get('replace')) await setOwner(space, join(dir, name), user);
+  autoScan(space, join(dir, name), user.username).catch(console.error); // landed in a release folder? update Tracks
   log(q.get('replace') ? 'replaced' : 'uploaded', { path: relative(root, join(dir, name)).split(sep).join('/') });
   transfer(q.get('replace') ? 'replaced' : 'uploaded', size, relative(root, join(dir, name)));
   return json(res, { ok: true, name });

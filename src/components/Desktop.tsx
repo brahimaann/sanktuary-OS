@@ -28,24 +28,6 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
     height: 485,
   },
   {
-    id: 'my-documents',
-    title: 'My Documents',
-    icon: '/images/icons/my-documents-32x32.png',
-    appType: 'explorer',
-    appProps: { path: 'C:/My Documents' },
-    width: 640,
-    height: 480,
-  },
-  {
-    id: 'network',
-    title: 'Sanktuary Net',
-    icon: '/images/icons/network-32x32.png',
-    appType: 'explorer',
-    appProps: { path: 'C:/Sanktuary Net' },
-    width: 640,
-    height: 480,
-  },
-  {
     id: 'recycle',
     title: 'Recycle Bin',
     icon: '/images/icons/recycle-bin-32x32.png',
@@ -66,30 +48,8 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
   { id: 'africaonly', title: 'AfricaOnly.TV', icon: '/images/icons/video-32x32.png', appType: 'africaonly', width: 900, height: 620 },
   { id: 'notepad', title: 'Notepad', icon: '/images/icons/notepad-32x32.png', appType: 'notepad', width: 480, height: 360 },
 
-  // Column 2
-  { id: 'winamp', title: 'Winamp', icon: '/images/icons/winamp2-32x32.png', appType: 'winamp', width: 275, height: 348 },
-  {
-    id: 'pipes',
-    title: '3D Pipes',
-    icon: '/images/icons/pipes-32x32.png',
-    appType: 'iframe',
-    appProps: { src: '/programs/pipes/index.html#%7B%22hideUI%22%3Atrue%7D' },
-    width: 800,
-    height: 600,
-  },
-
-  // Column 3
+  // Games
   { id: 'pong', title: 'Pong', icon: '/images/icons/pinball-32x32.png', appType: 'pong', width: 520, height: 380 },
-  {
-    id: 'powder-toy',
-    title: 'Sandspiel (Powder)',
-    icon: '/images/icons/pipes-32x32.png',
-    appType: 'iframe',
-    appProps: { src: 'https://sandspiel.club/' },
-    width: 800,
-    height: 600,
-  },
-  { id: 'webradio', title: 'MRND Web Radio', icon: '/images/icons/speaker-32x32.png', appType: 'webradio', width: 280, height: 320 },
 
   // Team spaces on the home server (Clerk sign-in required)
   {
@@ -110,6 +70,7 @@ const DEFAULT_ICONS: DesktopIconDef[] = [
     width: 560,
     height: 420,
   },
+  { id: 'new', title: 'New...', icon: '/images/icons/file-32x32.png', appType: 'new', width: 460, height: 420 },
   { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
   { id: 'timeline', title: 'Timeline', icon: '/images/icons/task-scheduler-16x16.png', appType: 'timeline', width: 900, height: 600 },
   // Public: these work without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)

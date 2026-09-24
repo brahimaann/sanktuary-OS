@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-export type ScreensaverType = 'pipes' | 'starfield' | 'none';
+export type ScreensaverType = 'starfield' | 'none';
 
 interface ScreensaverProps {
   type: ScreensaverType;
@@ -127,20 +127,7 @@ export const Screensaver: React.FC<ScreensaverProps> = ({ type, onDismiss }) => 
         overflow: 'hidden',
       }}
     >
-      {type === 'pipes' ? (
-        <iframe
-          src="/programs/pipes/index.html#%7B%22hideUI%22%3Atrue%7D"
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            pointerEvents: 'none', // Ensure pointer events bubble up to the dismiss wrapper
-          }}
-          title="3D Pipes Screensaver"
-        />
-      ) : (
-        <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
-      )}
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
     </div>
   );
 };

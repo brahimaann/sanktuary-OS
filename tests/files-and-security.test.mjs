@@ -126,6 +126,7 @@ const srv = spawn(process.execPath, [SERVER], {
     RAPIDRAW_BRIDGE: 'http://127.0.0.1:3193',
     RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
     RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
+    AUTO_SCAN_MS: '150',
   },
 });
 let srvOut = '';
@@ -400,6 +401,145 @@ try {
     JSON.parse((await call('bob', '/api/tracks')).text).tracks.some((t) => t.id === song.id),
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
+
+  // Release folders: files fill Tracks in
+  const albumDir = join(drive, 'team', 'Albums', 'Folder Album');
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const tracksOf = async (u, rid) => JSON.parse((await call(u, '/api/tracks')).text).tracks.filter((t) => t.release === rid);
+  const newRel = (u, body) => call(u, '/api/tracks/release', 'POST', body);
+  check(
+    'view rights cannot make a release folder',
+    (await newRel('carol', { title: 'X', folder: { space: 'view', path: 'Albums/X' }, setup: true })).status === 403,
+  );
+  check(
+    'a space you cannot see is refused',
+    (await newRel('carol', { title: 'X', folder: { space: 'up', path: 'Albums/X' } })).status === 404,
+  );
+  check(
+    'My Space cannot hold a release',
+    (await newRel('bob', { title: 'X', folder: { space: 'me', path: 'X' }, setup: true })).status === 400,
+  );
+  check(
+    'release folder cannot climb out',
+    (await newRel('bob', { title: 'X', folder: { space: 'up', path: '../X' }, setup: true })).status === 400,
+  );
+  check(
+    'release folder names are checked',
+    (await newRel('bob', { title: 'X', folder: { space: 'up', path: 'Albums/X?' }, setup: true })).status === 400 &&
+      (await newRel('bob', { title: 'X', folder: { space: 'up', path: 'Albums/X.' }, setup: true })).status === 400,
+  );
+  check('linking a missing folder is refused', (await newRel('bob', { title: 'X', folder: { space: 'up', path: 'nope' } })).status === 404);
+  const folderAlbum = JSON.parse(
+    (await newRel('bob', { title: 'Folder Album', folder: { space: 'up', path: 'Albums/Folder Album' }, setup: true })).text,
+  );
+  check(
+    'new release sets up its folders',
+    ['Bounces', 'Stems', 'Projects', 'Artwork'].every((n) => existsSync(join(albumDir, n))) &&
+      folderAlbum.folder?.path === 'Albums/Folder Album' &&
+      !('folderKey' in folderAlbum),
+  );
+  check(
+    'folder key never reaches the browser',
+    !JSON.parse((await call('bob', '/api/tracks')).text).releases.some((r) => 'folderKey' in r),
+  );
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/03 Summer Nights v1.wav', 'RIFF1');
+  await wait(700);
+  let fts = await tracksOf('bob', folderAlbum.id);
+  check(
+    'an uploaded bounce becomes a track',
+    fts.length === 1 && fts[0].title === 'Summer Nights' && fts[0].n === 3 && fts[0].bounce?.path.endsWith('v1.wav'),
+    JSON.stringify(fts.map((t) => [t.title, t.n, t.bounce?.path])),
+  );
+  await call('alice', `/api/tracks/track/${fts[0].id}`, 'PATCH', { follow: true });
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/Summer_Nights_v2_master.wav', 'RIFF2');
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/Summer Nights (Instrumental) v9.wav', 'RIFF9');
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/HIMA - Late Drive.mp3', 'ID3');
+  await wait(700);
+  fts = await tracksOf('bob', folderAlbum.id);
+  const nights = fts.find((t) => t.title === 'Summer Nights');
+  check('a newer version becomes the current bounce', nights?.bounce?.path.endsWith('Summer_Nights_v2_master.wav'), nights?.bounce?.path);
+  check('an instrumental does not take over', !/Instrumental/.test(nights?.bounce?.path || ''));
+  check('each song is one track', fts.length === 2 && fts.some((t) => t.title === 'HIMA Late Drive'), fts.map((t) => t.title).join(','));
+  check(
+    'followers hear about the new bounce',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) =>
+      /New bounce of Summer Nights: Summer_Nights_v2/.test(n.text),
+    ),
+  );
+  // Project, BPM, stems and cover, found by a manual scan
+  mkdirSync(join(albumDir, 'Projects', 'Summer Nights Project'), { recursive: true });
+  writeFileSync(
+    join(albumDir, 'Projects', 'Summer Nights Project', 'Summer Nights.als'),
+    gzipSync(
+      '<Ableton><LiveSet><MasterTrack><DeviceChain><Mixer><Tempo><LomId Value="0" /><Manual Value="98.5" /></Tempo></Mixer></DeviceChain></MasterTrack></LiveSet></Ableton>',
+    ),
+  );
+  mkdirSync(join(albumDir, 'Stems', 'Summer Nights'), { recursive: true });
+  writeFileSync(join(albumDir, 'Stems', 'Summer Nights', 'kick.wav'), 'RIFF');
+  writeFileSync(join(albumDir, 'Artwork', 'cover final.png'), Buffer.from('89504e47', 'hex'));
+  check(
+    'carol cannot scan a folder in a space she cannot see',
+    (await call('carol', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).status === 404,
+  );
+  const scan = JSON.parse((await call('bob', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).text);
+  fts = await tracksOf('bob', folderAlbum.id);
+  const nights2 = fts.find((t) => t.title === 'Summer Nights');
+  check(
+    'scan links project, BPM and stems',
+    nights2?.project?.path === 'Albums/Folder Album/Projects/Summer Nights Project' &&
+      nights2.bpm === '98.5' &&
+      nights2.stems?.path === 'Albums/Folder Album/Stems/Summer Nights' &&
+      scan.projects === 1 &&
+      scan.stems === 1,
+    JSON.stringify(scan),
+  );
+  check('stems are not mistaken for songs', fts.length === 2);
+  check(
+    'artwork becomes the cover',
+    JSON.parse((await call('bob', '/api/tracks')).text)
+      .releases.find((r) => r.id === folderAlbum.id)
+      ?.cover?.path.endsWith('cover final.png'),
+  );
+  // Something picked by hand stays
+  const drive2 = fts.find((t) => t.title === 'HIMA Late Drive');
+  await call('bob', `/api/tracks/track/${drive2.id}`, 'PATCH', { bounce: { space: 'up', path: 'docs/new.txt' } });
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/HIMA - Late Drive v2.mp3', 'ID3');
+  await up('bob', 'up', 'docs/Elsewhere Song.wav', 'RIFF'); // outside the folder: not a track
+  await wait(700);
+  fts = await tracksOf('bob', folderAlbum.id);
+  check('a bounce picked by hand is not replaced', fts.find((t) => t.id === drive2.id)?.bounce?.path === 'docs/new.txt');
+  check('files outside the folder are ignored', !fts.some((t) => /Elsewhere/.test(t.title)));
+  check(
+    'a moved-in file is picked up',
+    (await call('bob', '/api/files/up/docs/Elsewhere Song.wav?move=Albums/Folder Album/Bounces', 'POST')).status === 200 &&
+      (await wait(700), (await tracksOf('bob', folderAlbum.id)).some((t) => t.title === 'Elsewhere Song')),
+  );
+  const hand = JSON.parse((await call('bob', '/api/tracks/track', 'POST', { release: folderAlbum.id, title: 'Golden Hour' })).text);
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/gh_rough.wav', 'RIFF');
+  await call('bob', `/api/tracks/track/${hand.id}`, 'PATCH', { bounce: { space: 'up', path: 'Albums/Folder Album/Bounces/gh_rough.wav' } });
+  await up('bob', 'up', 'Albums/Folder Album/Bounces/gh v2.wav', 'RIFF');
+  await wait(700);
+  fts = await tracksOf('bob', folderAlbum.id);
+  check(
+    'a bounce with an odd name stays with its track and gets its new versions',
+    !fts.some((t) => t.title === 'gh') && fts.find((t) => t.id === hand.id)?.bounce?.path.endsWith('gh v2.wav'),
+    fts.map((t) => `${t.title}=${t.bounce?.path}`).join(', '),
+  );
+  check(
+    'mkdir with parents makes the whole path',
+    (await call('bob', '/api/files/up/Timeline/2027-01-01 Shoot?mkdir&parents', 'POST')).status === 200 &&
+      existsSync(join(drive, 'team', 'Timeline', '2027-01-01 Shoot')),
+  );
+  check(
+    'mkdir with parents is fine when it exists',
+    (await call('bob', '/api/files/up/Timeline/2027-01-01 Shoot?mkdir&parents', 'POST')).status === 200,
+  );
+  check('bob owns the folders he made', (await call('bob', '/api/files/up/Timeline', 'DELETE')).status === 200);
+  check('view rights cannot mkdir', (await call('carol', '/api/files/view/Nope/Deep?mkdir&parents', 'POST')).status === 403);
+  check(
+    "only the release's owner or an admin changes its folder",
+    (await call('carol', `/api/tracks/release/${folderAlbum.id}`, 'PATCH', { folder: null })).status === 403,
+  );
 
   // Timeline: visual projects and events, with Tracks dates merged in
   const day = (n) => new Date(Date.now() + n * 864e5).toLocaleDateString('en-CA');

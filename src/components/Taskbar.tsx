@@ -168,6 +168,15 @@ export const Taskbar: React.FC = () => {
           <ul className="flex-1 list-none p-1 m-0 text-xs">
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
+                onClick={() => launchApp('new', 'New', 'new', '/images/icons/file-32x32.png', 460, 420)}
+                className="w-full text-left py-1 px-2 flex items-center font-bold"
+              >
+                <img src="/images/icons/file-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                New...
+              </button>
+            </li>
+            <li className="hover:bg-[#000080] hover:text-white group">
+              <button
                 onClick={() =>
                   launchApp('explorer-c', 'My Computer', 'explorer', '/images/icons/my-computer-16x16.png', 640, 480, { path: 'C:/' })
                 }
@@ -175,32 +184,6 @@ export const Taskbar: React.FC = () => {
               >
                 <img src="/images/icons/my-computer-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>My Computer</span>
-              </button>
-            </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
-              <button
-                onClick={() =>
-                  launchApp('network', 'Sanktuary Net', 'explorer', '/images/icons/network-16x16.png', 640, 480, {
-                    path: 'C:/Sanktuary Net',
-                  })
-                }
-                className="w-full text-left py-1 px-2 flex items-center"
-              >
-                <img src="/images/icons/network-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
-                <span>Sanktuary Net</span>
-              </button>
-            </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
-              <button
-                onClick={() =>
-                  launchApp('explorer-docs', 'My Documents', 'explorer', '/images/icons/my-documents-16x16.png', 640, 480, {
-                    path: 'C:/My Documents',
-                  })
-                }
-                className="w-full text-left py-1 px-2 flex items-center"
-              >
-                <img src="/images/icons/my-documents-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
-                <span>My Documents</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
@@ -228,15 +211,6 @@ export const Taskbar: React.FC = () => {
               >
                 <img src="/images/icons/speaker-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Sound Recorder</span>
-              </button>
-            </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
-              <button
-                onClick={() => launchApp('winamp', 'Winamp', 'winamp', '/images/icons/winamp2-16x16.png', 275, 348)}
-                className="w-full text-left py-1 px-2 flex items-center"
-              >
-                <img src="/images/icons/winamp2-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
-                <span>Winamp</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
@@ -275,28 +249,6 @@ export const Taskbar: React.FC = () => {
               >
                 <img src="/images/icons/paint-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Paint</span>
-              </button>
-            </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
-              <button
-                onClick={() =>
-                  launchApp('powder-toy', 'Sandspiel (Powder)', 'iframe', '/images/icons/pipes-16x16.png', 800, 600, {
-                    src: 'https://sandspiel.club/',
-                  })
-                }
-                className="w-full text-left py-1 px-2 flex items-center"
-              >
-                <img src="/images/icons/pipes-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
-                <span>Sandspiel (Powder)</span>
-              </button>
-            </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
-              <button
-                onClick={() => launchApp('webradio', 'MRND Web Radio', 'webradio', '/images/icons/speaker-16x16.png', 280, 320)}
-                className="w-full text-left py-1 px-2 flex items-center"
-              >
-                <img src="/images/icons/speaker-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
-                <span>MRND Web Radio</span>
               </button>
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">

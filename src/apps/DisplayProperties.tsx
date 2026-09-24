@@ -145,9 +145,7 @@ export const DisplayProperties: React.FC = () => {
             <div className="flex justify-center">
               <div className="w-[120px] h-[90px] bg-[#3a3a3a] border-4 border-[#808080] rounded p-1 shadow-inner flex justify-center items-center relative overflow-hidden">
                 <div className="w-full h-full border border-black bg-black flex justify-center items-center text-center">
-                  {selectedScreensaver === 'pipes' ? (
-                    <span className="text-[10px] text-green-400 font-mono">3D PIPES</span>
-                  ) : selectedScreensaver === 'starfield' ? (
+                  {selectedScreensaver === 'starfield' ? (
                     <span className="text-[10px] text-white font-mono">★ · . * .</span>
                   ) : (
                     <span className="text-[10px] text-gray-500 font-sans">(None)</span>
@@ -165,7 +163,6 @@ export const DisplayProperties: React.FC = () => {
                   onChange={(e) => setSelectedScreensaver(e.target.value as ScreensaverType)}
                   className="flex-1 bg-white border border-gray-600 px-1 py-0.5 text-xs outline-none"
                 >
-                  <option value="pipes">3D Pipes</option>
                   <option value="starfield">Starfield Simulation</option>
                   <option value="none">(None)</option>
                 </select>

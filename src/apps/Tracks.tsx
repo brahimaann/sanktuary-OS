@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import RetroIcon, { IconLabel } from '../components/RetroIcon';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
+import { droppedItems, uploadFiles } from '../utils/upload';
 import { useLiveEvent } from '../utils/live';
 import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
@@ -21,7 +22,30 @@ interface Release {
   members: string[] | null;
   owner: string;
   public?: boolean;
+  folder?: FileRef | null;
 }
+interface Found {
+  added: string[];
+  bounces: string[];
+  projects: number;
+  stems: number;
+  bpm: number;
+  cover: boolean;
+  offline?: boolean;
+}
+/** "Found 2 new track(s), 1 bounce(s)..." or "Nothing new in the folder." */
+const foundText = (f: Found) => {
+  if (f.offline) return "The release's drive is offline.";
+  const bits = [
+    f.added.length && `${f.added.length} new track(s)`,
+    f.bounces.length && `${f.bounces.length} bounce(s)`,
+    f.projects && `${f.projects} project(s)`,
+    f.stems && `${f.stems} stems folder(s)`,
+    f.bpm && `${f.bpm} BPM`,
+    f.cover && 'the cover',
+  ].filter(Boolean);
+  return bits.length ? `Found ${bits.join(', ')}.` : 'Nothing new in the folder.';
+};
 interface Track {
   id: string;
   release: string;
@@ -86,6 +110,12 @@ const TracksApp: React.FC = () => {
   const [trackId, setTrackId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { getToken } = useAuth();
+  const { openWindow } = useWindowManager();
+  const openRef = useOpenRef();
   const box = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
@@ -100,6 +130,12 @@ const TracksApp: React.FC = () => {
     load();
   }, [load]);
   useLiveEvent('tracks', load);
+  useEffect(() => {
+    // The New... window just made or added to a release: show it
+    const show = (e: Event) => pickRelease((e as CustomEvent<string>).detail);
+    window.addEventListener('sk:tracks-release', show);
+    return () => window.removeEventListener('sk:tracks-release', show);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const releases = data?.releases || [];
   const release = releases.find((r) => r.id === releaseId) || releases[0];
@@ -122,13 +158,77 @@ const TracksApp: React.FC = () => {
     }
   };
 
-  const newRelease = async () => {
-    const title = (await dialog.prompt('Name of the album, EP or single:', '', { title: 'New release' }))?.trim();
-    if (!title) return;
-    run(async () => {
-      const r = await api('/api/tracks/release', { method: 'POST', body: JSON.stringify({ title }) });
-      pickRelease(r.id);
+  const newRelease = () =>
+    openWindow({
+      id: 'new',
+      title: 'New',
+      icon: '/images/icons/file-32x32.png',
+      appType: 'new',
+      width: 460,
+      height: 420,
+      appProps: { kind: 'release' },
     });
+  const scan = () =>
+    run(async () => {
+      const f: Found = await api(`/api/tracks/release/${release!.id}?scan`, { method: 'POST' });
+      setTimeout(() => setMsg(foundText(f))); // after run() clears the message
+    });
+
+  // Drop files or folders on Tracks: they go into the release's folder (loose audio into Bounces, folders as they
+  // are, so "Stems" / "Projects" folders land where the scan looks), then the folder is scanned.
+  // A single folder dropped with no release selected (or on request) becomes a new release of its own.
+  const drop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (busy) return;
+    const items = await droppedItems(e.dataTransfer); // reads the drop's entries before its first await
+    if (!items.length) return;
+    const tops = new Set(items.map((i) => i.sub?.[0] ?? ''));
+    const oneFolder = tops.size === 1 && !tops.has('') ? [...tops][0] : null;
+    let target = release;
+    if (
+      oneFolder &&
+      (!release || (await dialog.confirm(`Make "${oneFolder}" a new release?`, { ok: 'New release', cancel: `Add to ${release.title}` })))
+    ) {
+      const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && ['upload', 'edit'].includes(s.rights));
+      let last = '';
+      try {
+        last = localStorage.getItem('sk_new_space') || '';
+      } catch {}
+      const space = spaces.find((s) => s.id === last) || spaces[0];
+      if (!space) return setMsg("You can't add files to any team space. Ask an admin for upload rights.");
+      const name =
+        oneFolder
+          .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
+          .trim()
+          .replace(/[. ]+$/, '') || 'New release';
+      try {
+        target = await api('/api/tracks/release', {
+          method: 'POST',
+          body: JSON.stringify({ title: name, folder: { space: space.id, path: `Releases/${name}` }, setup: true }),
+        });
+      } catch (err) {
+        return setMsg((err as Error).message);
+      }
+      items.forEach((i) => (i.sub = i.sub!.slice(1))); // the folder's contents go straight into the release folder
+      pickRelease(target!.id);
+    }
+    if (!target?.folder) return setMsg('Link this release to a folder first (Folder... in the toolbar), then drop files on it.');
+    const f = target.folder;
+    items.forEach((i) => !i.sub?.length && /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i.test(i.name) && (i.sub = ['Bounces']));
+    setBusy(true);
+    try {
+      await uploadFiles(getToken, f.space, f.path.split('/'), items, (s, n) =>
+        setMsg(`Uploading ${items.length} file(s) to ${target!.title}... ${Math.round((s / n) * 100)}%`),
+      );
+      const found: Found = await api(`/api/tracks/release/${target.id}?scan`, { method: 'POST' });
+      await load();
+      setMsg(`Uploaded ${items.length} file(s). ${foundText(found)}`);
+    } catch (err) {
+      setMsg(`Upload stopped: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
   };
   const addTrack = async () => {
     if (!release) return;
@@ -179,6 +279,44 @@ const TracksApp: React.FC = () => {
                 style={input}
               />
             </label>
+            {release.folder ? (
+              <>
+                <button
+                  style={button}
+                  title={`Open ${release.folder.path}`}
+                  onClick={() => {
+                    const parts = release.folder!.path.split('/');
+                    openRef({
+                      kind: 'folder',
+                      title: parts[parts.length - 1],
+                      app: release.folder!.space,
+                      dir: parts.slice(0, -1),
+                      name: parts[parts.length - 1],
+                    });
+                  }}
+                >
+                  <IconLabel icon="external">Folder</IconLabel>
+                </button>
+                <button
+                  style={button}
+                  disabled={busy}
+                  onClick={scan}
+                  title="Look for new bounces, projects, stems and artwork in the folder"
+                >
+                  <IconLabel icon="refresh">Scan</IconLabel>
+                </button>
+              </>
+            ) : (
+              (release.owner === me?.username || me?.admin) && (
+                <button
+                  style={button}
+                  onClick={() => setLinking(true)}
+                  title="Point this release at a folder: its files fill the tracks in"
+                >
+                  <IconLabel icon="link">Folder...</IconLabel>
+                </button>
+              )
+            )}
             <button style={button} onClick={() => setSharing(true)} title="Who can see this release">
               {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}...
             </button>
@@ -197,10 +335,29 @@ const TracksApp: React.FC = () => {
           </>
         )}
       </div>
-      <div ref={box} style={{ flex: 1, display: 'flex', minHeight: 0, gap: 4, padding: '0 2px', position: 'relative' }}>
+      <div
+        ref={box}
+        style={{
+          flex: 1,
+          display: 'flex',
+          minHeight: 0,
+          gap: 4,
+          padding: '0 2px',
+          position: 'relative',
+          outline: dragging ? '2px dashed #000080' : undefined,
+          outlineOffset: -2,
+        }}
+        onDragOver={(e) => {
+          if (![...e.dataTransfer.types].includes('Files')) return;
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setDragging(false)}
+        onDrop={drop}
+      >
         {!release ? (
           <div style={{ ...listBox, padding: 16 }}>
-            No releases yet. Click <b>New release...</b> to start one (an album, EP or single), then add its tracks.
+            No releases yet. Click <b>New release...</b> to start one (an album, EP or single), or drop a folder of bounces here.
           </div>
         ) : (
           <div style={{ ...listBox, flex: track && !narrow ? '0 0 42%' : 1 }}>
@@ -245,6 +402,7 @@ const TracksApp: React.FC = () => {
                   <tr>
                     <td style={td} colSpan={6}>
                       No tracks yet. Click <b>Add track...</b>
+                      {release.folder ? ', or drop bounces here ("03 Song v2.wav" becomes track 3).' : ''}
                     </td>
                   </tr>
                 )}
@@ -262,6 +420,20 @@ const TracksApp: React.FC = () => {
             onChange={load}
             onClose={() => setTrackId(null)}
             setMsg={setMsg}
+          />
+        )}
+        {linking && release && (
+          <FilePicker
+            title={`Folder for ${release.title}`}
+            mode="folder"
+            onPick={(r) => {
+              setLinking(false);
+              if (r)
+                run(async () => {
+                  const x = await api(`/api/tracks/release/${release.id}`, { method: 'PATCH', body: JSON.stringify({ folder: r }) });
+                  if (x.found) setTimeout(() => setMsg(foundText(x.found)));
+                });
+            }}
           />
         )}
         {sharing && release && (

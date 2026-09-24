@@ -18,6 +18,7 @@ interface Entry {
   status?: string;
   start: string;
   end?: string | null;
+  time?: string;
   people?: string[];
   location?: string;
   notes?: string;
@@ -70,6 +71,12 @@ const TimelineApp: React.FC = () => {
   useLiveEvent('timeline', load);
   useLiveEvent('tracks', load);
   useEffect(() => {
+    // The New... window just added an entry: open it
+    const show = (ev: Event) => setOpenId((ev as CustomEvent<string>).detail);
+    window.addEventListener('sk:timeline-entry', show);
+    return () => window.removeEventListener('sk:timeline-entry', show);
+  }, []);
+  useEffect(() => {
     todayRow.current?.scrollIntoView({ block: 'start' });
   }, [!!data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -83,20 +90,17 @@ const TimelineApp: React.FC = () => {
   const entry = data.items.find((i) => i.id === openId && !i.source);
   const upcoming = items.filter((i) => (i.end || i.start) >= now).length;
 
-  const add = async () => {
-    const title = (await dialog.prompt('What is it? (e.g. "Cover shoot", "Release party")', '', { title: 'New timeline entry' }))?.trim();
-    if (!title) return;
-    try {
-      const e = await api('/api/timeline', {
-        method: 'POST',
-        body: JSON.stringify({ title, start: now, kind: kind && data.kinds.includes(kind) ? kind : 'Other' }),
-      });
-      await load();
-      setOpenId(e.id);
-    } catch (err) {
-      setMsg((err as Error).message);
-    }
-  };
+  // The New... window asks when in plain words ("next sat 8pm") and can make a folder for the files
+  const add = () =>
+    openWindow({
+      id: 'new',
+      title: 'New',
+      icon: '/images/icons/file-32x32.png',
+      appType: 'new',
+      width: 460,
+      height: 420,
+      appProps: { kind: kind && kind !== 'Other' && data.kinds.includes(kind) ? kind : undefined },
+    });
   const openTracks = () =>
     openWindow({ id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-16x16.png', appType: 'tracks', width: 900, height: 600 });
 
@@ -133,6 +137,7 @@ const TimelineApp: React.FC = () => {
         <span style={{ width: 88, flexShrink: 0 }}>
           {dayLabel(i.start)}
           {i.end && i.end !== i.start ? ` – ${dayLabel(i.end)}` : ''}
+          {i.time ? ` ${i.time}` : ''}
         </span>
         <span style={{ ...chip, background: KIND_COLORS[i.kind] || '#808080' }}>{i.kind}</span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -277,6 +282,13 @@ const EntryPanel: React.FC<{
           ))}
         </select>
         From <input type="date" value={e.start} onChange={(ev) => ev.target.value && save({ start: ev.target.value })} style={input} />
+        <input
+          type="time"
+          value={e.time || ''}
+          onChange={(ev) => save({ time: ev.target.value })}
+          style={input}
+          title="Start time (optional)"
+        />
         to
         <input
           type="date"

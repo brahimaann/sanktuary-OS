@@ -38,6 +38,7 @@ const Tracks = lazy(() => import('./apps/Tracks'));
 const Timeline = lazy(() => import('./apps/Timeline'));
 const Business = lazy(() => import('./apps/Business'));
 const Welcome = lazy(() => import('./apps/Welcome'));
+const NewThing = lazy(() => import('./apps/NewThing'));
 
 export const App: React.FC = () => {
   const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
@@ -210,6 +211,9 @@ export const App: React.FC = () => {
         break;
       case 'tracks':
         content = <Tracks />;
+        break;
+      case 'new':
+        content = <NewThing kind={win.appProps?.kind} />;
         break;
       case 'canvas':
         content = <Canvas boardId={win.appProps?.boardId} name={win.title} />;
