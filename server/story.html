@@ -295,6 +295,7 @@
 
           sections = [...main.querySelectorAll('section')];
           document.getElementById('controls').hidden = false;
+          document.getElementById('sound').hidden = !story.items.some((it) => it.kind === 'video'); // nothing to hear
           const seen = new IntersectionObserver(
             (entries) => {
               for (const e of entries) {

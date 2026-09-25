@@ -67,7 +67,7 @@ interface Health {
   rapidraw?: Check;
 }
 
-const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Shop & pool', 'Log'] as const;
+const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Stories', 'Shop & pool', 'Log'] as const;
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
 const AdminPanel: React.FC = () => {
@@ -244,6 +244,7 @@ const AdminPanel: React.FC = () => {
         {tab === 'Log' && <LogTab />}
         {tab === 'Blog' && <BlogTab />}
         {tab === 'Front page' && <FrontTab />}
+        {tab === 'Stories' && <StoriesTab />}
         {tab === 'Shop & pool' && <ShopTab />}
 
         {tab === 'Members' && (
@@ -675,6 +676,244 @@ type Product = {
 };
 
 /** Money pools (public counter at sanktuary.studio/pool/...) and the shop's products. Orders are in Business > Orders. */
+// ── Stories: a folder of photos and videos told as a full-screen guided story (e.g. Heart of the Cities) ──
+interface StoryItem {
+  file: string;
+  kind: 'image' | 'video';
+  chapter: string;
+  caption: string;
+  hidden: boolean;
+}
+interface Story {
+  slug: string;
+  title: string;
+  subtitle: string;
+  intro: string;
+  public: boolean;
+  folderName: string;
+  items: StoryItem[];
+}
+
+const StoriesTab: React.FC = () => {
+  const api = useApi();
+  const [stories, setStories] = useState<Story[] | null>(null);
+  const [open, setOpen] = useState<Story | null>(null); // the story being edited (a draft)
+  const [picking, setPicking] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => api('/api/stories').then(setStories, (e) => setMsg(e.message)), [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const create = async (folder: { space: string; path: string }) => {
+    const title = (await dialog.prompt('Title of the story:', folder.path.split('/').pop() || ''))?.trim();
+    if (!title) return;
+    try {
+      const st: Story = await api('/api/stories', { method: 'POST', body: JSON.stringify({ title, folder }) });
+      await load();
+      setOpen(st);
+      setMsg(`Made "${st.title}" with ${st.items.length} photos and videos. Add captions, then tick Published.`);
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const save = async (extra: object = {}) => {
+    if (!open) return;
+    try {
+      const st: Story = await api(`/api/stories/${open.slug}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: open.title,
+          subtitle: open.subtitle,
+          intro: open.intro,
+          public: open.public,
+          items: open.items,
+          ...extra,
+        }),
+      });
+      setOpen(st);
+      await load();
+      setMsg('Saved.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const set = (patch: Partial<Story>) => setOpen((o) => (o ? { ...o, ...patch } : o));
+  const setItem = (j: number, patch: Partial<StoryItem>) =>
+    set({ items: open!.items.map((it, k) => (k === j ? { ...it, ...patch } : it)) });
+  const move = (j: number, by: number) => {
+    const items = [...open!.items];
+    const k = j + by;
+    if (k < 0 || k >= items.length) return;
+    [items[j], items[k]] = [items[k], items[j]];
+    set({ items });
+  };
+
+  if (open) {
+    // Picture previews use the story's public numbering, which counts only the items that aren't hidden
+    let shown = -1;
+    return (
+      <>
+        <div style={row}>
+          <button style={button} onClick={() => (setOpen(null), setMsg(''))}>
+            ‹ All stories
+          </button>
+          <a
+            href={`/story/${open.slug}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ ...button, textDecoration: 'none', color: '#000' }}
+          >
+            Open the story
+          </a>
+          <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input type="checkbox" checked={open.public} onChange={(e) => set({ public: e.target.checked })} />
+            <b>Published</b> (anyone with the link, and My Computer)
+          </label>
+          <button style={button} onClick={() => save({ rescan: true })} title="Add photos and videos put in the folder since">
+            Look for new files
+          </button>
+          <button style={{ ...button, fontWeight: 700 }} onClick={() => save()}>
+            Save
+          </button>
+          <span>{msg}</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 6, margin: '8px 0', alignItems: 'center' }}>
+          Title
+          <input style={input} value={open.title} onChange={(e) => set({ title: e.target.value })} />
+          Subtitle
+          <input
+            style={input}
+            value={open.subtitle}
+            placeholder="e.g. Minneapolis & Saint Paul, 2026"
+            onChange={(e) => set({ subtitle: e.target.value })}
+          />
+          <span style={{ alignSelf: 'start' }}>Intro</span>
+          <textarea style={{ ...input, resize: 'vertical' }} rows={3} value={open.intro} onChange={(e) => set({ intro: e.target.value })} />
+        </div>
+        <p style={hint}>
+          From <b>{open.folderName}</b>. Subfolders are chapters. A caption can also come from a text file named like the photo ("01
+          corner.txt" for "01 corner.jpg"). Hidden items stay in the folder but leave the story.
+        </p>
+        {open.items.map((it, j) => {
+          if (!it.hidden) shown++;
+          return (
+            <div
+              key={it.file}
+              style={{
+                display: 'flex',
+                gap: 6,
+                alignItems: 'center',
+                padding: '4px 0',
+                borderBottom: '1px solid #a0a0a0',
+                opacity: it.hidden ? 0.5 : 1,
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <button style={{ ...button, padding: '0 6px' }} onClick={() => move(j, -1)} title="Earlier">
+                  ▲
+                </button>
+                <button style={{ ...button, padding: '0 6px' }} onClick={() => move(j, 1)} title="Later">
+                  ▼
+                </button>
+              </div>
+              {it.kind === 'image' && !it.hidden ? (
+                <img
+                  src={`/api/public/story/${open.slug}/${shown}?w=800`}
+                  alt=""
+                  style={{ width: 72, height: 54, objectFit: 'cover', border: '1px solid #808080' }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 72,
+                    height: 54,
+                    background: '#000',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 10,
+                  }}
+                >
+                  {it.kind === 'video' ? '▶ video' : 'hidden'}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ color: '#444', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {it.chapter ? `${it.chapter} · ` : ''}
+                  {it.file.split('/').pop()}
+                </span>
+                <input
+                  style={input}
+                  value={it.caption}
+                  placeholder="Caption (optional)"
+                  onChange={(e) => setItem(j, { caption: e.target.value })}
+                />
+              </div>
+              <label style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input type="checkbox" checked={it.hidden} onChange={(e) => setItem(j, { hidden: e.target.checked })} />
+                Hide
+              </label>
+            </div>
+          );
+        })}
+        <p style={{ ...hint, marginTop: 6 }}>Previews appear after saving when you show a hidden item or reorder.</p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p style={hint}>
+        A story tells a folder of photos and videos as a full-screen, scroll-through experience at <b>sanktuary.studio/story/…</b> (for
+        example Heart of the Cities). Visitors only ever get resized pictures, never the original files.
+      </p>
+      {!stories ? (
+        <div>{msg || 'Loading...'}</div>
+      ) : (
+        stories.map((st) => (
+          <div key={st.slug} style={{ ...row, marginBottom: 6 }}>
+            <b style={{ minWidth: 180 }}>{st.title}</b>
+            <span>
+              {st.items.filter((i) => !i.hidden).length} items · {st.public ? 'published' : 'draft'}
+            </span>
+            <button style={button} onClick={() => setOpen(st)}>
+              Edit...
+            </button>
+            <a href={`/story/${st.slug}`} target="_blank" rel="noopener noreferrer">
+              /story/{st.slug}
+            </a>
+            <button
+              style={button}
+              onClick={async () =>
+                (await dialog.confirm(`Take down "${st.title}"? The photos and videos are not touched.`, { icon: 'warning' })) &&
+                api(`/api/stories/${st.slug}`, { method: 'DELETE' }).then(load, (e) => setMsg(e.message))
+              }
+            >
+              Take down
+            </button>
+          </div>
+        ))
+      )}
+      <button style={{ ...button, fontWeight: 700 }} onClick={() => setPicking(true)}>
+        New story from a folder...
+      </button>
+      {msg && <p style={hint}>{msg}</p>}
+      {picking && (
+        <FilePicker
+          title="Folder with the story's photos and videos"
+          mode="folder"
+          onPick={(r) => {
+            setPicking(false);
+            if (r) create(r);
+          }}
+        />
+      )}
+    </>
+  );
+};
+
 const ShopTab: React.FC = () => {
   const api = useApi();
   const [pools, setPools] = useState<Pool[] | null>(null);

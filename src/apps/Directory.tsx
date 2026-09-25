@@ -30,9 +30,11 @@ interface Dir {
   posts: { id: string; title: string; excerpt: string; url: string; publication: string; date: string }[];
   products: { slug: string; title: string; price: number; kind: string; soldOut: boolean }[];
   pools: { slug: string; title: string; goal: number; raised: number; supporters: number }[];
+  stories: { slug: string; title: string; subtitle: string; count: number }[];
 }
-type Section = 'people' | 'releases' | 'events' | 'posts' | 'products' | 'pools';
+type Section = 'stories' | 'people' | 'releases' | 'events' | 'posts' | 'products' | 'pools';
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
+  { id: 'stories', label: 'Stories', icon: 'kodak-imaging' },
   { id: 'people', label: 'People', icon: 'my-documents-folder' },
   { id: 'releases', label: 'Releases', icon: 'media-player' },
   { id: 'events', label: 'Events', icon: 'task' },
@@ -94,10 +96,17 @@ const Directory: React.FC = () => {
               ? d.products.map((p) => [p.title, `${money(p.price)}${p.soldOut ? ' · sold out' : ''}`, 'favorites'])
               : section === 'pools'
                 ? d.pools.map((p) => [p.title, `${money(p.raised)} of ${money(p.goal)} · ${p.supporters} supporter(s)`, 'internet-folder'])
-                : [];
+                : section === 'stories'
+                  ? d.stories.map((st) => [
+                      st.title,
+                      `${st.subtitle ? `${st.subtitle} · ` : ''}${st.count} photos and videos`,
+                      'kodak-imaging',
+                    ])
+                  : [];
   const activate = (i: number) => {
     if (!d || !section) return;
     if (section === 'posts') return page(d.posts[i].title, d.posts[i].url, 'news');
+    if (section === 'stories') return page(d.stories[i].title, `/story/${d.stories[i].slug}`, 'kodak-imaging');
     if (section === 'products') return page('Shop', `/shop/${d.products[i].slug}`, 'favorites');
     if (section === 'pools') return page(d.pools[i].title, `/pool/${d.pools[i].slug}`, 'favorites');
     setOpen(i === open ? null : i);
@@ -152,7 +161,7 @@ const Directory: React.FC = () => {
                   <button key={s.id} onClick={() => go(s.id)} style={bigIcon}>
                     <img src={icon(s.icon, 32)} alt="" width={32} height={32} />
                     <span>{s.label}</span>
-                    <span style={{ color: '#666', fontSize: 10 }}>{d[s.id].length} item(s)</span>
+                    <span style={{ color: '#666', fontSize: 10 }}>{(d[s.id] || []).length} item(s)</span>
                   </button>
                 ))}
               </div>
