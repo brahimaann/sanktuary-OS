@@ -3100,6 +3100,8 @@ let shopDb = null;
 let shopSaved = Promise.resolve();
 const loadShop = async () => (shopDb ??= await readJson('shop.json', { products: {}, orders: {} }));
 const saveShop = () => (shopSaved = shopSaved.then(() => saveJson('shop.json', shopDb)).catch(console.error));
+// What the shop sells; the storefront filters by these (labels live in store.html and the Admin Panel)
+const SHOP_CATEGORIES = ['merch', 'presets', 'vocal-chains', 'samples', 'software', 'courses', 'other'];
 const productView = (p, admin) => ({
   id: p.id,
   slug: p.slug,
@@ -3107,6 +3109,7 @@ const productView = (p, admin) => ({
   description: p.description,
   price: p.price,
   kind: p.kind,
+  category: p.category || (p.kind === 'digital' ? 'other' : 'merch'),
   image: p.image,
   soldOut: p.stock !== null && p.stock <= 0,
   ...(admin ? { stock: p.stock, active: p.active, file: p.file ? { space: p.file.space, path: p.file.path } : null } : {}),
@@ -3144,7 +3147,8 @@ async function shopApi(req, res, url) {
     const p =
       Object.values(db.products).find((x) => (x.id === a || x.slug === a) && x.active && !x.deleted) || fail(404, 'No such product');
     if (!stripeReady()) fail(503, "The shop isn't taking payments yet");
-    const qty = Math.max(1, Math.min(10, Math.floor(Number((await jsonBody(req)).qty) || 1)));
+    const asked = Math.max(1, Math.min(10, Math.floor(Number((await jsonBody(req)).qty) || 1)));
+    const qty = p.kind === 'digital' ? 1 : asked; // one download link per order
     if (p.stock !== null && p.stock < qty) fail(409, p.stock ? `Only ${p.stock} left` : 'Sold out');
     const order = {
       id: randomUUID().slice(0, 10),
@@ -3204,6 +3208,8 @@ async function shopApi(req, res, url) {
       if (input.description !== undefined) p.description = String(input.description).slice(0, 4000);
       if (input.price !== undefined) p.price = Math.max(0.5, money(input.price));
       if (input.kind !== undefined) p.kind = input.kind === 'digital' ? 'digital' : 'physical';
+      if (input.category !== undefined)
+        p.category = SHOP_CATEGORIES.includes(input.category) ? input.category : fail(400, 'Unknown category');
       if (input.stock !== undefined)
         p.stock = input.stock === null || input.stock === '' ? null : Math.max(0, Math.floor(Number(input.stock) || 0));
       if (input.active !== undefined) p.active = !!input.active;

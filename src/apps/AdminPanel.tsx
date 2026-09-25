@@ -669,6 +669,7 @@ type Product = {
   description: string;
   price: number;
   kind: 'physical' | 'digital';
+  category: string;
   image: string | null;
   stock: number | null;
   active: boolean;
@@ -1198,6 +1199,20 @@ const ShopTab: React.FC = () => {
             >
               <option value="physical">Physical (shipped)</option>
               <option value="digital">Digital (download)</option>
+            </select>
+            Category
+            <select
+              style={{ ...input, width: 200 }}
+              value={product.category}
+              onChange={(e) => patchProduct(product.id, { category: e.target.value })}
+            >
+              <option value="merch">Merch</option>
+              <option value="presets">Presets (Photoshop, Lightroom...)</option>
+              <option value="vocal-chains">Vocal chains</option>
+              <option value="samples">Sample packs</option>
+              <option value="software">Programs &amp; plugins</option>
+              <option value="courses">Courses</option>
+              <option value="other">Other</option>
             </select>
             Stock
             <input

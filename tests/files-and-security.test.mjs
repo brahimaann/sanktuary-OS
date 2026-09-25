@@ -1454,7 +1454,15 @@ try {
   await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2}' });
   const teeCall = stripeCalls[stripeCalls.length - 1];
   check('merch asks Stripe for a shipping address', teeCall.form.get('shipping_address_collection[allowed_countries][0]') === 'US');
-  await fetch(B + `/api/shop/${beat.slug}/buy`, { method: 'POST', body: '{}' });
+  check(
+    'shop categories must be known ones',
+    (await call('alice', `/api/shop/products/${beat.id}`, 'PATCH', { category: '<script>' })).status === 400,
+  );
+  await call('alice', `/api/shop/products/${beat.id}`, 'PATCH', { category: 'vocal-chains' });
+  const cats = Object.fromEntries((await (await fetch(B + '/api/shop')).json()).products.map((p) => [p.id, p.category]));
+  check('products show their category (merch by default)', cats[beat.id] === 'vocal-chains' && cats[tee.id] === 'merch');
+  await fetch(B + `/api/shop/${beat.slug}/buy`, { method: 'POST', body: '{"qty":5}' });
+  check('a digital order is always one copy', stripeCalls[stripeCalls.length - 1].form.get('line_items[0][quantity]') === '1');
   const beatSession = `cs_test_${stripeCalls.length}`;
   const beatOrder = stripeCalls[stripeCalls.length - 1].form.get('metadata[order]');
   check('order is pending until Stripe confirms', (await (await fetch(B + `/api/shop/order/${beatSession}`)).json()).download === null);

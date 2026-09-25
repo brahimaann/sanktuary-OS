@@ -284,11 +284,30 @@
         } catch (e) {
           return fail(e);
         }
-        app.innerHTML = s.products.length
-          ? `<div class="grid">${s.products
+        // Filter chips for the categories that have something in them (?c=presets)
+        const CATS = {
+          merch: 'Merch',
+          presets: 'Presets',
+          'vocal-chains': 'Vocal chains',
+          samples: 'Sample packs',
+          software: 'Programs & plugins',
+          courses: 'Courses',
+          other: 'Other',
+        };
+        const c = new URLSearchParams(location.search).get('c');
+        const used = Object.keys(CATS).filter((k) => s.products.some((p) => p.category === k));
+        const shown = s.products.filter((p) => !CATS[c] || p.category === c);
+        const chips =
+          used.length > 1
+            ? `<div class="row" style="margin-bottom:8px;flex-wrap:wrap">${[['', 'All'], ...used.map((k) => [k, CATS[k]])]
+                .map(([k, l]) => `<a class="btn${(CATS[c] ? c : '') === k ? ' on' : ''}" href="/shop${k ? '?c=' + k : ''}">${esc(l)}</a>`)
+                .join('')}</div>`
+            : '';
+        app.innerHTML = shown.length
+          ? `${chips}<div class="grid">${shown
               .map(
                 (p) => `<a class="card" href="/shop/${esc(p.slug)}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : ''}
-                <div class="t"><b>${esc(p.title)}</b><div class="muted">${p.soldOut ? 'Sold out' : usd(p.price)} · ${p.kind === 'digital' ? 'digital download' : 'shipped'}</div></div></a>`,
+                <div class="t"><b>${esc(p.title)}</b><div class="muted">${p.soldOut ? 'Sold out' : usd(p.price)} · ${p.kind === 'digital' ? esc(CATS[p.category] || 'Digital') + ' · download' : 'shipped'}</div></div></a>`,
               )
               .join('')}</div>`
           : '<div class="inset">Nothing for sale yet. Check back soon.</div>';
