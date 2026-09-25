@@ -3,6 +3,7 @@ import { useApi, useMe } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
+import { openStudio } from '../apps/Studio';
 import RetroIcon from './RetroIcon';
 
 /**
@@ -124,23 +125,9 @@ export const NotificationTray: React.FC = () => {
         name: /\.(psd|psb|ai)$/i.test(w.name) ? w.dir[w.dir.length - 1] : w.name,
       });
     } else if (n.track) {
-      openWindow({
-        id: 'tracks',
-        title: 'Tracks',
-        icon: '/images/icons/media-player-16x16.png',
-        appType: 'tracks',
-        width: 900,
-        height: 600,
-      });
+      openStudio(openWindow, 'songs');
     } else if (n.timeline) {
-      openWindow({
-        id: 'timeline',
-        title: 'Timeline',
-        icon: '/images/icons/task-scheduler-16x16.png',
-        appType: 'timeline',
-        width: 900,
-        height: 600,
-      });
+      openStudio(openWindow, 'calendar');
     } else {
       openWindow({
         id: 'profile-me',

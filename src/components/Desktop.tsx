@@ -20,18 +20,17 @@ interface DesktopIconDef {
 const STUDIO_ICONS: DesktopIconDef[] = [
   { id: 'new', title: 'New...', icon: '/images/icons/file-32x32.png', appType: 'new', width: 460, height: 420 },
   { id: 'sanktuary-network', title: 'Team Files', icon: '/images/icons/network-32x32.png', appType: 'network', width: 560, height: 420 },
-  { id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-32x32.png', appType: 'tracks', width: 900, height: 600 },
-  { id: 'timeline', title: 'Timeline', icon: '/images/icons/task-scheduler-16x16.png', appType: 'timeline', width: 900, height: 600 },
-  { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
+  // Studio: songs (Tracks), calendar (Timeline) and to-do boards (Planner) in one window
   {
-    id: 'planner',
-    title: 'Planner',
-    icon: '/images/icons/task-32x32.png',
-    appType: 'boards',
-    appProps: { kind: 'kanban' },
-    width: 560,
-    height: 420,
+    id: 'studio',
+    title: 'Studio',
+    icon: '/images/icons/media-player-32x32.png',
+    appType: 'studio',
+    appProps: { tab: 'songs' },
+    width: 960,
+    height: 620,
   },
+  { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
   { id: 'teams', title: 'Messages', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
 ];
 

@@ -72,18 +72,18 @@ const MEMBER_TOUR: Step[] = [
     open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png', 560, 420),
   },
   {
-    title: 'Tracks fill themselves in',
+    title: 'Studio > Songs: tracks fill themselves in',
     text: 'Drop bounces into a release\'s folder (or onto Tracks): "03 Song v4.wav" becomes track 3 with v4 as its bounce. Projects, stems, BPM and the cover are linked by name.',
-    open: win('tracks', 'Tracks', 'tracks', 'media-player-16x16.png', 900, 600),
+    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'songs' }),
   },
   {
-    title: 'Timeline: shoots, shows, drops',
+    title: 'Studio > Calendar: shoots, shows, drops',
     text: 'One calendar for everything with a date, release days included. People on an entry get reminded the day before.',
-    open: win('timeline', 'Timeline', 'timeline', 'task-scheduler-16x16.png', 900, 600),
+    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'calendar' }),
   },
   {
-    title: 'Moodboards and the Planner',
-    text: 'Moodboards: drag images, audio and files onto a shared canvas. Planner: to-do boards. Both update live for everyone.',
+    title: 'Moodboards',
+    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Boards.',
     open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png', 560, 420),
   },
   {
@@ -131,7 +131,15 @@ const Tour: React.FC<{ member: boolean }> = ({ member }) => {
         </button>
         <span style={{ flex: 1 }} />
         {s.open && (
-          <button style={button} onClick={() => openWindow(s.open!)}>
+          <button
+            style={button}
+            onClick={() => {
+              // Studio may already be open on another tab: switch it
+              if (s.open!.appType === 'studio')
+                window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: (s.open!.appProps as { tab: string }).tab }));
+              openWindow(s.open!);
+            }}
+          >
             <IconLabel icon="external">Show me</IconLabel>
           </button>
         )}

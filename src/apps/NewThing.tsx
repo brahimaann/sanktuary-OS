@@ -4,6 +4,7 @@ import { RANK, useApi, useMe } from '../utils/api';
 import { parseWhen, describeWhen } from '../utils/when';
 import { uploadFiles } from '../utils/upload';
 import { useWindowManager } from '../wm/manager';
+import { openStudio } from './Studio';
 import { LogOn, shell, button } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { IconLabel, IconName } from '../components/RetroIcon';
@@ -118,18 +119,11 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const openTracks = (id: string) => {
     remember('sk_tracks_release', id);
     window.dispatchEvent(new CustomEvent('sk:tracks-release', { detail: id }));
-    openWindow({ id: 'tracks', title: 'Tracks', icon: '/images/icons/media-player-16x16.png', appType: 'tracks', width: 900, height: 600 });
+    openStudio(openWindow, 'songs');
   };
   const openTimeline = (id: string) => {
     window.dispatchEvent(new CustomEvent('sk:timeline-entry', { detail: id }));
-    openWindow({
-      id: 'timeline',
-      title: 'Timeline',
-      icon: '/images/icons/task-scheduler-16x16.png',
-      appType: 'timeline',
-      width: 900,
-      height: 600,
-    });
+    openStudio(openWindow, 'calendar');
   };
   const reset = () => {
     setTitle('');
