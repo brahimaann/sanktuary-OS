@@ -27,6 +27,22 @@ foreach ($f in 'drive-watch.ps1', 'sanktuary-backup.ps1') {
   }
 }
 
+# RapidRAW (Edit photo): once ops\rapidraw\setup.ps1 has installed it, rebuild it in the background whenever the
+# fork's "sanktuary" branch has a new commit. One attempt per commit (a failed build isn't retried every 2 minutes);
+# progress in C:\homeserver\rapidraw\update.log, status in Admin Panel > Health.
+$rr = 'C:\homeserver\rapidraw'
+if (Test-Path "$rr\src\.git") {
+  $want = ((git ls-remote https://github.com/brahimaann/rapidraw-sanktuary.git refs/heads/sanktuary 2>$null) -split '\s')[0]
+  $built = if (Test-Path "$rr\built.txt") { (Get-Content "$rr\built.txt" -Raw).Trim() } else { '' }
+  $tried = if (Test-Path "$rr\update-tried.txt") { (Get-Content "$rr\update-tried.txt" -Raw).Trim() } else { '' }
+  $busy = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object CommandLine -like '*rapidraw\setup.ps1*'
+  if ($want -and $want -ne $built -and $want -ne $tried -and -not $busy) {
+    Set-Content "$rr\update-tried.txt" $want
+    Log "RapidRAW: rebuilding at $($want.Substring(0, 7)) in the background"
+    Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "& '$proj\ops\rapidraw\setup.ps1' *> '$rr\update.log'"
+  }
+}
+
 git fetch --quiet origin main 2>$null
 if ($LASTEXITCODE -ne 0) { exit } # offline; try again next time
 $remote = (git rev-parse origin/main).Trim()

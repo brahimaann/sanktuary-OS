@@ -26,6 +26,7 @@ const dir = mkdtempSync(join(tmpdir(), 'sk-sec-'));
 const drive = join(dir, 'drive');
 mkdirSync(join(dir, 'data'));
 mkdirSync(join(drive, 'team', 'docs'), { recursive: true });
+mkdirSync(join(drive, 'vid2'), { recursive: true });
 writeFileSync(join(drive, 'team', 'docs', 'song.txt'), 'v1');
 writeFileSync(join(drive, 'team', 'evil.html'), '<script>alert(1)</script>');
 writeFileSync(join(drive, 'team', 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
@@ -44,7 +45,23 @@ writeFileSync(
       { id: 'up', name: 'Up', drive: 'd', path: `${rel}/team`, everyone: 'none', access: { bob: 'upload' } },
       { id: 'ed', name: 'Ed', drive: 'd', path: `${rel}/team`, everyone: 'none', access: { bob: 'edit' } },
       { id: 'off', name: 'Off', drive: 'off', path: `${rel}/team`, everyone: 'edit', access: {} },
+      // A combined space: two folders shown as one, open to the Editors group
+      {
+        id: 'vids',
+        name: 'Videos',
+        folders: [
+          { drive: 'd', path: `${rel}/team/docs`, label: 'Docs' },
+          { drive: 'd', path: `${rel}/vid2` },
+          { drive: 'off', path: `${rel}/team`, label: 'Unplugged' },
+        ],
+        everyone: 'none',
+        groups: { editors: 'upload' },
+        access: {},
+      },
+      // Group says edit, carol's own setting says view: her own setting wins
+      { id: 'grp', name: 'Grp', drive: 'd', path: `${rel}/team`, everyone: 'none', groups: { editors: 'edit' }, access: { carol: 'view' } },
     ],
+    groups: { editors: { name: 'Editors', members: ['carol'] } },
     members: {},
     backup: { drive: null, hour: 3 },
   }),
@@ -340,6 +357,46 @@ try {
   const devices = JSON.parse(readFileSync(join(dir, 'data', 'push.json'), 'utf8'));
   check('devices stored per member', devices.bob?.length === 1 && !devices.carol?.length);
   check('unsubscribe works', (await call('bob', '/api/push/unsubscribe', 'POST', { endpoint: sub.endpoint })).status === 200);
+
+  // Combined spaces and groups
+  const top = JSON.parse((await call('carol', '/api/files/vids/?list')).text);
+  check(
+    'a combined space lists its folders at the top',
+    top.combined && top.entries.map((e) => e.name).join(',') === 'Docs,vid2,Unplugged' && top.entries[2].offline === true,
+    JSON.stringify(top),
+  );
+  check("group members get the group's rights", top.rights === 'upload');
+  check('others do not see the space', (await call('bob', '/api/files/vids/?list')).status === 404);
+  check('files open through their folder', (await call('carol', '/api/files/vids/Docs/song.txt')).status === 200);
+  check(
+    'uploads land in the right folder on disk',
+    (await up('carol', 'vids', 'vid2/clip.txt', 'clip')).status === 200 && readFileSync(join(drive, 'vid2', 'clip.txt'), 'utf8') === 'clip',
+  );
+  check('nothing can be added at the top of a combined space', (await up('carol', 'vids', 'loose.txt', 'x')).status === 400);
+  check('an unknown folder is not found', (await call('carol', '/api/files/vids/Nope/?list')).status === 404);
+  check('a folder on an unplugged drive says so', (await call('carol', '/api/files/vids/Unplugged/?list')).status === 503);
+  check(
+    'paths cannot climb out of a folder',
+    (await call('carol', '/api/files/vids/vid2/..%2F..%2Fteam%2Fevil.html')).status === 400 &&
+      [400, 404].includes((await call('carol', '/api/files/vids/vid2/%2E%2E/team/old.txt')).status),
+  );
+  check('moves between the folders are refused', (await call('carol', '/api/files/vids/vid2/clip.txt?move=Docs', 'POST')).status === 400);
+  await call('carol', '/api/files/vids/vid2/sub?mkdir', 'POST');
+  check(
+    'moves within one folder work',
+    (await call('carol', '/api/files/vids/vid2/clip.txt?move=vid2/sub', 'POST')).status === 200 &&
+      existsSync(join(drive, 'vid2', 'sub', 'clip.txt')),
+  );
+  check(
+    'activity shows the path as members see it',
+    JSON.parse((await call('carol', '/api/activity')).text).some((a) => a.space === 'vids' && a.path === 'vid2/clip.txt'),
+  );
+  check(
+    'members can bin what they added in a combined space',
+    (await call('carol', '/api/files/vids/vid2/sub/clip.txt', 'DELETE')).status === 200,
+  );
+  check('but not what others added', (await call('carol', '/api/files/vids/Docs/song.txt', 'DELETE')).status === 403);
+  check("a person's own setting beats their group", (await up('carol', 'grp', 'g.txt', 'x')).status === 403);
 
   // Tracks: releases, track pages, private releases, notifications, deadlines
   const album = JSON.parse(
@@ -878,6 +935,38 @@ try {
 
   // Preview cache location (Admin Panel > Drives): only known drives accepted
   const cfgNow = JSON.parse(readFileSync(join(dir, 'data', 'config.json'), 'utf8'));
+  const badCfg = (patch) => call('alice', '/api/admin/config', 'PUT', { ...cfgNow, ...patch });
+  check(
+    'config: a space can only grant rights to groups that exist',
+    (
+      await badCfg({
+        spaces: [...cfgNow.spaces, { id: 'x1', name: 'X', drive: 'd', path: '', everyone: 'none', access: {}, groups: { ghosts: 'view' } }],
+      })
+    ).status === 400,
+  );
+  check(
+    'config: folder names cannot hold slashes',
+    (
+      await badCfg({
+        spaces: [
+          ...cfgNow.spaces,
+          { id: 'x2', name: 'X', folders: [{ drive: 'd', path: '', label: 'a/b' }], everyone: 'none', access: {} },
+        ],
+      })
+    ).status === 400,
+  );
+  check(
+    'config: folders cannot climb',
+    (
+      await badCfg({
+        spaces: [...cfgNow.spaces, { id: 'x3', name: 'X', folders: [{ drive: 'd', path: '../x' }], everyone: 'none', access: {} }],
+      })
+    ).status === 400,
+  );
+  check(
+    'config: group members must be usernames',
+    (await badCfg({ groups: { editors: { name: 'E', members: ['<script>'] } } })).status === 400,
+  );
   check(
     'cache on an unknown drive is refused',
     (await call('alice', '/api/admin/config', 'PUT', { ...cfgNow, cacheDrive: 'nope' })).status === 400,

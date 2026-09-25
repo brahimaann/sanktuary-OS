@@ -9,9 +9,11 @@ import FilePicker from '../components/FilePicker';
 interface Space {
   id: string;
   name: string;
-  drive: string;
-  path: string;
+  folders?: { drive: string; path: string; label?: string }[]; // one or more folders, from any drives
+  drive?: string; // older spaces: a single folder
+  path?: string;
   everyone: Rights;
+  groups?: Record<string, Rights>;
   access: Record<string, Rights>;
 }
 interface Config {
@@ -21,7 +23,18 @@ interface Config {
   members: Record<string, { drive?: string; quotaGB?: number }>;
   backup: { drive: string | null; hour: number };
   cacheDrive?: string | null;
+  groups?: Record<string, { name: string; members: string[] }>;
 }
+
+/** Older spaces (one drive + path) as a list of folders, so the Spaces tab only deals with one shape. */
+const normalize = (c: Config): Config => ({
+  ...c,
+  groups: c.groups || {},
+  spaces: c.spaces.map(({ drive, path, ...s }) => ({
+    ...s,
+    folders: s.folders?.length ? s.folders : drive ? [{ drive, path: path || '' }] : [],
+  })),
+});
 interface Drive {
   id: string;
   letter: string;
@@ -51,10 +64,10 @@ interface Health {
   publicSite: Check;
   watcher: { ok: boolean; lastSeen: string | null };
   deploy: { at: string; ok: boolean; commit: string; message: string } | null;
+  rapidraw?: Check;
 }
 
 const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Shop & pool', 'Log'] as const;
-const RIGHTS: Rights[] = ['none', 'view', 'upload', 'edit'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
 const AdminPanel: React.FC = () => {
@@ -65,11 +78,11 @@ const AdminPanel: React.FC = () => {
   const [draft, setDraft] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [msg, setMsg] = useState('');
-  const [picking, setPicking] = useState<number | null>(null); // space whose folder is being browsed
 
   const load = useCallback(async () => {
     try {
       const s: State = await api('/api/admin/state');
+      s.config = normalize(s.config);
       setState(s);
       setDraft(structuredClone(s.config));
       setMsg('');
@@ -226,147 +239,7 @@ const AdminPanel: React.FC = () => {
           </>
         )}
 
-        {tab === 'Spaces' && (
-          <>
-            <p style={hint}>
-              A space is a folder on a connected drive that you share with the team. Rights: <b>view</b> (browse, preview, download) ·{' '}
-              <b>upload</b> (+ add files and folders) · <b>edit</b> (+ replace, rename). Members can only delete (to trash) what they added
-              themselves; admins can delete anything. Removing a space never deletes files.
-            </p>
-            {draft.spaces.map((s, i) => (
-              <fieldset key={i} style={fieldset}>
-                <legend>{s.name || 'New space'}</legend>
-                <div style={row}>
-                  <label>
-                    Name{' '}
-                    <input
-                      style={input}
-                      value={s.name}
-                      onChange={(e) =>
-                        edit((c) => {
-                          c.spaces[i].name = e.target.value;
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Drive{' '}
-                    <select
-                      style={input}
-                      value={s.drive}
-                      onChange={(e) =>
-                        edit((c) => {
-                          c.spaces[i].drive = e.target.value;
-                        })
-                      }
-                    >
-                      {driveIds.map((id) => (
-                        <option key={id} value={id}>
-                          {driveName(id)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Folder{' '}
-                    <input
-                      style={input}
-                      value={s.path}
-                      placeholder="(whole drive)"
-                      onChange={(e) =>
-                        edit((c) => {
-                          c.spaces[i].path = e.target.value;
-                        })
-                      }
-                    />
-                  </label>
-                  <button style={button} onClick={() => setPicking(i)}>
-                    Browse...
-                  </button>
-                  <label>
-                    Everyone{' '}
-                    <RightsSelect
-                      value={s.everyone}
-                      onChange={(r) =>
-                        edit((c) => {
-                          c.spaces[i].everyone = r;
-                        })
-                      }
-                    />
-                  </label>
-                  <button
-                    style={button}
-                    onClick={async () =>
-                      (await dialog.confirm(`Remove the space "${s.name}"?\nFiles on the drive are not touched.`, { icon: 'warning' })) &&
-                      edit((c) => {
-                        c.spaces.splice(i, 1);
-                      })
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-                <div style={{ ...row, marginTop: 6 }}>
-                  {usernames
-                    .filter((u) => !draft.admins.includes(u))
-                    .map((u) => (
-                      <label key={u}>
-                        {u}{' '}
-                        <RightsSelect
-                          value={s.access[u] || 'default'}
-                          allowDefault
-                          onChange={(r) =>
-                            edit((c) => {
-                              if (r === 'default') delete c.spaces[i].access[u];
-                              else c.spaces[i].access[u] = r;
-                            })
-                          }
-                        />
-                      </label>
-                    ))}
-                </div>
-              </fieldset>
-            ))}
-            <button
-              style={button}
-              onClick={async () => {
-                const name = (await dialog.prompt('Name of the new space:'))?.trim();
-                if (name)
-                  edit((c) => {
-                    const id =
-                      name
-                        .toLowerCase()
-                        .replace(/[^a-z0-9]+/g, '-')
-                        .replace(/^-|-$/g, '') || 'space';
-                    c.spaces.push({
-                      id: c.spaces.some((x) => x.id === id) ? `${id}-${c.spaces.length}` : id,
-                      name,
-                      drive: driveIds.find((d) => c.drives[d]?.enabled) || driveIds[0],
-                      path: '',
-                      everyone: 'none',
-                      access: {},
-                    });
-                  });
-              }}
-            >
-              Add space...
-            </button>
-            {picking !== null && draft.spaces[picking] && (
-              <FolderPicker
-                drive={draft.spaces[picking].drive}
-                driveName={driveName(draft.spaces[picking].drive)}
-                start={draft.spaces[picking].path}
-                onPick={(path) => {
-                  if (path !== null)
-                    edit((c) => {
-                      c.spaces[picking].path = path;
-                    });
-                  setPicking(null);
-                }}
-              />
-            )}
-          </>
-        )}
+        {tab === 'Spaces' && <SpacesTab draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} usernames={usernames} />}
 
         {tab === 'Log' && <LogTab />}
         {tab === 'Blog' && <BlogTab />}
@@ -497,6 +370,7 @@ const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => 
       health?.deploy ? health.deploy.ok : null,
       health?.deploy ? `${health.deploy.message.split(/\r?\n/)[0]} · ${new Date(health.deploy.at).toLocaleString()}` : 'no deploys yet',
     ],
+    ['Photo editor (RapidRAW)', health?.rapidraw?.ok ?? null, health?.rapidraw?.note || ''],
     [
       'Docker',
       st ? st.dockerOk : null,
@@ -1392,20 +1266,360 @@ const LogTab: React.FC = () => {
   );
 };
 
-const RightsSelect: React.FC<{ value: string; allowDefault?: boolean; onChange: (r: any) => void }> = ({
-  value,
-  allowDefault,
-  onChange,
-}) => (
-  <select style={input} value={value} onChange={(e) => onChange(e.target.value)}>
-    {allowDefault && <option value="default">(everyone)</option>}
-    {RIGHTS.map((r) => (
-      <option key={r} value={r}>
-        {r}
+// ── Spaces: what members see in Team Files, made of one or more folders, and who can use each ──
+const ACCESS: [Rights, string][] = [
+  ['none', 'No access'],
+  ['view', 'Can view & download'],
+  ['upload', 'Can add files'],
+  ['edit', 'Full access (rename, replace)'],
+];
+const accessName = (r: Rights) => ACCESS.find(([k]) => k === r)?.[1] || r;
+const AccessSelect: React.FC<{ value: Rights | ''; empty?: string; onChange: (r: Rights | '') => void }> = ({ value, empty, onChange }) => (
+  <select style={input} value={value} onChange={(e) => onChange(e.target.value as Rights | '')}>
+    {empty && <option value="">{empty}</option>}
+    {ACCESS.map(([k, label]) => (
+      <option key={k} value={k}>
+        {label}
       </option>
     ))}
   </select>
 );
+const RANKS: Record<Rights, number> = { none: 0, view: 1, upload: 2, edit: 3 };
+const slug = (name: string, taken: string[]) => {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 30) || 'item';
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
+  return id;
+};
+const leaf = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || '';
+
+/** Who ends up with what in a space, and why (the same rule the server uses). */
+function effective(s: Space, groups: Config['groups'], username: string): { r: Rights; why: string } {
+  if (s.access?.[username]) return { r: s.access[username], why: 'own setting' };
+  let r: Rights = s.everyone || 'none';
+  let why = 'everyone';
+  for (const [g, gr] of Object.entries(s.groups || {}))
+    if (groups?.[g]?.members.includes(username) && RANKS[gr] > RANKS[r]) {
+      r = gr;
+      why = groups[g].name;
+    }
+  return { r, why };
+}
+
+const SpacesTab: React.FC<{
+  draft: Config;
+  edit: (fn: (c: Config) => void) => void;
+  driveIds: string[];
+  driveName: (id?: string | null) => string;
+  usernames: string[];
+}> = ({ draft, edit, driveIds, driveName, usernames }) => {
+  // Folder being chosen: in space i, folder j (or a new one), on a drive
+  const [picking, setPicking] = useState<{ i: number; j: number | null; drive: string } | null>(null);
+  const groups = draft.groups || {};
+  const people = usernames.filter((u) => !draft.admins.includes(u));
+  const firstDrive = driveIds.find((d) => draft.drives[d]?.enabled) || driveIds[0];
+
+  return (
+    <>
+      <p style={hint}>
+        A <b>space</b> is what members see in Team Files. It can be one folder, or several folders from different drives shown together (for
+        example four video folders as one <i>Videos</i> space). Removing a space or a folder never deletes files.
+      </p>
+
+      <fieldset style={fieldset}>
+        <legend>
+          <b>Groups</b>
+        </legend>
+        <p style={hint}>
+          Give access to a group once instead of person by person: add people to Editors and every space open to Editors opens for them.
+        </p>
+        {Object.entries(groups).map(([id, g]) => (
+          <div key={id} style={{ ...row, marginBottom: 6 }}>
+            <input
+              style={{ ...input, width: 120, fontWeight: 700 }}
+              value={g.name}
+              onChange={(e) =>
+                edit((c) => {
+                  c.groups![id].name = e.target.value;
+                })
+              }
+            />
+            {people.map((u) => (
+              <label key={u} style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={g.members.includes(u)}
+                  onChange={(e) =>
+                    edit((c) => {
+                      const m = c.groups![id].members.filter((x) => x !== u);
+                      c.groups![id].members = e.target.checked ? [...m, u] : m;
+                    })
+                  }
+                />
+                {u}
+              </label>
+            ))}
+            <button
+              style={button}
+              onClick={async () =>
+                (await dialog.confirm(`Remove the group "${g.name}"? Its members lose what the group gave them.`, { icon: 'warning' })) &&
+                edit((c) => {
+                  delete c.groups![id];
+                  for (const s of c.spaces) if (s.groups) delete s.groups[id];
+                })
+              }
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        <button
+          style={button}
+          onClick={async () => {
+            const name = (await dialog.prompt('Name of the group (e.g. Editors, Artists, Engineers):'))?.trim();
+            if (name)
+              edit((c) => {
+                c.groups ??= {};
+                c.groups[slug(name, Object.keys(c.groups))] = { name, members: [] };
+              });
+          }}
+        >
+          New group...
+        </button>
+      </fieldset>
+
+      {draft.spaces.map((s, i) => {
+        const folders = s.folders || [];
+        const who = people
+          .map((u) => ({ u, ...effective(s, groups, u) }))
+          .filter((x) => x.r !== 'none')
+          .map((x) => `${x.u} (${accessName(x.r).toLowerCase()}${x.why === 'everyone' ? '' : `, ${x.why}`})`);
+        return (
+          <fieldset key={s.id} style={fieldset}>
+            <legend>
+              <b>{s.name || 'New space'}</b>
+            </legend>
+            <div style={row}>
+              <label>
+                Name{' '}
+                <input
+                  style={input}
+                  value={s.name}
+                  onChange={(e) =>
+                    edit((c) => {
+                      c.spaces[i].name = e.target.value;
+                    })
+                  }
+                />
+              </label>
+              <button
+                style={button}
+                onClick={async () =>
+                  (await dialog.confirm(`Remove the space "${s.name}"?\nFiles on the drives are not touched.`, { icon: 'warning' })) &&
+                  edit((c) => {
+                    c.spaces.splice(i, 1);
+                  })
+                }
+              >
+                Remove space
+              </button>
+            </div>
+
+            <div style={{ margin: '8px 0 4px', fontWeight: 700 }}>Folders</div>
+            {folders.map((f, j) => (
+              <div key={j} style={{ ...row, marginBottom: 4 }}>
+                <span style={{ minWidth: 200 }}>
+                  <b>{driveName(f.drive)}</b> \ {f.path || '(whole drive)'}
+                </span>
+                {folders.length > 1 && (
+                  <label title="How this folder is named inside the space">
+                    shown as{' '}
+                    <input
+                      style={{ ...input, width: 130 }}
+                      value={f.label ?? ''}
+                      placeholder={leaf(f.path) || driveName(f.drive)}
+                      onChange={(e) =>
+                        edit((c) => {
+                          c.spaces[i].folders![j].label = e.target.value.replace(/[\\/:*?"<>|]/g, '') || undefined;
+                        })
+                      }
+                    />
+                  </label>
+                )}
+                <button style={button} onClick={() => setPicking({ i, j, drive: f.drive })}>
+                  Change...
+                </button>
+                {folders.length > 1 && (
+                  <button
+                    style={button}
+                    onClick={() =>
+                      edit((c) => {
+                        c.spaces[i].folders!.splice(j, 1);
+                      })
+                    }
+                  >
+                    Take out
+                  </button>
+                )}
+              </div>
+            ))}
+            <div style={row}>
+              <label>
+                Add a folder from{' '}
+                <select style={input} value="" onChange={(e) => e.target.value && setPicking({ i, j: null, drive: e.target.value })}>
+                  <option value="">(choose a drive)</option>
+                  {driveIds
+                    .filter((d) => draft.drives[d]?.enabled)
+                    .map((d) => (
+                      <option key={d} value={d}>
+                        {driveName(d)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {folders.length > 1 && <span style={{ color: '#444' }}>Each folder shows as its own folder inside the space.</span>}
+            </div>
+
+            <div style={{ margin: '10px 0 4px', fontWeight: 700 }}>Who can use it</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'max-content max-content', gap: '4px 10px', alignItems: 'center' }}>
+              <span>Everyone</span>
+              <AccessSelect
+                value={s.everyone}
+                onChange={(r) =>
+                  edit((c) => {
+                    c.spaces[i].everyone = (r || 'none') as Rights;
+                  })
+                }
+              />
+              {Object.entries(groups).map(([gid, g]) => (
+                <React.Fragment key={gid}>
+                  <span>
+                    {g.name} <span style={{ color: '#666' }}>({g.members.length})</span>
+                  </span>
+                  <AccessSelect
+                    value={s.groups?.[gid] || ''}
+                    empty="(same as everyone)"
+                    onChange={(r) =>
+                      edit((c) => {
+                        c.spaces[i].groups ??= {};
+                        if (r) c.spaces[i].groups![gid] = r;
+                        else delete c.spaces[i].groups![gid];
+                      })
+                    }
+                  />
+                </React.Fragment>
+              ))}
+              {Object.entries(s.access || {}).map(([u, r]) => (
+                <React.Fragment key={u}>
+                  <span>
+                    {u} <span style={{ color: '#666' }}>(just this person)</span>
+                  </span>
+                  <span style={{ display: 'flex', gap: 4 }}>
+                    <AccessSelect
+                      value={r}
+                      onChange={(v) =>
+                        edit((c) => {
+                          c.spaces[i].access[u] = (v || 'none') as Rights;
+                        })
+                      }
+                    />
+                    <button
+                      style={button}
+                      onClick={() =>
+                        edit((c) => {
+                          delete c.spaces[i].access[u];
+                        })
+                      }
+                    >
+                      ×
+                    </button>
+                  </span>
+                </React.Fragment>
+              ))}
+            </div>
+            <div style={{ ...row, marginTop: 6 }}>
+              <label>
+                Set one person differently{' '}
+                <select
+                  style={input}
+                  value=""
+                  onChange={(e) =>
+                    e.target.value &&
+                    edit((c) => {
+                      c.spaces[i].access[e.target.value] = effective(s, groups, e.target.value).r;
+                    })
+                  }
+                >
+                  <option value="">(choose)</option>
+                  {people
+                    .filter((u) => !s.access?.[u])
+                    .map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <p style={{ ...hint, marginTop: 6, color: '#000080' }}>
+              {who.length ? `Gets in: ${who.join(', ')}.` : 'Nobody but admins gets in yet.'} Admins always have full access.
+            </p>
+          </fieldset>
+        );
+      })}
+
+      <button
+        style={button}
+        onClick={async () => {
+          const name = (await dialog.prompt('Name of the new space:'))?.trim();
+          if (!name) return;
+          const i = draft.spaces.length;
+          edit((c) => {
+            c.spaces.push({
+              id: slug(
+                name,
+                c.spaces.map((x) => x.id),
+              ),
+              name,
+              folders: [],
+              everyone: 'none',
+              access: {},
+            });
+          });
+          if (firstDrive) setPicking({ i, j: null, drive: firstDrive });
+        }}
+      >
+        Add space...
+      </button>
+      <p style={{ ...hint, marginTop: 8 }}>
+        Members can bin (to a recoverable trash) only what they added themselves; admins can remove anything. Files can be moved within a
+        folder, not between the folders of a combined space (they can be on different drives).
+      </p>
+
+      {picking && draft.spaces[picking.i] && (
+        <FolderPicker
+          drive={picking.drive}
+          driveName={driveName(picking.drive)}
+          start={picking.j !== null ? draft.spaces[picking.i].folders![picking.j].path : ''}
+          onPick={(path) => {
+            if (path !== null)
+              edit((c) => {
+                const fs = (c.spaces[picking.i].folders ??= []);
+                if (picking.j === null) fs.push({ drive: picking.drive, path });
+                else fs[picking.j] = { ...fs[picking.j], drive: picking.drive, path };
+              });
+            setPicking(null);
+          }}
+        />
+      )}
+    </>
+  );
+};
 
 const Dot: React.FC<{ ok: boolean | null }> = ({ ok }) => (
   <span

@@ -12,7 +12,17 @@ Save $state
 $target = Letter $cfg.backup.drive
 $jobs = @()
 foreach ($s in $cfg.spaces) {
-  if ($s.drive -ne $cfg.backup.drive) { $jobs += , @($s.name, $s.drive, $s.path) }
+  # A space can combine several folders (from several drives): each is backed up to "<space>\<folder>"
+  $folders = @($s.folders | Where-Object { $_ })
+  if ($folders.Count -gt 1) {
+    foreach ($f in $folders) {
+      $label = if ($f.label) { $f.label } elseif ($f.path) { Split-Path $f.path -Leaf } else { $f.drive }
+      if ($f.drive -ne $cfg.backup.drive) { $jobs += , @("$($s.name)\$label", $f.drive, $f.path) }
+    }
+  } else {
+    $one = if ($folders.Count -eq 1) { $folders[0] } else { $s }
+    if ($one.drive -ne $cfg.backup.drive) { $jobs += , @($s.name, $one.drive, $one.path) }
+  }
 }
 foreach ($d in @($cfg.members.PSObject.Properties.Value | ForEach-Object { $_.drive } | Sort-Object -Unique)) {
   if ($d -and $d -ne $cfg.backup.drive) { $jobs += , @('Members', $d, 'Sanktuary Members') }

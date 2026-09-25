@@ -203,11 +203,35 @@ function driveDir(cfg, status, driveId) {
   return letter && existsSync(letter + sep) ? letter + sep : null;
 }
 
-/** Every space this user can see, including their personal space ("me"). */
+/** A space's folders: [{ drive, path, label? }]. Older spaces have a single drive + path. */
+const foldersOf = (s) => (Array.isArray(s.folders) && s.folders.length ? s.folders : [{ drive: s.drive, path: s.path || '' }]);
+
+/** What a member may do in a space: their own setting if they have one, else the best of Everyone and their groups. */
+function rightsIn(user, cfg, s) {
+  if (user.admin) return 'edit';
+  if (s.access?.[user.username]) return s.access[user.username];
+  let best = s.everyone || 'none';
+  for (const [g, r] of Object.entries(s.groups || {}))
+    if (cfg.groups?.[g]?.members?.includes(user.username) && RANK[r] > RANK[best]) best = r;
+  return best;
+}
+
+/** How each folder of a combined space is named inside it: its label, else its folder name (made unique). */
+function folderLabels(folders, cfg) {
+  const seen = new Set();
+  return folders.map((f) => {
+    const base = String(f.label || f.path?.split(/[\\/]/).filter(Boolean).pop() || cfg.drives[f.drive]?.name || 'Drive').slice(0, 60);
+    let label = base;
+    for (let n = 2; seen.has(label.toLowerCase()); n++) label = `${base} (${n})`;
+    seen.add(label.toLowerCase());
+    return label;
+  });
+}
+
+/** Every space this user can see, including their personal space ("me"). A space with several folders
+ * ("combined") shows each folder as a top-level folder inside it; see partOf(). */
 function spacesFor(user, cfg, status) {
-  const list = cfg.spaces
-    .map((s) => ({ ...s, rights: user.admin ? 'edit' : s.access?.[user.username] || s.everyone || 'none', sub: s.path || '' }))
-    .filter((s) => RANK[s.rights] > 0);
+  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s) })).filter((s) => RANK[s.rights] > 0);
   const mine = cfg.members[user.username];
   if (mine?.drive) {
     list.unshift({
@@ -216,13 +240,42 @@ function spacesFor(user, cfg, status) {
       drive: mine.drive,
       rights: 'edit',
       quotaGB: mine.quotaGB,
-      sub: join('Sanktuary Members', user.username),
+      folders: [{ drive: mine.drive, path: join('Sanktuary Members', user.username) }],
     });
   }
   return list.map((s) => {
-    const dir = driveDir(cfg, status, s.drive);
-    return { ...s, online: !!dir, driveRoot: dir, root: dir ? join(dir, s.sub) : null };
+    const folders = foldersOf(s);
+    const labels = folderLabels(folders, cfg);
+    const sources = folders.map((f, i) => {
+      const dir = driveDir(cfg, status, f.drive);
+      return {
+        label: labels[i],
+        drive: f.drive,
+        sub: f.path || '',
+        online: !!dir,
+        driveRoot: dir,
+        root: dir ? join(dir, f.path || '') : null,
+      };
+    });
+    if (sources.length === 1) {
+      const [f] = sources;
+      return { ...s, drive: f.drive, sub: f.sub, online: f.online, driveRoot: f.driveRoot, root: f.root, sources: undefined };
+    }
+    return { ...s, drive: null, sub: null, online: sources.some((f) => f.online), driveRoot: null, root: null, sources };
   });
+}
+
+/** One folder of a combined space, as an ordinary single-folder space (same id and rights). */
+function partOf(space, label) {
+  const src = space.sources.find((f) => f.label === label) || fail(404, 'No such folder');
+  if (!src.online) fail(503, `${src.label} is on a drive that isn't connected`);
+  return { ...space, drive: src.drive, sub: src.sub, driveRoot: src.driveRoot, root: src.root, online: true, sources: undefined, label };
+}
+
+/** Where a file lives on its drive: { drive, dpath } (works for combined spaces too). */
+function onDrive(space, file) {
+  const src = space.sources?.find((f) => f.root && inside(resolve(f.root), file)) || space;
+  return { drive: src.drive, dpath: relative(src.driveRoot, file).split(sep).join('/') };
 }
 
 // Folder sizes (personal-space quotas, zip progress) are cached for a minute and dropped on any write, so
@@ -271,22 +324,46 @@ async function files(req, res, url) {
   const user = await currentUser(req, url, cfg);
   const status = await loadStatus();
   const [, , , spaceId, ...rest] = url.pathname.split('/'); // /api/files/<space>/<path...>
-  const space = spacesFor(user, cfg, status).find((s) => s.id === spaceId) || fail(404, 'No such space');
-  if (!space.online) fail(503, 'Drive offline');
-  if (space.id === 'me') await mkdir(space.root, { recursive: true });
+  const whole = spacesFor(user, cfg, status).find((s) => s.id === spaceId) || fail(404, 'No such space');
+  if (!whole.online) fail(503, 'Drive offline');
+  if (whole.id === 'me') await mkdir(whole.root, { recursive: true });
+  const q = url.searchParams;
 
-  const root = resolve(space.root);
-  const parts = rest.map(decodeURIComponent);
+  let parts = rest.map(decodeURIComponent);
   if (parts.some((p) => /[:\x00-\x1f]/.test(p))) fail(400, 'Bad path');
+  // A combined space: its top level lists its folders; below that, everything happens in one folder on one drive
+  let space = whole;
+  let label = null;
+  if (whole.sources) {
+    parts = parts.filter(Boolean);
+    if (!parts.length) {
+      if (req.method === 'GET' && q.has('list')) {
+        const now = new Date().toISOString();
+        return json(res, {
+          rights: whole.rights,
+          combined: true,
+          entries: whole.sources.map((f) => ({ name: f.label, isDir: true, size: 0, modified: now, offline: !f.online })),
+        });
+      }
+      fail(400, 'Open one of the folders in this space first');
+    }
+    label = parts[0];
+    if (!whole.sources.some((f) => f.label === label))
+      fail(req.method === 'GET' ? 404 : 400, req.method === 'GET' ? 'No such folder' : 'Put files inside one of the folders in this space');
+    space = partOf(whole, label);
+    parts = parts.slice(1);
+  }
+  const root = resolve(space.root);
   const target = resolve(root, ...parts);
   if (!inside(root, target)) fail(400, 'Bad path');
   const rel = relative(root, target);
   const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
-  const q = url.searchParams;
+  /** A path as the member sees it in the space (with the folder's name first in a combined space). */
+  const shown = (p) => [label, p.split(sep).join('/')].filter(Boolean).join('/');
 
   // Downloads of projects say why: view only / playground copy / check-out
   const purpose = { view: ' (view only)', playground: ' (playground copy)', checkout: ' (checked out)' }[q.get('purpose')] || '';
-  const transfer = (action, bytes, path = rel) => logTransfer(req, user, action + purpose, space, path.split(sep).join('/'), bytes);
+  const transfer = (action, bytes, path = rel) => logTransfer(req, user, action + purpose, space, shown(path), bytes);
   if (req.method !== 'GET') forgetSizes(); // any change to files: cached folder sizes are stale
   if (req.method === 'GET') {
     need('view');
@@ -317,10 +394,11 @@ async function files(req, res, url) {
     return stream(req, res, q, target, transfer);
   }
   const log = (action, extra = {}) =>
-    space.id !== 'me' && logActivity(user, action, { space: space.id, spaceName: space.name, path: rel.split(sep).join('/'), ...extra });
+    space.id !== 'me' && logActivity(user, action, { space: space.id, spaceName: space.name, ...extra, path: shown(extra.path ?? rel) });
   if (req.method === 'PUT' && q.has('stage')) {
     // Check-in upload: goes to a hidden staging folder beside the project; POST /api/projects?action=checkin swaps it in
-    const { abs: proj } = locateIn(space, q.get('project'));
+    const { abs: proj } = locateIn(whole, q.get('project'));
+    if (!inside(root, proj)) fail(400, 'Bad check-in upload');
     if ((await loadProjects())[ownerKey(space, proj)]?.lock?.user !== user.username)
       fail(423, 'Check the project out before checking it in');
     if (!/^[\w-]{8,64}$/.test(q.get('stage')) || !inside(proj, target) || proj === root) fail(400, 'Bad check-in upload');
@@ -358,7 +436,13 @@ async function files(req, res, url) {
     // Drag and drop into another folder of the same space. ?move=<folder, "/"-separated; "" = the space's top>
     need('upload');
     if (target === root) fail(400, "Can't move the space itself");
-    const dest = resolve(root, ...q.get('move').split('/').filter(Boolean).map(safeName));
+    let into = q.get('move').split('/').filter(Boolean);
+    if (label) {
+      // Each folder of a combined space can be on a different drive: moves stay within one folder
+      if (into[0] !== label) fail(400, `Files can only be moved within "${label}" here (the other folders are on other drives)`);
+      into = into.slice(1);
+    }
+    const dest = resolve(root, ...into.map(safeName));
     if (!inside(root, dest) || inside(target, dest)) fail(400, "Can't move a folder into itself");
     if (!(await stat(dest).catch(() => null))?.isDirectory()) fail(404, 'No such folder');
     if (RANK[space.rights] < RANK.edit && !(await ownsAll(space, target, user.username)))
@@ -370,7 +454,7 @@ async function files(req, res, url) {
     await moveOwners(space, target, to);
     await moveProjects(space, target, to);
     autoScan(space, to, user.username).catch(console.error);
-    log('moved', { to: relative(root, to).split(sep).join('/') });
+    log('moved', { to: shown(relative(root, to)) });
     return json(res, { ok: true });
   }
   if (req.method === 'POST' && q.has('restore')) {
@@ -404,7 +488,10 @@ async function files(req, res, url) {
 // Files that were already on the drive have no owner, so only admins can delete them.
 let owners = null;
 let ownersSaved = Promise.resolve();
-const ownerKey = (space, file) => `${space.drive}|${relative(space.driveRoot, file).split(sep).join('/').toLowerCase()}`;
+const ownerKey = (space, file) => {
+  const { drive, dpath } = onDrive(space, file);
+  return `${drive}|${dpath.toLowerCase()}`;
+};
 const loadOwners = async () => (owners ??= await readJson('owners.json', {}));
 const saveOwners = () => (ownersSaved = ownersSaved.then(() => saveJson('owners.json', owners)).catch(console.error));
 
@@ -534,8 +621,7 @@ async function projectAt(space, abs) {
     all[key] = {
       kind,
       name: basename(abs),
-      drive: space.drive,
-      dpath: relative(space.driveRoot, abs).split(sep).join('/'),
+      ...onDrive(space, abs),
       status: 'Not started',
       lock: null,
       turn: null,
@@ -553,15 +639,16 @@ const pushHistory = (p, user, action, note) =>
 /** Where this project shows up for a member: { space, dir, name, isDir } in a space they can see, or null. */
 function locate(username, p, cfg, status) {
   const admin = cfg.admins.includes(username);
-  for (const s of spacesFor({ username, admin }, cfg, status)) {
-    if (s.drive !== p.drive) continue;
-    const sub = s.sub.split(/[\\/]/).filter(Boolean);
-    const parts = p.dpath.split('/');
-    if (sub.every((x, i) => x.toLowerCase() === parts[i]?.toLowerCase()) && parts.length > sub.length) {
-      const rel = parts.slice(sub.length);
-      return { space: s.id, spaceName: s.name, rights: s.rights, dir: rel.slice(0, -1), name: rel[rel.length - 1] };
+  for (const s of spacesFor({ username, admin }, cfg, status))
+    for (const f of s.sources || [{ drive: s.drive, sub: s.sub, label: null }]) {
+      if (f.drive !== p.drive) continue;
+      const sub = f.sub.split(/[\\/]/).filter(Boolean);
+      const parts = p.dpath.split('/');
+      if (sub.every((x, i) => x.toLowerCase() === parts[i]?.toLowerCase()) && parts.length > sub.length) {
+        const rel = [...(f.label ? [f.label] : []), ...parts.slice(sub.length)];
+        return { space: s.id, spaceName: s.name, rights: s.rights, dir: rel.slice(0, -1), name: rel[rel.length - 1] };
+      }
     }
-  }
   return null;
 }
 
@@ -633,21 +720,21 @@ async function moveProjects(space, from, to) {
         all[b + k.slice(a.length)] = {
           ...all[k],
           name: k === a ? basename(to) : all[k].name,
-          dpath: relative(space.driveRoot, to).split(sep).join('/') + all[k].dpath.slice(relative(space.driveRoot, from).length),
+          dpath: onDrive(space, to).dpath + all[k].dpath.slice(onDrive(space, from).dpath.length),
         };
       delete all[k];
     }
   saveProjects();
-  const fromD = relative(space.driveRoot, from).split(sep).join('/');
+  const { drive: fromDrive, dpath: fromD } = onDrive(space, from);
   for (const l of Object.values(await loadLinks()))
     if (
-      l.drive === space.drive &&
+      l.drive === fromDrive &&
       (l.dpath.toLowerCase() === fromD.toLowerCase() || l.dpath.toLowerCase().startsWith(fromD.toLowerCase() + '/'))
     ) {
       if (!to)
         l.revoked = true; // deleted: the link stops working
       else {
-        const toD = relative(space.driveRoot, to).split(sep).join('/');
+        const toD = onDrive(space, to).dpath;
         if (l.dpath.length === fromD.length) l.name = basename(to);
         l.dpath = toD + l.dpath.slice(fromD.length);
       }
@@ -799,11 +886,16 @@ async function pushApi(req, res, url) {
 
 /** Resolve "a/b/c" inside a space, refusing anything that escapes it. */
 function locateIn(space, relPath) {
-  const root = resolve(space.root);
-  const parts = String(relPath || '')
+  let parts = String(relPath || '')
     .split('/')
     .filter(Boolean);
   if (parts.some((p) => /[:\x00-\x1f]/.test(p) || p === '..')) fail(400, 'Bad path');
+  if (space.sources) {
+    if (!parts.length) fail(400, 'Pick one of the folders in this space');
+    space = partOf(space, parts[0]);
+    parts = parts.slice(1);
+  }
+  const root = resolve(space.root);
   const abs = resolve(root, ...parts);
   if (!inside(root, abs)) fail(400, 'Bad path');
   return { root, abs };
@@ -1029,7 +1121,7 @@ async function linksApi(req, res, url) {
   if (!space.online) fail(503, 'Drive offline');
   const { root, abs } = locateIn(space, q.path);
   if (abs === root) fail(400, 'Share a folder or file inside the space');
-  const key = `${space.drive}|${relative(space.driveRoot, abs).split(sep).join('/').toLowerCase()}`;
+  const key = ownerKey(space, abs);
 
   if (req.method === 'GET') {
     const list = [];
@@ -1045,8 +1137,7 @@ async function linksApi(req, res, url) {
     if (password && password.length < 4) fail(400, 'Use a password of at least 4 characters');
     const t = randomBytes(24).toString('base64url');
     all[t] = {
-      drive: space.drive,
-      dpath: relative(space.driveRoot, abs).split(sep).join('/'),
+      ...onDrive(space, abs),
       name: basename(abs),
       isDir: s.isDirectory(),
       createdBy: user.username,
@@ -2896,7 +2987,7 @@ async function shopApi(req, res, url) {
           if (!space.online) fail(503, 'Drive offline');
           const { abs } = locateIn(space, ref.path);
           const s = (await stat(abs).catch(() => null)) || fail(404, 'That file is gone');
-          p.file = { ...ref, drive: space.drive, dpath: relative(space.driveRoot, abs).split(sep).join('/'), isDir: s.isDirectory() };
+          p.file = { ...ref, ...onDrive(space, abs), isDir: s.isDirectory() };
         }
       }
     };
@@ -3042,11 +3133,20 @@ async function rawApi(req, res, url) {
   };
   // real paths in answers -> sk://space/...
   // Deepest root first; among spaces over the same folder, the one this request used
+  // [real root, sk path prefix, space id]; each folder of a combined space is its own root ("space/Label")
   const roots = () =>
-    spaces.map((s) => [resolve(s.root).toLowerCase(), s.id]).sort((a, b) => b[0].length - a[0].length || used.has(b[1]) - used.has(a[1]));
+    spaces
+      .flatMap((s) =>
+        s.sources
+          ? s.sources.filter((f) => f.online).map((f) => [resolve(f.root).toLowerCase(), `${s.id}/${f.label}`, s.id])
+          : [[resolve(s.root).toLowerCase(), s.id, s.id]],
+      )
+      .sort((a, b) => b[0].length - a[0].length || used.has(b[2]) - used.has(a[2]));
   const toSk = (v) => {
     if (typeof v === 'string' && /^[a-z]:[\\/]/i.test(v)) {
-      const hit = roots().find(([r]) => v.toLowerCase().startsWith(r));
+      const l = v.toLowerCase();
+      // whole folders only: D:\team must not claim D:\teamx
+      const hit = roots().find(([r]) => l.startsWith(r) && (l.length === r.length || /[\\/]$/.test(r) || /[\\/]/.test(l[r.length])));
       return hit
         ? `sk://${hit[1]}/${v
             .slice(hit[0].length)
@@ -3748,22 +3848,68 @@ function validateConfig(c, user) {
   for (const s of c.spaces) {
     ok(/^[a-z0-9-]{1,40}$/.test(s.id) && s.id !== 'me' && !ids.has(s.id), `Bad or duplicate space id "${s.id}"`);
     ids.add(s.id);
-    ok(s.name && c.drives[s.drive], `Space "${s.name || s.id}" needs a name and a known drive`);
+    const folders = foldersOf(s);
     ok(
-      !String(s.path || '')
-        .split(/[\\/]/)
-        .includes('..') && !/[:\x00-\x1f]/.test(s.path || ''),
-      `Bad folder path in "${s.name}"`,
+      s.name && folders.length <= 20 && folders.every((f) => c.drives[f.drive]),
+      `Space "${s.name || s.id}" needs a name and known drives`,
     );
+    for (const f of folders) {
+      ok(
+        !String(f.path || '')
+          .split(/[\\/]/)
+          .includes('..') && !/[:\x00-\x1f]/.test(f.path || ''),
+        `Bad folder path in "${s.name}"`,
+      );
+      ok(!f.label || (/^[^\\/:*?"<>|\x00-\x1f]{1,60}$/.test(f.label) && !/^\.+$/.test(f.label)), `Bad folder name in "${s.name}"`);
+    }
     ok(
-      RANK[s.everyone || 'none'] !== undefined && Object.values(s.access || {}).every((r) => RANK[r] !== undefined),
+      RANK[s.everyone || 'none'] !== undefined &&
+        Object.values(s.access || {}).every((r) => RANK[r] !== undefined) &&
+        Object.entries(s.groups || {}).every(([g, r]) => c.groups?.[g] && RANK[r] !== undefined),
       `Bad rights in "${s.name}"`,
     );
   }
+  for (const [id, g] of Object.entries(c.groups || {}))
+    ok(
+      /^[a-z0-9-]{1,40}$/.test(id) &&
+        typeof g.name === 'string' &&
+        g.name.length <= 60 &&
+        Array.isArray(g.members) &&
+        g.members.every((u) => /^[\w.-]{1,64}$/.test(u)),
+      `Bad group "${id}"`,
+    );
   for (const [name, m] of Object.entries(c.members)) ok(!m.drive || c.drives[m.drive], `Unknown drive for ${name}`);
   ok(c.backup && Number.isInteger(c.backup.hour) && c.backup.hour >= 0 && c.backup.hour < 24, 'Backup hour must be 0-23');
   ok(!c.cacheDrive || c.drives[c.cacheDrive], 'Unknown drive for the preview cache');
   return c;
+}
+
+/** Admin Panel > Health: is the photo editor's engine answering, which fork commit is built, is an update running. */
+async function rawHealth() {
+  const home = dirname(RAW_UI);
+  const read = (f) =>
+    readFile(join(home, f), 'utf8').then(
+      (t) => t.trim(),
+      () => '',
+    );
+  const [built, tried, log] = await Promise.all([read('built.txt'), read('update-tried.txt'), read('update.log')]);
+  const up = await fetch(RAW_BRIDGE + '/invoke/get_supported_file_types', {
+    method: 'POST',
+    headers: { 'x-bridge-token': process.env.RAPIDRAW_TOKEN || '' },
+    body: '{}',
+    signal: AbortSignal.timeout(3000),
+  }).then(
+    (r) => r.ok,
+    () => false,
+  );
+  const updating = !!tried && tried !== built;
+  const lastLine = log.split(/\r?\n/).filter(Boolean).pop() || '';
+  const note = !existsSync(join(RAW_UI, 'index.html'))
+    ? 'not installed: run ops\\rapidraw\\setup.ps1 on this PC'
+    : `${up ? 'engine answers' : 'engine not answering'}${built ? ` · built ${built.slice(0, 7)}` : ' · build date unknown (run setup once)'}${
+        updating ? ` · updating to ${tried.slice(0, 7)}: ${lastLine.slice(0, 120)}` : ''
+      }`;
+  return { ok: up && !updating, note };
 }
 
 async function health() {
@@ -3802,6 +3948,7 @@ async function health() {
     publicSite,
     watcher: { ok: !!status && Date.now() - Date.parse(status.updated) < 3 * 60_000, lastSeen: status?.updated || null },
     deploy: await readJson('deploy.json', null),
+    rapidraw: await rawHealth(),
     host: os.hostname(),
   };
 }

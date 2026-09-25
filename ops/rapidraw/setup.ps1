@@ -82,10 +82,14 @@ set SANKTUARY_BRIDGE_PORT=$port
 set SANKTUARY_BRIDGE_TOKEN=$token
 "$($exe.FullName)" >> "$home_\engine.log" 2>&1
 "@
-$a = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless cmd.exe /c `"$start`""
-$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName 'Sanktuary RapidRAW' -Action $a -Trigger $t -Settings $s -Force | Out-Null
+# The task runs start.cmd, so later rebuilds (including the automatic ones from ops\deploy.ps1, which may not
+# have admin rights) only rewrite start.cmd and don't need to touch the task.
+if (-not (Get-ScheduledTask -TaskName 'Sanktuary RapidRAW' -ErrorAction SilentlyContinue)) {
+  $a = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless cmd.exe /c `"$start`""
+  $t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
+  Register-ScheduledTask -TaskName 'Sanktuary RapidRAW' -Action $a -Trigger $t -Settings $s | Out-Null
+}
 
 Step 'Start and check'
 Get-CimInstance Win32_Process -Filter "Name='$($exe.Name)'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
@@ -100,6 +104,7 @@ foreach ($i in 1..30) {
 }
 if (-not $ok) { throw "The engine didn't answer on 127.0.0.1:$port. See $home_\engine.log" }
 Write-Host 'The engine answers.' -ForegroundColor Green
+Set-Content (Join-Path $home_ 'built.txt') (git -C $src rev-parse HEAD) # auto-deploy compares this with the fork
 
 if ($newToken) {
   Step 'Restarting Sanktuary so it reads the new token'

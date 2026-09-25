@@ -139,7 +139,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     }
     const data = await res.json();
     const list: Entry[] = data.entries;
-    setRights(data.rights);
+    setRights(data.combined ? 'view' : data.rights); // top of a combined space: only its folders, nothing to add here
     setLockedBy(data.lockedBy);
     setQuota(data.quota ? { used: data.used, quota: data.quota } : null);
     list.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name, undefined, { numeric: true }));
