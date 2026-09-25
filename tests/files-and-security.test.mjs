@@ -1014,6 +1014,15 @@ try {
   );
   check('post readable by its address', (await (await fetch(B + '/api/blog/post/why-culture')).json()).title === 'Why culture');
   check('two-part blog addresses load the page', (await fetch(B + '/blog/boroma/what-does-change-look-like')).status === 200);
+  const notesWall = await fetch(B + '/api/blog/notes');
+  check('notes wall reads without an account', notesWall.status === 200 && Array.isArray((await notesWall.json()).notes));
+  const titledNotes = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Notes', body: 'x' })).text);
+  await call('alice', `/api/blog/posts/${titledNotes.id}`, 'PATCH', { published: true });
+  check(
+    'a post called "Notes" does not take over /blog/notes',
+    JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === titledNotes.id).slug !== 'notes',
+  );
+  await call('alice', `/api/blog/posts/${titledNotes.id}`, 'DELETE');
   check('full post readable', (await (await fetch(B + `/api/blog/post/${draft.id}`)).json()).body.includes('Second'));
   check(
     'cover must be one of our images',

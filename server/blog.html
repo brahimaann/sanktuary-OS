@@ -211,6 +211,91 @@
       .foot a {
         color: #fff;
       }
+      /* Notes wall: TheSlap-style status boxes, each a little window in its writer's colour */
+      .wall {
+        margin: -10px;
+        padding: 12px;
+        background:
+          radial-gradient(circle, rgba(255, 255, 255, 0.35) 2px, transparent 2.5px) 0 0 / 18px 18px,
+          #3a1c71;
+        min-height: 300px;
+      }
+      .note {
+        background: #fff;
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+        margin: 0 auto 14px;
+        max-width: 620px;
+      }
+      .note .hd {
+        color: #fff;
+        font-weight: 700;
+        padding: 3px 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .note .hd img {
+        width: 32px;
+        height: 32px;
+        border: 2px solid #fff;
+        object-fit: cover;
+        background: #fff;
+      }
+      .note .hd .ago {
+        margin-left: auto;
+        font-weight: 400;
+        font-size: 11px;
+      }
+      .note .txt {
+        padding: 10px 12px;
+        font:
+          15px/1.5 Georgia,
+          serif;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .note .txt p {
+        margin: 0 0 8px;
+      }
+      .note .txt.long {
+        max-height: 15em;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(#000 70%, transparent);
+        mask-image: linear-gradient(#000 70%, transparent);
+      }
+      .note .txt a,
+      .note .ft a {
+        color: var(--navy);
+      }
+      .note .pics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 4px;
+        padding: 0 12px 10px;
+      }
+      .note .pics img {
+        width: 100%;
+        max-height: 360px;
+        object-fit: cover;
+        border: 1px solid #808080;
+      }
+      .note .ft {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 4px 12px 6px;
+        border-top: 1px solid #ddd;
+        font-size: 12px;
+        color: #444;
+        flex-wrap: wrap;
+      }
+      .note .ft .btn {
+        margin-left: auto;
+        min-height: 24px;
+        padding: 2px 8px;
+      }
       @media (max-width: 520px) {
         .post {
           flex-direction: column;
@@ -251,6 +336,7 @@
       function list() {
         const writers = [...new Set(all.map((p) => p.publication))];
         bar.innerHTML =
+          tabs('posts') +
           `<button class="btn ${filter ? '' : 'on'}" data-f="">All</button>` +
           writers.map((w) => `<button class="btn ${filter === w ? 'on' : ''}" data-f="${esc(w)}">${esc(w)}</button>`).join('');
         bar.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => ((filter = b.dataset.f), list())));
@@ -259,12 +345,12 @@
           shown
             .map(
               (p) => `<a class="post" href="${esc(p.url)}" data-open>
-              ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
-              <div style="min-width:0">
-                <div class="meta"><span class="chip" style="background:${p.source === 'sanktuary' ? '#000080' : '#ff6719'}">${p.source === 'sanktuary' ? 'Sanktuary' : 'Substack'}</span>${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-                <h2>${esc(p.title)}</h2>
-                <div class="excerpt">${esc(p.excerpt)}</div>
-              </div></a>`,
+                    ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+                    <div style="min-width:0">
+                      <div class="meta"><span class="chip" style="background:${p.source === 'sanktuary' ? '#000080' : '#ff6719'}">${p.source === 'sanktuary' ? 'Sanktuary' : 'Substack'}</span>${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
+                      <h2>${esc(p.title)}</h2>
+                      <div class="excerpt">${esc(p.excerpt)}</div>
+                    </div></a>`,
             )
             .join('') || '<div class="empty">No posts yet. Check back soon.</div>';
         app.querySelectorAll('[data-open]').forEach(
@@ -294,12 +380,81 @@
           ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
           : '';
         app.innerHTML = `<article class="reader"><h1>${esc(p.title)}</h1><div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-          ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : paragraphs(p.body)}${credit}</article>`;
+                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : paragraphs(p.body)}${credit}</article>`;
         scrollTo(0, 0);
+      }
+
+      // Posts | Notes switch, on both list pages
+      function tabs(on) {
+        return `<a class="btn ${on === 'posts' ? 'on' : ''}" href="/blog" data-nav><b>Posts</b></a><a class="btn ${on === 'notes' ? 'on' : ''}" href="/blog/notes" data-nav><b>Notes</b></a><span style="width:10px"></span>`;
+      }
+      addEventListener('click', (e) => {
+        const a = e.target.closest('[data-nav]');
+        if (!a) return;
+        e.preventDefault();
+        history.pushState(null, '', a.getAttribute('href'));
+        route();
+      });
+      const ago = (d) => {
+        const m = Math.round((Date.now() - new Date(d)) / 60000);
+        return m < 60 ? `${Math.max(1, m)}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : when(d);
+      };
+      const COLORS = ['#e6007e', '#0078d7', '#ff8c00', '#00a651', '#7b2fbe', '#d4145a', '#00897b'];
+      const colorOf = (name) => COLORS[[...String(name)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % COLORS.length];
+      // Note text is plain: escaped, with https links made clickable
+      const linkify = (t) =>
+        esc(t).replace(/https:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+      const isLong = (t) => t.length > 600 || t.split('\n').filter(Boolean).length > 10; // folded, with Read more
+      let allNotes = null;
+      let noteFilter = '';
+
+      async function notes() {
+        document.title = 'Notes · Sanktuary Blog';
+        if (!allNotes) {
+          app.textContent = 'Loading...';
+          try {
+            allNotes = (await (await fetch('/api/blog/notes')).json()).notes;
+          } catch {
+            app.innerHTML = '<div class="empty">Notes could not load. Try again in a minute.</div>';
+            return;
+          }
+        }
+        const writers = [...new Set(allNotes.map((n) => n.author))];
+        bar.innerHTML =
+          tabs('notes') +
+          (writers.length > 1
+            ? `<button class="btn ${noteFilter ? '' : 'on'}" data-w="">Everyone</button>` +
+              writers.map((w) => `<button class="btn ${noteFilter === w ? 'on' : ''}" data-w="${esc(w)}">${esc(w)}</button>`).join('')
+            : '');
+        bar.querySelectorAll('[data-w]').forEach((b) => (b.onclick = () => ((noteFilter = b.dataset.w), notes())));
+        const shown = allNotes.filter((n) => !noteFilter || n.author === noteFilter);
+        app.innerHTML = `<div class="wall">${
+          shown
+            .map(
+              (n) => `<div class="note">
+                    <div class="hd" style="background:${colorOf(n.author)}">${n.avatar ? `<img src="${esc(n.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span>${esc(n.author)}<br><span style="font-weight:400;font-size:11px">${esc(n.publication)}</span></span><span class="ago" title="${esc(new Date(n.date).toLocaleString())}">${ago(n.date)}</span></div>
+                    <div class="txt${isLong(n.body) ? ' long' : ''}">${n.body
+                      .split(/\n{2,}/)
+                      .map((p) => `<p>${linkify(p.trim())}</p>`)
+                      .join('')}</div>${isLong(n.body) ? '<button class="btn more" style="margin:0 12px 8px">Read more</button>' : ''}
+                    ${n.images.length ? `<div class="pics">${n.images.map((i) => `<img src="${esc(i)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join('')}</div>` : ''}
+                    <div class="ft"><span>&#9829; ${n.likes}</span><span>&#8635; ${n.restacks}</span>${n.post ? `<a href="${esc(n.post.url)}" target="_blank" rel="noopener noreferrer">${esc(n.post.title || 'Linked post')}</a>` : ''}<a class="btn" href="${esc(n.external)}" target="_blank" rel="noopener noreferrer">Reply on Substack</a></div>
+                  </div>`,
+            )
+            .join('') || '<div class="empty" style="max-width:620px;margin:0 auto">No notes yet. Check back soon.</div>'
+        }</div>`;
+        app.querySelectorAll('.more').forEach(
+          (b) =>
+            (b.onclick = () => {
+              b.previousElementSibling.classList.remove('long');
+              b.remove();
+            }),
+        );
       }
 
       async function route() {
         const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
+        if (path === 'notes') return notes();
         if (path) return read(path);
         document.title = 'Sanktuary Blog';
         if (!all.length) {

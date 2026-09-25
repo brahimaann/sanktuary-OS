@@ -2533,6 +2533,67 @@ async function readFeed(feed) {
   }
 }
 
+// Substack Notes (the short posts) aren't in RSS; they come from Substack's public profile feed, per writer.
+// Not an official API, so it's read gently (cached like the feeds) and a failure just leaves the wall empty.
+// Only plain text, pictures from Substack's own image hosts and links back to Substack are passed on.
+const notesCache = new Map(); // substack user id -> { at, items }
+const writerIds = new Map(); // feed url -> [user ids] (the publication's bylines)
+const SUBSTACK_IMAGE = /^https:\/\/(substack-post-media\.s3\.amazonaws\.com|substackcdn\.com)\//;
+const substackGet = (u) =>
+  fetch(u, { headers: { 'user-agent': 'Sanktuary blog reader (sanktuary.studio)' }, signal: AbortSignal.timeout(10_000) }).then((r) =>
+    r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)),
+  );
+
+async function readNotes(feed) {
+  const host = new URL(feed.url).hostname;
+  if (!host.endsWith('.substack.com')) return [];
+  try {
+    if (!writerIds.has(feed.url)) {
+      const archive = await substackGet(`https://${host}/api/v1/archive?limit=5`);
+      const ids = [...new Set(archive.flatMap((p) => (p.publishedBylines || []).map((b) => b.id)))].filter(Number.isInteger);
+      writerIds.set(feed.url, ids.slice(0, 3));
+    }
+    const lists = await Promise.all(
+      writerIds.get(feed.url).map(async (id) => {
+        const hit = notesCache.get(id);
+        if (hit && Date.now() - hit.at < FEED_MINUTES * 60_000) return hit.items;
+        const items = await substackGet(`https://substack.com/api/v1/reader/feed/profile/${id}?types%5B%5D=note`)
+          .then((d) =>
+            (d.items || [])
+              .map((it) => it.comment)
+              .filter((c) => c && !c.ancestor_path && /^[\w-]{1,60}$/.test(c.handle || '') && Number.isInteger(c.id))
+              .slice(0, 20)
+              .map((c) => ({
+                id: `note-${c.id}`,
+                author: String(c.name || c.handle).slice(0, 80),
+                publication: feed.name,
+                avatar: SUBSTACK_IMAGE.test(c.photo_url || '') ? c.photo_url : null,
+                body: String(c.body || '').slice(0, 5000),
+                date: new Date(c.date || Date.now()).toISOString(),
+                likes: Number(c.reaction_count) || 0,
+                restacks: Number(c.restacks) || 0,
+                images: (c.attachments || [])
+                  .filter((a) => a.type === 'image' && SUBSTACK_IMAGE.test(a.imageUrl || ''))
+                  .map((a) => a.imageUrl)
+                  .slice(0, 4),
+                post:
+                  (c.attachments || [])
+                    .filter((a) => a.type === 'post' && httpsOnly(a.post?.canonical_url))
+                    .map((a) => ({ title: String(a.post.title || '').slice(0, 200), url: a.post.canonical_url }))[0] || null,
+                external: `https://substack.com/@${c.handle}/note/c-${c.id}`,
+              })),
+          )
+          .catch(() => hit?.items || []);
+        notesCache.set(id, { at: Date.now(), items });
+        return items;
+      }),
+    );
+    return lists.flat();
+  } catch {
+    return [];
+  }
+}
+
 const ownPostView = (p, full) => ({
   id: p.id,
   source: 'sanktuary',
@@ -2559,6 +2620,12 @@ async function blogApi(req, res, url) {
     const posts = [...own, ...fromFeeds.map(({ html, ...rest }) => rest)].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, { posts, writers: db.feeds.map((f) => f.name) });
+  }
+  if (req.method === 'GET' && what === 'notes') {
+    const byId = new Map((await Promise.all(db.feeds.map(readNotes))).flat().map((n) => [n.id, n])); // a writer on two feeds shows once
+    const notes = [...byId.values()].sort((a, b) => b.date.localeCompare(a.date));
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, { notes: notes.slice(0, 80) });
   }
   if (req.method === 'GET' && what === 'post') {
     // /api/blog/post/<our slug or id>  or  /api/blog/post/<substack publication>/<post slug>
@@ -2639,7 +2706,7 @@ async function blogApi(req, res, url) {
       // A readable address, fixed once published so shared links keep working: /blog/why-culture-matters
       if (p.published && !p.slug) {
         const base = slugify(p.title) || p.id;
-        const taken = new Set(Object.values(db.posts).map((x) => x.slug));
+        const taken = new Set([...Object.values(db.posts).map((x) => x.slug), 'notes']); // /blog/notes is the notes wall
         p.slug = taken.has(base) ? `${base}-${p.id.slice(0, 4)}` : base;
       }
       p.updated = new Date().toISOString();
