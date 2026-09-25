@@ -57,6 +57,11 @@ Pop-Location
 
 Step 'Engine (cargo build --release; first time is slow)'
 Push-Location (Join-Path $src 'src-tauri')
+# The running engine locks its .exe, but Windows lets it be renamed: move it aside so cargo can write the new one
+Get-ChildItem target\release\*.exe -ErrorAction SilentlyContinue | ForEach-Object {
+  Remove-Item "$($_.FullName).old" -Force -ErrorAction SilentlyContinue
+  Rename-Item $_.FullName "$($_.Name).old"
+}
 cargo build --release
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw 'The engine did not build. Send the errors above to Claude.' }
 $exe = Get-ChildItem target\release\*.exe | Where-Object Name -notmatch 'build-script' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
