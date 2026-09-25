@@ -51,6 +51,22 @@ $last = if (Test-Path $stateFile) { (Get-Content $stateFile -Raw | ConvertFrom-J
 if ($last -and $last.commit -eq $remote) { exit } # already live (or already failed on this commit)
 
 $short = $remote.Substring(0, 7)
+$prev = (git rev-parse HEAD).Trim() # what's live now: put back if the new version doesn't come up
+$port = ((Get-Content (Join-Path $proj '.env') -ErrorAction SilentlyContinue) -match '^PORT=' -replace '^PORT=', '' | Select-Object -First 1)
+if (-not $port) { $port = 3080 }
+function Up {
+  # The new server answers /healthz within a minute, or it's a bad deploy
+  foreach ($i in 1..30) {
+    Start-Sleep 2
+    try { if ((Invoke-WebRequest "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { return $true } } catch {}
+  }
+  return $false
+}
+function StopServer {
+  Stop-ScheduledTask -TaskName 'Sanktuary OS server'
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -like '*server\index.mjs*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  Start-Sleep 1
+}
 try {
   Log "deploying $short"
   Run 'git pull' { git pull --ff-only --quiet origin main }
@@ -61,13 +77,27 @@ try {
   Run 'build' { npm run build -- --outDir dist-next --emptyOutDir }
 
   # Swap the new build in while the server is stopped (Windows won't rename folders with open files)
-  Stop-ScheduledTask -TaskName 'Sanktuary OS server'
-  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -like '*server\index.mjs*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-  Start-Sleep 1
+  StopServer
   if (Test-Path dist-old) { Remove-Item dist-old -Recurse -Force }
   if (Test-Path dist) { Rename-Item dist dist-old }
   Rename-Item dist-next dist
   Start-ScheduledTask -TaskName 'Sanktuary OS server'
+
+  if (-not (Up)) {
+    # Tests passed but the live server won't start: go back to the version that was running
+    Log "ROLLBACK $short -- no answer on /healthz, restoring $($prev.Substring(0, 7))"
+    StopServer
+    if (Test-Path dist-bad) { Remove-Item dist-bad -Recurse -Force }
+    Rename-Item dist dist-bad
+    Rename-Item dist-old dist
+    git reset --hard --quiet $prev
+    npm install --prefix server --no-audit --no-fund 2>&1 | Out-Null
+    Start-ScheduledTask -TaskName 'Sanktuary OS server'
+    $back = if (Up) { 'the previous version is live again' } else { 'the previous version did not come back either: check the server PC' }
+    Save $false $remote "Deploy of $short didn't start (no answer on /healthz); rolled back, $back."
+    Log "rolled back: $back"
+    exit
+  }
 
   Save $true $remote "Deployed $short"
   Log "deployed $short"

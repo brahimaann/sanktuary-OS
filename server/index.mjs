@@ -150,6 +150,7 @@ const clerkVerifyOptions = () => ({
 async function currentUser(req, url, cfg) {
   const asUser = async (sub) => {
     const username = await usernameOf(sub);
+    count('member', username);
     return { id: sub, username, admin: cfg.admins.includes(username) };
   };
   for (const token of sessionTokens(req, url)) {
@@ -531,7 +532,72 @@ async function ownsAll(space, target, username) {
 }
 
 // ── Transfer log: data/transfers.jsonl, every upload and download (Admin Panel > Log) ──
+// ── Usage: small daily counts for Admin Panel > Usage (data/usage.json, last 120 days) ──
+// Who was active (usernames only), uploads, downloads, share-link opens, story and release-page views. No IPs,
+// no visitor tracking: public views are plain counters.
+let usageDb = null;
+let usageTimer = null;
+let usageSaved = Promise.resolve();
+const loadUsage = async () => (usageDb ??= await readJson('usage.json', { days: {} }));
+/** Counting never gets in the way of a request: it can't throw or be awaited by accident. */
+const count = (what, key) => void countNow(what, key).catch(console.error);
+async function countNow(what, key) {
+  const db = await loadUsage();
+  const d = (db.days[localDate()] ??= { members: [], uploads: 0, downloads: 0, linkOpens: 0, views: {} });
+  if (what === 'member') {
+    if (!key || d.members.includes(key)) return;
+    d.members.push(key);
+  } else if (what === 'view') d.views[key] = (d.views[key] || 0) + 1;
+  else d[what] = (d[what] || 0) + 1;
+  usageTimer ??= setTimeout(() => {
+    usageTimer = null;
+    db.days = Object.fromEntries(
+      Object.keys(db.days)
+        .sort()
+        .slice(-120)
+        .map((k) => [k, db.days[k]]),
+    );
+    usageSaved = usageSaved.then(() => saveJson('usage.json', db)).catch(console.error);
+  }, 5000).unref();
+}
+
+/** Week by week (Monday first), the last 8 weeks. */
+async function usageReport() {
+  const db = await loadUsage();
+  const monday = (d) => {
+    const x = new Date(`${d}T12:00:00`);
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+    return x.toLocaleDateString('en-CA');
+  };
+  const weeks = new Map();
+  for (const [day, d] of Object.entries(db.days)) {
+    const w = weeks.get(monday(day)) || { week: monday(day), members: new Set(), uploads: 0, downloads: 0, linkOpens: 0, views: {} };
+    d.members.forEach((m) => w.members.add(m));
+    w.uploads += d.uploads;
+    w.downloads += d.downloads;
+    w.linkOpens += d.linkOpens;
+    for (const [k, n] of Object.entries(d.views)) w.views[k] = (w.views[k] || 0) + n;
+    weeks.set(w.week, w);
+  }
+  const list = [...weeks.values()]
+    .sort((a, b) => b.week.localeCompare(a.week))
+    .slice(0, 8)
+    .map((w) => ({ ...w, active: w.members.size, members: [...w.members].sort() }));
+  const tdb = await loadTracks();
+  const content = {
+    releases: Object.values(tdb.releases).filter((r) => !r.deleted).length,
+    tracks: Object.values(tdb.tracks).filter((t) => !t.deleted).length,
+    withBounce: Object.values(tdb.tracks).filter((t) => !t.deleted && t.bounce).length,
+    timeline: Object.keys((await loadTimeline()).items).length,
+    stories: Object.values((await loadStories()).stories).filter((st) => st.public && !st.deleted).length,
+    products: Object.values((await loadShop()).products).filter((p) => p.active && !p.deleted).length,
+  };
+  return { weeks: list, content };
+}
+
 function logTransfer(req, user, action, space, path, bytes) {
+  if (action.startsWith('uploaded')) count('uploads');
+  else if (action.startsWith('downloaded')) count('downloads');
   const entry = {
     at: new Date().toISOString(),
     user: user.username,
@@ -1181,6 +1247,7 @@ async function publicShare(req, res, url) {
 
   if (action === 'info') {
     if (unlocked) {
+      count('linkOpens');
       l.views++;
       l.lastOpened = new Date().toISOString();
       saved();
@@ -3420,6 +3487,7 @@ async function storyPublic(req, res, url) {
   if (!ok) fail(404, 'No such story');
   const shown = st.items.filter((i) => !i.hidden);
   if (n === undefined || n === '') {
+    if (st.public) count('view', `story:${st.slug}`);
     res.setHeader('cache-control', st.public ? 'public, max-age=60' : 'no-store');
     return json(res, {
       title: st.title,
@@ -3970,6 +4038,7 @@ async function admin(req, res, url) {
     return json(res, { config: cfg, status: await readJson('status.json', null), backup: await readJson('backup.json', null), users });
   }
   if (req.method === 'GET' && action === 'health') return json(res, await health());
+  if (req.method === 'GET' && action === 'usage') return json(res, await usageReport());
   if (req.method === 'GET' && action === 'log') {
     const lines = (await readFile(join(DATA, 'transfers.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean);
     return json(
@@ -4059,6 +4128,44 @@ function validateConfig(c, user) {
   ok(!c.cacheDrive || c.drives[c.cacheDrive], 'Unknown drive for the preview cache');
   return c;
 }
+
+/** GET /healthz: 200 when the server can read its data (ops/deploy.ps1 checks it after each deploy; outside uptime
+ * monitors can watch it too). Says nothing else about the server. */
+async function healthz(req, res) {
+  await loadConfig();
+  res.setHeader('cache-control', 'no-store');
+  return json(res, { ok: true });
+}
+
+// ── Alerts: admins get a notification (and a push) once per problem, instead of finding out by accident ──
+// A deploy that failed or was rolled back, a backup more than 30 hours old, the photo editor's engine not answering.
+// data/alerts.json remembers what was already sent, so restarts don't repeat them.
+async function checkAlerts() {
+  const cfg = await loadConfig();
+  const sent = await readJson('alerts.json', {});
+  const alert = async (key, text) => {
+    if (sent[key]) return;
+    sent[key] = new Date().toISOString();
+    await saveJson('alerts.json', sent);
+    for (const a of cfg.admins) await notify(a, text, {});
+  };
+  const deploy = await readJson('deploy.json', null);
+  if (deploy && !deploy.ok) alert(`deploy:${deploy.commit}`, `Sanktuary: ${String(deploy.message).split(/\r?\n/)[0].slice(0, 200)}`);
+  if (cfg.backup?.drive) {
+    const b = await readJson('backup.json', null);
+    const last = Date.parse(b?.finished || b?.started || 0);
+    if (Date.now() - last > 30 * 3.6e6)
+      alert(`backup:${localDate()}`, 'Sanktuary: the nightly backup is more than 30 hours old. Is the backup drive plugged in?');
+    else if (b?.results?.some((r) => !r.ok))
+      alert(`backup-failed:${b.finished}`, 'Sanktuary: the last backup had problems. See Admin Panel > Backups.');
+  }
+  if (existsSync(join(RAW_UI, 'index.html'))) {
+    const raw = await rawHealth();
+    if (!raw.ok && !/updating/.test(raw.note)) alert(`rapidraw:${localDate()}`, `Sanktuary: the photo editor isn't working (${raw.note}).`);
+  }
+}
+setTimeout(() => checkAlerts().catch(console.error), 60_000).unref(); // a minute after start (lets a deploy settle)
+setInterval(() => checkAlerts().catch(console.error), 5 * 60_000).unref();
 
 /** Admin Panel > Health: is the photo editor's engine answering, which fork commit is built, is an update running. */
 async function rawHealth() {
@@ -4549,6 +4656,7 @@ async function comments(req, res, url) {
 }
 
 const routes = [
+  ['/healthz', healthz],
   ['/api/files/', files],
   ['/api/me', me],
   ['/api/admin/', admin],

@@ -67,7 +67,7 @@ interface Health {
   rapidraw?: Check;
 }
 
-const TABS = ['Health', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Stories', 'Shop & pool', 'Log'] as const;
+const TABS = ['Health', 'Usage', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Stories', 'Shop & pool', 'Log'] as const;
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
 const AdminPanel: React.FC = () => {
@@ -244,6 +244,7 @@ const AdminPanel: React.FC = () => {
         {tab === 'Log' && <LogTab />}
         {tab === 'Blog' && <BlogTab />}
         {tab === 'Front page' && <FrontTab />}
+        {tab === 'Usage' && <UsageTab />}
         {tab === 'Stories' && <StoriesTab />}
         {tab === 'Shop & pool' && <ShopTab />}
 
@@ -910,6 +911,85 @@ const StoriesTab: React.FC = () => {
           }}
         />
       )}
+    </>
+  );
+};
+
+// ── Usage: is anyone using it, and is there anything on it? ──
+interface Usage {
+  weeks: {
+    week: string;
+    active: number;
+    members: string[];
+    uploads: number;
+    downloads: number;
+    linkOpens: number;
+    views: Record<string, number>;
+  }[];
+  content: { releases: number; tracks: number; withBounce: number; timeline: number; stories: number; products: number };
+}
+const UsageTab: React.FC = () => {
+  const api = useApi();
+  const [u, setU] = useState<Usage | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    api('/api/admin/usage').then(setU, (e) => setErr(e.message));
+  }, [api]);
+  if (!u) return <div>{err || 'Loading...'}</div>;
+  const c = u.content;
+  const views = (w: Usage['weeks'][number], prefix: string) =>
+    Object.entries(w.views)
+      .filter(([k]) => k.startsWith(prefix))
+      .reduce((n, [, v]) => n + v, 0);
+  const gaps = [
+    !c.withBounce && 'no song has a bounce yet (Studio > Songs)',
+    !c.timeline && 'the calendar is empty',
+    !c.stories && 'no story is published (Stories tab)',
+    !c.products && 'the shop has nothing in it',
+  ].filter(Boolean);
+  return (
+    <>
+      <p style={hint}>
+        On the site: <b>{c.releases}</b> release(s), <b>{c.tracks}</b> song(s) ({c.withBounce} with a bounce), <b>{c.timeline}</b> calendar
+        entries, <b>{c.stories}</b> published stor{c.stories === 1 ? 'y' : 'ies'}, <b>{c.products}</b> product(s).
+        {gaps.length > 0 && <span style={{ color: '#a00000' }}> Still empty: {gaps.join('; ')}.</span>}
+      </p>
+      <table style={table}>
+        <thead>
+          <tr>
+            {['Week of', 'Active members', 'Uploads', 'Downloads', 'Share-link opens', 'Story views', 'Release page views'].map((h) => (
+              <th key={h} style={th}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {u.weeks.map((w) => (
+            <tr key={w.week}>
+              <td style={td}>{new Date(`${w.week}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</td>
+              <td style={td} title={w.members.join(', ')}>
+                {w.active}
+              </td>
+              <td style={td}>{w.uploads}</td>
+              <td style={td}>{w.downloads}</td>
+              <td style={td}>{w.linkOpens}</td>
+              <td style={td}>{views(w, 'story:')}</td>
+              <td style={td}>{views(w, 'release:')}</td>
+            </tr>
+          ))}
+          {!u.weeks.length && (
+            <tr>
+              <td style={td} colSpan={7}>
+                Counting starts now: numbers appear as people use the site.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <p style={{ ...hint, marginTop: 8 }}>
+        Hover a number of active members to see who. Only members' usernames are kept (for 120 days); visitors are plain counts.
+      </p>
     </>
   );
 };

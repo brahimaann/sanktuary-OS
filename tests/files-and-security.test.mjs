@@ -1138,6 +1138,22 @@ try {
     (await (await pub('/api/public/directory')).json()).stories.some((x) => x.slug === 'heart-of-the-cities'),
   );
 
+  // Health check and usage numbers
+  const hz = await pub('/healthz');
+  check('/healthz answers for deploy checks and uptime monitors', hz.status === 200 && (await hz.json()).ok === true);
+  check('usage numbers are for admins only', (await call('bob', '/api/admin/usage')).status === 403);
+  const usage = JSON.parse((await call('alice', '/api/admin/usage')).text);
+  const thisWeek = usage.weeks[0];
+  check(
+    'usage counts active members, uploads and story views',
+    thisWeek.members.includes('bob') &&
+      thisWeek.members.includes('carol') &&
+      thisWeek.uploads > 0 &&
+      thisWeek.views['story:heart-of-the-cities'] >= 1,
+    JSON.stringify({ ...thisWeek, members: thisWeek.members.length }),
+  );
+  check('usage shows how much real content there is', usage.content.stories === 1 && usage.content.tracks > 0);
+
   // Public directory (My Computer): only people who opted in, only what was made public
   await call('bob', '/api/profiles/me', 'PUT', {
     displayName: 'Bob B',
