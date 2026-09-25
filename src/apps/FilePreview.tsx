@@ -113,6 +113,25 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
             Edit photo
           </button>
         )}
+        {lightImage(name) && (
+          <button
+            style={button}
+            title="Film looks: bleach bypass, cross process, B&W..."
+            onClick={() =>
+              openWindow({
+                id: `darkroom-${app}-${path}`,
+                title: `Darkroom - ${name}`,
+                icon: '/images/icons/kodak-imaging-16x16.png',
+                appType: 'darkroom',
+                appProps: { app, dir, name },
+                width: 900,
+                height: 600,
+              })
+            }
+          >
+            Film look
+          </button>
+        )}
         <span style={{ marginLeft: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>
           {name}
         </span>

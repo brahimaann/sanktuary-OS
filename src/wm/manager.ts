@@ -37,7 +37,8 @@ export type AppType =
   | 'share-in'
   | 'directory'
   | 'producer'
-  | 'studio';
+  | 'studio'
+  | 'darkroom';
 
 export interface WindowInstance {
   id: string;

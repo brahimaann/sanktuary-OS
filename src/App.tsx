@@ -43,6 +43,7 @@ const ShareIn = lazy(() => import('./apps/ShareIn'));
 const Directory = lazy(() => import('./apps/Directory'));
 const Producer = lazy(() => import('./apps/Producer'));
 const Studio = lazy(() => import('./apps/Studio'));
+const Darkroom = lazy(() => import('./apps/Darkroom'));
 
 export const App: React.FC = () => {
   const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
@@ -218,6 +219,9 @@ export const App: React.FC = () => {
         break;
       case 'new':
         content = <NewThing kind={win.appProps?.kind} />;
+        break;
+      case 'darkroom':
+        content = <Darkroom {...win.appProps} />;
         break;
       case 'studio':
         content = <Studio tab={win.appProps?.tab} />;

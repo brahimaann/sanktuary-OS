@@ -93,6 +93,7 @@ const EXTRA_ICONS: DesktopIconDef[] = [
     height: 640,
   },
   { id: 'africaonly', title: 'AfricaOnly.TV', icon: '/images/icons/video-32x32.png', appType: 'africaonly', width: 900, height: 620 },
+  { id: 'darkroom', title: 'Darkroom', icon: '/images/icons/kodak-imaging-32x32.png', appType: 'darkroom', width: 900, height: 600 },
   { id: 'notepad', title: 'Notepad', icon: '/images/icons/notepad-32x32.png', appType: 'notepad', width: 480, height: 360 },
   { id: 'pong', title: 'Pong', icon: '/images/icons/pinball-32x32.png', appType: 'pong', width: 520, height: 380 },
   {
