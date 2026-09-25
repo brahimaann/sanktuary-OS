@@ -8,6 +8,7 @@ import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion } 
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
 import { useWindowManager } from '../wm/manager';
+import { sharedAudio } from '../utils/sound';
 
 interface FilePreviewProps {
   app: string;
@@ -340,9 +341,7 @@ const AudioPreview: React.FC<{
           abort.abort();
           return setNote('File is large — waveform skipped.');
         }
-        const ctx = new AudioContext();
-        const audio = await ctx.decodeAudioData(await res.arrayBuffer());
-        ctx.close();
+        const audio = await sharedAudio()!.decodeAudioData(await res.arrayBuffer());
         const data = audio.getChannelData(0);
         const buckets = 600;
         const size = Math.floor(data.length / buckets) || 1;

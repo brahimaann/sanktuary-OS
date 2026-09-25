@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { dialog } from '../utils/dialog';
+import { sharedAudio } from '../utils/sound';
 
 export const SoundRecorder: React.FC = () => {
   const [position, setPosition] = useState(0);
@@ -50,7 +51,7 @@ export const SoundRecorder: React.FC = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
     }
-    if (audioContextRef.current) audioContextRef.current.close();
+    sourceRef.current?.disconnect(); // the shared AudioContext stays open for everyone else
   };
 
   const handleRecord = async () => {
@@ -76,8 +77,7 @@ export const SoundRecorder: React.FC = () => {
       };
 
       // Set up Audio Web Analyser for Waveform
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioContextClass();
+      const audioCtx = sharedAudio()!;
       audioContextRef.current = audioCtx;
 
       const analyser = audioCtx.createAnalyser();

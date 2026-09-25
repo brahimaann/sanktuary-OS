@@ -26,7 +26,7 @@ const FIELDS: [keyof P, string, string][] = [
 const Profile: React.FC<{ username?: string }> = ({ username }) => {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
-  if (!isSignedIn) return <LogOn name="Profile" />;
+  if (!isSignedIn) return <LogOn name="Your profile" />;
   return <ProfileCard username={username} />;
 };
 

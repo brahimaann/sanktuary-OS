@@ -1,6 +1,7 @@
 // Audio analysis for the Producer window, all in the browser (nothing is uploaded): tempo, key, loudness
 // (EBU R128 / ITU BS.1770 integrated LUFS), sample peak, stereo correlation and tonal balance.
 // The pure functions take Float32Arrays so they can be tested outside a browser.
+import { sharedAudio } from './sound';
 
 /** In-place radix-2 FFT (re/im length must be a power of two). */
 export function fft(re: Float64Array, im: Float64Array) {
@@ -370,15 +371,11 @@ const breathe = () => new Promise((r) => setTimeout(r)); // let the window repai
 /** Decodes any format the browser can play (WAV, AIFF, MP3, FLAC, M4A, OGG) and analyses it. */
 export async function analyzeAudio(data: ArrayBuffer, onStep: (s: string) => void = () => {}): Promise<Analysis> {
   onStep('Decoding...');
-  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new Ctx();
   let buf: AudioBuffer;
   try {
-    buf = await ctx.decodeAudioData(data);
+    buf = await sharedAudio()!.decodeAudioData(data);
   } catch {
     throw new Error("This browser can't read that file. Try a WAV, MP3, FLAC or M4A.");
-  } finally {
-    ctx.close();
   }
   const channels = [...Array(buf.numberOfChannels).keys()].map((i) => buf.getChannelData(i));
   // Tempo, key and balance from up to 90 s of mono at 22 kHz, skipping a long intro

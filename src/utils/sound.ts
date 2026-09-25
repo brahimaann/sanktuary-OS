@@ -131,4 +131,8 @@ class SoundSynthesizer {
 }
 
 export const sound = new SoundSynthesizer();
+
+/** The app's one AudioContext (browsers allow only a few): system sounds, decoding files, the recorder's meter.
+ * Never close it; disconnect what you connected instead. */
+export const sharedAudio = () => (sound as unknown as { getContext(): AudioContext | null }).getContext();
 export default sound;

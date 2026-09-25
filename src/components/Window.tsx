@@ -35,8 +35,6 @@ export const Window: React.FC<WindowProps> = ({
   const { focusWindow, closeWindow, minimizeWindow, maximizeWindow, updateWindowPosition, updateWindowSize } = useWindowManager();
   const windowRef = useRef<HTMLDivElement>(null);
 
-  if (isMinimized) return null;
-
   const handlePointerDown = () => {
     focusWindow(id);
   };
@@ -131,6 +129,7 @@ export const Window: React.FC<WindowProps> = ({
         width: '100%',
         height: 'calc(100% - 30px)',
         zIndex,
+        display: isMinimized ? 'none' : undefined,
       }
     : {
         position: 'absolute',
@@ -139,6 +138,8 @@ export const Window: React.FC<WindowProps> = ({
         width: `${width}px`,
         height: `${height}px`,
         zIndex,
+        // Minimized windows stay alive, just hidden: a song keeps playing, a form keeps what was typed
+        display: isMinimized ? 'none' : undefined,
       };
 
   return (
