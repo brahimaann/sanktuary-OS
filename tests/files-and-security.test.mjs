@@ -1138,6 +1138,65 @@ try {
     (await (await pub('/api/public/directory')).json()).stories.some((x) => x.slug === 'heart-of-the-cities'),
   );
 
+  // Opportunities: grants and calls posted for the team
+  const oppDue = new Date(Date.now() + 5 * 864e5).toLocaleDateString('en-CA');
+  check(
+    'opportunity links must be https',
+    (await call('bob', '/api/opportunities', 'POST', { title: 'X', link: 'javascript:alert(1)' })).status === 400,
+  );
+  check('an opportunity needs a name', (await call('bob', '/api/opportunities', 'POST', { title: '  ' })).status === 400);
+  const grant = JSON.parse(
+    (
+      await call('bob', '/api/opportunities', 'POST', {
+        title: 'Creative Support for Individuals',
+        org: 'Minnesota State Arts Board',
+        kind: 'Grant',
+        link: 'https://www.arts.state.mn.us/grants',
+        deadline: oppDue,
+        amount: 'up to $6,000',
+        fields: ['Music', 'Nonsense'],
+      })
+    ).text,
+  );
+  check('a member posts an opportunity', grant.title === 'Creative Support for Individuals' && grant.fields.join() === 'Music');
+  check(
+    'the team hears about it',
+    JSON.parse((await call('carol', '/api/projects?notifications')).text).some((n) => /New grant: Creative Support/.test(n.text)),
+  );
+  const carolMarks = JSON.parse((await call('carol', `/api/opportunities/${grant.id}`, 'PATCH', { status: 'interested' })).text);
+  check('each person marks their own status', carolMarks.mine === 'interested' && carolMarks.people.carol === 'interested');
+  check(
+    'marking it interested inside the last week reminds you',
+    JSON.parse((await call('carol', '/api/projects?notifications')).text).some((n) =>
+      /Creative Support for Individuals is due in 5 days/.test(n.text),
+    ),
+  );
+  await call('alice', `/api/opportunities/${grant.id}`, 'PATCH', { status: 'applied' });
+  check(
+    'people who already applied are not nagged',
+    !JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) =>
+      /Creative Support for Individuals is due/.test(n.text),
+    ),
+  );
+  check(
+    'only the poster or an admin edits the details',
+    (await call('carol', `/api/opportunities/${grant.id}`, 'PATCH', { title: 'Mine now' })).status === 403,
+  );
+  check('a bad status is refused', (await call('carol', `/api/opportunities/${grant.id}`, 'PATCH', { status: 'maybe' })).status === 400);
+  check(
+    'opportunity deadlines are on the calendar',
+    JSON.parse((await call('carol', '/api/timeline')).text).items.some(
+      (i) => i.source === 'opportunities' && i.kind === 'Deadline' && i.start === oppDue,
+    ),
+  );
+  check('only the poster or an admin takes it down', (await call('carol', `/api/opportunities/${grant.id}`, 'DELETE')).status === 403);
+  check(
+    'taken down opportunities disappear',
+    (await call('bob', `/api/opportunities/${grant.id}`, 'DELETE')).status === 200 &&
+      !JSON.parse((await call('carol', '/api/opportunities')).text).items.some((o) => o.id === grant.id),
+  );
+  check('opportunities are for members only', (await fetch(B + '/api/opportunities')).status === 401);
+
   // Health check and usage numbers
   const hz = await pub('/healthz');
   check('/healthz answers for deploy checks and uptime monitors', hz.status === 200 && (await hz.json()).ok === true);

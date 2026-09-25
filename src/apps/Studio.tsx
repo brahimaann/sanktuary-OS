@@ -2,17 +2,20 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './TeamFiles';
 
-// Studio: songs (Tracks), the calendar (Timeline) and to-do boards (Planner) in one window. Each tab is the
+// Studio: songs (Tracks), the calendar (Timeline), to-do boards (Planner) and opportunities (grants, calls, gigs)
+// in one window. Each tab is the
 // full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
 const Tracks = lazy(() => import('./Tracks'));
 const Timeline = lazy(() => import('./Timeline'));
 const Boards = lazy(() => import('./Boards'));
+const Opportunities = lazy(() => import('./Opportunities'));
 
-export type StudioTab = 'songs' | 'calendar' | 'boards';
+export type StudioTab = 'songs' | 'calendar' | 'boards' | 'opportunities';
 const TABS: [StudioTab, string][] = [
   ['songs', 'Songs'],
   ['calendar', 'Calendar'],
   ['boards', 'Boards'],
+  ['opportunities', 'Opportunities'],
 ];
 
 /** Opens Studio on a tab (switching the tab if Studio is already open). */
@@ -60,7 +63,15 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'songs' }) => {
             ([id]) =>
               opened.has(id) && (
                 <div key={id} style={{ flex: 1, minWidth: 0, display: active === id ? 'flex' : 'none', flexDirection: 'column' }}>
-                  {id === 'songs' ? <Tracks /> : id === 'calendar' ? <Timeline /> : <Boards kind="kanban" />}
+                  {id === 'songs' ? (
+                    <Tracks />
+                  ) : id === 'calendar' ? (
+                    <Timeline />
+                  ) : id === 'boards' ? (
+                    <Boards kind="kanban" />
+                  ) : (
+                    <Opportunities />
+                  )}
                 </div>
               ),
           )}

@@ -21,6 +21,7 @@ interface Note {
   where?: { space: string; dir: string[]; name: string }; // project update: open its folder
   track?: string;
   timeline?: string;
+  opportunity?: string;
 }
 
 const SEEN = 'sk_notif_seen';
@@ -54,7 +55,10 @@ export const NotificationTray: React.FC = () => {
       api('/api/projects?notifications').then(
         (list: any[]) =>
           setServer(
-            list.map((n) => ({ ...n, title: n.turn ? "It's your turn" : n.track ? 'Tracks' : n.timeline ? 'Timeline' : 'Update' })),
+            list.map((n) => ({
+              ...n,
+              title: n.turn ? "It's your turn" : n.track ? 'Tracks' : n.timeline ? 'Timeline' : n.opportunity ? 'Opportunity' : 'Update',
+            })),
           ),
         () => {},
       ),
@@ -71,7 +75,10 @@ export const NotificationTray: React.FC = () => {
   };
 
   useLiveEvent('notify', (n: any) => {
-    const note = { ...n, title: n.turn ? "It's your turn" : n.track ? 'Tracks' : n.timeline ? 'Timeline' : 'Update' };
+    const note = {
+      ...n,
+      title: n.turn ? "It's your turn" : n.track ? 'Tracks' : n.timeline ? 'Timeline' : n.opportunity ? 'Opportunity' : 'Update',
+    };
     setServer((s) => [note, ...s].slice(0, 50));
     toast(note);
   });
@@ -128,6 +135,8 @@ export const NotificationTray: React.FC = () => {
       openStudio(openWindow, 'songs');
     } else if (n.timeline) {
       openStudio(openWindow, 'calendar');
+    } else if (n.opportunity) {
+      openStudio(openWindow, 'opportunities');
     } else {
       openWindow({
         id: 'profile-me',

@@ -1776,6 +1776,135 @@ async function autoScan(space, abs, by) {
 }
 const AUTO_SCAN_MS = Number(process.env.AUTO_SCAN_MS || 3000);
 
+// ── /api/opportunities: grants, calls, gigs and jobs posted for the team — data/opportunities.json ──
+// Any member posts one (link, deadline, amount, who it's for, what it asks for); everyone is told. Each member
+// marks their own status (interested / applying / applied / not for me) and sees who else is going for it.
+// Interested and applying members are reminded 7 days and 1 day before the deadline; deadlines show on the calendar.
+const OPP_FIELDS = ['Music', 'Visual art', 'Film & video', 'Photography', 'Writing', 'Design & fashion', 'Tech', 'Any'];
+const OPP_KINDS = ['Grant', 'Residency', 'Open call', 'Competition', 'Gig', 'Job', 'Other'];
+const OPP_STATUSES = ['interested', 'applying', 'applied', 'no'];
+const OPP_TEXT = { title: 120, org: 120, amount: 60, notes: 4000 };
+let oppsDb = null;
+let oppsSaved = Promise.resolve();
+const loadOpps = async () => (oppsDb ??= await readJson('opportunities.json', { items: {} }));
+const saveOpps = () => (oppsSaved = oppsSaved.then(() => saveJson('opportunities.json', oppsDb)).catch(console.error));
+
+async function opportunitiesApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const me = user.username;
+  const db = await loadOpps();
+  const id = url.pathname.split('/')[3];
+  const view = (o) => ({ ...o, mine: o.people[me] || null });
+  const changed = () => {
+    saveOpps();
+    emit('opportunities', {}, () => true);
+  };
+  const apply = (o, input) => {
+    for (const [k, max] of Object.entries(OPP_TEXT))
+      if (input[k] !== undefined)
+        o[k] = String(input[k] ?? '')
+          .trim()
+          .slice(0, max);
+    if (input.link !== undefined) {
+      const v = String(input.link || '').trim();
+      o.link = !v ? '' : /^https:\/\/\S+$/i.test(v) && v.length <= 500 ? v : fail(400, 'The link must start with https://');
+    }
+    if (input.deadline !== undefined) {
+      o.deadline = dateOrNull(input.deadline);
+      o.reminded = {};
+    }
+    if (input.kind !== undefined) o.kind = OPP_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+    if (input.fields !== undefined)
+      o.fields = [...new Set((Array.isArray(input.fields) ? input.fields : []).filter((f) => OPP_FIELDS.includes(f)))];
+  };
+
+  if (req.method === 'GET' && !id)
+    return json(res, {
+      items: Object.values(db.items)
+        .filter((o) => !o.archived)
+        .map(view),
+      fields: OPP_FIELDS,
+      kinds: OPP_KINDS,
+    });
+
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const o = {
+      id: randomUUID().slice(0, 10),
+      title: '',
+      org: '',
+      amount: '',
+      notes: '',
+      link: '',
+      deadline: null,
+      kind: 'Grant',
+      fields: [],
+      people: {},
+      by: me,
+      created: new Date().toISOString(),
+    };
+    apply(o, input);
+    if (!o.title) fail(400, 'Give it a name');
+    db.items[o.id] = o;
+    changed();
+    // Tell the team (everyone but whoever posted it)
+    const text = `New ${o.kind.toLowerCase()}: ${o.title}${o.org ? ` (${o.org})` : ''}${o.deadline ? `, due ${o.deadline}` : ''}. Posted by ${me}.`;
+    for (const u of await currentMembers()) if (u !== me) await notify(u, text, { opportunity: o.id });
+    return json(res, view(o));
+  }
+
+  const o = (db.items[id] && !db.items[id].archived && db.items[id]) || fail(404, 'No such opportunity');
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    // Anyone sets their own status; only whoever posted it (or an admin) edits the details
+    if (input.status !== undefined) {
+      if (input.status === null) delete o.people[me];
+      else o.people[me] = OPP_STATUSES.includes(input.status) ? input.status : fail(400, 'Bad status');
+    }
+    const edits = Object.keys(input).filter((k) => k !== 'status');
+    if (edits.length) {
+      if (o.by !== me && !user.admin) fail(403, 'Only whoever posted it or an admin can change the details');
+      apply(o, input);
+      if (!o.title) fail(400, 'Give it a name');
+    }
+    changed();
+    await opportunityDeadlines(); // marked interested inside the last week: the reminder comes now
+    return json(res, view(o));
+  }
+  if (req.method === 'DELETE') {
+    if (o.by !== me && !user.admin) fail(403, 'Only whoever posted it or an admin can take it down');
+    o.archived = new Date().toISOString(); // kept in the file, just hidden
+    changed();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown opportunities action');
+}
+
+/** Deadline reminders: 7 days and 1 day before, to each person interested or applying (not once they've applied).
+ * Kept per person, so someone who marks it later still gets the reminder that's due. */
+async function opportunityDeadlines() {
+  const db = await loadOpps();
+  const today = localDate();
+  for (const o of Object.values(db.items)) {
+    if (o.archived || !o.deadline) continue;
+    const days = Math.round((Date.parse(o.deadline) - Date.parse(today)) / 864e5);
+    const stage = days < 0 ? null : days <= 1 ? 'd1' : days <= 7 ? 'd7' : null;
+    if (!stage) continue;
+    o.reminded ??= {};
+    const when = days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
+    for (const [u, st] of Object.entries(o.people)) {
+      const done = o.reminded[u];
+      if (!['interested', 'applying'].includes(st) || done === `${stage}:${o.deadline}` || (stage === 'd7' && done === `d1:${o.deadline}`))
+        continue;
+      o.reminded[u] = `${stage}:${o.deadline}`;
+      saveOpps();
+      await notify(u, `${o.title} is due ${when} (${o.deadline}). You marked it "${st}".`, { opportunity: o.id });
+    }
+  }
+}
+setInterval(() => opportunityDeadlines().catch(console.error), 3.6e6).unref();
+
 /** Deadline reminders: 3 days before and on the day before, to everyone following the track. */
 async function trackDeadlines() {
   const db = await loadTracks();
@@ -1849,6 +1978,17 @@ async function timelineApi(req, res, url) {
           done: t.status === 'Done',
         });
     }
+    // Opportunity deadlines too (read-only here)
+    for (const o of Object.values((await loadOpps()).items))
+      if (!o.archived && o.deadline)
+        fromTracks.push({
+          id: `opp-${o.id}`,
+          source: 'opportunities',
+          kind: 'Deadline',
+          title: `${o.title} due (${o.kind})`,
+          start: o.deadline,
+          done: o.people[me] === 'applied',
+        });
     return json(res, { items: [...items, ...fromTracks], kinds: TIMELINE_KINDS, statuses: TIMELINE_STATUSES });
   }
 
@@ -4859,6 +4999,7 @@ const routes = [
   ['/api/push', pushApi],
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
+  ['/api/opportunities', opportunitiesApi],
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],

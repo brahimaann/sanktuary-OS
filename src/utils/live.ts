@@ -18,6 +18,7 @@ const EVENTS = [
   'activity',
   'notify',
   'tracks',
+  'opportunities',
 ];
 const handlers = new Map<string, Set<Handler>>();
 let source: EventSource | null = null;

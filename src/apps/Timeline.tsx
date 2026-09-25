@@ -13,7 +13,7 @@ import RetroIcon, { IconLabel } from '../components/RetroIcon';
 
 interface Entry {
   id: string;
-  source?: 'tracks'; // release days and track deadlines, read-only here
+  source?: 'tracks' | 'opportunities'; // release days, track deadlines and opportunity deadlines: read-only here
   title: string;
   kind: string;
   status?: string;
@@ -42,6 +42,7 @@ const KIND_COLORS: Record<string, string> = {
   Other: '#808080',
   Release: '#008000',
   'Track due': '#404040',
+  Deadline: '#806000',
 };
 const today = () => new Date().toLocaleDateString('en-CA'); // local YYYY-MM-DD, not UTC
 const dayLabel = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric' });
@@ -126,13 +127,25 @@ const TimelineApp: React.FC = () => {
     rows.push(
       <div
         key={i.id}
-        onClick={() => (i.source ? openTracks() : setOpenId(i.id === openId ? null : i.id))}
+        onClick={() =>
+          i.source === 'opportunities'
+            ? openStudio(openWindow, 'opportunities')
+            : i.source
+              ? openTracks()
+              : setOpenId(i.id === openId ? null : i.id)
+        }
         style={{
           ...row,
           ...(i.id === openId ? { background: '#000080', color: '#fff' } : {}),
           opacity: past || i.status === 'Cancelled' || i.done ? 0.55 : 1,
         }}
-        title={i.source ? 'From Tracks: click to open Tracks' : undefined}
+        title={
+          i.source === 'opportunities'
+            ? 'An opportunity: click to open Opportunities'
+            : i.source
+              ? 'From Tracks: click to open Tracks'
+              : undefined
+        }
       >
         <span style={{ width: 88, flexShrink: 0 }}>
           {dayLabel(i.start)}

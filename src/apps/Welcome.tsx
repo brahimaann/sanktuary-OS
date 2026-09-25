@@ -82,6 +82,11 @@ const MEMBER_TOUR: Step[] = [
     open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'calendar' }),
   },
   {
+    title: 'Studio > Opportunities: grants, calls, gigs',
+    text: 'Post a grant, residency, open call or gig with its link and deadline and the whole team hears about it. Mark Interested or Applying to get reminded a week and a day before it closes; Copy portfolio link fills the "work samples" box.',
+    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'opportunities' }),
+  },
+  {
     title: 'Moodboards',
     text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Boards.',
     open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png', 560, 420),
