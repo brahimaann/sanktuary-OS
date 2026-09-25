@@ -1056,6 +1056,88 @@ try {
   );
   check('private releases never leak, even marked public', !pub1.releases.some((r) => r.title === 'TSIMY'));
 
+  // Stories (Heart of the Cities): a folder told as a guided story, public only when published
+  const hotc = join(drive, 'team', 'hotc');
+  mkdirSync(join(hotc, 'Minneapolis'), { recursive: true });
+  const jpg = await sharpLib({ create: { width: 64, height: 48, channels: 3, background: '#c33' } })
+    .jpeg()
+    .toBuffer();
+  writeFileSync(join(hotc, 'Minneapolis', '01 corner.jpg'), jpg);
+  writeFileSync(join(hotc, 'Minneapolis', '01 corner.txt'), 'Lake Street at dusk');
+  writeFileSync(join(hotc, 'Minneapolis', '02 walk.mp4'), Buffer.alloc(4096, 1));
+  writeFileSync(join(hotc, 'notes.docx'), 'not a photo'); // ignored
+  const pub = (p, init) => fetch(B + p, init);
+  check(
+    'only admins make stories',
+    (await call('bob', '/api/stories', 'POST', { title: 'X', folder: { space: 'up', path: 'hotc' } })).status === 403,
+  );
+  const story = JSON.parse(
+    (await call('alice', '/api/stories', 'POST', { title: 'Heart of the Cities', folder: { space: 'view', path: 'hotc' } })).text,
+  );
+  check(
+    'a story is made from the folder: chapters and captions',
+    story.slug === 'heart-of-the-cities' &&
+      story.items.length === 2 &&
+      story.items[0].chapter === 'Minneapolis' &&
+      story.items[0].caption === 'Lake Street at dusk' &&
+      story.items[1].kind === 'video',
+    JSON.stringify(story.items),
+  );
+  check(
+    'a story needs photos or videos',
+    (await call('alice', '/api/stories', 'POST', { title: 'Empty', folder: { space: 'view', path: 'docs' } })).status === 400,
+  );
+  const sp = '/api/public/story/heart-of-the-cities';
+  check('an unpublished story is not public', (await pub(sp)).status === 404 && (await pub(sp + '/0')).status === 404);
+  check('admins can preview it', (await call('alice', sp)).status === 200);
+  await call('alice', '/api/stories/heart-of-the-cities', 'PATCH', { public: true, subtitle: 'Twin Cities, 2026' });
+  const pubStory = await (await pub(sp)).json();
+  check('a published story is public', pubStory.title === 'Heart of the Cities' && pubStory.items.length === 2);
+  check(
+    'file names and paths never reach visitors',
+    !JSON.stringify(pubStory).includes('corner.jpg') && !JSON.stringify(pubStory).includes('hotc'),
+  );
+  const pic = await pub(sp + '/0?w=800');
+  check('photos come as resized WebP, not the original', pic.status === 200 && pic.headers.get('content-type') === 'image/webp');
+  const clip = await pub(sp + '/1', { headers: { range: 'bytes=0-99' } });
+  check('videos stream with ranges', clip.status === 206 && clip.headers.get('content-type') === 'video/mp4');
+  check(
+    'only the story’s own items can be fetched',
+    (await pub(sp + '/7')).status === 404 &&
+      (await pub(sp + '/abc')).status === 404 &&
+      (await pub('/api/public/story/..%2F..%2Fconfig/0')).status === 404,
+  );
+  await call('alice', '/api/stories/heart-of-the-cities', 'PATCH', {
+    items: [
+      { file: '../../../data/config.json', caption: 'x' },
+      { file: 'Minneapolis/02 walk.mp4', caption: 'The walk' },
+    ],
+  });
+  const afterSwap = JSON.parse((await call('alice', '/api/stories')).text).find((x) => x.slug === 'heart-of-the-cities');
+  check(
+    'items can be reordered and captioned but never swapped for other files',
+    afterSwap.items.length === 2 && afterSwap.items[0].file === 'Minneapolis/02 walk.mp4' && afterSwap.items[0].caption === 'The walk',
+    JSON.stringify(afterSwap.items),
+  );
+  await call('alice', '/api/stories/heart-of-the-cities', 'PATCH', { items: afterSwap.items.map((i, k) => ({ ...i, hidden: k === 0 })) });
+  check('hidden items leave the story', (await (await pub(sp)).json()).items.length === 1);
+  writeFileSync(join(hotc, '03 skyline.jpg'), jpg);
+  const rescanned = JSON.parse((await call('alice', '/api/stories/heart-of-the-cities', 'PATCH', { rescan: true })).text);
+  check('a rescan adds new photos at the end', rescanned.items.length === 3 && rescanned.items[2].file === '03 skyline.jpg');
+  const page = await pub('/story/heart-of-the-cities');
+  check(
+    'the story page is served with a strict policy',
+    page.status === 200 && /default-src 'self'/.test(page.headers.get('content-security-policy') || ''),
+  );
+  for (const bad of ['/%E0%A4%A', '/apps/rapidraw/%E0%A4%A', '/api/files/view/%E0%A4%A?list', '/story/%E0'])
+    check(`a malformed address (${bad}) is refused without taking the server down`, (await pub(bad)).status < 500);
+  check('the server is still up after malformed addresses', (await pub('/api/public/directory')).status === 200);
+  check('odd story addresses are refused', (await pub('/story/a%2F..%2Fb')).status === 404);
+  check(
+    'the directory lists published stories',
+    (await (await pub('/api/public/directory')).json()).stories.some((x) => x.slug === 'heart-of-the-cities'),
+  );
+
   // Public directory (My Computer): only people who opted in, only what was made public
   await call('bob', '/api/profiles/me', 'PUT', {
     displayName: 'Bob B',

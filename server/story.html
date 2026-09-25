@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Story · Sanktuary</title>
+    <meta name="theme-color" content="#0b0b0f" />
+    <style>
+      /* A story from Sanktuary: one photo or clip per screen, scroll or tap through, or press Play. */
+      :root {
+        --bg: #0b0b0f;
+        --fg: #f3efe8;
+        --dim: #b9b2a6;
+        --accent: #d9a441;
+        --bar: rgba(255, 255, 255, 0.14);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.5 Georgia,
+          'Times New Roman',
+          serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        height: 100dvh;
+        overflow-y: auto;
+        scroll-snap-type: y mandatory;
+        scroll-behavior: smooth;
+        overscroll-behavior: contain;
+      }
+      section {
+        position: relative;
+        height: 100dvh;
+        scroll-snap-align: start;
+        scroll-snap-stop: always;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .card {
+        flex-direction: column;
+        text-align: center;
+        padding: 24px;
+        gap: 14px;
+      }
+      .kicker {
+        font:
+          600 12px/1 system-ui,
+          sans-serif;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      h1 {
+        font-size: clamp(38px, 9vw, 96px);
+        line-height: 1;
+        margin: 0;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: clamp(30px, 7vw, 72px);
+        line-height: 1.05;
+        margin: 0;
+        font-weight: 400;
+      }
+      .sub {
+        color: var(--dim);
+        font-size: clamp(17px, 2.6vw, 22px);
+        margin: 0;
+      }
+      .intro {
+        max-width: 38em;
+        color: var(--dim);
+        white-space: pre-wrap;
+        margin: 8px 0 0;
+      }
+      .begin {
+        margin-top: 18px;
+        font:
+          600 14px system-ui,
+          sans-serif;
+        color: var(--bg);
+        background: var(--fg);
+        border: 0;
+        padding: 12px 22px;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .backdrop {
+        position: absolute;
+        inset: -40px;
+        width: calc(100% + 80px);
+        height: calc(100% + 80px);
+        object-fit: cover;
+        filter: blur(38px) brightness(0.45) saturate(1.2);
+      }
+      .media {
+        position: relative;
+        max-width: 100%;
+        max-height: 100%;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+      .caption {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 60px max(20px, env(safe-area-inset-left)) max(64px, calc(env(safe-area-inset-bottom) + 56px));
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+        font-size: clamp(16px, 2.2vw, 20px);
+        max-width: 100%;
+        white-space: pre-wrap;
+        opacity: 0;
+        transform: translateY(10px);
+        transition:
+          opacity 0.8s ease 0.3s,
+          transform 0.8s ease 0.3s;
+      }
+      section.here .caption {
+        opacity: 1;
+        transform: none;
+      }
+      .caption:empty {
+        display: none;
+      }
+      .progress {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 3px;
+        background: var(--accent);
+        width: 0;
+        z-index: 3;
+        transition: width 0.3s;
+      }
+      .controls {
+        position: fixed;
+        right: max(12px, env(safe-area-inset-right));
+        bottom: max(12px, env(safe-area-inset-bottom));
+        display: flex;
+        gap: 8px;
+        z-index: 3;
+      }
+      .controls button {
+        font:
+          600 13px system-ui,
+          sans-serif;
+        color: var(--fg);
+        background: rgba(20, 20, 26, 0.7);
+        border: 1px solid var(--bar);
+        padding: 9px 14px;
+        border-radius: 999px;
+        cursor: pointer;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .controls button:focus-visible,
+      .begin:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .count {
+        position: fixed;
+        left: max(14px, env(safe-area-inset-left));
+        top: 12px;
+        font:
+          600 11px system-ui,
+          sans-serif;
+        letter-spacing: 0.2em;
+        color: var(--dim);
+        z-index: 3;
+      }
+      .end a {
+        color: var(--accent);
+      }
+      .notice {
+        padding: 40px 24px;
+        text-align: center;
+        color: var(--dim);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        main {
+          scroll-behavior: auto;
+        }
+        .caption {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="progress" id="progress"></div>
+    <div class="count" id="count"></div>
+    <main id="story" aria-live="polite"><p class="notice">Loading the story...</p></main>
+    <div class="controls" id="controls" hidden>
+      <button id="sound" aria-pressed="false" title="Sound (M)">Sound off</button>
+      <button id="play" aria-pressed="false" title="Play (P)">Play</button>
+    </div>
+    <script>
+      (() => {
+        const slug = location.pathname.split('/').filter(Boolean)[1];
+        const api = `/api/public/story/${encodeURIComponent(slug)}`;
+        const main = document.getElementById('story');
+        const el = (tag, cls, text) => {
+          const e = document.createElement(tag);
+          if (cls) e.className = cls;
+          if (text) e.textContent = text; // always text, never HTML
+          return e;
+        };
+        let sections = [];
+        let playing = false;
+        let muted = true;
+        let timer = null;
+
+        fetch(api)
+          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+          .then(build)
+          .catch((status) => {
+            main.replaceChildren(
+              el('p', 'notice', status === 404 ? "This story isn't published (yet)." : 'The story is offline right now. Try again soon.'),
+            );
+          });
+
+        function build(story) {
+          document.title = `${story.title} · Sanktuary`;
+          main.replaceChildren();
+          // Title card
+          const cover = el('section', 'card');
+          cover.append(el('div', 'kicker', 'Sanktuary presents'), el('h1', '', story.title));
+          if (story.subtitle) cover.append(el('p', 'sub', story.subtitle));
+          if (story.intro) cover.append(el('p', 'intro', story.intro));
+          const begin = el('button', 'begin', 'Begin');
+          begin.onclick = () => {
+            setPlaying(true);
+            go(1);
+          };
+          cover.append(begin);
+          main.append(cover);
+          // Chapters and items
+          let chapter = '';
+          story.items.forEach((it) => {
+            if (it.chapter && it.chapter !== chapter) {
+              chapter = it.chapter;
+              const c = el('section', 'card');
+              c.append(el('div', 'kicker', 'Chapter'), el('h2', '', chapter));
+              main.append(c);
+            }
+            const s = el('section');
+            const src = `${api}/${it.n}`;
+            if (it.kind === 'image') {
+              const back = el('img', 'backdrop');
+              back.alt = '';
+              back.src = `${src}?w=800`;
+              back.loading = 'lazy';
+              const img = el('img', 'media');
+              img.alt = it.caption || '';
+              img.src = `${src}?w=1600`;
+              img.srcset = `${src}?w=800 800w, ${src}?w=1600 1600w, ${src}?w=2400 2400w`;
+              img.sizes = '100vw';
+              img.loading = 'lazy';
+              img.decoding = 'async';
+              s.append(back, img);
+            } else {
+              const v = el('video', 'media');
+              v.src = src;
+              v.muted = true;
+              v.playsInline = true;
+              v.preload = 'metadata';
+              v.loop = true;
+              v.onended = () => playing && next();
+              s.append(v);
+            }
+            s.append(el('div', 'caption', it.caption || ''));
+            main.append(s);
+          });
+          const end = el('section', 'card end');
+          end.append(el('div', 'kicker', 'The end'), el('h2', '', story.title));
+          const home = el('a', '', 'Visit Sanktuary');
+          home.href = '/';
+          home.target = '_top';
+          end.append(home);
+          main.append(end);
+
+          sections = [...main.querySelectorAll('section')];
+          document.getElementById('controls').hidden = false;
+          const seen = new IntersectionObserver(
+            (entries) => {
+              for (const e of entries) {
+                e.target.classList.toggle('here', e.isIntersecting);
+                const v = e.target.querySelector('video');
+                if (v) e.isIntersecting ? v.play().catch(() => {}) : v.pause();
+                if (e.isIntersecting) onArrive(sections.indexOf(e.target));
+              }
+            },
+            { root: main, threshold: 0.6 },
+          );
+          sections.forEach((s) => seen.observe(s));
+        }
+
+        const current = () => {
+          const i = Math.round(main.scrollTop / main.clientHeight);
+          return Math.max(0, Math.min(sections.length - 1, i));
+        };
+        const go = (i) => sections[Math.max(0, Math.min(sections.length - 1, i))]?.scrollIntoView();
+        const next = () => go(current() + 1);
+
+        function onArrive(i) {
+          const total = sections.length - 1;
+          document.getElementById('progress').style.width = `${(i / total) * 100}%`;
+          document.getElementById('count').textContent = i > 0 && i < total ? `${i} / ${total - 1}` : '';
+          clearTimeout(timer);
+          if (!playing) return;
+          const v = sections[i].querySelector('video');
+          if (v) {
+            // In Play mode a clip plays through once, then the story moves on
+            v.loop = false;
+            v.currentTime = 0;
+            v.play().catch(() => {});
+          } else if (i < total) timer = setTimeout(next, sections[i].classList.contains('card') ? 3500 : 6000);
+          else setPlaying(false);
+        }
+
+        function setPlaying(on) {
+          playing = on;
+          const b = document.getElementById('play');
+          b.textContent = on ? 'Pause' : 'Play';
+          b.setAttribute('aria-pressed', String(on));
+          clearTimeout(timer);
+          sections.forEach((s) => {
+            const v = s.querySelector('video');
+            if (v) v.loop = !on;
+          });
+          if (on) onArrive(current());
+        }
+        function setMuted(on) {
+          muted = on;
+          const b = document.getElementById('sound');
+          b.textContent = on ? 'Sound off' : 'Sound on';
+          b.setAttribute('aria-pressed', String(!on));
+          document.querySelectorAll('video').forEach((v) => (v.muted = on));
+        }
+        document.getElementById('play').onclick = () => setPlaying(!playing);
+        document.getElementById('sound').onclick = () => setMuted(!muted);
+        addEventListener('keydown', (e) => {
+          if (['ArrowDown', 'PageDown', ' '].includes(e.key)) (e.preventDefault(), next());
+          else if (['ArrowUp', 'PageUp'].includes(e.key)) (e.preventDefault(), go(current() - 1));
+          else if (e.key === 'p' || e.key === 'P') setPlaying(!playing);
+          else if (e.key === 'm' || e.key === 'M') setMuted(!muted);
+        });
+        // Scrolling or swiping yourself takes over from Play
+        main.addEventListener('wheel', () => playing && setPlaying(false), { passive: true });
+        main.addEventListener('touchstart', () => playing && setPlaying(false), { passive: true });
+      })();
+    </script>
+  </body>
+</html>

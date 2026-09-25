@@ -2539,6 +2539,7 @@ async function publicApi(req, res, url) {
   const front = await loadFront();
   const [, , , what, who] = url.pathname.split('/');
   // The public directory (My Computer): only what was explicitly made public, plus the shop and writing
+  if (req.method === 'GET' && what === 'story') return storyPublic(req, res, url);
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
     const tdb = await loadTracks();
@@ -2578,6 +2579,9 @@ async function publicApi(req, res, url) {
       pools: Object.values((await loadPools()).pools)
         .filter((p) => p.public && p.open && !p.deleted)
         .map((p) => (({ slug, title, goal, raised, supporters }) => ({ slug, title, goal, raised, supporters }))(poolView(p))),
+      stories: Object.values((await loadStories()).stories)
+        .filter((st) => st.public && !st.deleted)
+        .map((st) => ({ slug: st.slug, title: st.title, subtitle: st.subtitle, count: st.items.filter((i) => !i.hidden).length })),
     });
   }
   if (req.method === 'GET' && what === 'avatar') {
@@ -3272,6 +3276,178 @@ function blogPage(req, res, url) {
     'content-security-policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:",
   });
   return pipeline(createReadStream(BLOG_PAGE), res);
+}
+
+// ── Stories: a folder of photos and videos told as a full-screen guided story at /story/<slug> ──
+// (the first one: Heart of the Cities). Admins pick the folder in Admin Panel > Stories; each subfolder becomes a
+// chapter, "photo.txt" next to "photo.jpg" is its caption, and captions / order / hiding are edited there. The story
+// points at drive + path so it survives spaces changing. Visitors only ever get resized pictures (never the
+// original files), and only the files the story lists, from inside its folder.
+const STORY_PAGE = new URL('./story.html', import.meta.url);
+const STORY_IMAGE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tif', '.tiff']);
+const STORY_VIDEO = new Set(['.mp4', '.m4v', '.webm', '.mov']);
+const STORY_WIDTHS = [800, 1600, 2400];
+let storiesDb = null;
+let storiesSaved = Promise.resolve();
+const loadStories = async () => (storiesDb ??= await readJson('stories.json', { stories: {} }));
+const saveStories = () => (storiesSaved = storiesSaved.then(() => saveJson('stories.json', storiesDb)).catch(console.error));
+
+/** The story's folder right now (drive letters can change), or null while its drive is unplugged. */
+async function storyRoot(st) {
+  const dir = driveDir(await loadConfig(), await loadStatus(), st.drive);
+  return dir ? join(dir, st.dpath) : null;
+}
+
+/** Photos and videos in name order; one level of subfolders become chapters; "name.txt" is a caption. */
+async function scanStory(root) {
+  const items = [];
+  const add = async (dir, chapter) => {
+    const entries = (await readdir(dir, { withFileTypes: true }).catch(() => []))
+      .filter((e) => !HIDDEN.test(e.name))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const names = new Set(entries.map((e) => e.name.toLowerCase()));
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (!chapter) await add(join(dir, e.name), e.name.slice(0, 100));
+        continue;
+      }
+      const ext = extname(e.name).toLowerCase();
+      const kind = STORY_IMAGE.has(ext) ? 'image' : STORY_VIDEO.has(ext) ? 'video' : null;
+      if (!kind || items.length >= 500) continue;
+      const base = e.name.slice(0, e.name.length - ext.length);
+      const caption = names.has(`${base}.txt`.toLowerCase())
+        ? (await readFile(join(dir, `${base}.txt`), 'utf8').catch(() => '')).trim().slice(0, 1000)
+        : '';
+      items.push({ file: relative(root, join(dir, e.name)).split(sep).join('/'), kind, chapter, caption, hidden: false });
+    }
+  };
+  await add(root, '');
+  return items;
+}
+
+async function storiesApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  if (!user.admin) fail(403, 'Administrators only');
+  const db = await loadStories();
+  const slug = url.pathname.split('/')[3];
+  const now = new Date().toISOString();
+  if (req.method === 'GET' && !slug)
+    return json(
+      res,
+      Object.values(db.stories).filter((st) => !st.deleted),
+    );
+  if (req.method === 'POST' && !slug) {
+    const input = await jsonBody(req);
+    const title =
+      String(input.title || '')
+        .trim()
+        .slice(0, 100) || fail(400, 'Give the story a title');
+    const ref = fileRef(input.folder) || fail(400, 'Pick the folder with the photos and videos');
+    const space = spacesFor(user, cfg, await loadStatus()).find((x) => x.id === ref.space) || fail(404, 'No such space');
+    const { abs } = locateIn(space, ref.path);
+    if (!(await stat(abs).catch(() => null))?.isDirectory()) fail(404, 'No such folder');
+    const items = await scanStory(abs);
+    if (!items.length) fail(400, 'There are no photos or videos in that folder');
+    const base = slugify(title) || 'story';
+    let id = base;
+    for (let n = 2; db.stories[id]; n++) id = `${base}-${n}`;
+    const st = {
+      slug: id,
+      title,
+      subtitle: '',
+      intro: '',
+      ...onDrive(space, abs),
+      folderName: basename(abs),
+      public: false,
+      items,
+      created: now,
+      updated: now,
+    };
+    db.stories[id] = st;
+    saveStories();
+    return json(res, st);
+  }
+  const st = (db.stories[slug] && !db.stories[slug].deleted && db.stories[slug]) || fail(404, 'No such story');
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    for (const [k, max] of Object.entries({ title: 100, subtitle: 200, intro: 4000 }))
+      if (input[k] !== undefined) st[k] = String(input[k] ?? '').slice(0, max);
+    if (!st.title.trim()) fail(400, 'Give the story a title');
+    if (input.public !== undefined) st.public = !!input.public;
+    if (Array.isArray(input.items)) {
+      // Reorder, caption and hide: only files the story already lists (the server found them, not the browser)
+      const known = new Map(st.items.map((i) => [i.file, i]));
+      const next = [];
+      for (const i of input.items) {
+        const k = known.get(i?.file);
+        if (!k || next.some((x) => x.file === k.file)) continue;
+        next.push({ ...k, caption: String(i.caption ?? k.caption).slice(0, 1000), hidden: !!i.hidden });
+      }
+      st.items = [...next, ...st.items.filter((i) => !next.some((x) => x.file === i.file))];
+    }
+    if (input.rescan) {
+      // New files are added at the end, removed ones drop out; order and captions of the rest stay
+      const root = (await storyRoot(st)) || fail(503, "The story's drive isn't connected");
+      const found = await scanStory(root);
+      const still = new Set(found.map((i) => i.file));
+      const had = new Set(st.items.map((i) => i.file));
+      st.items = [...st.items.filter((i) => still.has(i.file)), ...found.filter((i) => !had.has(i.file))];
+    }
+    st.updated = now;
+    saveStories();
+    return json(res, st);
+  }
+  if (req.method === 'DELETE') {
+    st.deleted = now; // kept in the file, just hidden; the photos themselves are never touched
+    st.public = false;
+    saveStories();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown story action');
+}
+
+/** /api/public/story/<slug> (the story) and /api/public/story/<slug>/<n>?w= (its n-th picture or video). */
+async function storyPublic(req, res, url) {
+  const [, , , , slug, n] = url.pathname.split('/');
+  const st = (await loadStories()).stories[slug];
+  let ok = !!st && !st.deleted && st.public;
+  if (st && !st.deleted && !ok) {
+    // Admins can look at a story before it's public
+    const user = await currentUser(req, url, await loadConfig()).catch(() => null);
+    ok = !!user?.admin;
+  }
+  if (!ok) fail(404, 'No such story');
+  const shown = st.items.filter((i) => !i.hidden);
+  if (n === undefined || n === '') {
+    res.setHeader('cache-control', st.public ? 'public, max-age=60' : 'no-store');
+    return json(res, {
+      title: st.title,
+      subtitle: st.subtitle,
+      intro: st.intro,
+      items: shown.map((i, k) => ({ n: k, kind: i.kind, chapter: i.chapter, caption: i.caption })),
+    });
+  }
+  const item = (/^\d{1,4}$/.test(n) && shown[Number(n)]) || fail(404, 'Not found');
+  const root = (await storyRoot(st)) || fail(503, 'This story is offline right now');
+  const abs = resolve(root, ...item.file.split('/'));
+  if (!inside(resolve(root), abs)) fail(400, 'Bad path');
+  if (item.kind === 'image') {
+    const w = Number(url.searchParams.get('w'));
+    return thumb(res, abs, STORY_WIDTHS.includes(w) ? w : 1600);
+  }
+  return stream(req, res, new URLSearchParams(), abs);
+}
+
+function storyPage(req, res, url) {
+  if (!/^\/story\/[\w-]{1,80}\/?$/.test(url.pathname)) fail(404, 'No such story');
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'content-security-policy':
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'",
+  });
+  return pipeline(createReadStream(STORY_PAGE), res);
 }
 
 /** What the file window and Profile need to show about a project. */
@@ -4399,6 +4575,8 @@ const routes = [
   ['/pool/', storePage],
   ['/shop', storePage],
   ['/blog', blogPage],
+  ['/story/', storyPage],
+  ['/api/stories', storiesApi],
   ['/s/', publicShare],
   // Normally the service worker answers the phone's "Share to Sanktuary"; if it wasn't running, say so instead of 404
   ['/share-target', (req, res) => (req.resume(), res.writeHead(303, { location: '/?share=missed' }).end())],
@@ -4412,8 +4590,10 @@ http
     res.setHeader('x-frame-options', 'SAMEORIGIN');
     if (/https/.test(req.headers['cf-visitor'] || '')) res.setHeader('strict-transport-security', 'max-age=31536000');
     const handler = routes.find(([prefix]) => url.pathname.startsWith(prefix))?.[1] || staticFile;
-    Promise.resolve(handler(req, res, url)).catch((err) => {
+    // new Promise catches handlers that throw synchronously too (a plain function calling fail())
+    new Promise((ok) => ok(handler(req, res, url))).catch((err) => {
       if (err.code === 'ERR_STREAM_PREMATURE_CLOSE') return; // viewer closed/seeked a media stream
+      if (err instanceof URIError) err = Object.assign(new Error('Bad address'), { status: 400 }); // malformed %-escapes
       const status = err.status || { EEXIST: 409, ENOENT: 404, ENOTEMPTY: 409 }[err.code] || 500;
       if (status === 500) console.error(err);
       if (!res.headersSent)
