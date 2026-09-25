@@ -1287,7 +1287,7 @@ type Join = { id: string; name: string; email: string; role: string; links: stri
 /** What visitors see in the Welcome window, and the "Join the Village" requests. */
 const FrontTab: React.FC = () => {
   const api = useApi();
-  const [d, setD] = useState<{ intro: string; joins: Join[] } | null>(null);
+  const [d, setD] = useState<{ intro: string; portfolio: Record<string, string>; joins: Join[] } | null>(null);
   const [msg, setMsg] = useState('');
   const load = useCallback(() => api('/api/public/admin').then(setD, (e) => setMsg(e.message)), [api]);
   useEffect(() => {
@@ -1310,6 +1310,48 @@ const FrontTab: React.FC = () => {
           defaultValue={d.intro}
           onBlur={(e) => e.target.value !== d.intro && save({ intro: e.target.value })}
         />
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Portfolio</legend>
+        <p style={hint}>
+          <a href="/portfolio" target="_blank" rel="noopener noreferrer">
+            sanktuary.studio/portfolio
+          </a>{' '}
+          is a work sample page for grant applications and press: this text, then every public release (with previews), published story,
+          public event and listed member. Open it and press <b>Save as PDF</b> to attach it to an application.
+        </p>
+        {(
+          [
+            ['name', 'Name', 'HIMA', 1],
+            ['tagline', 'One line', 'Artist, producer and visual storyteller, Twin Cities', 1],
+            ['contact', 'Contact', 'email address', 1],
+            ['statement', 'Artist statement', 'What you make and why (grant panels read this first)', 6],
+            ['bio', 'Bio', 'Where you come from, what you have done, who you work with', 6],
+            ['links', 'Links', 'One https:// link per line (Spotify, Instagram, Substack...)', 3],
+          ] as const
+        ).map(([k, label, ph, rows]) => (
+          <label key={k} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 6, marginBottom: 6, alignItems: 'start' }}>
+            {label}
+            {rows === 1 ? (
+              <input
+                key={d.portfolio[k] || ''}
+                style={input}
+                placeholder={ph}
+                defaultValue={d.portfolio[k] || ''}
+                onBlur={(e) => e.target.value !== (d.portfolio[k] || '') && save({ portfolio: { [k]: e.target.value } })}
+              />
+            ) : (
+              <textarea
+                key={d.portfolio[k] || ''}
+                rows={rows}
+                style={{ ...input, resize: 'vertical' }}
+                placeholder={ph}
+                defaultValue={d.portfolio[k] || ''}
+                onBlur={(e) => e.target.value !== (d.portfolio[k] || '') && save({ portfolio: { [k]: e.target.value } })}
+              />
+            )}
+          </label>
+        ))}
       </fieldset>
       <fieldset style={fieldset}>
         <legend>Join requests ({d.joins.filter((j) => j.status === 'New').length} new)</legend>

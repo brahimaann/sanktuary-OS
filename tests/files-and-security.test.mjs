@@ -1187,6 +1187,106 @@ try {
   check('directory never shows folders or owners', !/folder|owner|members/.test(JSON.stringify(dirData.releases)));
   check('avatar of someone not listed is not public', (await fetch(B + '/api/public/avatar/carol')).status === 404);
   check('avatar name cannot climb', (await fetch(B + '/api/public/avatar/..%2F..%2Fconfig')).status === 404);
+
+  // Public release pages: only songs ticked for the page, 30-second previews, never the bounce itself
+  const rate = 8000;
+  const wavData = Buffer.alloc(rate * 40 * 2);
+  for (let i = 0; i < rate * 40; i++) wavData.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 220 * i) / rate)), i * 2);
+  const wavHead = Buffer.alloc(44);
+  wavHead.write('RIFF', 0);
+  wavHead.writeUInt32LE(36 + wavData.length, 4);
+  wavHead.write('WAVEfmt ', 8);
+  wavHead.writeUInt32LE(16, 16);
+  wavHead.writeUInt16LE(1, 20);
+  wavHead.writeUInt16LE(1, 22);
+  wavHead.writeUInt32LE(rate, 24);
+  wavHead.writeUInt32LE(rate * 2, 28);
+  wavHead.writeUInt16LE(2, 32);
+  wavHead.writeUInt16LE(16, 34);
+  wavHead.write('data', 36);
+  wavHead.writeUInt32LE(wavData.length, 40);
+  mkdirSync(join(drive, 'team', 'ep'), { recursive: true });
+  writeFileSync(join(drive, 'team', 'ep', 'opening master.wav'), Buffer.concat([wavHead, wavData]));
+  const rp = '/api/public/release/open-ep';
+  const epPage = await (await fetch(B + rp)).json();
+  check(
+    'a public release has a page (slug given on first use)',
+    epPage.title === 'Open EP' && Array.isArray(epPage.tracks) && epPage.tracks.length === 0,
+  );
+  const opening = JSON.parse((await call('alice', '/api/tracks/track', 'POST', { release: ep.id, title: 'Opening' })).text);
+  const unannounced = JSON.parse((await call('alice', '/api/tracks/track', 'POST', { release: ep.id, title: 'Unannounced' })).text);
+  await call('alice', `/api/tracks/track/${opening.id}`, 'PATCH', {
+    bounce: { space: 'view', path: 'ep/opening master.wav' },
+    credits: 'Produced by HIMA',
+    links: { bandlab: 'https://www.bandlab.com/x' },
+    onPage: true,
+    previewAt: 5,
+  });
+  await call('alice', `/api/tracks/track/${unannounced.id}`, 'PATCH', {
+    bounce: { space: 'view', path: 'ep/opening master.wav' },
+    previewAt: 0,
+  });
+  const epPage2 = await (await fetch(B + rp)).json();
+  check(
+    'only songs ticked for the page appear, with credits and links',
+    epPage2.tracks.length === 1 &&
+      epPage2.tracks[0].title === 'Opening' &&
+      epPage2.tracks[0].credits === 'Produced by HIMA' &&
+      epPage2.tracks[0].preview,
+    JSON.stringify(epPage2.tracks),
+  );
+  check('bounce paths never reach the page', !JSON.stringify(epPage2).includes('master.wav') && !JSON.stringify(epPage2).includes('team'));
+  const clipRes = await fetch(B + `${rp}/preview/${opening.id}`);
+  const clipBytes = Buffer.from(await clipRes.arrayBuffer());
+  check(
+    'the preview is a short MP3 clip, not the bounce',
+    clipRes.status === 200 &&
+      clipRes.headers.get('content-type') === 'audio/mpeg' &&
+      clipBytes.length > 1000 &&
+      clipBytes.length < wavData.length,
+    `${clipRes.status} ${clipBytes.length}`,
+  );
+  check('songs not on the page have no preview', (await fetch(B + `${rp}/preview/${unannounced.id}`)).status === 404);
+  check('a song from another release cannot be previewed here', (await fetch(B + `${rp}/preview/${song.id}`)).status === 404);
+  check('private releases have no page even when marked public', (await fetch(B + '/api/public/release/tsimy')).status === 404);
+  const relHtml = await fetch(B + '/release/open-ep/opening');
+  check(
+    'release and song pages are served with a strict policy',
+    relHtml.status === 200 && /default-src 'self'/.test(relHtml.headers.get('content-security-policy') || ''),
+  );
+  check('odd release addresses are refused', (await fetch(B + '/release/a/b/c/d')).status === 404);
+  check(
+    'the directory links releases to their page',
+    (await (await fetch(B + '/api/public/directory')).json()).releases.some((r) => r.slug === 'open-ep'),
+  );
+
+  // Portfolio (for grant applications): statement and bio from the Admin Panel, plus everything public
+  check('only admins edit the portfolio', (await call('bob', '/api/public/admin', 'PATCH', { portfolio: { name: 'X' } })).status === 403);
+  await call('alice', '/api/public/admin', 'PATCH', {
+    portfolio: {
+      name: 'HIMA',
+      tagline: 'Artist, producer',
+      statement: 'I make music about home.',
+      contact: 'hima@example.com',
+      links: 'https://ok.example/hima\njavascript:alert(1)\nhttp://plain.example',
+    },
+  });
+  const pf = await (await fetch(B + '/api/public/portfolio')).json();
+  check(
+    'the portfolio shows the statement and contact',
+    pf.name === 'HIMA' && pf.statement === 'I make music about home.' && pf.contact === 'hima@example.com',
+  );
+  check('portfolio links are https only', pf.links.length === 1 && pf.links[0] === 'https://ok.example/hima', JSON.stringify(pf.links));
+  check(
+    'the portfolio gathers releases, stories and collaborators',
+    pf.releases.some((r) => r.slug === 'open-ep' && r.tracks.length === 1) &&
+      pf.stories.some((x) => x.slug === 'heart-of-the-cities') &&
+      pf.people.some((x) => x.username === 'bob'),
+  );
+  check('the portfolio never lists private releases', !pf.releases.some((r) => r.title === 'TSIMY'));
+  check('the portfolio page is served', (await fetch(B + '/portfolio')).status === 200);
+  const usage2 = JSON.parse((await call('alice', '/api/admin/usage')).text);
+  check('release and portfolio views are counted', usage2.weeks[0].views['release:open-ep'] >= 1 && usage2.weeks[0].views.portfolio >= 1);
   check(
     'join needs a real email',
     (await fetch(B + '/api/public/join', { method: 'POST', body: JSON.stringify({ name: 'Amara', email: 'nope' }) })).status === 400,

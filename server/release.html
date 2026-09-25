@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Release · Sanktuary</title>
+    <meta name="theme-color" content="#0b0b0f" />
+    <style>
+      /* A release on Sanktuary: cover, story, tracklist with 30-second previews, credits and links per song. */
+      :root {
+        --bg: #0b0b0f;
+        --panel: #15151c;
+        --fg: #f3efe8;
+        --dim: #b3ab9f;
+        --accent: #d9a441;
+        --line: rgba(255, 255, 255, 0.1);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.55 Georgia,
+          'Times New Roman',
+          serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: var(--accent);
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: max(24px, env(safe-area-inset-top)) 20px 60px;
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 380px) 1fr;
+        gap: 36px;
+        align-items: end;
+        margin: 24px 0 40px;
+      }
+      @media (max-width: 720px) {
+        .hero {
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+      }
+      .cover {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        background: var(--panel);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+      }
+      .nocover {
+        width: 100%;
+        aspect-ratio: 1;
+        background: linear-gradient(135deg, #2a2230, #0f1a24);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 44px;
+        text-align: center;
+        padding: 20px;
+      }
+      .kicker {
+        font:
+          600 12px/1 system-ui,
+          sans-serif;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      h1 {
+        font-size: clamp(40px, 8vw, 84px);
+        line-height: 1;
+        margin: 12px 0 14px;
+        font-weight: 400;
+      }
+      .blurb {
+        color: var(--dim);
+        white-space: pre-wrap;
+        max-width: 36em;
+        margin: 0 0 18px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font:
+          600 14px system-ui,
+          sans-serif;
+        color: var(--bg);
+        background: var(--fg);
+        border: 0;
+        padding: 11px 20px;
+        border-radius: 999px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .btn.ghost {
+        background: transparent;
+        color: var(--fg);
+        border: 1px solid var(--line);
+      }
+      ol {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border-top: 1px solid var(--line);
+      }
+      li {
+        border-bottom: 1px solid var(--line);
+        padding: 14px 4px;
+        scroll-margin-top: 20px;
+      }
+      li.focus {
+        background: rgba(217, 164, 65, 0.08);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .n {
+        width: 24px;
+        color: var(--dim);
+        font:
+          13px system-ui,
+          sans-serif;
+        text-align: right;
+      }
+      .title {
+        flex: 1;
+        font-size: 19px;
+        min-width: 0;
+      }
+      .play {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--fg);
+        cursor: pointer;
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+      .play[disabled] {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .more {
+        font:
+          13px system-ui,
+          sans-serif;
+        color: var(--dim);
+        background: none;
+        border: 0;
+        cursor: pointer;
+        padding: 6px;
+      }
+      .details {
+        margin: 10px 0 4px 38px;
+        color: var(--dim);
+        font-size: 15px;
+        white-space: pre-wrap;
+      }
+      .links {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+        font:
+          13px system-ui,
+          sans-serif;
+      }
+      .bar {
+        height: 2px;
+        background: var(--line);
+        margin: 10px 0 0 38px;
+        display: none;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+      }
+      li.playing .bar {
+        display: block;
+      }
+      footer {
+        margin-top: 48px;
+        color: var(--dim);
+        font:
+          13px system-ui,
+          sans-serif;
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+      .notice {
+        color: var(--dim);
+        padding: 60px 0;
+        text-align: center;
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap" id="page"><p class="notice">Loading...</p></div>
+    <audio id="audio" preload="none"></audio>
+    <script>
+      (() => {
+        const [, , slug, songSlug] = location.pathname.split('/');
+        const api = `/api/public/release/${encodeURIComponent(slug)}`;
+        const page = document.getElementById('page');
+        const audio = document.getElementById('audio');
+        const el = (tag, cls, text) => {
+          const e = document.createElement(tag);
+          if (cls) e.className = cls;
+          if (text) e.textContent = text; // always text, never HTML
+          return e;
+        };
+        const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+        const LINK_NAMES = { bandlab: 'BandLab', untitled: 'Untitled', soundcloud: 'SoundCloud', other: 'Listen' };
+
+        fetch(api)
+          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+          .then(build)
+          .catch((s) =>
+            page.replaceChildren(el('p', 'notice', s === 404 ? "This release isn't public (yet)." : 'Offline right now. Try again soon.')),
+          );
+
+        function build(r) {
+          document.title = `${r.title} · Sanktuary`;
+          page.replaceChildren();
+          const hero = el('div', 'hero');
+          if (r.cover) {
+            const img = el('img', 'cover');
+            img.alt = `${r.title} cover`;
+            img.src = `${api}/cover?w=800`;
+            img.srcset = `${api}/cover?w=400 400w, ${api}/cover?w=800 800w, ${api}/cover?w=1600 1600w`;
+            img.sizes = '(max-width: 720px) 100vw, 380px';
+            hero.append(img);
+          } else hero.append(el('div', 'nocover', r.title));
+          const text = el('div');
+          const today = new Date().toLocaleDateString('en-CA');
+          text.append(
+            el('div', 'kicker', `${r.kind}${r.date ? ` · ${r.date > today ? 'Out' : 'Released'} ${day(r.date)}` : ''}`),
+            el('h1', '', r.title),
+          );
+          if (r.blurb) text.append(el('p', 'blurb', r.blurb));
+          const actions = el('div');
+          actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap';
+          if (r.story) {
+            const a = el('a', 'btn', `Enter the world: ${r.story.title}`);
+            a.href = `/story/${r.story.slug}`;
+            actions.append(a);
+          }
+          const share = el('button', 'btn ghost', 'Share');
+          share.onclick = () => shareLink(`${location.origin}/release/${r.slug}`, r.title);
+          actions.append(share);
+          text.append(actions);
+          hero.append(text);
+          page.append(hero);
+
+          if (!r.tracks.length) page.append(el('p', 'notice', 'The tracklist is coming soon.'));
+          const list = el('ol');
+          r.tracks.forEach((t) => {
+            const li = el('li');
+            li.id = t.slug;
+            const row = el('div', 'row');
+            const play = el('button', 'play', '▶');
+            play.setAttribute('aria-label', `Play a preview of ${t.title}`);
+            play.disabled = !t.preview;
+            play.title = t.preview ? '30-second preview' : 'No preview yet';
+            play.onclick = () => toggle(t, li, play);
+            const more = el('button', 'more', 'Credits');
+            const details = el('div', 'details');
+            details.hidden = true;
+            if (t.credits) details.append(t.credits);
+            const links = el('div', 'links');
+            for (const [k, url] of Object.entries(t.links)) {
+              const a = el('a', '', LINK_NAMES[k] || 'Listen');
+              a.href = url;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              links.append(a);
+            }
+            const s = el('a', '', 'Share this song');
+            s.href = `/release/${r.slug}/${t.slug}`;
+            s.onclick = (e) => (e.preventDefault(), shareLink(`${location.origin}/release/${r.slug}/${t.slug}`, `${t.title} · ${r.title}`));
+            links.append(s);
+            details.append(links);
+            more.onclick = () => {
+              details.hidden = !details.hidden;
+              more.textContent = details.hidden ? 'Credits' : 'Close';
+            };
+            row.append(el('span', 'n', String(t.n)), play, el('span', 'title', t.title), more);
+            const bar = el('div', 'bar');
+            bar.append(el('i'));
+            li.append(row, bar, details);
+            list.append(li);
+            if (songSlug && t.slug === songSlug) {
+              // /release/<release>/<song>: that song first
+              document.title = `${t.title} · ${r.title} · Sanktuary`;
+              li.classList.add('focus');
+              details.hidden = false;
+              more.textContent = 'Close';
+              setTimeout(() => li.scrollIntoView({ block: 'center' }), 100);
+            }
+          });
+          page.append(list);
+          const foot = el('footer');
+          const home = el('a', '', 'Sanktuary');
+          home.href = '/';
+          const pf = el('a', '', 'Portfolio');
+          pf.href = '/portfolio';
+          foot.append(home, pf, el('span', '', 'Previews are 30 seconds.'));
+          page.append(foot);
+        }
+
+        let current = null;
+        function toggle(t, li, btn) {
+          if (current?.t === t && !audio.paused) return audio.pause();
+          document.querySelectorAll('li.playing').forEach((x) => x.classList.remove('playing'));
+          document.querySelectorAll('.play').forEach((b) => (b.textContent = '▶'));
+          if (current?.t !== t) audio.src = `${api}/preview/${t.id}`;
+          current = { t, li, btn };
+          li.classList.add('playing');
+          audio.play().catch(() => {});
+        }
+        audio.onplay = () => current && (current.btn.textContent = '❚❚');
+        audio.onpause = () => current && (current.btn.textContent = '▶');
+        audio.onended = () => current && ((current.btn.textContent = '▶'), current.li.classList.remove('playing'));
+        audio.ontimeupdate = () => {
+          const bar = current?.li.querySelector('.bar i');
+          if (bar && audio.duration) bar.style.width = `${(audio.currentTime / audio.duration) * 100}%`;
+        };
+        function shareLink(url, title) {
+          if (navigator.share) navigator.share({ title, url }).catch(() => {});
+          else
+            navigator.clipboard?.writeText(url).then(
+              () => alert('Link copied'),
+              () => prompt('Copy this link:', url),
+            );
+        }
+      })();
+    </script>
+  </body>
+</html>

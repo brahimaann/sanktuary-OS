@@ -23,6 +23,9 @@ interface Release {
   owner: string;
   public?: boolean;
   folder?: FileRef | null;
+  slug?: string; // its public page: /release/<slug>
+  blurb?: string;
+  story?: string | null;
 }
 interface Found {
   added: string[];
@@ -66,7 +69,14 @@ interface Track {
   history: { at: string; user: string; action: string }[];
   updated: string;
   updatedBy: string;
+  onPage?: boolean; // shown on the release's public page
+  previewAt?: number | null; // a 30-second public preview starts here (seconds)
 }
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const seconds = (v: string) => {
+  const m = v.trim().match(/^(\d{1,2}):(\d{2})$|^(\d{1,4})$/);
+  return m ? (m[3] !== undefined ? Number(m[3]) : Number(m[1]) * 60 + Number(m[2])) : null;
+};
 
 const STATUS_COLORS: Record<string, string> = {
   Idea: '#808080',
@@ -110,6 +120,7 @@ const TracksApp: React.FC = () => {
   const [trackId, setTrackId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [pageSetup, setPageSetup] = useState(false);
   const [linking, setLinking] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -332,6 +343,18 @@ const TracksApp: React.FC = () => {
               />
               Announce publicly
             </label>
+            {release.public && !release.members && (
+              <>
+                <button style={button} onClick={() => setPageSetup(true)} title="What the public page says: blurb and its story">
+                  Public page...
+                </button>
+                {release.slug && (
+                  <a href={`/release/${release.slug}`} target="_blank" rel="noopener noreferrer" title="Open the public page">
+                    /release/{release.slug}
+                  </a>
+                )}
+              </>
+            )}
           </>
         )}
       </div>
@@ -434,6 +457,16 @@ const TracksApp: React.FC = () => {
                   if (x.found) setTimeout(() => setMsg(foundText(x.found)));
                 });
             }}
+          />
+        )}
+        {pageSetup && release && (
+          <PageSetup
+            release={release}
+            onSave={(body) => {
+              setPageSetup(false);
+              patchRelease(body);
+            }}
+            onClose={() => setPageSetup(false)}
           />
         )}
         {sharing && release && (
@@ -680,6 +713,38 @@ const TrackPage: React.FC<{
         </div>
       </Section>
 
+      <Section title="Public page">
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={!!t.onPage} onChange={(e) => save({ onPage: e.target.checked })} />
+          Show on the release's public page (title, credits, links)
+        </label>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', opacity: t.onPage ? 1 : 0.5 }}>
+          <label style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              disabled={!t.onPage || !t.bounce}
+              checked={t.previewAt !== null && t.previewAt !== undefined}
+              onChange={(e) => save({ previewAt: e.target.checked ? 30 : null })}
+            />
+            30-second preview, starting at
+          </label>
+          <input
+            key={t.previewAt ?? 'none'}
+            style={{ ...input, width: 52 }}
+            disabled={t.previewAt === null || t.previewAt === undefined}
+            defaultValue={mmss(t.previewAt ?? 30)}
+            onBlur={(e) => {
+              const v = seconds(e.target.value);
+              if (v === null) setMsg('Preview start looks like 1:15');
+              else if (v !== t.previewAt) save({ previewAt: v });
+            }}
+            title="Minutes:seconds into the bounce"
+          />
+          {!t.bounce && <span style={{ color: '#666' }}>(needs a bounce)</span>}
+        </div>
+        <div style={{ color: '#555' }}>Visitors only ever hear the 30 seconds; the bounce itself stays private.</div>
+      </Section>
+
       <Section title="Links">
         {LINKS.map(([k, label]) => (
           <div key={k} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -761,6 +826,74 @@ const TrackPage: React.FC<{
           }}
         />
       )}
+    </div>
+  );
+};
+
+/** A release's public page: a few lines about it, and the Story that is its visual world. */
+const PageSetup: React.FC<{ release: Release; onSave: (body: { blurb: string; story: string | null }) => void; onClose: () => void }> = ({
+  release,
+  onSave,
+  onClose,
+}) => {
+  const api = useApi();
+  const { me } = useMe();
+  const [blurb, setBlurb] = useState(release.blurb || '');
+  const [story, setStory] = useState(release.story || '');
+  const [stories, setStories] = useState<{ slug: string; title: string }[]>([]);
+  useEffect(() => {
+    // Stories are listed publicly once published (and admins can pick drafts)
+    (me?.admin ? api('/api/stories') : api('/api/public/directory').then((d) => d.stories || [])).then(setStories, () => {});
+  }, [api, me?.admin]);
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.25)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20,
+      }}
+    >
+      <div style={{ width: 'min(460px, 96%)', background: '#c0c0c0', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+          Public page for {release.title}
+        </div>
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          About it
+          <textarea
+            rows={5}
+            style={{ ...input, resize: 'vertical' }}
+            value={blurb}
+            onChange={(e) => setBlurb(e.target.value)}
+            placeholder="A few lines about the record: what it is, who made it, what it sounds like."
+          />
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            Its story
+            <select style={input} value={story} onChange={(e) => setStory(e.target.value)}>
+              <option value="">(none)</option>
+              {stories.map((st) => (
+                <option key={st.slug} value={st.slug}>
+                  {st.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div style={{ color: '#555' }}>
+            The story (e.g. Heart of the Cities) gets an "Enter the world" button on the page once it's published.
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+            <button style={button} onClick={onClose}>
+              Cancel
+            </button>
+            <button style={{ ...button, fontWeight: 700 }} onClick={() => onSave({ blurb, story: story || null })}>
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

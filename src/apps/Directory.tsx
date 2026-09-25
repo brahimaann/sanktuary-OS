@@ -16,7 +16,7 @@ interface Person {
 interface Dir {
   intro: string;
   people: Person[];
-  releases: { title: string; kind: string; date: string | null; tracks: number }[];
+  releases: { title: string; kind: string; date: string | null; tracks: number; slug: string | null }[];
   events: {
     title: string;
     kind: string;
@@ -107,6 +107,7 @@ const Directory: React.FC = () => {
     if (!d || !section) return;
     if (section === 'posts') return page(d.posts[i].title, d.posts[i].url, 'news');
     if (section === 'stories') return page(d.stories[i].title, `/story/${d.stories[i].slug}`, 'kodak-imaging');
+    if (section === 'releases' && d.releases[i].slug) return page(d.releases[i].title, `/release/${d.releases[i].slug}`, 'media-player');
     if (section === 'products') return page('Shop', `/shop/${d.products[i].slug}`, 'favorites');
     if (section === 'pools') return page(d.pools[i].title, `/pool/${d.pools[i].slug}`, 'favorites');
     setOpen(i === open ? null : i);
@@ -137,6 +138,9 @@ const Directory: React.FC = () => {
           <img src={icon('hard-disk-drive', 16)} alt="" width={16} height={16} />
           S:\Sanktuary{label ? `\\${label}` : ''}
         </div>
+        <button style={button} onClick={() => page('Portfolio', '/portfolio', 'my-documents')} title="Work samples, statement and bio">
+          Portfolio
+        </button>
         <button style={{ ...button, fontWeight: 700 }} onClick={welcome}>
           Join the Village
         </button>

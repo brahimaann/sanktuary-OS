@@ -1406,6 +1406,9 @@ async function tracksApi(req, res, url) {
       if (input.date !== undefined) r.date = dateOrNull(input.date);
       if (input.cover !== undefined) r.cover = fileRef(input.cover);
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
+      if (r.public) giveSlug(db, r);
+      if (input.blurb !== undefined) r.blurb = String(input.blurb ?? '').slice(0, 3000);
+      if (input.story !== undefined) r.story = input.story ? String(input.story).slice(0, 80) : null; // a Story as its visual world
       if (input.members !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
         r.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
@@ -1441,6 +1444,10 @@ async function tracksApi(req, res, url) {
       const log = (action) => (t.history = [{ at: new Date().toISOString(), user: me, action }, ...t.history].slice(0, 100));
       const news = [];
       for (const [k, max] of Object.entries(TRACK_TEXT)) if (input[k] !== undefined) t[k] = String(input[k] ?? '').slice(0, max);
+      if (input.onPage !== undefined) t.onPage = !!input.onPage; // shown on the release's public page (title, credits, links)
+      if (input.previewAt !== undefined)
+        // 30 seconds of the bounce from here are public on that page (null: no preview); never the whole bounce
+        t.previewAt = input.previewAt === null ? null : Math.max(0, Math.min(3600, Math.round(Number(input.previewAt)) || 0));
       if (input.n !== undefined) t.n = Math.max(1, Math.min(99, Number(input.n) || t.n));
       if (input.deadline !== undefined) {
         t.deadline = dateOrNull(input.deadline);
@@ -2607,9 +2614,11 @@ async function publicApi(req, res, url) {
   const [, , , what, who] = url.pathname.split('/');
   // The public directory (My Computer): only what was explicitly made public, plus the shop and writing
   if (req.method === 'GET' && what === 'story') return storyPublic(req, res, url);
+  if (req.method === 'GET' && what === 'release') return releasePublic(req, res, url);
+  if (req.method === 'GET' && what === 'portfolio') return portfolioPublic(req, res);
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
-    const tdb = await loadTracks();
+    const tdb = await publicTracks();
     const count = (r) => Object.values(tdb.tracks).filter((t) => t.release === r.id && !t.deleted).length;
     const events = Object.values((await loadTimeline()).items)
       .filter((i) => i.public && !i.members && i.status !== 'Cancelled')
@@ -2630,7 +2639,7 @@ async function publicApi(req, res, url) {
       people: await listedPeople(),
       releases: Object.values(tdb.releases)
         .filter((r) => r.public && !r.deleted && !r.members)
-        .map((r) => ({ title: r.title, kind: r.kind, date: r.date, tracks: count(r) }))
+        .map((r) => ({ title: r.title, kind: r.kind, date: r.date, tracks: count(r), slug: r.slug || null }))
         .sort((a, b) => (b.date || '9').localeCompare(a.date || '9')),
       events: [
         ...events.filter((e) => !e.past),
@@ -2713,10 +2722,20 @@ async function publicApi(req, res, url) {
   const user = await currentUser(req, url, cfg);
   if (!user.admin) fail(403, 'Administrators only');
   if (req.method === 'GET' && what === 'admin')
-    return json(res, { intro: front.intro, joins: Object.values(front.joins).sort((a, b) => b.at.localeCompare(a.at)) });
+    return json(res, {
+      intro: front.intro,
+      portfolio: front.portfolio || {},
+      joins: Object.values(front.joins).sort((a, b) => b.at.localeCompare(a.at)),
+    });
   if (req.method === 'PATCH' && what === 'admin') {
     const input = await jsonBody(req);
     if (input.intro !== undefined) front.intro = String(input.intro).slice(0, 3000);
+    if (input.portfolio && typeof input.portfolio === 'object') {
+      const limits = { name: 100, tagline: 200, statement: 6000, bio: 6000, contact: 300, links: 2000 };
+      front.portfolio = Object.fromEntries(
+        Object.entries(limits).map(([k, max]) => [k, String(input.portfolio[k] ?? front.portfolio?.[k] ?? '').slice(0, max)]),
+      );
+    }
     if (input.join && front.joins[input.join.id] && ['New', 'Contacted', 'Joined', 'Archived'].includes(input.join.status))
       front.joins[input.join.id].status = input.join.status;
     saveFront();
@@ -3518,6 +3537,153 @@ function storyPage(req, res, url) {
   return pipeline(createReadStream(STORY_PAGE), res);
 }
 
+// ── Public release pages (/release/<slug>) and the portfolio (/portfolio) ──
+// A release is public when "Announce publicly" is ticked and it isn't private to some members. Its page shows
+// only the songs ticked "Show on the public page": title, credits, links, and (if a preview start is set) a
+// 30-second clip. Covers are resized pictures. Full bounces and file names never leave the server.
+const RELEASE_PAGE = new URL('./release.html', import.meta.url);
+const PORTFOLIO_PAGE = new URL('./portfolio.html', import.meta.url);
+const publicRelease = (r) => r && r.public && !r.deleted && !r.members && r.slug;
+
+/** A public release's page address, /release/<slug>: given once, then fixed so shared links keep working. */
+function giveSlug(db, r) {
+  if (r.slug) return;
+  const base = slugify(r.title) || 'release';
+  let slug = base;
+  for (let n = 2; Object.values(db.releases).some((x) => x !== r && x.slug === slug); n++) slug = `${base}-${n}`;
+  r.slug = slug;
+  saveTracks();
+}
+/** Releases made public before pages existed get their address the first time anything public is read. */
+async function publicTracks() {
+  const db = await loadTracks();
+  for (const r of Object.values(db.releases)) if (r.public && !r.deleted && !r.members) giveSlug(db, r);
+  return db;
+}
+
+/** A file a release points at, as the server (not a member) sees it; null if its space or drive is gone. */
+async function releaseFile(ref) {
+  if (!ref || ref.space === 'me') return null;
+  const space = spacesFor({ username: '', admin: true }, await loadConfig(), await loadStatus()).find((x) => x.id === ref.space);
+  if (!space?.online) return null;
+  try {
+    return locateIn(space, ref.path).abs;
+  } catch {
+    return null;
+  }
+}
+
+async function releaseView(r) {
+  const tdb = await loadTracks();
+  const st = r.story && (await loadStories()).stories[r.story];
+  const tracks = Object.values(tdb.tracks)
+    .filter((t) => t.release === r.id && !t.deleted && t.onPage)
+    .sort((a, b) => a.n - b.n)
+    .map((t) => ({
+      id: t.id,
+      n: t.n,
+      title: t.title,
+      slug: slugify(t.title) || t.id,
+      credits: t.credits || '',
+      links: Object.fromEntries(Object.entries(t.links || {}).filter(([, v]) => /^https:\/\//.test(v))),
+      preview: t.previewAt !== null && t.previewAt !== undefined && !!t.bounce,
+    }));
+  return {
+    slug: r.slug,
+    title: r.title,
+    kind: r.kind,
+    date: r.date,
+    blurb: r.blurb || '',
+    cover: !!r.cover,
+    story: st && st.public && !st.deleted ? { slug: st.slug, title: st.title } : null,
+    tracks,
+  };
+}
+
+async function releasePublic(req, res, url) {
+  const [, , , , slug, part, id] = url.pathname.split('/'); // /api/public/release/<slug>[/cover | /preview/<track>]
+  const tdb = await publicTracks();
+  const r = Object.values(tdb.releases).find((x) => x.slug === slug && publicRelease(x)) || fail(404, 'No such release');
+  if (!part) {
+    count('view', `release:${r.slug}`);
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, await releaseView(r));
+  }
+  if (part === 'cover') {
+    const file = (await releaseFile(r.cover)) || fail(404, 'No cover');
+    const w = Number(url.searchParams.get('w'));
+    return thumb(res, file, [400, 800, 1600].includes(w) ? w : 800);
+  }
+  if (part === 'preview') {
+    const t = tdb.tracks[id];
+    if (!t || t.deleted || t.release !== r.id || !t.onPage || t.previewAt === null || t.previewAt === undefined) fail(404, 'No preview');
+    const file = (await releaseFile(t.bounce)) || fail(404, 'No preview');
+    res.setHeader('cache-control', 'public, max-age=3600');
+    return stream(req, res, new URLSearchParams(), await audioClipFile(file, t.previewAt));
+  }
+  fail(404, 'Not found');
+}
+
+/** The portfolio: statement, bio and contact (Admin Panel > Front page), and everything that's public. */
+async function portfolioPublic(req, res) {
+  const front = await loadFront();
+  const pf = front.portfolio || {};
+  const tdb = await publicTracks();
+  const today = localDate();
+  const releases = await Promise.all(
+    Object.values(tdb.releases)
+      .filter(publicRelease)
+      .sort((a, b) => (b.date || '9').localeCompare(a.date || '9'))
+      .map(releaseView),
+  );
+  const stories = Object.values((await loadStories()).stories)
+    .filter((st) => st.public && !st.deleted)
+    .map((st) => ({ slug: st.slug, title: st.title, subtitle: st.subtitle, count: st.items.filter((i) => !i.hidden).length }));
+  const events = Object.values((await loadTimeline()).items)
+    .filter((i) => i.public && !i.members && i.status !== 'Cancelled')
+    .sort((a, b) => b.start.localeCompare(a.start))
+    .map((i) => ({
+      title: i.title,
+      kind: i.kind,
+      start: i.start,
+      end: i.end,
+      location: i.location,
+      link: i.link || null,
+      past: (i.end || i.start) < today,
+    }));
+  count('view', 'portfolio');
+  res.setHeader('cache-control', 'public, max-age=60');
+  return json(res, {
+    name: pf.name || 'Sanktuary',
+    tagline: pf.tagline || '',
+    statement: pf.statement || '',
+    bio: pf.bio || '',
+    contact: pf.contact || '',
+    links: String(pf.links || '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => /^https:\/\/\S+$/.test(l))
+      .slice(0, 12),
+    releases,
+    stories,
+    events,
+    people: await listedPeople(),
+  });
+}
+
+function htmlPage(file) {
+  return (req, res, url) => {
+    if (!/^\/(release|portfolio)(\/[\w-]{1,80}){0,2}\/?$/.test(url.pathname)) fail(404, 'Not found');
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-cache',
+      'content-security-policy':
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'",
+    });
+    return pipeline(createReadStream(file), res);
+  };
+}
+
 /** What the file window and Profile need to show about a project. */
 const projectView = (p, me) => ({
   kind: p.kind,
@@ -3649,15 +3815,20 @@ async function audioPreviewFile(file) {
   return out;
 }
 
-async function transcode(file, format, out) {
+async function transcode(file, format, out, clip = null) {
   if (transcoding >= 2) await new Promise((r) => transcodeQueue.push(r));
   transcoding++;
   try {
     await mkdir(dirname(out), { recursive: true });
     const tmp = out + '.part';
-    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file', '-f', format, '-i', file];
+    const seek = clip ? ['-ss', String(clip.at)] : [];
+    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file', ...seek, '-f', format, '-i', file];
+    // A public preview: 30 s, faded in and out, lighter bitrate
+    const cut = clip ? ['-t', '30', '-af', 'afade=t=in:d=0.5,afade=t=out:st=28.5:d=1.5'] : [];
     const code = await new Promise((resolve) => {
-      const ff = spawn(ffmpegPath, [...args, '-vn', '-c:a', 'libmp3lame', '-b:a', '256k', '-f', 'mp3', '-y', tmp], { windowsHide: true });
+      const ff = spawn(ffmpegPath, [...args, '-vn', ...cut, '-c:a', 'libmp3lame', '-b:a', clip ? '160k' : '256k', '-f', 'mp3', '-y', tmp], {
+        windowsHide: true,
+      });
       const timer = setTimeout(() => ff.kill(), 10 * 60_000);
       ff.stderr.resume();
       ff.on('error', () => resolve(-1));
@@ -3676,6 +3847,22 @@ async function transcode(file, format, out) {
     transcoding--;
     transcodeQueue.shift()?.();
   }
+}
+
+/** 30 seconds of a bounce from `at` (for public release pages), made once and cached. */
+const CLIP_FORMATS = { ...AUDIO_PREVIEW, '.mp3': 'mp3', '.m4a': 'mov', '.ogg': 'ogg' };
+async function audioClipFile(file, at) {
+  const format = CLIP_FORMATS[extname(file).toLowerCase()] || fail(415, 'No preview for this type');
+  const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
+  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|clip${at}`).digest('hex') + '.mp3');
+  if (existsSync(out)) return out;
+  if (!previewJobs.has(out))
+    previewJobs.set(
+      out,
+      transcode(file, format, out, { at }).finally(() => previewJobs.delete(out)),
+    );
+  await previewJobs.get(out);
+  return out;
 }
 
 /** Makes the audio preview in the background right after an upload, so it's ready before anyone presses play. */
@@ -4684,6 +4871,8 @@ const routes = [
   ['/shop', storePage],
   ['/blog', blogPage],
   ['/story/', storyPage],
+  ['/release/', htmlPage(RELEASE_PAGE)],
+  ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
   // Normally the service worker answers the phone's "Share to Sanktuary"; if it wasn't running, say so instead of 404
