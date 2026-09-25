@@ -97,6 +97,7 @@ if (-not (Get-ScheduledTask -TaskName 'Sanktuary RapidRAW' -ErrorAction Silently
 }
 
 Step 'Start and check'
+Stop-ScheduledTask -TaskName 'Sanktuary RapidRAW' # else the task still counts as running and Start is ignored (IgnoreNew)
 Get-CimInstance Win32_Process -Filter "Name='$($exe.Name)'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-ScheduledTask -TaskName 'Sanktuary RapidRAW'
 $ok = $false
