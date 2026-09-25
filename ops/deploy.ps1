@@ -39,7 +39,8 @@ if (Test-Path "$rr\src\.git") {
   if ($want -and $want -ne $built -and $want -ne $tried -and -not $busy) {
     Set-Content "$rr\update-tried.txt" $want
     Log "RapidRAW: rebuilding at $($want.Substring(0, 7)) in the background"
-    Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "& '$proj\ops\rapidraw\setup.ps1' *> '$rr\update.log'"
+    # cmd does the redirect: redirected inside PowerShell, the first stderr line from npm/vite/cargo kills setup.ps1
+    Start-Process cmd -WindowStyle Hidden -ArgumentList '/c', "powershell -NoProfile -ExecutionPolicy Bypass -File `"$proj\ops\rapidraw\setup.ps1`" > `"$rr\update.log`" 2>&1"
   }
 }
 
