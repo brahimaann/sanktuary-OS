@@ -6,6 +6,11 @@ import { useAuth } from '@clerk/react';
 import { startLive } from '../utils/live';
 import { dialog } from '../utils/dialog';
 
+type Cell = [col: number, row: number];
+const GRID = 82; // Win98 desktop spacing
+const PAD = 16;
+const toPx = ([c, r]: Cell) => ({ x: PAD + c * GRID, y: PAD + r * GRID });
+
 interface DesktopIconDef {
   id: string;
   title: string;
@@ -184,12 +189,11 @@ export const Desktop: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
 
-  // Freeform Desktop Icon positions and drag state
-  const [positions, setPositions] = useState<{ [id: string]: { x: number; y: number } }>({});
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [currentDragPos, setCurrentDragPos] = useState<{ x: number; y: number } | null>(null);
-  const dragMoved = useRef(false);
+  // Icons sit in grid cells, one icon per cell. Each person's arrangement is kept in this browser (per user).
+  const layoutKey = `sk_desktop_${me?.username || 'guest'}`;
+  const [cells, setCells] = useState<Record<string, Cell>>({});
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const [drag, setDrag] = useState<{ ids: string[]; sx: number; sy: number; dx: number; dy: number; moved: boolean } | null>(null);
 
   // Custom right click context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; visible: boolean } | null>(null);
@@ -358,92 +362,110 @@ export const Desktop: React.FC = () => {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('hq_os_desktop_icon_positions');
-      if (saved) {
-        setPositions(JSON.parse(saved));
-      }
-    } catch (_) {}
+      setCells(JSON.parse(localStorage.getItem(layoutKey) || '{}'));
+    } catch {
+      setCells({});
+    }
+  }, [layoutKey]);
+
+  useEffect(() => {
+    const el = desktopRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
-  const getIconPos = (id: string, index: number) => {
-    if (positions[id]) return positions[id];
-    const row = index % 7;
-    const col = Math.floor(index / 7);
-    return {
-      x: 16 + col * 82,
-      y: 16 + row * 82,
-    };
+  // Where every icon goes: saved cells first (if still on screen and free), then the rest fill the first free
+  // cells top-to-bottom, column by column. No two icons ever share a cell.
+  const rows = Math.max(1, Math.floor((size.h - PAD - 75) / GRID) + 1);
+  const cols = Math.max(1, Math.floor((size.w - PAD - 75) / GRID) + 1);
+  const key = ([c, r]: Cell) => `${c},${r}`;
+  const layout: Record<string, Cell> = {};
+  {
+    const taken = new Set<string>();
+    for (const { id } of allIcons) {
+      const c = cells[id];
+      if (Array.isArray(c) && c[0] >= 0 && c[1] >= 0 && c[0] < cols && c[1] < rows && !taken.has(key(c))) {
+        layout[id] = [c[0], c[1]];
+        taken.add(key(c));
+      }
+    }
+    let n = 0;
+    for (const { id } of allIcons) {
+      if (layout[id]) continue;
+      while (taken.has(key([Math.floor(n / rows), n % rows]))) n++;
+      layout[id] = [Math.floor(n / rows), n % rows];
+      taken.add(key(layout[id]));
+    }
+  }
+
+  const saveCells = (next: Record<string, Cell>) => {
+    setCells(next);
+    try {
+      localStorage.setItem(layoutKey, JSON.stringify(next));
+    } catch {}
+  };
+
+  // Dropped: each moved icon takes the cell under it, or the nearest free one if another icon is there
+  const dropIcons = (ids: string[], dx: number, dy: number) => {
+    const taken = new Set(allIcons.filter((i) => !ids.includes(i.id)).map((i) => key(layout[i.id])));
+    const next = { ...layout };
+    const clamp = (v: number, max: number) => Math.min(max - 1, Math.max(0, v));
+    for (const id of ids) {
+      const want: Cell = [clamp(Math.round(layout[id][0] + dx / GRID), cols), clamp(Math.round(layout[id][1] + dy / GRID), rows)];
+      let best: Cell | null = taken.has(key(want)) ? null : want;
+      // ponytail: scans every cell per icon; fine for a desktop's few dozen icons
+      let d = best ? 0 : Infinity;
+      for (let i = 0; i < cols; i++)
+        for (let j = 0; j < rows; j++) {
+          const dist = (i - want[0]) ** 2 + (j - want[1]) ** 2;
+          if (dist < d && !taken.has(key([i, j]))) [d, best] = [dist, [i, j]];
+        }
+      next[id] = best || layout[id]; // screen full: stays where it was
+      taken.add(key(next[id]));
+    }
+    saveCells(next);
   };
 
   const handleIconPointerDown = (id: string, e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    handleIconClick(id, e);
-    e.currentTarget.setPointerCapture(e.pointerId);
-
-    const parentRect = desktopRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-    const curPos =
-      positions[id] ||
-      getIconPos(
-        id,
-        allIcons.findIndex((i) => i.id === id),
-      );
-
-    dragMoved.current = false;
-    setDraggingId(id);
-    setDragOffset({
-      x: e.clientX - parentRect.left - curPos.x,
-      y: e.clientY - parentRect.top - curPos.y,
-    });
-    setCurrentDragPos(curPos);
-  };
-
-  const handleIconPointerMove = (id: string, e: React.PointerEvent) => {
-    if (draggingId !== id) return;
-    dragMoved.current = true;
-    const parentRect = desktopRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-    const newX = Math.max(8, e.clientX - parentRect.left - dragOffset.x);
-    const newY = Math.max(8, e.clientY - parentRect.top - dragOffset.y);
-    setCurrentDragPos({ x: newX, y: newY });
-  };
-
-  const handleIconPointerUp = (id: string, e: React.PointerEvent) => {
-    if (draggingId !== id) return;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch (_) {}
-
-    if (dragMoved.current && currentDragPos) {
-      // Snap to 82px Win98 desktop grid
-      const snappedX = Math.max(16, Math.round((currentDragPos.x - 16) / 82) * 82 + 16);
-      const snappedY = Math.max(16, Math.round((currentDragPos.y - 16) / 82) * 82 + 16);
-      const finalPos = { x: snappedX, y: snappedY };
-
-      setPositions((prev) => {
-        const next = { ...prev, [id]: finalPos };
-        try {
-          localStorage.setItem('hq_os_desktop_icon_positions', JSON.stringify(next));
-        } catch (_) {}
-        return next;
-      });
-    } else if (e.pointerType === 'touch') {
-      // Phones: a tap opens the icon (double-tap is unreliable on touch screens)
-      const iconDef = allIcons.find((i) => i.id === id);
-      if (iconDef) handleIconDoubleClick(iconDef);
-    }
-
-    setDraggingId(null);
-    setCurrentDragPos(null);
-  };
-
-  const handleIconClick = (id: string, e: React.PointerEvent) => {
     e.stopPropagation();
     setContextMenu(null);
     setActiveSubMenu(null);
     if (e.ctrlKey) {
       setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
-    } else {
-      setSelectedIds([id]);
+      return;
     }
+    // Pressing on a highlighted icon drags the whole highlighted group, like Windows
+    const ids = selectedIds.includes(id) ? selectedIds : [id];
+    setSelectedIds(ids);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrag({ ids, sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, moved: false });
+  };
+
+  const handleIconPointerMove = (e: React.PointerEvent) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.sx;
+    const dy = e.clientY - drag.sy;
+    setDrag({ ...drag, dx, dy, moved: drag.moved || Math.hypot(dx, dy) > 4 });
+  };
+
+  const handleIconPointerUp = (id: string, e: React.PointerEvent) => {
+    if (!drag) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    if (drag.moved) dropIcons(drag.ids, drag.dx, drag.dy);
+    else {
+      setSelectedIds([id]); // a plain click on one of several highlighted icons picks just that one
+      if (e.pointerType === 'touch') {
+        // Phones: a tap opens the icon (double-tap is unreliable on touch screens)
+        const iconDef = allIcons.find((i) => i.id === id);
+        if (iconDef) handleIconDoubleClick(iconDef);
+      }
+    }
+    setDrag(null);
   };
 
   const handleIconDoubleClick = (iconDef: DesktopIconDef) => {
@@ -569,10 +591,11 @@ export const Desktop: React.FC = () => {
       }}
       data-view-mode="DESKTOP"
     >
-      {allIcons.map((icon, index) => {
+      {allIcons.map((icon) => {
         const isSelected = selectedIds.includes(icon.id);
-        const isDragging = draggingId === icon.id;
-        const pos = isDragging && currentDragPos ? currentDragPos : getIconPos(icon.id, index);
+        const isDragging = !!drag?.moved && drag.ids.includes(icon.id);
+        const home = toPx(layout[icon.id]);
+        const pos = isDragging ? { x: home.x + drag!.dx, y: home.y + drag!.dy } : home;
         return (
           <div
             key={icon.id}
@@ -580,7 +603,7 @@ export const Desktop: React.FC = () => {
               iconRefs.current[icon.id] = el;
             }}
             onPointerDown={(e) => handleIconPointerDown(icon.id, e)}
-            onPointerMove={(e) => handleIconPointerMove(icon.id, e)}
+            onPointerMove={handleIconPointerMove}
             onPointerUp={(e) => handleIconPointerUp(icon.id, e)}
             onDoubleClick={() => handleIconDoubleClick(icon)}
             onContextMenu={(e) => handleIconContextMenu(e, icon)}
@@ -592,6 +615,7 @@ export const Desktop: React.FC = () => {
               left: `${pos.x}px`,
               top: `${pos.y}px`,
               zIndex: isDragging ? 50 : 1,
+              opacity: isDragging ? 0.7 : 1,
               touchAction: 'none',
             }}
           >
@@ -646,7 +670,15 @@ export const Desktop: React.FC = () => {
             top: `${contextMenu.y}px`,
           }}
         >
-          <div className="px-3 py-1 cursor-default text-gray-500 opacity-60">Arrange Icons</div>
+          <div
+            onClick={() => {
+              saveCells({}); // back to the default order
+              setContextMenu(null);
+            }}
+            className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default"
+          >
+            Arrange Icons
+          </div>
           <div className="px-3 py-1 cursor-default text-gray-500 opacity-60">Line Up Icons</div>
           <div onClick={() => window.location.reload()} className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default">
             Refresh
