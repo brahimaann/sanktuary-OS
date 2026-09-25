@@ -58,9 +58,21 @@ function Up {
   # The new server answers /healthz within a minute, or it's a bad deploy
   foreach ($i in 1..30) {
     Start-Sleep 2
-    try { if ((Invoke-WebRequest "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { return $true } } catch {}
+    # /healthz is the server; / is the site itself (a missing build folder still passes /healthz)
+    try {
+      if ((Invoke-WebRequest "http://127.0.0.1:$port/healthz" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200 -and
+        (Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { return $true }
+    } catch {}
   }
   return $false
+}
+# Fresh build files can be locked for a moment (antivirus scanning them): retry, and fail loudly rather than
+# carry on with no site folder (ErrorActionPreference is Continue, so a failed Rename-Item wouldn't stop us)
+function Move-Folder($from, $to) {
+  foreach ($i in 1..10) {
+    try { Rename-Item $from $to -ErrorAction Stop; return } catch { Start-Sleep 2 }
+  }
+  throw "Couldn't rename $from to $to (files in use?)"
 }
 function StopServer {
   Stop-ScheduledTask -TaskName 'Sanktuary OS server'
@@ -79,8 +91,8 @@ try {
   # Swap the new build in while the server is stopped (Windows won't rename folders with open files)
   StopServer
   if (Test-Path dist-old) { Remove-Item dist-old -Recurse -Force }
-  if (Test-Path dist) { Rename-Item dist dist-old }
-  Rename-Item dist-next dist
+  if (Test-Path dist) { Move-Folder dist dist-old }
+  Move-Folder dist-next dist
   Start-ScheduledTask -TaskName 'Sanktuary OS server'
 
   if (-not (Up)) {
