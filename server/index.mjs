@@ -5395,6 +5395,16 @@ async function comments(req, res, url) {
   const audience = (u) => (space.id === 'me' ? u.username === user.username : true);
 
   if (req.method === 'GET') return json(res, thread.comments);
+  if (req.method === 'POST' && q.has('heard')) {
+    // Someone asked for feedback has listened (the player reports it after 30 s)
+    const c = thread.comments.find((x) => x.id === q.get('id') && x.ask?.to.includes(user.username)) || fail(404, 'No such request');
+    if (!c.ask.heard[user.username]) {
+      c.ask.heard[user.username] = new Date().toISOString();
+      await saveJson(file, thread);
+      emit('comment', { space: space.id, path, comment: c }, (u) => audience(u));
+    }
+    return json(res, c);
+  }
   if (req.method === 'POST') {
     const input = await jsonBody(req);
     const text =
@@ -5403,11 +5413,32 @@ async function comments(req, res, url) {
         .slice(0, 2000) || fail(400, 'Empty comment');
     const t = Number.isFinite(input.t) && input.t >= 0 ? Math.round(input.t * 10) / 10 : null;
     const c = { id: randomUUID().slice(0, 12), user: user.username, at: new Date().toISOString(), t, text };
+    // A feedback request: "listen by Friday: is the vocal too loud?" to named people who can open this file.
+    // They're notified with a link to the file; their comments are the answers; listening is recorded (?heard).
+    if (input.ask && space.id !== 'me') {
+      const [members, status] = [await currentMembers(), await loadStatus()];
+      const canOpen = (u) =>
+        u !== user.username &&
+        members.has(u) &&
+        spacesFor({ username: u, admin: cfg.admins.includes(u) }, cfg, status).some((s) => s.id === space.id);
+      const to = [...new Set((Array.isArray(input.ask.to) ? input.ask.to : []).map(String))].filter(canOpen).slice(0, 20);
+      if (!to.length) fail(400, 'Pick at least one person who can open this file');
+      c.ask = { to, due: input.ask.due ? dateOrNull(input.ask.due) : null, heard: {} };
+    }
     thread.comments.push(c);
     await mkdir(join(DATA, 'comments'), { recursive: true });
     await saveJson(file, thread);
     emit('comment', { space: space.id, path, comment: c }, (u) => audience(u));
     if (space.id !== 'me') logActivity(user, 'commented on', { space: space.id, spaceName: space.name, path, text: text.slice(0, 120), t });
+    const parts = path.split('/');
+    for (const u of c.ask?.to || [])
+      await notify(
+        u,
+        `${user.username} asks for your ears on ${parts[parts.length - 1]}${c.ask.due ? ` (by ${c.ask.due})` : ''}: "${text.slice(0, 140)}"`,
+        {
+          open: { space: space.id, dir: parts.slice(0, -1), name: parts[parts.length - 1] },
+        },
+      );
     return json(res, c);
   }
   if (req.method === 'DELETE') {

@@ -924,6 +924,41 @@ try {
   );
   check('audio facts are cached', JSON.parse((await call('alice', '/api/files/view/bounce.wav?audioinfo')).text).lufs === info.lufs);
   check('audio facts need access to the space', (await call('carol', '/api/files/ed/song.txt?audioinfo')).status >= 400);
+  // Comments on a file, and feedback requests ("listen by Friday: is the vocal too loud?")
+  const cq = '/api/comments?space=view&path=bounce.wav';
+  const plain = JSON.parse((await call('carol', cq, 'POST', { text: 'kick is great at 0:12', t: 12 })).text);
+  check('a timestamped comment is kept', plain.t === 12 && plain.user === 'carol');
+  check(
+    'a feedback request needs someone who can open the file',
+    (await call('alice', cq, 'POST', { text: 'thoughts?', ask: { to: ['mallory', 'alice'] } })).status === 400,
+  );
+  const ask = JSON.parse(
+    (
+      await call('alice', cq, 'POST', {
+        text: 'Is the vocal too loud at the chorus?',
+        ask: { to: ['bob', 'carol', 'mallory', 'alice'], due: '2026-12-01' },
+      })
+    ).text,
+  );
+  check(
+    'feedback request goes to the right people only',
+    ask.ask?.to.join() === 'bob,carol' && ask.ask.due === '2026-12-01',
+    JSON.stringify(ask),
+  );
+  const bobNotes = JSON.parse((await call('bob', '/api/projects?notifications')).text);
+  check(
+    'the people asked are notified, with a link to the file',
+    bobNotes.some((n) => /asks for your ears on bounce\.wav/.test(n.text) && n.open?.space === 'view' && n.open?.name === 'bounce.wav'),
+    JSON.stringify(bobNotes.slice(-2)),
+  );
+  check('only people asked can mark it listened', (await call('alice', `${cq}&heard&id=${ask.id}`, 'POST')).status === 404);
+  const heardByBob = JSON.parse((await call('bob', `${cq}&heard&id=${ask.id}`, 'POST')).text);
+  check('listening is recorded', !!heardByBob.ask.heard.bob && !heardByBob.ask.heard.carol);
+  const thread = JSON.parse((await call('carol', cq)).text);
+  check(
+    'everyone on the file sees the request and who listened',
+    thread.some((c) => c.id === ask.id && c.ask.heard.bob),
+  );
   const mp3 = await getBin('alice', '/api/files/view/bounce.wav?preview');
   check('WAV preview is an MP3', mp3.status === 200 && mp3.type === 'audio/mpeg');
   check(

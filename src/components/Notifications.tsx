@@ -19,6 +19,7 @@ interface Note {
   text: string;
   channel?: string; // message: open this chat
   where?: { space: string; dir: string[]; name: string }; // project update: open its folder
+  open?: { space: string; dir: string[]; name: string }; // feedback request: open the file itself
   track?: string;
   timeline?: string;
   opportunity?: string;
@@ -122,6 +123,8 @@ export const NotificationTray: React.FC = () => {
         width: 460,
         height: 420,
       });
+    } else if (n.open) {
+      openRef({ kind: 'file', title: n.open.name, app: n.open.space, dir: n.open.dir, name: n.open.name });
     } else if (n.where) {
       const w = n.where;
       openRef({
