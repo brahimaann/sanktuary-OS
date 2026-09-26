@@ -11,11 +11,12 @@ import { GUIDE } from './producerGuide';
 // Producer: a companion for making music. Drop a song to get its tempo, key, loudness and tonal balance
 // (worked out in the browser: nothing is uploaded), compare a mix with a reference, get delay and reverb times
 // for the tempo, the key's scale and chords, and a guide of chains, tips and tools. Open to everyone.
-type Tab = 'analyze' | 'compare' | 'tempo' | 'guide';
+type Tab = 'analyze' | 'compare' | 'tempo' | 'convert' | 'guide';
 const TABS: [Tab, string][] = [
   ['analyze', 'Analyze'],
   ['compare', 'Compare'],
   ['tempo', 'Tempo & key'],
+  ['convert', 'To WAV'],
   ['guide', 'Guide'],
 ];
 const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(2)} s` : `${Math.round(v)} ms`);
@@ -56,6 +57,7 @@ const Producer: React.FC = () => {
         {tab === 'analyze' && <AnalyzeTab current={mine} onDone={adopt} />}
         {tab === 'compare' && <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />}
         {tab === 'tempo' && <TempoTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />}
+        {tab === 'convert' && <ConvertTab />}
         {tab === 'guide' && <GuideTab />}
       </div>
       <div style={statusBar}>Files are measured on this device. Nothing is uploaded.</div>
@@ -68,8 +70,12 @@ interface Named {
   result: Analysis;
 }
 
-/** Choose a file from this device or from Team Files, then analyse it. */
-const Picker: React.FC<{ label: string; onDone: (a: Named) => void }> = ({ label, onDone }) => {
+/** Choose a file from this device or from Team Files, then analyse it (or hand it to onFile instead). */
+const Picker: React.FC<{
+  label: string;
+  onDone?: (a: Named) => void;
+  onFile?: (name: string, data: ArrayBuffer, status: (s: string) => void) => Promise<void>;
+}> = ({ label, onDone, onFile }) => {
   const { isSignedIn, getToken } = useAuth();
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -80,8 +86,9 @@ const Picker: React.FC<{ label: string; onDone: (a: Named) => void }> = ({ label
     setErr('');
     try {
       setBusy(`Opening ${name}...`);
+      if (onFile) return await onFile(name, await load(), setBusy);
       const result = await analyzeAudio(await load(), setBusy);
-      onDone({ name, result });
+      onDone?.({ name, result });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -525,6 +532,85 @@ const TempoTab: React.FC<{
           {keyName(keySel.minor ? (keySel.root + 3) % 12 : (keySel.root + 9) % 12, !keySel.minor)}.
         </div>
       </fieldset>
+    </div>
+  );
+};
+
+/**
+ * Any audio the browser can decode (MP3, M4A/AAC, OGG, FLAC, WAV) as a WAV file for a DAW or sampler, on this
+ * device. Decoding at the chosen rate resamples too. It can't bring back what MP3 compression threw away.
+ */
+const ConvertTab: React.FC = () => {
+  const [rate, setRate] = useState(44100);
+  const [bits, setBits] = useState<16 | 24>(24);
+  const [done, setDone] = useState('');
+  const toWav = async (name: string, data: ArrayBuffer, status: (s: string) => void) => {
+    setDone('');
+    status('Decoding...');
+    const audio = await new OfflineAudioContext(2, 1, rate).decodeAudioData(data).catch(() => {
+      throw new Error("This browser can't read that file. Try an MP3, M4A, OGG, FLAC or WAV.");
+    });
+    status('Writing WAV...');
+    const ch = audio.numberOfChannels;
+    const bytes = bits / 8;
+    const frames = audio.length;
+    const out = new DataView(new ArrayBuffer(44 + frames * ch * bytes));
+    const str = (o: number, t: string) => [...t].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+    str(0, 'RIFF');
+    out.setUint32(4, 36 + frames * ch * bytes, true);
+    str(8, 'WAVEfmt ');
+    out.setUint32(16, 16, true);
+    out.setUint16(20, 1, true); // PCM
+    out.setUint16(22, ch, true);
+    out.setUint32(24, rate, true);
+    out.setUint32(28, rate * ch * bytes, true);
+    out.setUint16(32, ch * bytes, true);
+    out.setUint16(34, bits, true);
+    str(36, 'data');
+    out.setUint32(40, frames * ch * bytes, true);
+    const chans = [...Array(ch).keys()].map((c) => audio.getChannelData(c));
+    const max = bits === 16 ? 0x7fff : 0x7fffff;
+    for (let i = 0, o = 44; i < frames; i++)
+      for (let c = 0; c < ch; c++, o += bytes) {
+        const v = Math.round(Math.max(-1, Math.min(1, chans[c][i])) * max);
+        if (bits === 16) out.setInt16(o, v, true);
+        else {
+          out.setUint8(o, v & 0xff);
+          out.setUint8(o + 1, (v >> 8) & 0xff);
+          out.setUint8(o + 2, (v >> 16) & 0xff);
+        }
+      }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([out], { type: 'audio/wav' }));
+    a.download = `${name.replace(/\.[^.]+$/, '')}.wav`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+    status('');
+    setDone(`Saved ${a.download} (${(rate / 1000).toFixed(1)} kHz, ${bits}-bit, ${clock(audio.duration)}).`);
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <label>
+          Sample rate{' '}
+          <select value={rate} onChange={(e) => setRate(+e.target.value)}>
+            <option value={44100}>44.1 kHz</option>
+            <option value={48000}>48 kHz</option>
+          </select>
+        </label>
+        <label>
+          Bit depth{' '}
+          <select value={bits} onChange={(e) => setBits(+e.target.value as 16 | 24)}>
+            <option value={24}>24-bit</option>
+            <option value={16}>16-bit</option>
+          </select>
+        </label>
+      </div>
+      <Picker label="Convert to WAV" onFile={toWav} />
+      {done && <div style={{ color: '#006000' }}>{done}</div>}
+      <div style={{ color: '#555' }}>
+        For samplers and DAWs that want WAV. Converting an MP3 doesn't bring back quality the MP3 already lost.
+      </div>
     </div>
   );
 };
