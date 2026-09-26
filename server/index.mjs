@@ -389,12 +389,14 @@ async function files(req, res, url) {
       });
     }
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
-    if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))), transfer);
-    if (q.has('thumb')) return thumb(res, target);
-    if (q.has('audioinfo')) return json(res, await audioInfo(target));
-    if (q.has('preview') && AUDIO_PREVIEW[extname(target).toLowerCase()])
-      return stream(req, res, new URLSearchParams(), await audioPreviewFile(target));
-    if (q.has('preview')) return thumb(res, target, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
+    // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
+    const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
+    if (q.has('thumb')) return thumb(res, file);
+    if (q.has('audioinfo')) return json(res, await audioInfo(file));
+    if (q.has('preview') && AUDIO_PREVIEW[extname(file).toLowerCase()])
+      return stream(req, res, new URLSearchParams(), await audioPreviewFile(file));
+    if (q.has('preview')) return thumb(res, file, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
+    if (file !== target) return stream(req, res, q, file, transfer);
     if (q.has('zip')) return zipFolder(res, target, target === root ? space.name : basename(target), transfer);
     return stream(req, res, q, target, transfer);
   }

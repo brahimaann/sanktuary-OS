@@ -205,6 +205,26 @@ try {
       readFileSync(join(drive, 'team', 'docs', 'song.txt'), 'utf8') === 'v2' &&
       readdirSync(join(drive, 'team', '.sk-versions', 'docs', 'song.txt')).length === 1,
   );
+  {
+    // Earlier versions: listed, previewed like the current file, never a way out of the folder, restore needs edit
+    const vList = JSON.parse((await call('bob', '/api/files/ed/docs/song.txt?versions')).text);
+    const vName = vList[0]?.name;
+    const vFile = readFileSync(join(drive, 'team', '.sk-versions', 'docs', 'song.txt', vName), 'utf8');
+    check('versions are listed', vList.length === 1 && !!vName);
+    check(
+      'an earlier version downloads as it was',
+      (await call('bob', `/api/files/ed/docs/song.txt?version=${encodeURIComponent(vName)}`)).text === vFile,
+    );
+    for (const bad of ['../../../secret.txt', '..', 'a/b', 'C:\Windows'])
+      check(
+        `version name cannot escape: ${bad}`,
+        (await call('bob', `/api/files/ed/docs/song.txt?version=${encodeURIComponent(bad)}`)).status >= 400,
+      );
+    check(
+      'view rights cannot restore a version',
+      (await call('carol', `/api/files/view/docs/song.txt?restore=${encodeURIComponent(vName)}`, 'POST')).status === 403,
+    );
+  }
   check(
     'edit: delete goes to trash',
     (await call('bob', '/api/files/ed/docs/new.txt', 'DELETE')).status === 200 && existsSync(join(drive, 'team', '.sk-trash')),

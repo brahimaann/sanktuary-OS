@@ -8,6 +8,7 @@ import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion } 
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
 import { useWindowManager } from '../wm/manager';
+import { dialog } from '../utils/dialog';
 import { sharedAudio } from '../utils/sound';
 import { tempoAndKey } from '../utils/audioAnalysis';
 import { Term } from '../utils/glossary';
@@ -60,9 +61,16 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const playerKeys = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
   const [commentHere, setCommentHere] = useState(0);
   const [autoPlay, setAutoPlay] = useState(false);
+  // Earlier versions (kept each time the file is replaced): pick one to hear/see it in place, or restore it
+  const api = useApi();
+  const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
+  const [ver, setVer] = useState('');
+  const [fresh, setFresh] = useState(0); // bumped after a restore so the browser fetches the file again
   const index = siblings.indexOf(name);
   const kind = fileKind(name);
-  const src = token ? `${fileUrl(app, [...dir, name])}?t=${token}` : '';
+  const src = token
+    ? `${fileUrl(app, [...dir, name])}?t=${token}${ver ? `&version=${encodeURIComponent(ver)}` : ''}${fresh ? `&r=${fresh}` : ''}`
+    : '';
   const path = [...dir, name].join('/');
 
   useEffect(() => {
@@ -73,6 +81,29 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
       live = false;
     };
   }, [name, getToken]);
+
+  const loadVersions = () =>
+    api(`${fileUrl(app, [...dir, name])}?versions`).then(
+      (list: { name: string; modified: string }[]) => setVersions(list.sort((a, b) => b.modified.localeCompare(a.modified))),
+      () => setVersions([]),
+    );
+  useEffect(() => {
+    setVer('');
+    setVersions([]);
+    if (token) loadVersions();
+  }, [name, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  const restoreVersion = async () => {
+    const when = new Date(versions.find((v) => v.name === ver)!.modified).toLocaleString();
+    if (!(await dialog.confirm(`Make the version from ${when} the current ${name}?\nThe current file is kept as a version too.`))) return;
+    try {
+      await api(`${fileUrl(app, [...dir, name])}?restore=${encodeURIComponent(ver)}`, { method: 'POST' });
+      setVer('');
+      setFresh(Date.now());
+      loadVersions();
+    } catch (e) {
+      dialog.alert((e as Error).message, { icon: 'error' });
+    }
+  };
 
   const step = (d: number) => {
     if (siblings.length < 2) return;
@@ -123,6 +154,25 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         <button style={button} disabled={!token} onClick={() => window.open(`${src}&download`, '_blank')}>
           Download
         </button>
+        {versions.length > 0 && (
+          <select
+            value={ver}
+            onChange={(e) => setVer(e.target.value)}
+            title="Earlier versions are kept every time this file is replaced: pick one to hear or see it"
+          >
+            <option value="">Current version</option>
+            {versions.map((v, i) => (
+              <option key={v.name} value={v.name}>
+                Version {versions.length - i} · {new Date(v.modified).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+              </option>
+            ))}
+          </select>
+        )}
+        {ver && (
+          <button style={{ ...button, fontWeight: 700 }} onClick={restoreVersion} title="Needs edit rights on this folder">
+            Restore this version
+          </button>
+        )}
         {(kind === 'pdf' || kind === 'image') && (
           <button style={button} disabled={!token} onClick={() => window.open(needsConversion(name) ? `${src}&preview` : src, '_blank')}>
             Open in new tab
