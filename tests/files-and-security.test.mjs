@@ -942,6 +942,44 @@ try {
     info.lufs < -5 && info.lufs > -25 && Math.abs(info.truePeak + 12.2) < 0.5,
     infoRes.text,
   );
+  {
+    // Mix check: a hard clip at 2-3 s and left/right out of phase at 4-5 s are found where they are
+    const rate = 44100;
+    const n = 6 * rate;
+    const b = Buffer.alloc(44 + n * 4);
+    b.write('RIFF', 0);
+    b.writeUInt32LE(36 + n * 4, 4);
+    b.write('WAVEfmt ', 8);
+    b.writeUInt32LE(16, 16);
+    b.writeUInt16LE(1, 20);
+    b.writeUInt16LE(2, 22);
+    b.writeUInt32LE(rate, 24);
+    b.writeUInt32LE(rate * 4, 28);
+    b.writeUInt16LE(4, 32);
+    b.writeUInt16LE(16, 34);
+    b.write('data', 36);
+    b.writeUInt32LE(n * 4, 40);
+    for (let i = 0; i < n; i++) {
+      const sec = i / rate;
+      const s = Math.sin(sec * 2 * Math.PI * 220);
+      const l = sec >= 2 && sec < 3 ? Math.max(-32767, Math.min(32767, Math.round(s * 90000))) : Math.round(s * 6000);
+      b.writeInt16LE(l, 44 + i * 4);
+      b.writeInt16LE(sec >= 4 && sec < 5 ? -l : l, 46 + i * 4);
+    }
+    writeFileSync(join(drive, 'team', 'mixcheck.wav'), b);
+    const hints = JSON.parse((await call('alice', '/api/files/view/mixcheck.wav?audioinfo')).text).hints || [];
+    check(
+      'mix check finds the clip where it is',
+      hints.some((h) => h.kind === 'clip' && h.from <= 2 && h.to >= 3) && !hints.some((h) => h.kind === 'clip' && (h.from > 3 || h.to < 2)),
+      JSON.stringify(hints),
+    );
+    check(
+      'mix check finds the out-of-phase part where it is',
+      hints.some((h) => h.kind === 'phase' && h.from <= 4 && h.to >= 5 && h.value < 0),
+      JSON.stringify(hints),
+    );
+    check('a clean file has nothing flagged', (info.hints || []).length === 0, JSON.stringify(info.hints));
+  }
   check('audio facts are cached', JSON.parse((await call('alice', '/api/files/view/bounce.wav?audioinfo')).text).lufs === info.lufs);
   check('audio facts need access to the space', (await call('carol', '/api/files/ed/song.txt?audioinfo')).status >= 400);
   // Comments on a file, and feedback requests ("listen by Friday: is the vocal too loud?")

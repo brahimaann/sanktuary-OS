@@ -4290,7 +4290,7 @@ const CLIP_FORMATS = { ...AUDIO_PREVIEW, '.mp3': 'mp3', '.m4a': 'mov', '.ogg': '
 async function audioInfo(file) {
   const format = CLIP_FORMATS[extname(file).toLowerCase()] || fail(415, 'No audio info for this type');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
-  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|info2`).digest('hex') + '.json');
+  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|info3`).digest('hex') + '.json');
   const cached = await readFile(out, 'utf8').then(JSON.parse, () => null);
   if (cached) return cached;
   if (!previewJobs.has(out))
@@ -4301,17 +4301,79 @@ async function audioInfo(file) {
   return previewJobs.get(out);
 }
 
+/**
+ * Spots worth a listen, second by second: clipping (true peak at 0 dBTP or more), hot (above -1 dBTP, may distort
+ * once streaming services encode it) and phase (left and right cancel when played in mono). Neighbouring seconds of
+ * the same kind become one range; the loudest / worst value is kept for the explanation.
+ */
+function mixHints(peak, phase) {
+  const flags = [];
+  for (const [sec, v] of peak) if (v > -1) flags.push({ from: sec, kind: v >= -0.05 ? 'clip' : 'hot', value: v });
+  for (const [sec, [sum, n]] of phase) if (n && sum / n < 0) flags.push({ from: sec, kind: 'phase', value: sum / n });
+  flags.sort((a, b) => a.kind.localeCompare(b.kind) || a.from - b.from);
+  const out = [];
+  for (const f of flags) {
+    const last = out[out.length - 1];
+    if (last && last.kind === f.kind && f.from <= last.to + 1) {
+      last.to = f.from + 1;
+      last.value = f.kind === 'phase' ? Math.min(last.value, f.value) : Math.max(last.value, f.value);
+    } else out.push({ kind: f.kind, from: f.from, to: f.from + 1, value: Math.round(f.value * 100) / 100 });
+  }
+  for (const h of out) h.value = Math.round(h.value * 100) / 100;
+  return out.sort((a, b) => a.from - b.from).slice(0, 40);
+}
+
 async function measureAudio(file, format, out) {
   if (transcoding >= 2) await new Promise((r) => transcodeQueue.push(r));
   transcoding++;
   try {
-    // framelog=verbose keeps the per-100ms lines out of the log; the summary and stream info stay
-    const args = ['-nostdin', '-hide_banner', '-protocol_whitelist', 'file', '-f', format, '-i', file];
-    let log = '';
+    // One pass: loudness on the original channels, and a stereo copy through the phase meter. The per-moment lines
+    // (true peak every 100 ms, phase every few ms) are read as they stream, so only the head (stream info) and tail
+    // (summary) of the log are kept.
+    const args = ['-nostdin', '-hide_banner', '-protocol_whitelist', 'file', '-f', format, '-i', file, '-vn'];
+    const graph =
+      '[0:a]asplit[a][b];[a]ebur128=peak=true:framelog=info[x];' +
+      '[b]aformat=channel_layouts=stereo,aphasemeter=video=0,ametadata=mode=print:key=lavfi.aphasemeter.phase[y]';
+    let head = '';
+    let tail = '';
+    let rest = '';
+    let pts = 0;
+    const peak = new Map(); // second -> loudest true peak in it (dBTP)
+    const phase = new Map(); // second -> [sum, count] of the phase meter (1 = mono-safe, -1 = cancels in mono)
+    const line = (l) => {
+      const f = l.match(/\] t: ([\d.]+) .*FTPK:((?:\s+(?:-?[\d.]+|-inf))+) dBFS/);
+      if (f) {
+        const v = Math.max(
+          ...f[2]
+            .trim()
+            .split(/\s+/)
+            .map((x) => (x === '-inf' ? -Infinity : Number(x))),
+        );
+        const sec = Math.floor(Number(f[1]) - 0.05); // each line covers the 100 ms before t
+        peak.set(sec, Math.max(peak.get(sec) ?? -Infinity, v));
+        return;
+      }
+      const t = l.match(/pts_time:([\d.]+)/);
+      if (t) return void (pts = Number(t[1]));
+      const ph = l.match(/aphasemeter\.phase=(-?[\d.]+)/);
+      if (ph) {
+        const a = phase.get(Math.floor(pts)) || [0, 0];
+        phase.set(Math.floor(pts), [a[0] + Number(ph[1]), a[1] + 1]);
+      }
+    };
     const code = await new Promise((resolve) => {
-      const ff = spawn(ffmpegPath, [...args, '-vn', '-af', 'ebur128=peak=true:framelog=verbose', '-f', 'null', '-'], { windowsHide: true });
+      const ff = spawn(ffmpegPath, [...args, '-filter_complex', graph, '-map', '[x]', '-map', '[y]', '-f', 'null', '-'], {
+        windowsHide: true,
+      });
       const timer = setTimeout(() => ff.kill(), 10 * 60_000);
-      ff.stderr.on('data', (d) => (log = (log + d).slice(-200_000)));
+      ff.stderr.on('data', (d) => {
+        const text = String(d);
+        if (head.length < 20_000) head += text;
+        tail = (tail + text).slice(-20_000);
+        const lines = (rest + text).split(/\r?\n/);
+        rest = lines.pop();
+        lines.forEach(line);
+      });
       ff.on('error', () => resolve(-1));
       ff.on('close', (c) => {
         clearTimeout(timer);
@@ -4319,6 +4381,7 @@ async function measureAudio(file, format, out) {
       });
     });
     if (code !== 0) fail(415, "Couldn't measure this audio");
+    const log = head + tail;
     const num = (re) => {
       const m = log.match(re);
       return m ? Number(m[1]) : null;
@@ -4345,6 +4408,7 @@ async function measureAudio(file, format, out) {
       lufs: fromSummary(/I:\s+(-?[\d.]+|-inf) LUFS/),
       lra: fromSummary(/LRA:\s+(-?[\d.]+|-inf) LU/),
       truePeak: fromSummary(/True peak:\s+Peak:\s+(-?[\d.]+|-inf) dBFS/),
+      hints: mixHints(peak, phase),
     };
     await mkdir(dirname(out), { recursive: true });
     await writeFile(out, JSON.stringify(info));

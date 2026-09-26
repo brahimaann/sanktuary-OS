@@ -525,6 +525,22 @@ const Comments: React.FC<{
   );
 };
 
+/** A spot the server's mix check flagged: clipping, hot peaks, or left/right cancelling in mono. */
+interface MixHint {
+  kind: 'clip' | 'hot' | 'phase';
+  from: number;
+  to: number;
+  value: number;
+}
+const HINT_COLOR = { clip: '#c00000', hot: '#e07000', phase: '#8000a0' };
+/** What it is, why it matters, in plain words. */
+const hintText = (h: MixHint) =>
+  h.kind === 'clip'
+    ? `Clips (true peak ${h.value > 0 ? '+' : ''}${h.value} dBTP): the loudest moments are cut off, which sounds harsh and gets worse once streaming services encode it.`
+    : h.kind === 'hot'
+      ? `Hot (true peak ${h.value} dBTP): above the -1 dBTP streaming services ask for, so it may distort in their MP3/AAC versions.`
+      : `Out of phase (${h.value}): left and right partly cancel, so this part sounds thin or hollow in mono (phones, many club systems).`;
+
 /** Measured on the original file by the server (?audioinfo): format, resolution and loudness. */
 interface AudioFacts {
   codec: string;
@@ -538,6 +554,7 @@ interface AudioFacts {
   lufs: number | null;
   lra: number | null;
   truePeak: number | null;
+  hints?: MixHint[]; // spots worth a listen, found on the original file
 }
 type Listen = 'stereo' | 'mono' | 'L' | 'R';
 /** How the player is set up; kept by the preview window while you move between files. */
@@ -572,6 +589,10 @@ const AudioPreview: React.FC<{
   const [peaks, setPeaks] = useState<number[] | null>(null);
   const [note, setNote] = useState('Drawing waveform...');
   const [now, setNow] = useState(0);
+  // Mix-check hints show up as the playhead reaches them (your ears first, then a second opinion); "show all" reveals them
+  const [reached, setReached] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => setReached((r) => Math.max(r, now)), [now]);
   const [duration, setDuration] = useState(0);
   const [hover, setHover] = useState<number | null>(null); // seconds under the pointer
   const [loop, setLoop] = useState<{ a: number; b: number } | null>(null);
@@ -651,6 +672,11 @@ const AudioPreview: React.FC<{
     if (!duration) return;
     g.fillStyle = '#008080';
     for (const c of comments) if (c.t !== null) g.fillRect(x(c.t) - devicePixelRatio, 0, 2 * devicePixelRatio, wave);
+    for (const hint of facts?.hints || []) {
+      if (!showAll && hint.from > reached) continue;
+      g.fillStyle = HINT_COLOR[hint.kind];
+      g.fillRect(x(hint.from), 0, Math.max(3 * devicePixelRatio, x(hint.to) - x(hint.from)), 5 * devicePixelRatio);
+    }
     // Ruler: a tick about every 60 px, labelled m:ss
     const step = RULER_STEPS.find((s) => (s / duration) * w >= 60 * devicePixelRatio) || 600;
     g.fillStyle = '#c0c0c0';
@@ -661,7 +687,7 @@ const AudioPreview: React.FC<{
       g.fillRect(x(t), wave, devicePixelRatio, 4 * devicePixelRatio);
       g.fillText(clock(t), x(t) + 3 * devicePixelRatio, h - 3 * devicePixelRatio);
     }
-  }, [peaks, now, comments, duration, loop, looping]);
+  }, [peaks, now, comments, duration, loop, looping, facts, reached, showAll]);
 
   // Loop: jump back to the start of the section when the playhead passes its end
   useEffect(() => {
@@ -857,7 +883,46 @@ const AudioPreview: React.FC<{
         )}
         {musical?.bpm && <span style={cell}>≈ {Math.round(musical.bpm)} BPM</span>}
         {musical?.key && <span style={cell}>{musical.key}</span>}
+        {facts?.hints && (
+          <span
+            style={{ ...cell, cursor: facts.hints.length ? 'pointer' : undefined, color: facts.hints.length ? '#a00000' : '#006000' }}
+            title={facts.hints.length ? 'Marks on top of the waveform show them as you play; click to show them all now' : undefined}
+            onClick={() => setShowAll(true)}
+          >
+            {facts.hints.length ? `${facts.hints.length} spot(s) to check` : '✓ no clipping or phase problems'}
+          </span>
+        )}
       </div>
+      {(() => {
+        // The hint under the playhead (or the last one passed), with its reason and a way to check it by ear
+        const hint = (facts?.hints || []).find((h) => now >= h.from - 0.25 && now <= h.to + 1.5);
+        if (!hint) return null;
+        return (
+          <div
+            style={{
+              background: '#ffffe1',
+              border: '1px solid #808080',
+              padding: '2px 6px',
+              fontSize: 11,
+              display: 'flex',
+              gap: 6,
+              alignItems: 'center',
+            }}
+          >
+            <b style={{ color: HINT_COLOR[hint.kind] }}>
+              {clock(hint.from)}–{clock(hint.to)}
+            </b>
+            <span style={{ flex: 1 }}>
+              {hintText(hint)} <Term k={hint.kind === 'phase' ? 'Mono' : 'dBTP'}>What's this?</Term>
+            </span>
+            {hint.kind === 'phase' && prefs.listen !== 'mono' && (
+              <button style={button} onClick={() => setPrefs({ ...prefs, listen: 'mono' })}>
+                Listen in mono
+              </button>
+            )}
+          </div>
+        );
+      })()}
       <div style={{ flex: 1, minHeight: 70, border: '2px inset #808080', background: '#fff', position: 'relative' }}>
         {peaks && (
           <canvas
