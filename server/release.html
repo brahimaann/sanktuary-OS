@@ -179,6 +179,25 @@
           13px system-ui,
           sans-serif;
       }
+      /* Where to listen / pre-save: one big button per store, like a smart link */
+      .stores {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 18px 0 6px;
+        max-width: 360px;
+      }
+      .stores .btn {
+        justify-content: space-between;
+        display: flex;
+      }
+      .countdown {
+        font:
+          600 15px system-ui,
+          sans-serif;
+        letter-spacing: 0.04em;
+        margin-top: 14px;
+      }
       .bar {
         height: 2px;
         background: var(--line);
@@ -270,6 +289,47 @@
           share.onclick = () => shareLink(`${location.origin}/release/${r.slug}`, r.title);
           actions.append(share);
           text.append(actions);
+          // Before release day: a countdown and the pre-save link; from release day: where to listen
+          const STORE_NAMES = {
+            spotify: 'Spotify',
+            appleMusic: 'Apple Music',
+            youtubeMusic: 'YouTube Music',
+            tidal: 'Tidal',
+            amazonMusic: 'Amazon Music',
+            deezer: 'Deezer',
+            soundcloud: 'SoundCloud',
+            bandcamp: 'Bandcamp',
+            audiomack: 'Audiomack',
+          };
+          const upcoming = r.date && r.date > today;
+          if (upcoming) {
+            const cd = el('div', 'countdown');
+            const out = new Date(`${r.date}T00:00:00`);
+            const tick = () => {
+              const ms = out - Date.now();
+              if (ms <= 0) return location.reload();
+              const d = Math.floor(ms / 864e5);
+              const h = Math.floor((ms / 36e5) % 24);
+              const m = Math.floor((ms / 6e4) % 60);
+              cd.textContent = `OUT IN ${d}D ${h}H ${m}M`;
+            };
+            tick();
+            setInterval(tick, 30_000);
+            text.append(cd);
+          }
+          const storeLinks = Object.entries(r.stores || {}).filter(([k]) => (upcoming ? k === 'presave' : k in STORE_NAMES));
+          if (storeLinks.length) {
+            const stores = el('div', 'stores');
+            for (const [k, url] of storeLinks) {
+              const a = el('a', `btn${k === 'presave' ? '' : ' ghost'}`);
+              a.append(el('span', '', k === 'presave' ? 'Pre-save' : STORE_NAMES[k]), el('span', '', k === 'presave' ? '→' : 'Play'));
+              a.href = url;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              stores.append(a);
+            }
+            text.append(stores);
+          }
           hero.append(text);
           page.append(hero);
 

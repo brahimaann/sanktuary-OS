@@ -959,7 +959,7 @@ try {
     const rawShot = await getBin('alice', '/api/files/view/shot.CR2?preview');
     const rawMeta = rawShot.status === 200 ? await sh(rawShot.bytes).metadata() : {};
     check('RAW photo previews from its embedded JPEG, upright', rawMeta.format === 'webp' && rawMeta.width === 48 && rawMeta.height === 64);
-    writeFileSync(join(drive, 'team', 'junk.NEF'), Buffer.from('MM *   garbage'));
+    writeFileSync(join(drive, 'team', 'junk.NEF'), Buffer.from('MM\x00*\x00\x00\x00\x08garbage'));
     check(
       'a RAW with nothing inside says so (not a server error)',
       (await getBin('alice', '/api/files/view/junk.NEF?preview')).status === 415,
@@ -1361,6 +1361,21 @@ try {
   check('songs not on the page have no preview', (await fetch(B + `${rp}/preview/${unannounced.id}`)).status === 404);
   check('a song from another release cannot be previewed here', (await fetch(B + `${rp}/preview/${song.id}`)).status === 404);
   check('private releases have no page even when marked public', (await fetch(B + '/api/public/release/tsimy')).status === 404);
+  // Landing-page style: store buttons (https only) and a temporary page that ends on a date
+  const epUrl = `/api/tracks/release/${ep.id}`;
+  check('store links must be https', (await call('alice', epUrl, 'PATCH', { stores: { spotify: 'javascript:alert(1)' } })).status === 400);
+  await call('alice', epUrl, 'PATCH', {
+    stores: { spotify: 'https://open.spotify.com/album/x', presave: 'https://distrokid.com/hyperfollow/x', madeUp: 'https://evil.example' },
+  });
+  const storesShown = (await (await fetch(B + rp)).json()).stores;
+  check(
+    'the page lists where to listen / pre-save (known stores only)',
+    storesShown.spotify === 'https://open.spotify.com/album/x' && storesShown.presave && !('madeUp' in storesShown),
+  );
+  await call('alice', epUrl, 'PATCH', { pageUntil: '2000-01-01' });
+  check('a temporary page is gone after its end date', (await fetch(B + rp)).status === 404);
+  await call('alice', epUrl, 'PATCH', { pageUntil: null });
+  check('and back when the end date is cleared', (await fetch(B + rp)).status === 200);
   const relHtml = await fetch(B + '/release/open-ep/opening');
   check(
     'release and song pages are served with a strict policy',

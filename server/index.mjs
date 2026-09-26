@@ -1411,6 +1411,17 @@ async function tracksApi(req, res, url) {
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
       if (r.public) giveSlug(db, r);
       if (input.blurb !== undefined) r.blurb = String(input.blurb ?? '').slice(0, 3000);
+      if (input.stores !== undefined) {
+        const stores = {};
+        for (const k of RELEASE_STORES) {
+          const v = String(input.stores?.[k] ?? '').trim();
+          if (!v) continue;
+          if (!/^https:\/\/[^\s"<>]{3,500}$/.test(v)) fail(400, 'Store links must be full https:// links');
+          stores[k] = v;
+        }
+        r.stores = stores;
+      }
+      if (input.pageUntil !== undefined) r.pageUntil = dateOrNull(input.pageUntil);
       if (input.story !== undefined) r.story = input.story ? String(input.story).slice(0, 80) : null; // a Story as its visual world
       if (input.members !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
@@ -3771,7 +3782,22 @@ function storyPage(req, res, url) {
 // 30-second clip. Covers are resized pictures. Full bounces and file names never leave the server.
 const RELEASE_PAGE = new URL('./release.html', import.meta.url);
 const PORTFOLIO_PAGE = new URL('./portfolio.html', import.meta.url);
-const publicRelease = (r) => r && r.public && !r.deleted && !r.members && r.slug;
+// A page can be temporary (like a pre-release landing page): after "page ends on" it's gone, lists included
+const publicRelease = (r) =>
+  r && r.public && !r.deleted && !r.members && r.slug && !(r.pageUntil && r.pageUntil < new Date().toISOString().slice(0, 10));
+// Where a release can be heard or pre-saved; shown as big buttons on its page (https links only)
+const RELEASE_STORES = [
+  'presave',
+  'spotify',
+  'appleMusic',
+  'youtubeMusic',
+  'tidal',
+  'amazonMusic',
+  'deezer',
+  'soundcloud',
+  'bandcamp',
+  'audiomack',
+];
 
 /** A public release's page address, /release/<slug>: given once, then fixed so shared links keep working. */
 function giveSlug(db, r) {
@@ -3822,6 +3848,7 @@ async function releaseView(r) {
     kind: r.kind,
     date: r.date,
     blurb: r.blurb || '',
+    stores: r.stores || {},
     cover: !!r.cover,
     story: st && st.public && !st.deleted ? { slug: st.slug, title: st.title } : null,
     tracks,

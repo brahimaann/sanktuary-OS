@@ -26,7 +26,22 @@ interface Release {
   slug?: string; // its public page: /release/<slug>
   blurb?: string;
   story?: string | null;
+  stores?: Record<string, string>; // where to listen / pre-save (https links), shown as buttons on the page
+  pageUntil?: string | null; // a temporary page: gone after this day
 }
+const STORES: [string, string][] = [
+  ['presave', 'Pre-save link (shown until release day)'],
+  ['spotify', 'Spotify'],
+  ['appleMusic', 'Apple Music'],
+  ['youtubeMusic', 'YouTube Music'],
+  ['tidal', 'Tidal'],
+  ['amazonMusic', 'Amazon Music'],
+  ['deezer', 'Deezer'],
+  ['soundcloud', 'SoundCloud'],
+  ['bandcamp', 'Bandcamp'],
+  ['audiomack', 'Audiomack'],
+];
+type PageBody = { blurb: string; story: string | null; stores: Record<string, string>; pageUntil: string | null };
 interface Found {
   added: string[];
   bounces: string[];
@@ -831,15 +846,13 @@ const TrackPage: React.FC<{
 };
 
 /** A release's public page: a few lines about it, and the Story that is its visual world. */
-const PageSetup: React.FC<{ release: Release; onSave: (body: { blurb: string; story: string | null }) => void; onClose: () => void }> = ({
-  release,
-  onSave,
-  onClose,
-}) => {
+const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; onClose: () => void }> = ({ release, onSave, onClose }) => {
   const api = useApi();
   const { me } = useMe();
   const [blurb, setBlurb] = useState(release.blurb || '');
   const [story, setStory] = useState(release.story || '');
+  const [stores, setStores] = useState<Record<string, string>>(release.stores || {});
+  const [pageUntil, setPageUntil] = useState(release.pageUntil || '');
   const [stories, setStories] = useState<{ slug: string; title: string }[]>([]);
   useEffect(() => {
     // Stories are listed publicly once published (and admins can pick drafts)
@@ -884,11 +897,39 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: { blurb: string; st
           <div style={{ color: '#555' }}>
             The story (e.g. Heart of the Cities) gets an "Enter the world" button on the page once it's published.
           </div>
+          <Section title="Where to listen (paste the links from your distributor)">
+            <div
+              style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 4, alignItems: 'center', maxHeight: 180, overflow: 'auto' }}
+            >
+              {STORES.map(([k, label]) => (
+                <React.Fragment key={k}>
+                  <span>{label}</span>
+                  <input
+                    style={input}
+                    value={stores[k] || ''}
+                    placeholder="https://..."
+                    onChange={(e) => setStores((s) => ({ ...s, [k]: e.target.value }))}
+                  />
+                </React.Fragment>
+              ))}
+            </div>
+            <div style={{ color: '#555' }}>
+              Before the release date the page counts down and shows only Pre-save; from release day it shows the rest.
+            </div>
+          </Section>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            Page ends on
+            <input type="date" style={input} value={pageUntil} onChange={(e) => setPageUntil(e.target.value)} />
+            <span style={{ color: '#555' }}>(optional: for a temporary page)</span>
+          </label>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
             <button style={button} onClick={onClose}>
               Cancel
             </button>
-            <button style={{ ...button, fontWeight: 700 }} onClick={() => onSave({ blurb, story: story || null })}>
+            <button
+              style={{ ...button, fontWeight: 700 }}
+              onClick={() => onSave({ blurb, story: story || null, stores, pageUntil: pageUntil || null })}
+            >
               Save
             </button>
           </div>
