@@ -84,7 +84,10 @@ const MIME = {
   '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
   '.psd': 'image/vnd.adobe.photoshop',
 };
-const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.tif', '.tiff', '.psd']);
+// Camera RAW files: previewed from the JPEG inside them (rawPreview)
+const RAW_PHOTO = new Set('.cr2 .cr3 .nef .nrw .arw .srf .sr2 .dng .raf .orf .rw2 .pef .srw .3fr .erf .kdc .iiq'.split(' '));
+const RAW_MAX = 300 * 1024 ** 2;
+const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.tif', '.tiff', '.psd', ...RAW_PHOTO]);
 const PSD_MAX = 400 * 1024 ** 2; // flattening reads the whole file into memory
 // User files that are safe to show in the browser. Anything else (HTML, SVG, scripts, unknown) is served as a
 // sandboxed download, so an uploaded page can never run as the viewer on sanktuary.studio.
@@ -2765,16 +2768,24 @@ async function latestPosts(n) {
 }
 
 /** A profile link as a safe http(s) URL ("@hima" -> https://instagram.com/hima), or null. */
+// Where artists keep their work: a full link, or for these a bare handle ("@name" or "name") after the prefix
+const PROFILE_LINKS = {
+  spotify: '',
+  appleMusic: '',
+  youtube: 'https://youtube.com/@',
+  soundcloud: 'https://soundcloud.com/',
+  bandcamp: '',
+  audiomack: 'https://audiomack.com/',
+  bandlab: 'https://bandlab.com/',
+  tiktok: 'https://tiktok.com/@',
+  instagram: 'https://instagram.com/',
+  x: 'https://x.com/',
+  website: '',
+};
 function publicLink(kind, v) {
   v = String(v || '').trim();
   if (!v) return null;
-  const u = /^https?:\/\//i.test(v)
-    ? v
-    : kind === 'instagram'
-      ? `https://instagram.com/${v.replace(/^@/, '')}`
-      : kind === 'soundcloud'
-        ? `https://soundcloud.com/${v}`
-        : `https://${v}`;
+  const u = /^https?:\/\//i.test(v) ? v : PROFILE_LINKS[kind] ? PROFILE_LINKS[kind] + v.replace(/^@/, '') : `https://${v}`;
   try {
     const x = new URL(u);
     return ['https:', 'http:'].includes(x.protocol) ? x.href : null;
@@ -2809,7 +2820,11 @@ async function listedPeople() {
       displayName: p.displayName || username,
       role: p.role || '',
       bio: p.bio || '',
-      links: Object.fromEntries(['soundcloud', 'instagram', 'website'].map((k) => [k, publicLink(k, p[k])]).filter(([, v]) => v)),
+      links: Object.fromEntries(
+        Object.keys(PROFILE_LINKS)
+          .map((k) => [k, publicLink(k, p[k])])
+          .filter(([, v]) => v),
+      ),
       avatar: !!p.avatar && existsSync(join(DATA, 'profiles', 'avatars', `${username}.webp`)),
     });
   }
@@ -4140,7 +4155,78 @@ async function stream(req, res, q, file, transfer) {
 }
 
 /** Opens an image for sharp. Photoshop files are flattened from the composite image they store. */
+/**
+ * Camera RAW: the JPEG the camera rendered and tucked inside the file (full size on most cameras). TIFF-based
+ * raws (CR2, NEF, ARW, DNG, ORF, RW2, PEF...) list theirs in their IFDs; RAF points at it from its header; CR3
+ * keeps one in a PRVW box. The biggest one sharp can read wins, turned the way the camera held it.
+ */
+async function rawPreview(file, size) {
+  if (size > RAW_MAX) fail(413, 'This RAW file is too large to preview');
+  const b = await readFile(file); // ponytail: reads the whole file; seek to the IFDs if 100 MB raws get common
+  const found = []; // [offset, length]
+  let orientation = 1;
+  const le = b[0] === 0x49; // "II" little-endian, "MM" big-endian
+  const u16 = (o) => (le ? b.readUInt16LE(o) : b.readUInt16BE(o));
+  const u32 = (o) => (le ? b.readUInt32LE(o) : b.readUInt32BE(o));
+  try {
+    if ((le && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) {
+      const seen = new Set();
+      const walk = (ifd, depth) => {
+        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8;) {
+          seen.add(ifd);
+          const n = u16(ifd);
+          if (ifd + 2 + n * 12 + 4 > b.length) return;
+          const tags = {};
+          for (let i = 0; i < n; i++) {
+            const e = ifd + 2 + i * 12;
+            const type = u16(e + 2);
+            const count = u32(e + 4);
+            const val = type === 3 && count === 1 ? u16(e + 8) : u32(e + 8);
+            tags[u16(e)] = { val, count, at: e + 8 };
+          }
+          if (depth === 0 && tags[0x0112]) orientation = tags[0x0112].val;
+          if (tags[0x0201] && tags[0x0202]) found.push([tags[0x0201].val, tags[0x0202].val]); // JPEGInterchangeFormat
+          if ([6, 7].includes(tags[0x0103]?.val) && tags[0x0111]?.count === 1 && tags[0x0117])
+            found.push([tags[0x0111].val, tags[0x0117].val]); // one JPEG strip
+          const sub = tags[0x014a]; // SubIFDs: one offset inline, or a list of them
+          if (sub) for (let i = 0; i < Math.min(sub.count, 8); i++) walk(sub.count === 1 ? sub.val : u32(sub.val + i * 4), depth + 1);
+          ifd = u32(ifd + 2 + n * 12);
+        }
+      };
+      walk(u32(4), 0);
+    } else if (b.toString('latin1', 0, 8) === 'FUJIFILM') {
+      found.push([b.readUInt32BE(84), b.readUInt32BE(88)]);
+    } else {
+      const prvw = b.indexOf('PRVW'); // CR3
+      if (prvw > 4) {
+        const soi = b.indexOf(Buffer.from([0xff, 0xd8, 0xff]), prvw);
+        if (soi > 0) found.push([soi, prvw - 4 + b.readUInt32BE(prvw - 4) - soi]);
+      }
+    }
+  } catch {} // a damaged file: use whatever was found before the damage
+  const jpegs = found
+    .filter(([o, l]) => o > 0 && l > 0 && o + l <= b.length && b[o] === 0xff && b[o + 1] === 0xd8)
+    .sort((x, y) => y[1] - x[1]);
+  for (const [o, l] of jpegs) {
+    const jpeg = b.subarray(o, o + l);
+    if (
+      !(
+        await sharp(jpeg)
+          .metadata()
+          .catch(() => null)
+      )?.width
+    )
+      continue; // e.g. DNG lossless-JPEG raw data
+    const deg = { 3: 180, 6: 90, 8: 270 }[orientation];
+    if (!deg) return sharp(jpeg);
+    const { data, info } = await sharp(jpeg).rotate(deg).raw().toBuffer({ resolveWithObject: true });
+    return sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } });
+  }
+  fail(415, 'No preview inside this RAW file — use Edit photo or Download');
+}
+
 async function imageInput(file, size) {
+  if (RAW_PHOTO.has(extname(file).toLowerCase())) return rawPreview(file, size);
   if (extname(file).toLowerCase() !== '.psd') return sharp(file, { animated: false });
   if (size > PSD_MAX) fail(413, 'This Photoshop file is too large to preview');
   const psd = readPsd(await readFile(file), { skipLayerImageData: true, skipThumbnail: true, useImageData: true });
@@ -4949,7 +5035,13 @@ async function chat(req, res, url) {
 }
 
 // ── /api/profiles: display name, status (away message), role, bio, links, avatar ──
-const PROFILE_FIELDS = { displayName: 60, status: 140, role: 60, bio: 1000, soundcloud: 200, instagram: 200, website: 200 };
+const PROFILE_FIELDS = {
+  displayName: 60,
+  status: 140,
+  role: 60,
+  bio: 1000,
+  ...Object.fromEntries(Object.keys(PROFILE_LINKS).map((k) => [k, 200])),
+};
 
 async function profiles(req, res, url) {
   const cfg = await loadConfig();

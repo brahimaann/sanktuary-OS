@@ -2,7 +2,30 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApi } from './api';
 import { useLiveEvent, useOnline } from './live';
 
-export interface Profile {
+// Where artists keep their work (same keys as PROFILE_LINKS in server/index.mjs): a full link, or a bare
+// handle where there's a prefix
+export const PROFILE_LINKS = [
+  ['spotify', 'Spotify', '', 'https://open.spotify.com/artist/...'],
+  ['appleMusic', 'Apple Music', '', 'https://music.apple.com/...'],
+  ['youtube', 'YouTube', 'https://youtube.com/@', '@channel or link'],
+  ['soundcloud', 'SoundCloud', 'https://soundcloud.com/', 'name or link'],
+  ['bandcamp', 'Bandcamp', '', 'https://name.bandcamp.com'],
+  ['audiomack', 'Audiomack', 'https://audiomack.com/', 'name or link'],
+  ['bandlab', 'BandLab', 'https://bandlab.com/', 'name or link'],
+  ['tiktok', 'TikTok', 'https://tiktok.com/@', '@handle'],
+  ['instagram', 'Instagram', 'https://instagram.com/', '@handle'],
+  ['x', 'X (Twitter)', 'https://x.com/', '@handle'],
+  ['website', 'Website', '', 'https://...'],
+] as const;
+export type LinkKey = (typeof PROFILE_LINKS)[number][0];
+
+/** A profile link as an https address (a pasted http(s) link as is; never any other scheme). */
+export const linkFor = (k: LinkKey, v: string) => {
+  const prefix = PROFILE_LINKS.find(([key]) => key === k)?.[2];
+  return /^https?:\/\//i.test(v) ? v : prefix ? prefix + v.replace(/^@/, '') : `https://${v}`;
+};
+
+export interface Profile extends Partial<Record<LinkKey, string>> {
   username: string;
   admin?: boolean;
   online?: boolean;
@@ -11,9 +34,6 @@ export interface Profile {
   status?: string;
   role?: string;
   bio?: string;
-  soundcloud?: string;
-  instagram?: string;
-  website?: string;
   avatar?: number;
   listed?: boolean;
 }

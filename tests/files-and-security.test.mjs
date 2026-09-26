@@ -933,6 +933,39 @@ try {
     (await getBin('alice', '/api/files/view/pic.png?preview')).status === 415,
   );
 
+  // Camera RAW: previewed from the JPEG inside it, turned the way the camera was held
+  {
+    const { createRequire } = await import('node:module');
+    const sh = createRequire(new URL('../server/package.json', import.meta.url))('sharp');
+    const inner = await sh({ create: { width: 64, height: 48, channels: 3, background: '#36c' } })
+      .jpeg()
+      .toBuffer();
+    const ifd = Buffer.alloc(54); // a TIFF-style raw (like CR2): IFD0 = orientation + one JPEG strip
+    const tags = [
+      [0x0103, 3, 6], // compression: JPEG
+      [0x0111, 4, 62], // strip offset (8-byte header + this 54-byte IFD)
+      [0x0112, 3, 6], // orientation: rotate 90
+      [0x0117, 4, inner.length],
+    ];
+    ifd.writeUInt16LE(tags.length, 0);
+    tags.forEach(([tag, type, val], i) => {
+      ifd.writeUInt16LE(tag, 2 + i * 12);
+      ifd.writeUInt16LE(type, 4 + i * 12);
+      ifd.writeUInt32LE(1, 6 + i * 12);
+      if (type === 3) ifd.writeUInt16LE(val, 10 + i * 12);
+      else ifd.writeUInt32LE(val, 10 + i * 12);
+    });
+    writeFileSync(join(drive, 'team', 'shot.CR2'), Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0, 8, 0, 0, 0]), ifd, inner]));
+    const rawShot = await getBin('alice', '/api/files/view/shot.CR2?preview');
+    const rawMeta = rawShot.status === 200 ? await sh(rawShot.bytes).metadata() : {};
+    check('RAW photo previews from its embedded JPEG, upright', rawMeta.format === 'webp' && rawMeta.width === 48 && rawMeta.height === 64);
+    writeFileSync(join(drive, 'team', 'junk.NEF'), Buffer.from('MM *   garbage'));
+    check(
+      'a RAW with nothing inside says so (not a server error)',
+      (await getBin('alice', '/api/files/view/junk.NEF?preview')).status === 415,
+    );
+  }
+
   // Preview cache location (Admin Panel > Drives): only known drives accepted
   const cfgNow = JSON.parse(readFileSync(join(dir, 'data', 'config.json'), 'utf8'));
   const badCfg = (patch) => call('alice', '/api/admin/config', 'PUT', { ...cfgNow, ...patch });
@@ -1228,6 +1261,9 @@ try {
     role: 'Producer',
     instagram: '@bobmakesbeats',
     website: 'javascript:alert(1)',
+    spotify: 'https://open.spotify.com/artist/abc123',
+    tiktok: '@bobbeats',
+    bandcamp: 'data:text/html,<script>alert(1)</script>',
     status: 'at the dentist',
     listed: true,
   });
@@ -1241,6 +1277,14 @@ try {
     'people who opted in are listed, with safe links',
     bobCard?.displayName === 'Bob B' && bobCard.links.instagram === 'https://instagram.com/bobmakesbeats' && !bobCard.links.website,
     JSON.stringify(bobCard),
+  );
+  check(
+    'more places artists keep their work: Spotify, TikTok handles',
+    bobCard?.links.spotify === 'https://open.spotify.com/artist/abc123' && bobCard.links.tiktok === 'https://tiktok.com/@bobbeats',
+  );
+  check(
+    'profile links are only ever http(s)',
+    Object.values(bobCard?.links || {}).every((l) => /^https?:\/\//.test(l)),
   );
   check('away messages stay private', !JSON.stringify(dirData.people).includes('dentist'));
   check('only people who opted in are listed', !dirData.people.some((p) => ['carol', 'alice', 'mallory'].includes(p.username)));

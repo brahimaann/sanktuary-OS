@@ -4,7 +4,7 @@ import AccountButton from '../components/AccountButton';
 import { useWindowManager } from '../wm/manager';
 import { useApi, useMe } from '../utils/api';
 import { liveUser } from '../utils/live';
-import { displayName, Profile as P, useProfiles } from '../utils/profiles';
+import { displayName, linkFor, Profile as P, PROFILE_LINKS, useProfiles } from '../utils/profiles';
 import { dmId } from './Chat';
 import Avatar from './Avatar';
 import { formatSize } from './fileTypes';
@@ -17,9 +17,7 @@ const FIELDS: [keyof P, string, string][] = [
   ['displayName', 'Display name', 'How your name shows to the team'],
   ['status', 'Status / away message', 'e.g. in the studio till 9'],
   ['role', 'Role', 'e.g. producer, designer, photographer'],
-  ['soundcloud', 'SoundCloud', 'https://soundcloud.com/...'],
-  ['instagram', 'Instagram', '@handle'],
-  ['website', 'Website', 'https://...'],
+  ...PROFILE_LINKS.map(([k, label, , hint]): [keyof P, string, string] => [k, label, hint]),
 ];
 
 /** Your profile (editable) or another member's info card. */
@@ -97,11 +95,11 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             <div style={{ fontStyle: 'italic', background: '#ffffe1', border: '1px solid #808080', padding: 6 }}>{p.status}</div>
           )}
           {p?.bio && <div style={{ whiteSpace: 'pre-wrap', background: '#fff', border: '2px inset #808080', padding: 6 }}>{p.bio}</div>}
-          {(['soundcloud', 'instagram', 'website'] as const).map(
-            (k) =>
+          {PROFILE_LINKS.map(
+            ([k, label]) =>
               p?.[k] && (
                 <div key={k}>
-                  <b>{k[0].toUpperCase() + k.slice(1)}:</b>{' '}
+                  <b>{label}:</b>{' '}
                   <a href={linkFor(k, p[k]!)} target="_blank" rel="noopener noreferrer">
                     {p[k]}
                   </a>
@@ -219,15 +217,6 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
     </div>
   );
 };
-
-const linkFor = (k: string, v: string) =>
-  /^https?:\/\//.test(v)
-    ? v
-    : k === 'instagram'
-      ? `https://instagram.com/${v.replace(/^@/, '')}`
-      : k === 'soundcloud'
-        ? `https://soundcloud.com/${v}`
-        : `https://${v}`;
 
 const input: React.CSSProperties = { fontFamily: 'inherit', fontSize: 12, padding: '2px 4px', border: '2px inset #808080', minWidth: 0 };
 

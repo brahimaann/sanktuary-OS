@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { LinkKey, PROFILE_LINKS } from '../utils/profiles';
 import { useWindowManager } from '../wm/manager';
 import { button, shell, statusBar } from './TeamFiles';
 
@@ -10,7 +11,7 @@ interface Person {
   displayName: string;
   role: string;
   bio: string;
-  links: Partial<Record<'soundcloud' | 'instagram' | 'website', string>>;
+  links: Partial<Record<LinkKey, string>>;
   avatar: boolean;
 }
 interface Dir {
@@ -233,11 +234,11 @@ const Details: React.FC<{ d: Dir; section: Section; i: number }> = ({ d, section
           {p.role && <div>{p.role}</div>}
           {p.bio && <div style={{ whiteSpace: 'pre-wrap' }}>{p.bio}</div>}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {(['soundcloud', 'instagram', 'website'] as const).map(
-              (k) =>
+            {PROFILE_LINKS.map(
+              ([k, label]) =>
                 p.links[k] && (
                   <a key={k} href={p.links[k]} target="_blank" rel="noopener noreferrer nofollow">
-                    {k === 'website' ? 'Website' : k[0].toUpperCase() + k.slice(1)}
+                    {label}
                   </a>
                 ),
             )}
