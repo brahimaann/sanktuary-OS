@@ -14,6 +14,7 @@ import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
 import { ProjectInfo } from './ProjectPanel';
 import { useProfiles } from '../utils/profiles';
+import { Term } from '../utils/glossary';
 
 interface Release {
   id: string;
@@ -175,6 +176,30 @@ const TracksApp: React.FC = () => {
   const release = releases.find((r) => r.id === releaseId) || releases[0];
   const [ready, setReady] = useState<Readiness | null>(null);
   const [readyOpen, setReadyOpen] = useState(false);
+  // Guided path on by default; hiding it is remembered in this browser
+  const [guided, setGuided] = useState(() => {
+    try {
+      return localStorage.getItem('sk_studio_guided') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const guide = (on: boolean) => {
+    setGuided(on);
+    try {
+      localStorage.setItem('sk_studio_guided', on ? 'on' : 'off');
+    } catch {}
+  };
+  const [focus, setFocus] = useState<{ where: string; n: number } | null>(null);
+  const artistBox = useRef<HTMLInputElement>(null);
+  const goTo = (c: Readiness['checks'][number]) => {
+    if (c.track) {
+      setTrackId(c.track);
+      setFocus({ where: whereFor(c), n: Date.now() });
+    } else if (c.step === 'songs') addTrack();
+    else if (c.step === 'artist') artistBox.current?.focus();
+    else setReadyOpen(true);
+  };
   useEffect(() => {
     if (!release) return;
     api(`/api/tracks/release/${release.id}?ready`).then(setReady, () => setReady(null));
@@ -312,12 +337,18 @@ const TracksApp: React.FC = () => {
             >
               {ready ? `Ready? ${ready.ready}/${ready.of}` : 'Ready?'}
             </button>
+            {!guided && (
+              <button style={button} onClick={() => guide(true)} title="Show the guided path: stages and the next thing to do">
+                Guide
+              </button>
+            )}
             <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of release">
               {data.kinds.map((k) => (
                 <option key={k}>{k}</option>
               ))}
             </select>
             <input
+              ref={artistBox}
               key={`artist-${release.id}`}
               style={{ ...input, width: 120 }}
               defaultValue={release.artist || ''}
@@ -418,6 +449,7 @@ const TracksApp: React.FC = () => {
           </>
         )}
       </div>
+      {release && guided && ready && <GuidedStrip ready={ready} onGo={goTo} onHide={() => guide(false)} />}
       <div
         ref={box}
         style={{
@@ -498,6 +530,7 @@ const TracksApp: React.FC = () => {
             key={track.id}
             track={track}
             release={release!}
+            focus={focus}
             statuses={data.statuses}
             canRemove={!!me && (release!.owner === me.username || me.admin)}
             overlay={narrow}
@@ -570,7 +603,8 @@ const TrackPage: React.FC<{
   onChange: () => void;
   onClose: () => void;
   setMsg: (m: string) => void;
-}> = ({ track: t, release, statuses, canRemove, overlay, onChange, onClose, setMsg }) => {
+  focus?: { where: string; n: number } | null; // from the guided strip's Go
+}> = ({ track: t, release, statuses, canRemove, overlay, onChange, onClose, setMsg, focus }) => {
   const api = useApi();
   const openRef = useOpenRef();
   const { openWindow } = useWindowManager();
@@ -582,6 +616,12 @@ const TrackPage: React.FC<{
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [bmiOpen, setBmiOpen] = useState(false);
   const { me } = useMe();
+  const page = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focus) return;
+    if (focus.where === 'bmi') return setBmiOpen(true);
+    page.current?.querySelector(`[data-step="${focus.where}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focus]);
   const media = useRef<HTMLMediaElement | null>(null);
 
   useEffect(() => setDraft(t), [t]);
@@ -624,6 +664,7 @@ const TrackPage: React.FC<{
 
   return (
     <div
+      ref={page}
       style={{
         ...listBox,
         flex: 1,
@@ -670,7 +711,7 @@ const TrackPage: React.FC<{
         </label>
       </div>
 
-      <Section title="Current bounce">
+      <Section title="Current bounce" step="bounce">
         {t.bounce ? (
           <>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -832,7 +873,7 @@ const TrackPage: React.FC<{
         ))}
       </Section>
 
-      <Section title="BMI registration">
+      <Section title="BMI registration" step="bmi">
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <span>{bmiStatus(t.bmi)}</span>
           <button style={button} onClick={() => setBmiOpen(true)}>
@@ -840,7 +881,7 @@ const TrackPage: React.FC<{
           </button>
         </div>
       </Section>
-      <Section title="Explicit">
+      <Section title={<Term>Explicit</Term>} step="explicit">
         <div style={{ display: 'flex', gap: 12 }}>
           {([false, true] as const).map((v) => (
             <label key={String(v)} style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -1065,7 +1106,7 @@ ${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc
     const w = window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
     if (w) w.onload = () => w.print();
   };
-  const field = (k: keyof Bmi, label: string, hint = '') => (
+  const field = (k: keyof Bmi, label: React.ReactNode, hint = '') => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {label}
       <input style={input} value={(b[k] as string) || ''} placeholder={hint} onChange={(e) => set(k, e.target.value)} />
@@ -1093,8 +1134,20 @@ ${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc
               {field('altTitle', 'Alternate title')}
               {field('duration', 'Duration', '3:25')}
               {field('artist', 'Performing artist')}
-              {field('isrc', 'ISRC (recording)', 'US-ABC-26-00001')}
-              {field('iswc', 'ISWC (if BMI gave one)', 'T-123.456.789-0')}
+              {field(
+                'isrc',
+                <>
+                  <Term>ISRC</Term> (recording)
+                </>,
+                'US-ABC-26-00001',
+              )}
+              {field(
+                'iswc',
+                <>
+                  <Term>ISWC</Term> (if BMI gave one)
+                </>,
+                'T-123.456.789-0',
+              )}
             </div>
           </Section>
           <Section title={`Writers and publishers (shares: ${shareTotal(b)}%)`}>
@@ -1103,11 +1156,17 @@ ${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc
                 <thead>
                   <tr style={{ textAlign: 'left' }}>
                     <th>Writer</th>
-                    <th>PRO</th>
-                    <th>IPI/CAE #</th>
+                    <th>
+                      <Term>PRO</Term>
+                    </th>
+                    <th>
+                      <Term k="IPI">IPI/CAE #</Term>
+                    </th>
                     <th>Share %</th>
                     <th>Publisher</th>
-                    <th>Publisher IPI</th>
+                    <th>
+                      Publisher <Term>IPI</Term>
+                    </th>
                     <th />
                   </tr>
                 </thead>
@@ -1249,10 +1308,10 @@ interface Master {
   signoffs: { user: string; at: string; hash: string }[];
 }
 const MASTER_ROLES = ['Artist', 'Featured artist', 'Producer', 'Co-producer', 'Engineer', 'Label', 'Other'];
-const REGISTRATIONS: [string, string, string][] = [
-  ['mlc', 'The MLC (mechanicals)', 'https://portal.themlc.com'],
-  ['soundexchange', 'SoundExchange (digital radio)', 'https://www.soundexchange.com'],
-  ['contentId', 'YouTube Content ID (through your distributor)', ''],
+const REGISTRATIONS: [key: string, label: string, link: string, term: string][] = [
+  ['mlc', 'The MLC (mechanicals)', 'https://portal.themlc.com', 'MLC'],
+  ['soundexchange', 'SoundExchange (digital radio)', 'https://www.soundexchange.com', 'SoundExchange'],
+  ['contentId', 'YouTube Content ID (through your distributor)', '', 'Content ID'],
 ];
 
 /**
@@ -1275,7 +1334,14 @@ const MasterSplits: React.FC<{ track: Track; me: string; save: (body: object) =>
   const stale = (u: string) => t.master?.signoffs.some((x) => x.user === u && x.hash !== t.master!.hash);
   const mine = !dirty && t.master?.splits.some((r) => r.member === me) && !signed(me);
   return (
-    <Section title={`Master splits (${total}%)`}>
+    <Section
+      title={
+        <>
+          <Term>Master splits</Term> ({total}%)
+        </>
+      }
+      step="master"
+    >
       {rows.map((r, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
           <input style={{ ...input, width: 110 }} placeholder="Name" value={r.name} onChange={(e) => set(i, 'name', e.target.value)} />
@@ -1359,16 +1425,18 @@ const MasterSplits: React.FC<{ track: Track; me: string; save: (body: object) =>
 
 /** After it's out: the registrations that collect the money streaming payouts don't include. */
 const Registrations: React.FC<{ track: Track; save: (body: object) => Promise<void> }> = ({ track: t, save }) => (
-  <Section title="Registrations">
+  <Section title="Registrations" step="regs">
     <div style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', gap: 4, alignItems: 'center' }}>
       <span>BMI</span>
       <span style={{ color: t.bmi?.workId || t.bmi?.registered ? '#006000' : '#555' }}>
         {t.bmi?.workId ? `work #${t.bmi.workId}` : t.bmi?.registered ? `on ${t.bmi.registered}` : 'on the BMI sheet'}
       </span>
       <span />
-      {REGISTRATIONS.map(([k, label, link]) => (
+      {REGISTRATIONS.map(([k, label, link, term]) => (
         <React.Fragment key={k}>
-          <span>{label}</span>
+          <span>
+            <Term k={term}>{label}</Term>
+          </span>
           <input
             type="date"
             style={input}
@@ -1390,11 +1458,84 @@ const Registrations: React.FC<{ track: Track; save: (body: object) => Promise<vo
 );
 
 interface Readiness {
-  checks: { ok: boolean; text: string; song: string | null; later: boolean }[];
+  checks: { ok: boolean; text: string; step: string; song: string | null; track: string | null; later: boolean }[];
   ready: number;
   of: number;
   out: boolean;
 }
+
+// Studio's guided path: the release's stages in order, done or not, and the one next thing to do. It never hides
+// anything (experts skip around); it only points. Built from the server's readiness check.
+const STAGES: [step: string, label: string][] = [
+  ['artist', 'Artist & date'],
+  ['songs', 'Songs & masters'],
+  ['credits', 'ISRC & explicit'],
+  ['splits', 'Splits'],
+  ['artwork', 'Cover & UPC'],
+  ['register', 'Register'],
+];
+/** Which part of the song page a readiness item is about (see the data-step sections in TrackPage). */
+const whereFor = (c: Readiness['checks'][number]) =>
+  /^(ISRC|Songwriter)/.test(c.text) || c.text.includes('BMI')
+    ? 'bmi'
+    : c.text.startsWith('Explicit')
+      ? 'explicit'
+      : c.text.startsWith('Master audio')
+        ? 'bounce'
+        : c.step === 'register'
+          ? 'regs'
+          : 'master';
+
+const GuidedStrip: React.FC<{ ready: Readiness; onGo: (c: Readiness['checks'][number]) => void; onHide: () => void }> = ({
+  ready,
+  onGo,
+  onHide,
+}) => {
+  const due = (c: Readiness['checks'][number]) => !c.ok && (!c.later || ready.out);
+  const next = STAGES.map(([st]) => ready.checks.find((c) => c.step === st && due(c))).find(Boolean);
+  return (
+    <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', padding: '3px 6px', borderBottom: '1px solid #808080' }}>
+      {STAGES.map(([st, label], i) => {
+        const mine = ready.checks.filter((c) => c.step === st);
+        const done = mine.length > 0 && mine.every((c) => c.ok);
+        return (
+          <React.Fragment key={st}>
+            {i > 0 && <span style={{ color: '#808080' }}>›</span>}
+            <span
+              style={{ color: done ? '#006000' : st === 'register' && !ready.out ? '#808080' : '#000' }}
+              title={mine.map((c) => `${c.ok ? '✓' : '○'} ${c.song ? `${c.song}: ` : ''}${c.text}`).join('\n')}
+            >
+              {done ? '✓ ' : ''}
+              {label}
+            </span>
+          </React.Fragment>
+        );
+      })}
+      <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+        {next ? (
+          <>
+            <span>
+              <b>Next:</b> {next.song ? `${next.song}: ` : ''}
+              {next.text}
+            </span>
+            <button style={{ ...button, fontWeight: 700 }} onClick={() => onGo(next)}>
+              Go
+            </button>
+          </>
+        ) : (
+          <b style={{ color: '#006000' }}>{ready.out ? 'All done, registrations included.' : 'Ready for your distributor.'}</b>
+        )}
+        <button
+          style={{ ...button, padding: '0 6px' }}
+          title="Hide the guided path (bring it back with Guide in the toolbar)"
+          onClick={onHide}
+        >
+          ×
+        </button>
+      </span>
+    </div>
+  );
+};
 /** Everything the release needs before it goes to the distributor, then the registrations once it's out. */
 const ReadinessPanel: React.FC<{ release: Release; ready: Readiness | null; onUpc: (upc: string) => void; onClose: () => void }> = ({
   release,
@@ -1432,7 +1573,7 @@ const ReadinessPanel: React.FC<{ release: Release; ready: Readiness | null; onUp
             </b>
           )}
           <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            UPC
+            <Term>UPC</Term>
             <input
               key={release.upc || ''}
               style={{ ...input, width: 150 }}
@@ -1560,8 +1701,11 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
   );
 };
 
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <fieldset style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+const Section: React.FC<{ title: React.ReactNode; step?: string; children: React.ReactNode }> = ({ title, step, children }) => (
+  <fieldset
+    data-step={step}
+    style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}
+  >
     <legend>{title}</legend>
     {children}
   </fieldset>

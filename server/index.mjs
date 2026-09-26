@@ -1408,10 +1408,12 @@ const unsigned = (t) =>
 /** Everything a release needs before it goes to the distributor, and the registrations to do once it's out. */
 async function releaseReadiness(db, r) {
   const checks = [];
-  const add = (ok, text, song = null, later = false) => checks.push({ ok: !!ok, text, song, later });
-  add(r.artist, 'Artist name');
-  add(r.date, 'Release date');
-  add(r.upc, 'UPC (your distributor gives you one)');
+  // step: which part of the release it belongs to (Studio's guided strip); track: the song to open
+  const add = (ok, text, step, t = null, later = false) =>
+    checks.push({ ok: !!ok, text, step, song: t && `${t.n}. ${t.title}`, track: t?.id || null, later });
+  add(r.artist, 'Artist name', 'artist');
+  add(r.date, 'Release date', 'artist');
+  add(r.upc, 'UPC (your distributor gives you one)', 'artwork');
   const cover = await releaseFile(r.cover);
   const m =
     cover &&
@@ -1425,32 +1427,33 @@ async function releaseReadiness(db, r) {
       : m
         ? `Cover art 3000 × 3000 square (this one is ${m.width} × ${m.height})`
         : 'Cover art that can be read',
+    'artwork',
   );
   const tracks = Object.values(db.tracks)
     .filter((t) => t.release === r.id && !t.deleted)
     .sort((a, b) => a.n - b.n);
-  add(tracks.length, 'At least one song');
+  add(tracks.length, 'At least one song', 'songs');
   const out = !!r.date && r.date <= new Date().toISOString().slice(0, 10);
   for (const t of tracks) {
-    const song = `${t.n}. ${t.title}`;
     const isrc = t.bmi?.isrc;
     const clash = isrc && Object.values(db.tracks).find((o) => o !== t && !o.deleted && o.bmi?.isrc === isrc);
-    add(t.bounce, 'Master audio chosen', song);
-    add(isrc && !clash, clash ? `ISRC ${isrc} is also on "${clash.title}": each recording needs its own` : 'ISRC', song);
-    add(t.explicit !== undefined && t.explicit !== null, 'Explicit or clean marked', song);
-    add(t.bmi?.writers?.length && shareSum(t.bmi.writers) === 100, 'Songwriter splits add up to 100% (BMI sheet)', song);
-    add(t.master?.splits?.length && shareSum(t.master.splits) === 100, 'Master splits add up to 100%', song);
+    add(t.bounce, 'Master audio chosen', 'songs', t);
+    add(isrc && !clash, clash ? `ISRC ${isrc} is also on "${clash.title}": each recording needs its own` : 'ISRC', 'credits', t);
+    add(t.explicit !== undefined && t.explicit !== null, 'Explicit or clean marked', 'credits', t);
+    add(t.bmi?.writers?.length && shareSum(t.bmi.writers) === 100, 'Songwriter splits add up to 100% (BMI sheet)', 'splits', t);
+    add(t.master?.splits?.length && shareSum(t.master.splits) === 100, 'Master splits add up to 100%', 'splits', t);
     const waiting = unsigned(t);
     add(
       t.master?.splits?.length && !waiting.length,
       waiting.length ? `Master split sign-off from ${waiting.map((x) => x.name).join(', ')}` : 'Master splits signed off',
-      song,
+      'splits',
+      t,
     );
     // Once it's out: the registrations that collect money DSP payouts don't include
-    add(t.bmi?.workId || t.bmi?.registered, 'Registered with BMI', song, true);
-    add(t.regs?.mlc, 'Registered with The MLC (mechanicals)', song, true);
-    add(t.regs?.soundexchange, 'Registered with SoundExchange (digital radio)', song, true);
-    add(t.regs?.contentId, 'YouTube Content ID set up (through your distributor)', song, true);
+    add(t.bmi?.workId || t.bmi?.registered, 'Registered with BMI', 'register', t, true);
+    add(t.regs?.mlc, 'Registered with The MLC (mechanicals)', 'register', t, true);
+    add(t.regs?.soundexchange, 'Registered with SoundExchange (digital radio)', 'register', t, true);
+    add(t.regs?.contentId, 'YouTube Content ID set up (through your distributor)', 'register', t, true);
   }
   const now = checks.filter((c) => !c.later);
   return { checks, ready: now.filter((c) => c.ok).length, of: now.length, out };

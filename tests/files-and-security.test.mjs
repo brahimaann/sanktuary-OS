@@ -1488,6 +1488,11 @@ try {
     ready.checks.some((c) => !c.ok && /also on/.test(c.text)),
     JSON.stringify(ready.checks),
   );
+  check(
+    'readiness items say which step and song they belong to (for the guided path)',
+    ready.checks.every((c) => ['artist', 'songs', 'credits', 'splits', 'artwork', 'register'].includes(c.step)) &&
+      ready.checks.every((c) => !c.song || c.track === opening.id || c.track === unannounced.id),
+  );
   check('readiness counts only what is due before release', ready.of > 0 && ready.ready < ready.of && ready.checks.some((c) => c.later));
   const pagedLabel = JSON.stringify(await (await fetch(B + rp)).json());
   check('splits, UPC and registrations stay off the public page', !pagedLabel.includes('036000291452') && !pagedLabel.includes('signoffs'));

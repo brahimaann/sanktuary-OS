@@ -10,6 +10,7 @@ import MediaControls from '../components/MediaControls';
 import { useWindowManager } from '../wm/manager';
 import { sharedAudio } from '../utils/sound';
 import { tempoAndKey } from '../utils/audioAnalysis';
+import { Term } from '../utils/glossary';
 
 interface FilePreviewProps {
   app: string;
@@ -703,7 +704,7 @@ const AudioPreview: React.FC<{
         )}
         {facts?.lufs != null && (
           <span style={cell}>
-            <b>{facts.lufs.toFixed(1)}</b> LUFS
+            <b>{facts.lufs.toFixed(1)}</b> <Term>LUFS</Term>
           </span>
         )}
         {facts?.truePeak != null && (
@@ -711,10 +712,15 @@ const AudioPreview: React.FC<{
             style={{ ...cell, color: hot ? '#a00000' : undefined }}
             title={hot ? 'Above -1 dBTP: may distort after MP3/AAC encoding on streaming services' : 'True peak'}
           >
-            <b>{facts.truePeak.toFixed(1)}</b> dBTP{facts.truePeak >= 0 ? ' · clipping' : hot ? ' · hot' : ''}
+            <b>{facts.truePeak.toFixed(1)}</b> <Term>dBTP</Term>
+            {facts.truePeak >= 0 ? ' · clipping' : hot ? ' · hot' : ''}
           </span>
         )}
-        {facts?.lra != null && <span style={cell}>LRA {facts.lra.toFixed(1)}</span>}
+        {facts?.lra != null && (
+          <span style={cell}>
+            <Term>LRA</Term> {facts.lra.toFixed(1)}
+          </span>
+        )}
         {musical?.bpm && <span style={cell}>≈ {Math.round(musical.bpm)} BPM</span>}
         {musical?.key && <span style={cell}>{musical.key}</span>}
       </div>
