@@ -1367,6 +1367,95 @@ function cleanBmi(v) {
   };
 }
 
+// ── The label side: a release's UPC and readiness; per song explicit flag, registrations, master splits ──
+// The composition (songwriters, BMI sheet) and the recording (the master: artist, producers, label) are separate
+// rights with separate splits. Master splits are signed off in the app by the members on them; a sign-off holds a
+// hash of the splits it agreed to, so changing the splits leaves the old sign-offs visibly out of date.
+const REGISTRATIONS = ['mlc', 'soundexchange', 'contentId']; // BMI is on the BMI sheet
+const MASTER_ROLES = ['Artist', 'Featured artist', 'Producer', 'Co-producer', 'Engineer', 'Label', 'Other'];
+/** UPC-A (12 digits) or EAN-13, with a correct check digit, or '' for none. */
+function upcOrEmpty(v) {
+  const d = String(v ?? '').replace(/\D/g, '');
+  if (!d) return '';
+  if (!/^\d{12,13}$/.test(d)) fail(400, 'UPCs are 12 digits (EANs 13)');
+  const n = d.padStart(13, '0').split('').map(Number);
+  const sum = n.slice(0, 12).reduce((t, x, i) => t + x * (i % 2 ? 3 : 1), 0);
+  if ((10 - (sum % 10)) % 10 !== n[12]) fail(400, "That UPC's last digit doesn't check out: look for a typo");
+  return d;
+}
+const cents = (x) => Math.round(Math.max(0, Math.min(100, Number(x) || 0)) * 100) / 100;
+const shareSum = (rows = []) => Math.round(rows.reduce((t, r) => t + (Number(r.share) || 0), 0) * 100) / 100;
+function cleanMaster(list) {
+  const splits = (Array.isArray(list) ? list : [])
+    .slice(0, 16)
+    .map((x) => ({
+      name: String(x?.name ?? '')
+        .trim()
+        .slice(0, 80),
+      role: MASTER_ROLES.includes(x?.role) ? x.role : 'Other',
+      share: cents(x?.share),
+      member: /^[\w.-]{1,64}$/.test(x?.member || '') ? x.member : '', // their Sanktuary account, if they have one
+    }))
+    .filter((x) => x.name);
+  return { splits, hash: createHash('sha1').update(JSON.stringify(splits)).digest('hex').slice(0, 16) };
+}
+/** Members on the master split who haven't signed off on the splits as they are now. */
+const unsigned = (t) =>
+  (t.master?.splits || []).filter(
+    (x) => x.member && !(t.master.signoffs || []).some((s) => s.user === x.member && s.hash === t.master.hash),
+  );
+
+/** Everything a release needs before it goes to the distributor, and the registrations to do once it's out. */
+async function releaseReadiness(db, r) {
+  const checks = [];
+  const add = (ok, text, song = null, later = false) => checks.push({ ok: !!ok, text, song, later });
+  add(r.artist, 'Artist name');
+  add(r.date, 'Release date');
+  add(r.upc, 'UPC (your distributor gives you one)');
+  const cover = await releaseFile(r.cover);
+  const m =
+    cover &&
+    (await sharp(cover)
+      .metadata()
+      .catch(() => null));
+  add(
+    m && m.width >= 3000 && m.width === m.height,
+    !r.cover
+      ? 'Cover art, 3000 × 3000 px'
+      : m
+        ? `Cover art 3000 × 3000 square (this one is ${m.width} × ${m.height})`
+        : 'Cover art that can be read',
+  );
+  const tracks = Object.values(db.tracks)
+    .filter((t) => t.release === r.id && !t.deleted)
+    .sort((a, b) => a.n - b.n);
+  add(tracks.length, 'At least one song');
+  const out = !!r.date && r.date <= new Date().toISOString().slice(0, 10);
+  for (const t of tracks) {
+    const song = `${t.n}. ${t.title}`;
+    const isrc = t.bmi?.isrc;
+    const clash = isrc && Object.values(db.tracks).find((o) => o !== t && !o.deleted && o.bmi?.isrc === isrc);
+    add(t.bounce, 'Master audio chosen', song);
+    add(isrc && !clash, clash ? `ISRC ${isrc} is also on "${clash.title}": each recording needs its own` : 'ISRC', song);
+    add(t.explicit !== undefined && t.explicit !== null, 'Explicit or clean marked', song);
+    add(t.bmi?.writers?.length && shareSum(t.bmi.writers) === 100, 'Songwriter splits add up to 100% (BMI sheet)', song);
+    add(t.master?.splits?.length && shareSum(t.master.splits) === 100, 'Master splits add up to 100%', song);
+    const waiting = unsigned(t);
+    add(
+      t.master?.splits?.length && !waiting.length,
+      waiting.length ? `Master split sign-off from ${waiting.map((x) => x.name).join(', ')}` : 'Master splits signed off',
+      song,
+    );
+    // Once it's out: the registrations that collect money DSP payouts don't include
+    add(t.bmi?.workId || t.bmi?.registered, 'Registered with BMI', song, true);
+    add(t.regs?.mlc, 'Registered with The MLC (mechanicals)', song, true);
+    add(t.regs?.soundexchange, 'Registered with SoundExchange (digital radio)', song, true);
+    add(t.regs?.contentId, 'YouTube Content ID set up (through your distributor)', song, true);
+  }
+  const now = checks.filter((c) => !c.later);
+  return { checks, ready: now.filter((c) => c.ok).length, of: now.length, out };
+}
+
 const TRACK_TEXT = { title: 80, bpm: 10, key: 20, credits: 2000, notes: 4000 };
 const TRACK_LINKS = ['bandlab', 'untitled', 'soundcloud', 'other'];
 let tracksDb = null;
@@ -1439,6 +1528,7 @@ async function tracksApi(req, res, url) {
       return json(res, { ...r, folderKey: undefined, found });
     }
     const r = (db.releases[id] && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
+    if (req.method === 'GET' && url.searchParams.has('ready')) return json(res, await releaseReadiness(db, r));
     if (req.method === 'POST' && url.searchParams.has('scan')) {
       if (!r.folder) fail(400, 'Link the release to a folder first');
       await releaseSpace(r.folder.space, user, cfg); // still allowed to see that folder?
@@ -1465,6 +1555,7 @@ async function tracksApi(req, res, url) {
           .trim()
           .slice(0, 120);
       if (input.writers !== undefined) r.writers = releaseWriters(input.writers);
+      if (input.upc !== undefined) r.upc = upcOrEmpty(input.upc);
       if (input.stores !== undefined) {
         const stores = {};
         for (const k of RELEASE_STORES) {
@@ -1507,6 +1598,16 @@ async function tracksApi(req, res, url) {
     const r =
       (t && !t.deleted && db.releases[t.release] && canSeeRelease(user, db.releases[t.release]) && db.releases[t.release]) ||
       fail(404, 'No such track');
+    if (req.method === 'POST' && url.searchParams.has('signoff')) {
+      // "I agree to these master splits": only the members on the split, only for splits that add up
+      if (!t.master?.splits?.some((x) => x.member === me)) fail(403, "You're not on this song's master split");
+      if (shareSum(t.master.splits) !== 100) fail(400, 'The master splits need to add up to 100% first');
+      const at = new Date().toISOString();
+      t.master.signoffs = [...(t.master.signoffs || []).filter((x) => x.user !== me), { user: me, at, hash: t.master.hash }];
+      t.history = [{ at, user: me, action: 'signed off on the master splits' }, ...t.history].slice(0, 100);
+      changed(r);
+      return json(res, { ...t, following: t.followers.includes(me), followers: t.followers.length });
+    }
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);
       const log = (action) => (t.history = [{ at: new Date().toISOString(), user: me, action }, ...t.history].slice(0, 100));
@@ -1515,6 +1616,16 @@ async function tracksApi(req, res, url) {
       if (input.bmi !== undefined) {
         t.bmi = cleanBmi(input.bmi);
         log('updated the BMI sheet');
+      }
+      if (input.explicit !== undefined) t.explicit = input.explicit === null ? null : !!input.explicit;
+      if (input.regs !== undefined)
+        t.regs = Object.fromEntries(REGISTRATIONS.map((k) => [k, input.regs?.[k] ? dateOrNull(input.regs[k]) : null]).filter(([, v]) => v));
+      if (input.master !== undefined) {
+        const next = cleanMaster(input.master);
+        if (next.hash !== t.master?.hash) {
+          t.master = { ...next, signoffs: t.master?.signoffs || [] }; // old sign-offs stay, marked out of date by the hash
+          log('changed the master splits');
+        }
       }
       if (input.onPage !== undefined) t.onPage = !!input.onPage; // shown on the release's public page (title, credits, links)
       if (input.previewAt !== undefined)

@@ -13,6 +13,7 @@ import MediaControls from '../components/MediaControls';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
 import { ProjectInfo } from './ProjectPanel';
+import { useProfiles } from '../utils/profiles';
 
 interface Release {
   id: string;
@@ -29,6 +30,7 @@ interface Release {
   stores?: Record<string, string>; // where to listen / pre-save (https links), shown as buttons on the page
   pageUntil?: string | null; // a temporary page: gone after this day
   artist?: string; // who it's by (asked first when it's made)
+  upc?: string; // the release's barcode
   writers?: Partial<BmiWriter>[]; // its usual songwriters: each song's BMI sheet starts from these
 }
 const STORES: [string, string][] = [
@@ -89,6 +91,9 @@ interface Track {
   onPage?: boolean; // shown on the release's public page
   previewAt?: number | null; // a 30-second public preview starts here (seconds)
   bmi?: Bmi | null; // BMI work registration / split sheet (team only)
+  explicit?: boolean | null; // null / missing: not answered yet
+  regs?: Record<string, string>; // registration -> the day it was done
+  master?: Master | null; // who owns the recording, and their sign-offs
 }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const seconds = (v: string) => {
@@ -168,6 +173,12 @@ const TracksApp: React.FC = () => {
 
   const releases = data?.releases || [];
   const release = releases.find((r) => r.id === releaseId) || releases[0];
+  const [ready, setReady] = useState<Readiness | null>(null);
+  const [readyOpen, setReadyOpen] = useState(false);
+  useEffect(() => {
+    if (!release) return;
+    api(`/api/tracks/release/${release.id}?ready`).then(setReady, () => setReady(null));
+  }, [api, release?.id, data]); // eslint-disable-line react-hooks/exhaustive-deps
   const tracks = (data?.tracks || []).filter((t) => t.release === release?.id).sort((a, b) => a.n - b.n);
   const track = tracks.find((t) => t.id === trackId) || null;
   const pickRelease = (id: string) => {
@@ -293,6 +304,13 @@ const TracksApp: React.FC = () => {
           <>
             <button style={{ ...button, fontWeight: 700 }} onClick={addTrack}>
               <IconLabel icon="note">Add track...</IconLabel>
+            </button>
+            <button
+              style={{ ...button, color: ready && ready.ready < ready.of ? '#a00000' : '#006000' }}
+              onClick={() => setReadyOpen(true)}
+              title="Everything it needs before it goes to your distributor"
+            >
+              {ready ? `Ready? ${ready.ready}/${ready.of}` : 'Ready?'}
             </button>
             <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of release">
               {data.kinds.map((k) => (
@@ -512,6 +530,9 @@ const TracksApp: React.FC = () => {
             onClose={() => setPageSetup(false)}
           />
         )}
+        {readyOpen && release && (
+          <ReadinessPanel release={release} ready={ready} onUpc={(upc) => patchRelease({ upc })} onClose={() => setReadyOpen(false)} />
+        )}
         {sharing && release && (
           <MembersPicker
             title={`Who can see ${release.title}`}
@@ -560,6 +581,7 @@ const TrackPage: React.FC<{
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [bmiOpen, setBmiOpen] = useState(false);
+  const { me } = useMe();
   const media = useRef<HTMLMediaElement | null>(null);
 
   useEffect(() => setDraft(t), [t]);
@@ -818,6 +840,24 @@ const TrackPage: React.FC<{
           </button>
         </div>
       </Section>
+      <Section title="Explicit">
+        <div style={{ display: 'flex', gap: 12 }}>
+          {([false, true] as const).map((v) => (
+            <label key={String(v)} style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+              <input type="radio" checked={t.explicit === v} onChange={() => save({ explicit: v })} />
+              {v ? 'Explicit' : 'Clean'}
+            </label>
+          ))}
+          {(t.explicit === undefined || t.explicit === null) && <span style={{ color: '#a00000' }}>Distributors ask for this.</span>}
+        </div>
+      </Section>
+      <MasterSplits
+        track={t}
+        me={me?.username || ''}
+        save={save}
+        signOff={() => api(`/api/tracks/track/${t.id}?signoff`, { method: 'POST' }).then(onChange, (e) => setMsg((e as Error).message))}
+      />
+      <Registrations track={t} save={save} />
       {bmiOpen && (
         <BmiSheet
           track={t}
@@ -934,7 +974,7 @@ const emptyBmi = (): Bmi => ({
   writers: [{ ...NEW_WRITER, share: 100 }],
 });
 /** 100% split between writers, to the cent, adding up to exactly 100 (the last one takes the rounding). */
-const evenShares = (ws: BmiWriter[]) => {
+const evenShares = <T extends { share: number }>(ws: T[]) => {
   const each = Math.floor(10000 / Math.max(1, ws.length)) / 100;
   return ws.map((w, i) => ({ ...w, share: i === ws.length - 1 ? Math.round((100 - each * (ws.length - 1)) * 100) / 100 : each }));
 };
@@ -1189,6 +1229,235 @@ ${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc
               }}
             >
               Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+interface MasterSplit {
+  name: string;
+  role: string;
+  share: number;
+  member: string; // their Sanktuary username, if they have one (then they sign off here)
+}
+interface Master {
+  splits: MasterSplit[];
+  hash: string;
+  signoffs: { user: string; at: string; hash: string }[];
+}
+const MASTER_ROLES = ['Artist', 'Featured artist', 'Producer', 'Co-producer', 'Engineer', 'Label', 'Other'];
+const REGISTRATIONS: [string, string, string][] = [
+  ['mlc', 'The MLC (mechanicals)', 'https://portal.themlc.com'],
+  ['soundexchange', 'SoundExchange (digital radio)', 'https://www.soundexchange.com'],
+  ['contentId', 'YouTube Content ID (through your distributor)', ''],
+];
+
+/**
+ * Who owns the recording (the master) and in what shares: separate from the songwriters on the BMI sheet.
+ * Members on the split sign off here; changing the splits puts their sign-off out of date.
+ */
+const MasterSplits: React.FC<{ track: Track; me: string; save: (body: object) => Promise<void>; signOff: () => Promise<void> }> = ({
+  track: t,
+  me,
+  save,
+  signOff,
+}) => {
+  const { profiles } = useProfiles();
+  const [rows, setRows] = useState<MasterSplit[]>(t.master?.splits || []);
+  useEffect(() => setRows(t.master?.splits || []), [t.master?.hash]); // eslint-disable-line react-hooks/exhaustive-deps
+  const total = Math.round(rows.reduce((n, r) => n + (Number(r.share) || 0), 0) * 100) / 100;
+  const dirty = JSON.stringify(rows) !== JSON.stringify(t.master?.splits || []);
+  const set = (i: number, k: keyof MasterSplit, v: string | number) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  const signed = (u: string) => t.master?.signoffs.find((x) => x.user === u && x.hash === t.master!.hash);
+  const stale = (u: string) => t.master?.signoffs.some((x) => x.user === u && x.hash !== t.master!.hash);
+  const mine = !dirty && t.master?.splits.some((r) => r.member === me) && !signed(me);
+  return (
+    <Section title={`Master splits (${total}%)`}>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input style={{ ...input, width: 110 }} placeholder="Name" value={r.name} onChange={(e) => set(i, 'name', e.target.value)} />
+          <select style={input} value={r.role} onChange={(e) => set(i, 'role', e.target.value)}>
+            {MASTER_ROLES.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
+          <input
+            style={{ ...input, width: 56 }}
+            type="number"
+            min={0}
+            max={100}
+            step="0.01"
+            value={r.share}
+            onChange={(e) => set(i, 'share', +e.target.value)}
+          />
+          %
+          <select
+            style={input}
+            value={r.member}
+            onChange={(e) => set(i, 'member', e.target.value)}
+            title="Their Sanktuary account: they sign off here"
+          >
+            <option value="">(no account)</option>
+            {profiles.map((p) => (
+              <option key={p.username} value={p.username}>
+                @{p.username}
+              </option>
+            ))}
+          </select>
+          {r.member && !dirty && (
+            <span style={{ color: signed(r.member) ? '#006000' : '#a00000' }}>
+              {signed(r.member)
+                ? `✓ signed ${new Date(signed(r.member)!.at).toLocaleDateString()}`
+                : stale(r.member)
+                  ? 'splits changed: needs to sign again'
+                  : 'needs to sign off'}
+            </span>
+          )}
+          <button style={button} title="Remove" onClick={() => setRows(rows.filter((_, j) => j !== i))}>
+            ×
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          style={button}
+          onClick={() => setRows([...rows, { name: '', role: rows.length ? 'Producer' : 'Artist', share: 0, member: '' }])}
+        >
+          Add person
+        </button>
+        <button style={button} disabled={!rows.length} onClick={() => setRows(evenShares(rows))}>
+          Split evenly
+        </button>
+        {dirty && (
+          <button style={{ ...button, fontWeight: 700 }} onClick={() => save({ master: rows })}>
+            Save splits
+          </button>
+        )}
+        {mine && (
+          <button
+            style={{ ...button, fontWeight: 700 }}
+            disabled={total !== 100}
+            title={total !== 100 ? 'The splits need to add up to 100% first' : 'Records that you agree to these splits, with the time'}
+            onClick={signOff}
+          >
+            Sign off on these splits
+          </button>
+        )}
+        {total !== 100 && rows.length > 0 && <span style={{ color: '#a00000' }}>Shares add up to {total}%, not 100%.</span>}
+      </div>
+      {!rows.length && (
+        <div style={{ color: '#555' }}>
+          Who owns the recording: artist, featured artists, producers' points, the label. Separate from the songwriters on the BMI sheet.
+        </div>
+      )}
+    </Section>
+  );
+};
+
+/** After it's out: the registrations that collect the money streaming payouts don't include. */
+const Registrations: React.FC<{ track: Track; save: (body: object) => Promise<void> }> = ({ track: t, save }) => (
+  <Section title="Registrations">
+    <div style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', gap: 4, alignItems: 'center' }}>
+      <span>BMI</span>
+      <span style={{ color: t.bmi?.workId || t.bmi?.registered ? '#006000' : '#555' }}>
+        {t.bmi?.workId ? `work #${t.bmi.workId}` : t.bmi?.registered ? `on ${t.bmi.registered}` : 'on the BMI sheet'}
+      </span>
+      <span />
+      {REGISTRATIONS.map(([k, label, link]) => (
+        <React.Fragment key={k}>
+          <span>{label}</span>
+          <input
+            type="date"
+            style={input}
+            value={t.regs?.[k] || ''}
+            onChange={(e) => save({ regs: { ...t.regs, [k]: e.target.value || null } })}
+            title="The day it was registered"
+          />
+          {link ? (
+            <a href={link} target="_blank" rel="noopener noreferrer">
+              open
+            </a>
+          ) : (
+            <span />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  </Section>
+);
+
+interface Readiness {
+  checks: { ok: boolean; text: string; song: string | null; later: boolean }[];
+  ready: number;
+  of: number;
+  out: boolean;
+}
+/** Everything the release needs before it goes to the distributor, then the registrations once it's out. */
+const ReadinessPanel: React.FC<{ release: Release; ready: Readiness | null; onUpc: (upc: string) => void; onClose: () => void }> = ({
+  release,
+  ready,
+  onUpc,
+  onClose,
+}) => {
+  const groups = new Map<string, Readiness['checks']>();
+  for (const c of ready?.checks || []) {
+    const g = c.later ? (ready!.out ? 'Now that it is out: register it' : 'Once it is out: register it') : c.song || 'The release';
+    groups.set(g, [...(groups.get(g) || []), c]);
+  }
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.25)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20,
+      }}
+    >
+      <div style={{ width: 'min(560px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#c0c0c0', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+          Ready to release? {release.title}
+        </div>
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {!ready ? (
+            'Checking...'
+          ) : (
+            <b>
+              {ready.ready} of {ready.of} done{ready.ready === ready.of ? ': ready for your distributor.' : '.'}
+            </b>
+          )}
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            UPC
+            <input
+              key={release.upc || ''}
+              style={{ ...input, width: 150 }}
+              defaultValue={release.upc || ''}
+              placeholder="12 digits"
+              onBlur={(e) => e.target.value.replace(/\D/g, '') !== (release.upc || '') && onUpc(e.target.value)}
+            />
+            <span style={{ color: '#555' }}>the release's barcode, from your distributor</span>
+          </label>
+          {[...groups].map(([g, cs]) => (
+            <Section key={g} title={g}>
+              {cs.map((c, i) => (
+                <div key={i} style={{ color: c.ok ? '#006000' : c.later ? '#555' : '#a00000' }}>
+                  {c.ok ? '✓' : c.later ? '○' : '✗'} {c.text}
+                </div>
+              ))}
+            </Section>
+          ))}
+          <div style={{ color: '#555' }}>
+            ISRC, songwriter splits and registrations are on each song (BMI sheet, Master splits, Registrations). Missing ISRCs and
+            forgotten registrations are how released music quietly loses money.
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button style={button} onClick={onClose}>
+              Close
             </button>
           </div>
         </div>

@@ -1444,6 +1444,53 @@ try {
   );
   const pagedAfterBmi = JSON.stringify(await (await fetch(B + rp)).json());
   check('BMI sheet never reaches the public page', !pagedAfterBmi.includes('00123456789') && !pagedAfterBmi.includes('bmi'));
+
+  // The label side: UPC with its check digit, master splits signed off in the app, readiness before release
+  check('UPC: a typo in the check digit is caught', (await call('alice', epUrl, 'PATCH', { upc: '036000291453' })).status === 400);
+  check(
+    'UPC: a real one is kept',
+    JSON.parse((await call('alice', epUrl, 'PATCH', { upc: '0 36000 29145 2' })).text).upc === '036000291452',
+  );
+  const splitsV1 = [
+    { name: 'Bob B', role: 'Artist', share: 50, member: 'bob' },
+    { name: 'Sanktuary', role: 'Label', share: 50 },
+  ];
+  await call('alice', openingUrl, 'PATCH', { master: splitsV1, explicit: false, regs: { mlc: '2026-10-01', madeUp: '2026-10-01' } });
+  const openingNow = () => call('alice', '/api/tracks').then((r) => JSON.parse(r.text).tracks.find((x) => x.id === opening.id));
+  const o1 = await openingNow();
+  check('registrations: only known ones kept', o1.regs.mlc === '2026-10-01' && !('madeUp' in o1.regs), JSON.stringify(o1.regs));
+  check('only people on the master split can sign it off', (await call('carol', `${openingUrl}?signoff`, 'POST')).status === 403);
+  check('someone on the split signs off', (await call('bob', `${openingUrl}?signoff`, 'POST')).status === 200);
+  const readyUrl = `/api/tracks/release/${ep.id}?ready`;
+  const song1 = (rd) => rd.checks.filter((c) => c.song?.includes('Opening'));
+  let ready = JSON.parse((await call('alice', readyUrl)).text);
+  check(
+    'readiness: signed master splits and ISRC count as done',
+    song1(ready).some((c) => c.ok && c.text === 'Master splits signed off') && song1(ready).some((c) => c.ok && c.text === 'ISRC'),
+    JSON.stringify(song1(ready)),
+  );
+  await call('alice', openingUrl, 'PATCH', {
+    master: [
+      { ...splitsV1[0], share: 60 },
+      { ...splitsV1[1], share: 40 },
+    ],
+  });
+  ready = JSON.parse((await call('alice', readyUrl)).text);
+  check(
+    'changing the splits needs a new sign-off',
+    song1(ready).some((c) => !c.ok && c.text === 'Master split sign-off from Bob B'),
+    JSON.stringify(song1(ready)),
+  );
+  await call('alice', `/api/tracks/track/${unannounced.id}`, 'PATCH', { bmi: { isrc: 'USABC2600001' } });
+  ready = JSON.parse((await call('alice', readyUrl)).text);
+  check(
+    'readiness: the same ISRC on two songs is caught',
+    ready.checks.some((c) => !c.ok && /also on/.test(c.text)),
+    JSON.stringify(ready.checks),
+  );
+  check('readiness counts only what is due before release', ready.of > 0 && ready.ready < ready.of && ready.checks.some((c) => c.later));
+  const pagedLabel = JSON.stringify(await (await fetch(B + rp)).json());
+  check('splits, UPC and registrations stay off the public page', !pagedLabel.includes('036000291452') && !pagedLabel.includes('signoffs'));
   const relHtml = await fetch(B + '/release/open-ep/opening');
   check(
     'release and song pages are served with a strict policy',
