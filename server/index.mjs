@@ -1323,6 +1323,47 @@ async function publicShare(req, res, url) {
 // member unless `members` lists who may see them (owner + admins always can), like boards.
 const TRACK_STATUSES = ['Idea', 'Writing', 'Recording', 'Mixing', 'Mastering', 'Done'];
 const RELEASE_KINDS = ['Album', 'EP', 'Single'];
+// A song's BMI work-registration sheet (and split sheet): only the song's team sees it, never public pages.
+// Identifiers are checked for shape here; shares adding up to 100% is checked in the app (drafts may not yet).
+const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
+function cleanBmi(v) {
+  if (v === null) return null;
+  const s = (x, max) =>
+    String(x ?? '')
+      .trim()
+      .slice(0, max);
+  const digits = (x, what) => {
+    const d = s(x, 20).replace(/\D/g, '');
+    if (d && !/^\d{9,11}$/.test(d)) fail(400, `${what} IPI numbers are 9 to 11 digits`);
+    return d;
+  };
+  const isrc = s(v?.isrc, 20).toUpperCase().replace(/-/g, '');
+  if (isrc && !/^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(isrc)) fail(400, 'ISRCs look like US-ABC-26-00001');
+  const iswc = s(v?.iswc, 20)
+    .toUpperCase()
+    .replace(/[^T\d]/g, '');
+  if (iswc && !/^T\d{10}$/.test(iswc)) fail(400, 'ISWCs look like T-123.456.789-0');
+  const workId = s(v?.workId, 20).replace(/\D/g, '');
+  return {
+    altTitle: s(v?.altTitle, 120),
+    artist: s(v?.artist, 120),
+    duration: /^\d{1,2}:\d{2}$/.test(s(v?.duration, 8)) ? s(v.duration, 8) : '',
+    isrc,
+    iswc: iswc && `T-${iswc.slice(1, 4)}.${iswc.slice(4, 7)}.${iswc.slice(7, 10)}-${iswc.slice(10)}`,
+    samples: s(v?.samples, 1000),
+    workId,
+    registered: v?.registered ? dateOrNull(v.registered) : null,
+    writers: (Array.isArray(v?.writers) ? v.writers : []).slice(0, 12).map((w) => ({
+      name: s(w?.name, 80),
+      pro: PROS.includes(w?.pro) ? w.pro : 'BMI',
+      ipi: digits(w?.ipi, 'Writer'),
+      share: Math.round(Math.max(0, Math.min(100, Number(w?.share) || 0)) * 100) / 100,
+      publisher: s(w?.publisher, 80),
+      publisherIpi: digits(w?.publisherIpi, 'Publisher'),
+    })),
+  };
+}
+
 const TRACK_TEXT = { title: 80, bpm: 10, key: 20, credits: 2000, notes: 4000 };
 const TRACK_LINKS = ['bandlab', 'untitled', 'soundcloud', 'other'];
 let tracksDb = null;
@@ -1458,6 +1499,10 @@ async function tracksApi(req, res, url) {
       const log = (action) => (t.history = [{ at: new Date().toISOString(), user: me, action }, ...t.history].slice(0, 100));
       const news = [];
       for (const [k, max] of Object.entries(TRACK_TEXT)) if (input[k] !== undefined) t[k] = String(input[k] ?? '').slice(0, max);
+      if (input.bmi !== undefined) {
+        t.bmi = cleanBmi(input.bmi);
+        log('updated the BMI sheet');
+      }
       if (input.onPage !== undefined) t.onPage = !!input.onPage; // shown on the release's public page (title, credits, links)
       if (input.previewAt !== undefined)
         // 30 seconds of the bounce from here are public on that page (null: no preview); never the whole bounce

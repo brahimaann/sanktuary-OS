@@ -1376,6 +1376,39 @@ try {
   check('a temporary page is gone after its end date', (await fetch(B + rp)).status === 404);
   await call('alice', epUrl, 'PATCH', { pageUntil: null });
   check('and back when the end date is cleared', (await fetch(B + rp)).status === 200);
+  // BMI sheet: identifiers checked and tidied, shares kept in range, never on the public page
+  const openingUrl = `/api/tracks/track/${opening.id}`;
+  check(
+    'BMI: IPI numbers must be 9-11 digits',
+    (await call('alice', openingUrl, 'PATCH', { bmi: { writers: [{ name: 'H', ipi: '123' }] } })).status === 400,
+  );
+  check('BMI: ISRCs are checked', (await call('alice', openingUrl, 'PATCH', { bmi: { isrc: 'nope' } })).status === 400);
+  const bmiSaved = JSON.parse(
+    (
+      await call('alice', openingUrl, 'PATCH', {
+        bmi: {
+          duration: '3:25',
+          isrc: 'us-abc-26-00001',
+          iswc: 'T-123.456.789-0',
+          writers: [
+            { name: 'HIMA', pro: 'BMI', ipi: '00123456789', share: 60, publisher: 'Sanktuary Songs', publisherIpi: '987654321' },
+            { name: 'Guest', pro: 'Made up', ipi: '', share: 400 },
+          ],
+        },
+      })
+    ).text,
+  ).bmi;
+  check(
+    'BMI: numbers tidied, unknown PRO becomes BMI, shares capped at 100',
+    bmiSaved.isrc === 'USABC2600001' &&
+      bmiSaved.iswc === 'T-123.456.789-0' &&
+      bmiSaved.writers[0].ipi === '00123456789' &&
+      bmiSaved.writers[1].pro === 'BMI' &&
+      bmiSaved.writers[1].share === 100,
+    JSON.stringify(bmiSaved),
+  );
+  const pagedAfterBmi = JSON.stringify(await (await fetch(B + rp)).json());
+  check('BMI sheet never reaches the public page', !pagedAfterBmi.includes('00123456789') && !pagedAfterBmi.includes('bmi'));
   const relHtml = await fetch(B + '/release/open-ep/opening');
   check(
     'release and song pages are served with a strict policy',

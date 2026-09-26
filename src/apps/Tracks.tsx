@@ -86,6 +86,7 @@ interface Track {
   updatedBy: string;
   onPage?: boolean; // shown on the release's public page
   previewAt?: number | null; // a 30-second public preview starts here (seconds)
+  bmi?: Bmi | null; // BMI work registration / split sheet (team only)
 }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const seconds = (v: string) => {
@@ -530,6 +531,7 @@ const TrackPage: React.FC<{
   const [token, setToken] = useState('');
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [bmiOpen, setBmiOpen] = useState(false);
   const media = useRef<HTMLMediaElement | null>(null);
 
   useEffect(() => setDraft(t), [t]);
@@ -780,6 +782,31 @@ const TrackPage: React.FC<{
         ))}
       </Section>
 
+      <Section title="BMI registration">
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>{bmiStatus(t.bmi)}</span>
+          <button style={button} onClick={() => setBmiOpen(true)}>
+            BMI sheet...
+          </button>
+        </div>
+      </Section>
+      {bmiOpen && (
+        <BmiSheet
+          track={t}
+          onClose={() => setBmiOpen(false)}
+          onSave={async (bmi) => {
+            try {
+              await api(`/api/tracks/track/${t.id}`, { method: 'PATCH', body: JSON.stringify({ bmi }) });
+              onChange();
+              return true;
+            } catch (e) {
+              setMsg((e as Error).message);
+              return false;
+            }
+          }}
+        />
+      )}
+
       <Section title="Credits">
         <textarea
           rows={3}
@@ -841,6 +868,283 @@ const TrackPage: React.FC<{
           }}
         />
       )}
+    </div>
+  );
+};
+
+interface BmiWriter {
+  name: string;
+  pro: string;
+  ipi: string;
+  share: number;
+  publisher: string;
+  publisherIpi: string;
+}
+interface Bmi {
+  altTitle: string;
+  artist: string;
+  duration: string;
+  isrc: string;
+  iswc: string;
+  samples: string;
+  workId: string;
+  registered: string | null;
+  writers: BmiWriter[];
+}
+const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
+const NEW_WRITER: BmiWriter = { name: '', pro: 'BMI', ipi: '', share: 0, publisher: '', publisherIpi: '' };
+const emptyBmi = (): Bmi => ({
+  altTitle: '',
+  artist: '',
+  duration: '',
+  isrc: '',
+  iswc: '',
+  samples: '',
+  workId: '',
+  registered: null,
+  writers: [{ ...NEW_WRITER, share: 100 }],
+});
+const shareTotal = (b: Bmi) => Math.round(b.writers.reduce((n, w) => n + (Number(w.share) || 0), 0) * 100) / 100;
+/** What's missing before it can go into BMI's work registration. */
+const bmiChecks = (b: Bmi) => {
+  const out: string[] = [];
+  const total = shareTotal(b);
+  if (total !== 100) out.push(`Writer shares add up to ${total}%, not 100%.`);
+  b.writers.forEach((w, i) => {
+    const who = w.name || `Writer ${i + 1}`;
+    if (!w.name) out.push(`Writer ${i + 1} has no name.`);
+    if (w.pro !== 'None' && !w.ipi) out.push(`${who}: add their IPI/CAE number (on their ${w.pro} account).`);
+    if (w.publisher && !w.publisherIpi) out.push(`${who}'s publisher ${w.publisher}: add its IPI number.`);
+  });
+  if (!b.duration) out.push('Add the duration (m:ss).');
+  return out;
+};
+
+/** "Registered: BMI work #...", "Draft: 2 thing(s) to fill in" or "Not started." */
+const bmiStatus = (b?: Bmi | null) => {
+  if (!b) return 'Not started.';
+  if (b.workId) return `Registered: BMI work #${b.workId}${b.registered ? ` (${b.registered})` : ''}.`;
+  const n = bmiChecks({ ...emptyBmi(), ...b }).length;
+  return n ? `Draft: ${n} thing(s) to fill in.` : 'Ready to register.';
+};
+
+/** The song's BMI work registration, laid out in the order BMI's form asks, plus a printable split sheet. */
+const BmiSheet: React.FC<{ track: Track; onSave: (bmi: Bmi) => Promise<boolean>; onClose: () => void }> = ({ track, onSave, onClose }) => {
+  const [b, setB] = useState<Bmi>({ ...emptyBmi(), ...track.bmi });
+  const [note, setNote] = useState('');
+  const set = (k: keyof Bmi, v: string) => setB({ ...b, [k]: v });
+  const setW = (i: number, k: keyof BmiWriter, v: string | number) =>
+    setB({ ...b, writers: b.writers.map((w, j) => (j === i ? { ...w, [k]: v } : w)) });
+  const checks = bmiChecks(b);
+  const asText = () =>
+    [
+      `Title: ${track.title}`,
+      b.altTitle ? `Alternate title: ${b.altTitle}` : null,
+      `Duration: ${b.duration}`,
+      b.artist ? `Performing artist: ${b.artist}` : null,
+      b.isrc ? `ISRC: ${b.isrc}` : null,
+      b.iswc ? `ISWC: ${b.iswc}` : null,
+      '',
+      ...b.writers.map(
+        (w) =>
+          `Writer: ${w.name} | ${w.pro}${w.ipi ? ` IPI ${w.ipi}` : ''} | ${w.share}%` +
+          (w.publisher ? ` | Publisher: ${w.publisher}${w.publisherIpi ? ` IPI ${w.publisherIpi}` : ''}` : ' | no publisher'),
+      ),
+      b.samples ? `\nSamples / interpolations: ${b.samples}` : null,
+    ]
+      .filter((l) => l !== null)
+      .join('\n');
+  const splitSheet = () => {
+    const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const rows = b.writers
+      .map(
+        (w) =>
+          `<tr><td>${esc(w.name)}</td><td>${esc(w.pro)}</td><td>${esc(w.ipi)}</td><td>${w.share}%</td><td>${esc(w.publisher || '-')}${
+            w.publisherIpi ? `<br><small>IPI ${esc(w.publisherIpi)}</small>` : ''
+          }</td><td class="sig"></td><td class="sig"></td></tr>`,
+      )
+      .join('');
+    const html = `<!doctype html><meta charset="utf-8"><title>Split sheet - ${esc(track.title)}</title>
+<style>body{font:14px Arial,sans-serif;margin:32px}h1{margin:0 0 4px}table{border-collapse:collapse;width:100%;margin-top:16px}
+td,th{border:1px solid #000;padding:6px;text-align:left;vertical-align:top}.sig{width:140px;height:40px}p{margin:2px 0}</style>
+<h1>Split sheet</h1><p><b>Song:</b> ${esc(track.title)}${b.altTitle ? ` (${esc(b.altTitle)})` : ''}</p>
+${b.artist ? `<p><b>Artist:</b> ${esc(b.artist)}</p>` : ''}${b.duration ? `<p><b>Duration:</b> ${esc(b.duration)}</p>` : ''}
+${b.isrc ? `<p><b>ISRC:</b> ${esc(b.isrc)}</p>` : ''}${b.iswc ? `<p><b>ISWC:</b> ${esc(b.iswc)}</p>` : ''}
+<table><tr><th>Writer</th><th>PRO</th><th>IPI/CAE</th><th>Share</th><th>Publisher</th><th>Signature</th><th>Date</th></tr>${rows}
+<tr><th colspan="3">Total</th><th>${shareTotal(b)}%</th><th colspan="3"></th></tr></table>
+${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc(b.samples)}</p>` : ''}
+<p style="margin-top:24px;color:#555">Everyone signing agrees to these writer shares of the composition.</p>`;
+    const w = window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
+    if (w) w.onload = () => w.print();
+  };
+  const field = (k: keyof Bmi, label: string, hint = '') => (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {label}
+      <input style={input} value={(b[k] as string) || ''} placeholder={hint} onChange={(e) => set(k, e.target.value)} />
+    </label>
+  );
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.25)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20,
+      }}
+    >
+      <div style={{ width: 'min(720px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#c0c0c0', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+          BMI sheet: {track.title}
+        </div>
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Section title="The work">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 6 }}>
+              {field('altTitle', 'Alternate title')}
+              {field('duration', 'Duration', '3:25')}
+              {field('artist', 'Performing artist')}
+              {field('isrc', 'ISRC (recording)', 'US-ABC-26-00001')}
+              {field('iswc', 'ISWC (if BMI gave one)', 'T-123.456.789-0')}
+            </div>
+          </Section>
+          <Section title={`Writers and publishers (shares: ${shareTotal(b)}%)`}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left' }}>
+                    <th>Writer</th>
+                    <th>PRO</th>
+                    <th>IPI/CAE #</th>
+                    <th>Share %</th>
+                    <th>Publisher</th>
+                    <th>Publisher IPI</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.writers.map((w, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input style={{ ...input, width: 120 }} value={w.name} onChange={(e) => setW(i, 'name', e.target.value)} />
+                      </td>
+                      <td>
+                        <select style={input} value={w.pro} onChange={(e) => setW(i, 'pro', e.target.value)}>
+                          {PROS.map((p) => (
+                            <option key={p}>{p}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input style={{ ...input, width: 100 }} value={w.ipi} onChange={(e) => setW(i, 'ipi', e.target.value)} />
+                      </td>
+                      <td>
+                        <input
+                          style={{ ...input, width: 56 }}
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.01"
+                          value={w.share}
+                          onChange={(e) => setW(i, 'share', +e.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          style={{ ...input, width: 110 }}
+                          value={w.publisher}
+                          placeholder="(none)"
+                          onChange={(e) => setW(i, 'publisher', e.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          style={{ ...input, width: 100 }}
+                          value={w.publisherIpi}
+                          onChange={(e) => setW(i, 'publisherIpi', e.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <button style={button} title="Remove" onClick={() => setB({ ...b, writers: b.writers.filter((_, j) => j !== i) })}>
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                style={button}
+                disabled={b.writers.length >= 12}
+                onClick={() => setB({ ...b, writers: [...b.writers, { ...NEW_WRITER }] })}
+              >
+                Add writer
+              </button>
+              <button
+                style={button}
+                disabled={!b.writers.length}
+                title="Split 100% evenly between everyone listed"
+                onClick={() => setB({ ...b, writers: b.writers.map((w) => ({ ...w, share: Math.round(10000 / b.writers.length) / 100 })) })}
+              >
+                Split evenly
+              </button>
+            </div>
+          </Section>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            Samples or interpolations (what, whose, cleared?)
+            <textarea
+              rows={2}
+              style={{ ...input, resize: 'vertical' }}
+              value={b.samples}
+              onChange={(e) => set('samples', e.target.value)}
+            />
+          </label>
+          <Section title="Registered">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              BMI work #
+              <input style={{ ...input, width: 110 }} value={b.workId} onChange={(e) => set('workId', e.target.value)} />
+              on
+              <input type="date" style={input} value={b.registered || ''} onChange={(e) => set('registered', e.target.value)} />
+            </div>
+          </Section>
+          <div style={{ background: checks.length ? '#ffffe1' : '#e0ffe0', border: '1px solid #808080', padding: 6 }}>
+            {checks.length
+              ? checks.map((c) => <div key={c}>• {c}</div>)
+              : 'Ready to register at BMI (Online Services > Works > Register a work).'}
+          </div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
+            {note && <span style={{ marginRight: 'auto' }}>{note}</span>}
+            <button
+              style={button}
+              onClick={() =>
+                navigator.clipboard.writeText(asText()).then(
+                  () => setNote('Copied: paste it next to the BMI form.'),
+                  () => setNote('Could not copy.'),
+                )
+              }
+            >
+              Copy for BMI
+            </button>
+            <button style={button} onClick={splitSheet} title="A split sheet everyone can sign">
+              Print split sheet
+            </button>
+            <button style={button} onClick={onClose}>
+              Close
+            </button>
+            <button
+              style={{ ...button, fontWeight: 700 }}
+              onClick={async () => {
+                if (await onSave(b)) setNote('Saved.');
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
