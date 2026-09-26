@@ -1084,6 +1084,26 @@ try {
   const secret = JSON.parse((await call('bob', '/api/timeline', 'POST', { title: 'Secret shoot', kind: 'Shoot', start: day(10) })).text);
   await call('bob', `/api/timeline/${gig.id}`, 'PATCH', { public: true });
   const ep = JSON.parse((await call('alice', '/api/tracks/release', 'POST', { title: 'Open EP', kind: 'EP', date: day(30) })).text);
+  // New releases ask who it's by and who wrote it first; songs' BMI sheets start from these
+  const credited = JSON.parse(
+    (
+      await call('alice', '/api/tracks/release', 'POST', {
+        title: 'Credited EP',
+        kind: 'EP',
+        artist: '  Sanktuary Collective ',
+        writers: [{ name: 'HIMA', pro: 'BMI' }, { name: '  ' }, { name: 'Amara', pro: 'ASCAP' }],
+      })
+    ).text,
+  );
+  check(
+    'a release keeps its artist and songwriters (blank names dropped)',
+    credited.artist === 'Sanktuary Collective' && credited.writers.map((w) => `${w.name}/${w.pro}`).join(',') === 'HIMA/BMI,Amara/ASCAP',
+    JSON.stringify(credited),
+  );
+  check(
+    "a release's writers are checked like the BMI sheet's",
+    (await call('alice', `/api/tracks/release/${credited.id}`, 'PATCH', { writers: [{ name: 'HIMA', ipi: '12' }] })).status === 400,
+  );
   await call('alice', `/api/tracks/release/${ep.id}`, 'PATCH', { public: true });
   await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { public: true }); // still private (members list): must not leak
   const pub1 = await (await fetch(B + '/api/public')).json();

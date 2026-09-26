@@ -70,6 +70,9 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const [when, setWhen] = useState('');
   const [where, setWhere] = useState('');
   const [releaseKind, setReleaseKind] = useState('Album');
+  // Who it's by and who wrote it: asked first, carried into every song's BMI sheet
+  const [artist, setArtist] = useState(() => remembered('sk_new_artist'));
+  const [writers, setWriters] = useState(() => remembered('sk_new_writers'));
   const [releases, setReleases] = useState<Release[]>([]);
   const [releaseId, setReleaseId] = useState(() => remembered('sk_tracks_release'));
   const [folderMode, setFolderMode] = useState<'new' | 'existing' | 'none'>('new');
@@ -133,6 +136,20 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     setExisting(null);
   };
   const post = (url: string, body: object, method = 'POST') => api(url, { method, body: JSON.stringify(body) });
+  // "HIMA, Amara" -> writers for the BMI sheets (PRO, IPI and exact shares are filled in on each song's sheet)
+  const credits = () => {
+    remember('sk_new_artist', artist.trim());
+    remember('sk_new_writers', writers.trim());
+    return {
+      artist: artist.trim(),
+      writers: writers
+        .split(',')
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .map((name) => ({ name, pro: 'BMI' })),
+    };
+  };
+  const nextSteps = " Next: add its songs, then open each song's BMI sheet (it starts with this artist and these writers).";
   const foundText = (f?: { added: string[]; bounces: string[] } | null) =>
     f && (f.added.length || f.bounces.length) ? ` Found ${f.added.length} track(s) in the folder.` : '';
 
@@ -153,15 +170,16 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           date: parsed?.date ?? null,
           folder,
           setup: folderMode === 'new',
+          ...credits(),
         });
-        setMsg(`Made ${r.title}${folder ? ` with its folder in ${spaceName || folder.space}` : ''}.${foundText(r.found)}`);
+        setMsg(`Made ${r.title}${folder ? ` with its folder in ${spaceName || folder.space}` : ''}.${foundText(r.found)}${nextSteps}`);
         openTracks(r.id);
       } else if (kind === 'song') {
         let r = release;
         if (!r) {
           setBusy('Making the single...');
           const folder = spaceId ? { space: spaceId, path: `Releases/${folderName(name)}` } : null;
-          r = await post('/api/tracks/release', { title: name, kind: 'Single', folder, setup: !!folder });
+          r = await post('/api/tracks/release', { title: name, kind: 'Single', folder, setup: !!folder, ...credits() });
         }
         setBusy('Adding the track...');
         const t = await post('/api/tracks/track', { release: r!.id, title: name });
@@ -236,10 +254,22 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         </button>
         <b style={{ fontSize: 13 }}>New {label.toLowerCase()}</b>
       </div>
+      {(kind === 'release' || (kind === 'song' && !release)) && (
+        <label style={row}>
+          <span style={cap}>Artist</span>
+          <input
+            autoFocus
+            style={{ ...field, flex: 1, minWidth: 160 }}
+            value={artist}
+            onChange={(e) => setArtist(e.target.value)}
+            placeholder="Who it's by, as it will show on Spotify"
+          />
+        </label>
+      )}
       <label style={row}>
         <span style={cap}>{kind === 'release' ? 'Title' : kind === 'song' ? 'Song title' : 'What'}</span>
         <input
-          autoFocus
+          autoFocus={!(kind === 'release' || (kind === 'song' && !release))}
           style={{ ...field, flex: 1, minWidth: 160 }}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -247,6 +277,17 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           placeholder={kind === 'release' ? 'The Summer I Missed You' : kind === 'song' ? 'Summer Nights' : 'Cover shoot with Amara'}
         />
       </label>
+      {(kind === 'release' || (kind === 'song' && !release)) && (
+        <label style={row} title="For the BMI sheets. Each writer's PRO, IPI number and exact share go on each song's sheet.">
+          <span style={cap}>Written by</span>
+          <input
+            style={{ ...field, flex: 1, minWidth: 160 }}
+            value={writers}
+            onChange={(e) => setWriters(e.target.value)}
+            placeholder="Songwriters, e.g. HIMA, Amara"
+          />
+        </label>
+      )}
       {kind === 'release' && (
         <label style={row}>
           <span style={cap}>Kind</span>

@@ -28,6 +28,8 @@ interface Release {
   story?: string | null;
   stores?: Record<string, string>; // where to listen / pre-save (https links), shown as buttons on the page
   pageUntil?: string | null; // a temporary page: gone after this day
+  artist?: string; // who it's by (asked first when it's made)
+  writers?: Partial<BmiWriter>[]; // its usual songwriters: each song's BMI sheet starts from these
 }
 const STORES: [string, string][] = [
   ['presave', 'Pre-save link (shown until release day)'],
@@ -297,6 +299,30 @@ const TracksApp: React.FC = () => {
                 <option key={k}>{k}</option>
               ))}
             </select>
+            <input
+              key={`artist-${release.id}`}
+              style={{ ...input, width: 120 }}
+              defaultValue={release.artist || ''}
+              placeholder="Artist"
+              title="Who it's by (starts each song's BMI sheet)"
+              onBlur={(e) => e.target.value.trim() !== (release.artist || '') && patchRelease({ artist: e.target.value.trim() })}
+            />
+            <input
+              key={`writers-${release.id}`}
+              style={{ ...input, width: 140 }}
+              defaultValue={(release.writers || []).map((w) => w.name).join(', ')}
+              placeholder="Written by"
+              title="Its songwriters, comma-separated (each song's BMI sheet starts with them)"
+              onBlur={(e) => {
+                const names = e.target.value
+                  .split(',')
+                  .map((n) => n.trim())
+                  .filter(Boolean);
+                if (names.join(', ') === (release.writers || []).map((w) => w.name).join(', ')) return;
+                // keep what's known about writers already listed (PRO, IPI, publisher)
+                patchRelease({ writers: names.map((name) => release.writers?.find((w) => w.name === name) || { name, pro: 'BMI' }) });
+              }}
+            />
             <label title="Release date">
               Out{' '}
               <input
@@ -453,6 +479,7 @@ const TracksApp: React.FC = () => {
           <TrackPage
             key={track.id}
             track={track}
+            release={release!}
             statuses={data.statuses}
             canRemove={!!me && (release!.owner === me.username || me.admin)}
             overlay={narrow}
@@ -515,13 +542,14 @@ const StatusChip: React.FC<{ s: string }> = ({ s }) => (
 /** One song: bounce player, project check-out state, stems, links, credits, notes, deadline, history. */
 const TrackPage: React.FC<{
   track: Track;
+  release: Release;
   statuses: string[];
   canRemove: boolean;
   overlay: boolean; // narrow window: cover the track list instead of sitting beside it
   onChange: () => void;
   onClose: () => void;
   setMsg: (m: string) => void;
-}> = ({ track: t, statuses, canRemove, overlay, onChange, onClose, setMsg }) => {
+}> = ({ track: t, release, statuses, canRemove, overlay, onChange, onClose, setMsg }) => {
   const api = useApi();
   const openRef = useOpenRef();
   const { openWindow } = useWindowManager();
@@ -793,6 +821,7 @@ const TrackPage: React.FC<{
       {bmiOpen && (
         <BmiSheet
           track={t}
+          release={release}
           onClose={() => setBmiOpen(false)}
           onSave={async (bmi) => {
             try {
@@ -904,6 +933,11 @@ const emptyBmi = (): Bmi => ({
   registered: null,
   writers: [{ ...NEW_WRITER, share: 100 }],
 });
+/** 100% split between writers, to the cent, adding up to exactly 100 (the last one takes the rounding). */
+const evenShares = (ws: BmiWriter[]) => {
+  const each = Math.floor(10000 / Math.max(1, ws.length)) / 100;
+  return ws.map((w, i) => ({ ...w, share: i === ws.length - 1 ? Math.round((100 - each * (ws.length - 1)) * 100) / 100 : each }));
+};
 const shareTotal = (b: Bmi) => Math.round(b.writers.reduce((n, w) => n + (Number(w.share) || 0), 0) * 100) / 100;
 /** What's missing before it can go into BMI's work registration. */
 const bmiChecks = (b: Bmi) => {
@@ -929,8 +963,22 @@ const bmiStatus = (b?: Bmi | null) => {
 };
 
 /** The song's BMI work registration, laid out in the order BMI's form asks, plus a printable split sheet. */
-const BmiSheet: React.FC<{ track: Track; onSave: (bmi: Bmi) => Promise<boolean>; onClose: () => void }> = ({ track, onSave, onClose }) => {
-  const [b, setB] = useState<Bmi>({ ...emptyBmi(), ...track.bmi });
+const BmiSheet: React.FC<{ track: Track; release: Release; onSave: (bmi: Bmi) => Promise<boolean>; onClose: () => void }> = ({
+  track,
+  release,
+  onSave,
+  onClose,
+}) => {
+  // A new sheet starts with the release's artist and songwriters, shares split evenly
+  const [b, setB] = useState<Bmi>(() =>
+    track.bmi
+      ? { ...emptyBmi(), ...track.bmi }
+      : {
+          ...emptyBmi(),
+          artist: release.artist || '',
+          writers: release.writers?.length ? evenShares(release.writers.map((w) => ({ ...NEW_WRITER, ...w }))) : emptyBmi().writers,
+        },
+  );
   const [note, setNote] = useState('');
   const set = (k: keyof Bmi, v: string) => setB({ ...b, [k]: v });
   const setW = (i: number, k: keyof BmiWriter, v: string | number) =>
@@ -1087,7 +1135,7 @@ ${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc
                 style={button}
                 disabled={!b.writers.length}
                 title="Split 100% evenly between everyone listed"
-                onClick={() => setB({ ...b, writers: b.writers.map((w) => ({ ...w, share: Math.round(10000 / b.writers.length) / 100 })) })}
+                onClick={() => setB({ ...b, writers: evenShares(b.writers) })}
               >
                 Split evenly
               </button>

@@ -1326,6 +1326,8 @@ const RELEASE_KINDS = ['Album', 'EP', 'Single'];
 // A song's BMI work-registration sheet (and split sheet): only the song's team sees it, never public pages.
 // Identifiers are checked for shape here; shares adding up to 100% is checked in the app (drafts may not yet).
 const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
+/** A release's usual songwriters (names, PRO, IPIs...), the starting point for each song's BMI sheet. */
+const releaseWriters = (list) => cleanBmi({ writers: Array.isArray(list) ? list.filter((w) => String(w?.name ?? '').trim()) : [] }).writers;
 function cleanBmi(v) {
   if (v === null) return null;
   const s = (x, max) =>
@@ -1418,6 +1420,11 @@ async function tracksApi(req, res, url) {
         title,
         kind: RELEASE_KINDS.includes(input.kind) ? input.kind : 'Album',
         date: dateOrNull(input.date ?? null),
+        // Asked first when a release is made; every song's BMI sheet starts from these
+        artist: String(input.artist ?? '')
+          .trim()
+          .slice(0, 120),
+        writers: releaseWriters(input.writers),
         cover: null,
         members: null,
         owner: me,
@@ -1452,6 +1459,11 @@ async function tracksApi(req, res, url) {
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
       if (r.public) giveSlug(db, r);
       if (input.blurb !== undefined) r.blurb = String(input.blurb ?? '').slice(0, 3000);
+      if (input.artist !== undefined)
+        r.artist = String(input.artist ?? '')
+          .trim()
+          .slice(0, 120);
+      if (input.writers !== undefined) r.writers = releaseWriters(input.writers);
       if (input.stores !== undefined) {
         const stores = {};
         for (const k of RELEASE_STORES) {
@@ -3892,6 +3904,7 @@ async function releaseView(r) {
     title: r.title,
     kind: r.kind,
     date: r.date,
+    artist: r.artist || '',
     blurb: r.blurb || '',
     stores: r.stores || {},
     cover: !!r.cover,

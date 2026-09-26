@@ -277,6 +277,7 @@
             el('div', 'kicker', `${r.kind}${r.date ? ` · ${r.date > today ? 'Out' : 'Released'} ${day(r.date)}` : ''}`),
             el('h1', '', r.title),
           );
+          if (r.artist) text.append(el('div', 'kicker', `by ${r.artist}`));
           if (r.blurb) text.append(el('p', 'blurb', r.blurb));
           const actions = el('div');
           actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap';
