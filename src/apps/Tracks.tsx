@@ -216,7 +216,7 @@ const TracksApp: React.FC = () => {
   const run = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
-      setMsg('');
+      setMsg(savedNote());
       await load();
     } catch (e) {
       setMsg((e as Error).message);
@@ -587,6 +587,9 @@ const TracksApp: React.FC = () => {
   );
 };
 
+/** Shown in the status bar after every change, so saving on click-away is never silent. */
+const savedNote = () => `Saved ✓ ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+
 const StatusChip: React.FC<{ s: string }> = ({ s }) => (
   <span style={{ background: STATUS_COLORS[s] || '#808080', color: '#fff', padding: '0 5px', fontSize: 10, whiteSpace: 'nowrap' }}>
     {s}
@@ -644,7 +647,7 @@ const TrackPage: React.FC<{
   const save = async (body: Partial<Track> | { follow: boolean }) => {
     try {
       await api(`/api/tracks/track/${t.id}`, { method: 'PATCH', body: JSON.stringify(body) });
-      setMsg('');
+      setMsg(savedNote());
       onChange();
     } catch (e) {
       setMsg((e as Error).message);
