@@ -368,6 +368,26 @@ export interface Analysis {
 
 const breathe = () => new Promise((r) => setTimeout(r)); // let the window repaint between steps
 
+// Tempo, key and balance come from up to 90 s of mono at 22 kHz, skipping a long intro
+const EXCERPT_RATE = 22050;
+async function monoExcerpt(buf: AudioBuffer) {
+  const len = Math.min(buf.duration, 90);
+  const start = buf.duration > 120 ? Math.min(30, buf.duration - len) : 0;
+  const off = new OfflineAudioContext(1, Math.ceil(len * EXCERPT_RATE), EXCERPT_RATE);
+  const src = off.createBufferSource();
+  src.buffer = buf;
+  src.connect(off.destination);
+  src.start(0, start, len);
+  return (await off.startRendering()).getChannelData(0);
+}
+
+/** Just tempo and key, from audio already decoded (the file preview's waveform). */
+export async function tempoAndKey(buf: AudioBuffer) {
+  const mono = await monoExcerpt(buf);
+  await breathe();
+  return { tempo: estimateTempo(mono, EXCERPT_RATE), key: estimateKey(mono, EXCERPT_RATE) };
+}
+
 /** Decodes any format the browser can play (WAV, AIFF, MP3, FLAC, M4A, OGG) and analyses it. */
 export async function analyzeAudio(data: ArrayBuffer, onStep: (s: string) => void = () => {}): Promise<Analysis> {
   onStep('Decoding...');
@@ -378,16 +398,8 @@ export async function analyzeAudio(data: ArrayBuffer, onStep: (s: string) => voi
     throw new Error("This browser can't read that file. Try a WAV, MP3, FLAC or M4A.");
   }
   const channels = [...Array(buf.numberOfChannels).keys()].map((i) => buf.getChannelData(i));
-  // Tempo, key and balance from up to 90 s of mono at 22 kHz, skipping a long intro
-  const len = Math.min(buf.duration, 90);
-  const start = buf.duration > 120 ? Math.min(30, buf.duration - len) : 0;
-  const sr = 22050;
-  const off = new OfflineAudioContext(1, Math.ceil(len * sr), sr);
-  const src = off.createBufferSource();
-  src.buffer = buf;
-  src.connect(off.destination);
-  src.start(0, start, len);
-  const mono = (await off.startRendering()).getChannelData(0);
+  const mono = await monoExcerpt(buf);
+  const sr = EXCERPT_RATE;
   onStep('Finding the tempo...');
   await breathe();
   const tempo = estimateTempo(mono, sr);

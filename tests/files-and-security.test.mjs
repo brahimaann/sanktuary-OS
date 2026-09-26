@@ -909,6 +909,21 @@ try {
     const r = await fetch(B + path, { headers: u ? { cookie: cookie(u) } : {} });
     return { status: r.status, type: r.headers.get('content-type'), bytes: Buffer.from(await r.arrayBuffer()), ms: Date.now() - t };
   };
+  // Engineer facts, measured on the original: format, rate, bit depth, loudness and true peak (the sine peaks at 8000/32768)
+  const infoRes = await call('alice', '/api/files/view/bounce.wav?audioinfo');
+  const info = infoRes.status === 200 ? JSON.parse(infoRes.text) : {};
+  check(
+    'audio facts: 44.1 kHz 16-bit stereo WAV, 5 s',
+    info.lossless && info.rate === 44100 && info.bits === 16 && info.channels === 'stereo' && Math.abs(info.duration - 5) < 0.05,
+    infoRes.text,
+  );
+  check(
+    'audio facts: loudness and true peak measured',
+    info.lufs < -5 && info.lufs > -25 && Math.abs(info.truePeak + 12.2) < 0.5,
+    infoRes.text,
+  );
+  check('audio facts are cached', JSON.parse((await call('alice', '/api/files/view/bounce.wav?audioinfo')).text).lufs === info.lufs);
+  check('audio facts need access to the space', (await call('carol', '/api/files/ed/song.txt?audioinfo')).status >= 400);
   const mp3 = await getBin('alice', '/api/files/view/bounce.wav?preview');
   check('WAV preview is an MP3', mp3.status === 200 && mp3.type === 'audio/mpeg');
   check(

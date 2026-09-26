@@ -391,6 +391,7 @@ async function files(req, res, url) {
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     if (q.has('version')) return stream(req, res, q, join(root, '.sk-versions', rel, safeName(q.get('version'))), transfer);
     if (q.has('thumb')) return thumb(res, target);
+    if (q.has('audioinfo')) return json(res, await audioInfo(target));
     if (q.has('preview') && AUDIO_PREVIEW[extname(target).toLowerCase()])
       return stream(req, res, new URLSearchParams(), await audioPreviewFile(target));
     if (q.has('preview')) return thumb(res, target, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
@@ -4164,6 +4165,80 @@ async function transcode(file, format, out, clip = null) {
 
 /** 30 seconds of a bounce from `at` (for public release pages), made once and cached. */
 const CLIP_FORMATS = { ...AUDIO_PREVIEW, '.mp3': 'mp3', '.m4a': 'mov', '.ogg': 'ogg' };
+
+/**
+ * What an engineer checks first, measured on the original file (not the MP3 preview) and cached: format, sample
+ * rate, bit depth, channels, duration, and EBU R128 loudness (integrated LUFS, loudness range, true peak).
+ * Same safety as transcode: format forced from the extension, local files only, in the same 2-at-a-time queue.
+ */
+async function audioInfo(file) {
+  const format = CLIP_FORMATS[extname(file).toLowerCase()] || fail(415, 'No audio info for this type');
+  const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
+  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|info2`).digest('hex') + '.json');
+  const cached = await readFile(out, 'utf8').then(JSON.parse, () => null);
+  if (cached) return cached;
+  if (!previewJobs.has(out))
+    previewJobs.set(
+      out,
+      measureAudio(file, format, out).finally(() => previewJobs.delete(out)),
+    );
+  return previewJobs.get(out);
+}
+
+async function measureAudio(file, format, out) {
+  if (transcoding >= 2) await new Promise((r) => transcodeQueue.push(r));
+  transcoding++;
+  try {
+    // framelog=verbose keeps the per-100ms lines out of the log; the summary and stream info stay
+    const args = ['-nostdin', '-hide_banner', '-protocol_whitelist', 'file', '-f', format, '-i', file];
+    let log = '';
+    const code = await new Promise((resolve) => {
+      const ff = spawn(ffmpegPath, [...args, '-vn', '-af', 'ebur128=peak=true:framelog=verbose', '-f', 'null', '-'], { windowsHide: true });
+      const timer = setTimeout(() => ff.kill(), 10 * 60_000);
+      ff.stderr.on('data', (d) => (log = (log + d).slice(-200_000)));
+      ff.on('error', () => resolve(-1));
+      ff.on('close', (c) => {
+        clearTimeout(timer);
+        resolve(c);
+      });
+    });
+    if (code !== 0) fail(415, "Couldn't measure this audio");
+    const num = (re) => {
+      const m = log.match(re);
+      return m ? Number(m[1]) : null;
+    };
+    const stream = log.match(/Audio: (\w+)[^,\n]*, (\d+) Hz, ([^,\n]+), (\w+)(?: \((\d+) bit\))?/);
+    const dur = log.match(/Duration: (\d+):(\d+):([\d.]+)/);
+    const codec = stream?.[1] || '';
+    const summary = log.slice(log.lastIndexOf('Summary:'));
+    const fromSummary = (re) => {
+      const v = summary.match(re)?.[1];
+      return v === undefined || v === '-inf' ? null : Number(v);
+    };
+    const info = {
+      codec,
+      lossless: /^(pcm_|flac|alac)/.test(codec),
+      rate: stream ? Number(stream[2]) : null,
+      // "stereo", "mono", "5.1"...; untagged WAVs just say "2 channels"
+      channels: (stream?.[3]?.trim() || '').replace(/^1 channels?$/, 'mono').replace(/^2 channels$/, 'stereo') || null,
+      bits: stream?.[5] ? Number(stream[5]) : Number(codec.match(/^pcm_[su](\d+)/)?.[1]) || (/^pcm_f32/.test(codec) ? 32 : null),
+      float: /^pcm_f/.test(codec),
+      bitrate: /^(pcm_|flac|alac)/.test(codec) ? null : num(/bitrate: (\d+) kb\/s/),
+      duration: dur ? Number(dur[1]) * 3600 + Number(dur[2]) * 60 + Number(dur[3]) : null,
+      // From the end-of-file summary; silence reads as "-inf" (null here)
+      lufs: fromSummary(/I:\s+(-?[\d.]+|-inf) LUFS/),
+      lra: fromSummary(/LRA:\s+(-?[\d.]+|-inf) LU/),
+      truePeak: fromSummary(/True peak:\s+Peak:\s+(-?[\d.]+|-inf) dBFS/),
+    };
+    await mkdir(dirname(out), { recursive: true });
+    await writeFile(out, JSON.stringify(info));
+    return info;
+  } finally {
+    transcoding--;
+    transcodeQueue.shift()?.();
+  }
+}
+
 async function audioClipFile(file, at) {
   const format = CLIP_FORMATS[extname(file).toLowerCase()] || fail(415, 'No preview for this type');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
