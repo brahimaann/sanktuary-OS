@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Windows 98 Desk Calendar Icon 32x32 -->
+  <!-- Shadow -->
+  <rect x="5" y="6" width="24" height="23" fill="#000000" opacity="0.4"/>
+  <!-- Base Page Background -->
+  <rect x="4" y="5" width="24" height="23" fill="#ffffff"/>
+  <!-- Bevel Outset -->
+  <path d="M4 5 H28 V6 H5 V28 H4 Z" fill="#ffffff"/>
+  <path d="M4 27 H28 V28 H4 Z" fill="#808080"/>
+  <path d="M27 5 H28 V28 H27 Z" fill="#808080"/>
+  <rect x="3" y="4" width="26" height="1" fill="#c0c0c0"/>
+  <rect x="3" y="4" width="1" height="25" fill="#c0c0c0"/>
+  <rect x="28" y="5" width="1" height="24" fill="#000000"/>
+  <rect x="4" y="28" width="25" height="1" fill="#000000"/>
+  <!-- Red Top Header -->
+  <rect x="5" y="6" width="22" height="6" fill="#c00000"/>
+  <rect x="5" y="6" width="22" height="1" fill="#ff4040"/>
+  <!-- Spiral Bindings / Hanging Rings -->
+  <rect x="8" y="3" width="2" height="5" fill="#808080"/>
+  <rect x="8" y="3" width="1" height="4" fill="#ffffff"/>
+  <rect x="9" y="4" width="1" height="4" fill="#000000"/>
+  <rect x="15" y="3" width="2" height="5" fill="#808080"/>
+  <rect x="15" y="3" width="1" height="4" fill="#ffffff"/>
+  <rect x="16" y="4" width="1" height="4" fill="#000000"/>
+  <rect x="22" y="3" width="2" height="5" fill="#808080"/>
+  <rect x="22" y="3" width="1" height="4" fill="#ffffff"/>
+  <rect x="23" y="4" width="1" height="4" fill="#000000"/>
+  <!-- Calendar Grid Lines / Dates -->
+  <!-- Days header line -->
+  <rect x="6" y="14" width="20" height="1" fill="#a0a0a0"/>
+  <!-- Row 1 -->
+  <rect x="8" y="16" width="2" height="2" fill="#000080"/>
+  <rect x="12" y="16" width="2" height="2" fill="#000080"/>
+  <rect x="16" y="16" width="2" height="2" fill="#000080"/>
+  <rect x="20" y="16" width="2" height="2" fill="#000080"/>
+  <!-- Row 2 -->
+  <rect x="8" y="19" width="2" height="2" fill="#000080"/>
+  <rect x="12" y="19" width="2" height="2" fill="#000080"/>
+  <rect x="16" y="19" width="2" height="2" fill="#000080"/>
+  <rect x="20" y="19" width="2" height="2" fill="#000080"/>
+  <!-- Row 3 (Current Day Highlight in Yellow/Navy) -->
+  <rect x="7" y="21" width="4" height="4" fill="#000080"/>
+  <rect x="8" y="22" width="2" height="2" fill="#ffff00"/>
+  <rect x="12" y="22" width="2" height="2" fill="#000080"/>
+  <rect x="16" y="22" width="2" height="2" fill="#000080"/>
+  <rect x="20" y="22" width="2" height="2" fill="#000080"/>
+  <!-- Row 4 -->
+  <rect x="8" y="25" width="2" height="2" fill="#000080"/>
+  <rect x="12" y="25" width="2" height="2" fill="#000080"/>
+  <rect x="16" y="25" width="2" height="2" fill="#000080"/>
+</svg>

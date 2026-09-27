@@ -372,7 +372,7 @@ const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => 
       health?.deploy ? health.deploy.ok : null,
       health?.deploy ? `${health.deploy.message.split(/\r?\n/)[0]} · ${new Date(health.deploy.at).toLocaleString()}` : 'no deploys yet',
     ],
-    ['Photo editor (RapidRAW)', health?.rapidraw?.ok ?? null, health?.rapidraw?.note || ''],
+    ['Photo editor (SANKTUARY)', health?.rapidraw?.ok ?? null, health?.rapidraw?.note || ''],
     [
       'Docker',
       st ? st.dockerOk : null,

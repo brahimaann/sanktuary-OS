@@ -33,7 +33,7 @@ interface Dir {
   pools: { slug: string; title: string; goal: number; raised: number; supporters: number }[];
   stories: { slug: string; title: string; subtitle: string; count: number }[];
 }
-type Section = 'stories' | 'people' | 'releases' | 'events' | 'posts' | 'products' | 'pools';
+type Section = 'stories' | 'people' | 'releases' | 'events' | 'posts' | 'products';
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'stories', label: 'Stories', icon: 'kodak-imaging' },
   { id: 'people', label: 'People', icon: 'my-documents-folder' },
@@ -41,7 +41,6 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'events', label: 'Events', icon: 'task' },
   { id: 'posts', label: 'Writing', icon: 'news' },
   { id: 'products', label: 'Shop', icon: 'favorites-folder' },
-  { id: 'pools', label: 'Money pools', icon: 'internet-folder' },
 ];
 const icon = (name: string, size: 16 | 32) => `/images/icons/${name}-${size}x${size}.png`;
 const day = (d: string) =>
@@ -95,22 +94,19 @@ const Directory: React.FC = () => {
             ? d.posts.map((p) => [p.title, `${p.publication} · ${day(p.date.slice(0, 10))}`, 'news'])
             : section === 'products'
               ? d.products.map((p) => [p.title, `${money(p.price)}${p.soldOut ? ' · sold out' : ''}`, 'favorites'])
-              : section === 'pools'
-                ? d.pools.map((p) => [p.title, `${money(p.raised)} of ${money(p.goal)} · ${p.supporters} supporter(s)`, 'internet-folder'])
-                : section === 'stories'
-                  ? d.stories.map((st) => [
-                      st.title,
-                      `${st.subtitle ? `${st.subtitle} · ` : ''}${st.count} photos and videos`,
-                      'kodak-imaging',
-                    ])
-                  : [];
+              : section === 'stories'
+                ? d.stories.map((st) => [
+                    st.title,
+                    `${st.subtitle ? `${st.subtitle} · ` : ''}${st.count} photos and videos`,
+                    'kodak-imaging',
+                  ])
+                : [];
   const activate = (i: number) => {
     if (!d || !section) return;
     if (section === 'posts') return page(d.posts[i].title, d.posts[i].url, 'news');
     if (section === 'stories') return page(d.stories[i].title, `/story/${d.stories[i].slug}`, 'kodak-imaging');
     if (section === 'releases' && d.releases[i].slug) return page(d.releases[i].title, `/release/${d.releases[i].slug}`, 'media-player');
     if (section === 'products') return page('Shop', `/shop/${d.products[i].slug}`, 'favorites');
-    if (section === 'pools') return page(d.pools[i].title, `/pool/${d.pools[i].slug}`, 'favorites');
     setOpen(i === open ? null : i);
   };
   const label = SECTIONS.find((s) => s.id === section)?.label;
@@ -143,7 +139,7 @@ const Directory: React.FC = () => {
           Portfolio
         </button>
         <button style={{ ...button, fontWeight: 700 }} onClick={welcome}>
-          Join the Village
+          Join the Team
         </button>
       </div>
       <div style={{ flex: 1, display: 'flex', minHeight: 0, gap: 2, padding: '0 2px' }}>

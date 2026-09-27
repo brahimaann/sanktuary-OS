@@ -10,7 +10,7 @@ import http from 'node:http';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -83,11 +83,13 @@ const MIME = {
   '.xls': 'application/vnd.ms-excel',
   '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
   '.psd': 'image/vnd.adobe.photoshop',
+  '.ai': 'application/pdf',
+  '.logicx': 'application/x-apple-logicx',
 };
 // Camera RAW files: previewed from the JPEG inside them (rawPreview)
 const RAW_PHOTO = new Set('.cr2 .cr3 .nef .nrw .arw .srf .sr2 .dng .raf .orf .rw2 .pef .srw .3fr .erf .kdc .iiq'.split(' '));
 const RAW_MAX = 300 * 1024 ** 2;
-const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.tif', '.tiff', '.psd', ...RAW_PHOTO]);
+const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.tif', '.tiff', '.psd', '.ai', ...RAW_PHOTO]);
 const PSD_MAX = 400 * 1024 ** 2; // flattening reads the whole file into memory
 // User files that are safe to show in the browser. Anything else (HTML, SVG, scripts, unknown) is served as a
 // sandboxed download, so an uploaded page can never run as the viewer on sanktuary.studio.
@@ -663,8 +665,9 @@ const PROJECT_FILES = {
   '.prproj': 'Premiere Pro',
   '.aep': 'After Effects',
   '.aepx': 'After Effects',
+  '.logicx': 'Logic Pro',
 };
-const PROJECT_SINGLE = { '.psd': 'Photoshop', '.psb': 'Photoshop', '.ai': 'Illustrator' };
+const PROJECT_SINGLE = { '.psd': 'Photoshop', '.psb': 'Photoshop', '.ai': 'Illustrator', '.logicx': 'Logic Pro' };
 const STATUSES = ['Not started', 'In progress', 'In review', 'Done'];
 const TURN_HOURS = 24;
 const REMIND_HOURS = 48;
@@ -673,8 +676,9 @@ let projectsSaved = Promise.resolve();
 const loadProjects = async () => (projects ??= await readJson('projects.json', {}));
 const saveProjects = () => (projectsSaved = projectsSaved.then(() => saveJson('projects.json', projects)).catch(console.error));
 
-/** "Ableton Live", "Photoshop"... or null if this isn't a project. */
+/** "Ableton Live", "Photoshop", "Logic Pro"... or null if this isn't a project. */
 async function projectKind(abs, isDir) {
+  if (abs.toLowerCase().endsWith('.logicx')) return 'Logic Pro';
   if (!isDir) return PROJECT_SINGLE[extname(abs).toLowerCase()] || null;
   for (const n of await readdir(abs).catch(() => []))
     if (PROJECT_FILES[extname(n).toLowerCase()]) return PROJECT_FILES[extname(n).toLowerCase()];
@@ -689,7 +693,7 @@ async function projectAt(space, abs) {
     const s = (await stat(abs).catch(() => null)) || fail(404, 'Not found');
     const kind =
       (await projectKind(abs, s.isDirectory())) ||
-      fail(400, "This isn't a project (no Ableton, FL Studio, Premiere or After Effects file inside, or not a PSD/AI file)");
+      fail(400, "This isn't a project (no Ableton, Logic Pro, FL Studio, Premiere or After Effects file inside, or not a PSD/AI file)");
     all[key] = {
       kind,
       name: basename(abs),
@@ -1721,7 +1725,7 @@ function newTrack(db, r, title, by, action) {
 const RELEASE_SUBFOLDERS = ['Bounces', 'Stems', 'Projects', 'Artwork'];
 const BOUNCE_EXT = new Set(['.wav', '.aif', '.aiff', '.flac', '.mp3', '.m4a', '.ogg']);
 const LOSSLESS_EXT = new Set(['.wav', '.aif', '.aiff', '.flac']);
-const ART_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.psd']);
+const ART_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.psd', '.ai']);
 const SONG_NOISE = new Set(
   'master mastered mix mixed mixdown bounce bounced final rough demo wip ref reference project stems stem version v'.split(' '),
 );
@@ -3739,6 +3743,233 @@ async function rawApi(req, res, url) {
   fail(404, 'Not found');
 }
 
+const RAPIDRAW_HOMEPAGE_INJECTION = `
+<style id="sk-rr-clean-home">
+  /* RapidRAW Simplified Homepage: Only Open Folder & Settings buttons, centered */
+  .w-1\\/2.hidden.md\\:block,
+  div:has(> * > img[alt="Splash screen background"]),
+  img[alt="Splash screen background"],
+  img[src*="-ambient"],
+  .absolute.inset-0.-z-10 {
+    display: none !important;
+  }
+  .w-full.md\\:w-1\\/2 {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: #c0c0c0 !important;
+  }
+  div:has(> .w-1\\/2.hidden.md\\:block),
+  .flex-1.flex.h-full.p-2.bg-transparent > div {
+    background: #c0c0c0 !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+  }
+  .my-auto.text-left > div:not(.flex.flex-col),
+  .my-auto.text-left > p,
+  .my-auto.text-left > span,
+  .my-auto.text-left > h1,
+  .my-auto.text-left > h2,
+  .my-auto.text-left > h3 {
+    display: none !important;
+  }
+  .absolute.bottom-8,
+  .absolute.bottom-8 * {
+    display: none !important;
+  }
+  .my-auto.text-left {
+    margin: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    max-width: 340px !important;
+    padding: 20px !important;
+  }
+  .my-auto.text-left > .flex.flex-col {
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+  }
+  .my-auto.text-left button {
+    background: #c0c0c0 !important;
+    color: #000000 !important;
+    border: 2px outset #ffffff !important;
+    border-radius: 0px !important;
+    font-family: Tahoma, 'MS Sans Serif', sans-serif !important;
+    font-weight: bold !important;
+    box-shadow: 1px 1px 0px #000000 !important;
+    cursor: pointer !important;
+  }
+  .my-auto.text-left button:active {
+    border: 2px inset #ffffff !important;
+    box-shadow: none !important;
+  }
+</style>
+<script>
+window.__rapidraw_open_dialog = function() {
+  return new Promise(async (resolve) => {
+    let root = document.getElementById('sk-rr-dialog-root');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'sk-rr-dialog-root';
+      root.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999999;display:flex;align-items:center;justify-content:center;font-family:Tahoma,sans-serif;font-size:12px;color:#000;';
+      root.innerHTML = \`
+        <div style="width:min(440px,94vw);background:#c0c0c0;border:2px outset #fff;box-shadow:2px 2px 8px rgba(0,0,0,0.5);display:flex;flex-direction:column;">
+          <div style="background:linear-gradient(90deg,#000080,#1084d0);color:#fff;font-weight:bold;padding:4px 6px;display:flex;justify-content:space-between;align-items:center;font-size:11px;">
+            <span>Open Folder - SANKTUARY</span>
+            <button id="sk-rr-close" style="background:#c0c0c0;border:1px outset #fff;font-weight:bold;font-size:10px;line-height:1;padding:1px 4px;cursor:pointer;">✕</button>
+          </div>
+          <div style="padding:10px;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="min-width:55px;font-weight:500;">Look in:</label>
+              <select id="sk-rr-space-select" style="flex:1;background:#fff;border:2px inset #dfdfdf;padding:3px 4px;font-size:12px;outline:none;">
+              </select>
+            </div>
+            <div id="sk-rr-dir-list" style="background:#fff;border:2px inset #808080;height:180px;overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:2px;">
+              <div style="color:#666;padding:4px;">Loading spaces...</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="min-width:55px;font-weight:500;">Folder:</label>
+              <input id="sk-rr-path-input" style="flex:1;background:#fff;border:2px inset #dfdfdf;padding:3px 4px;font-size:12px;outline:none;" value="sk://drive" />
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px;">
+              <button id="sk-rr-btn-open" style="background:#c0c0c0;border:2px outset #fff;font-weight:bold;padding:4px 18px;min-width:75px;cursor:pointer;">Open</button>
+              <button id="sk-rr-btn-cancel" style="background:#c0c0c0;border:2px outset #fff;padding:4px 18px;min-width:75px;cursor:pointer;">Cancel</button>
+            </div>
+          </div>
+        </div>
+      \`;
+      document.body.appendChild(root);
+    } else {
+      root.style.display = 'flex';
+    }
+
+    const spaceSelect = root.querySelector('#sk-rr-space-select');
+    const dirList = root.querySelector('#sk-rr-dir-list');
+    const pathInput = root.querySelector('#sk-rr-path-input');
+    const btnOpen = root.querySelector('#sk-rr-btn-open');
+    const btnCancel = root.querySelector('#sk-rr-btn-cancel');
+    const btnClose = root.querySelector('#sk-rr-close');
+
+    let currentSpace = '';
+    let currentDir = [];
+
+    const closeDialog = (val) => {
+      root.style.display = 'none';
+      resolve(val);
+    };
+
+    btnCancel.onclick = () => closeDialog(null);
+    btnClose.onclick = () => closeDialog(null);
+    btnOpen.onclick = () => {
+      const p = pathInput.value.trim();
+      closeDialog(p || ('sk://' + (currentSpace || 'drive')));
+    };
+
+    pathInput.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        btnOpen.click();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        btnCancel.click();
+      }
+    };
+
+    const updatePath = () => {
+      const p = 'sk://' + currentSpace + (currentDir.length ? '/' + currentDir.join('/') : '');
+      pathInput.value = p;
+    };
+
+    const loadDir = async () => {
+      dirList.innerHTML = '<div style="color:#666;padding:4px;">Loading folders...</div>';
+      updatePath();
+      try {
+        const url = '/api/files/' + currentSpace + '/' + currentDir.map(encodeURIComponent).join('/') + '?list';
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to list directory');
+        const data = await res.json();
+        dirList.innerHTML = '';
+
+        if (currentDir.length > 0) {
+          const upRow = document.createElement('div');
+          upRow.style.cssText = 'padding:3px 6px;cursor:pointer;display:flex;align-items:center;gap:6px;';
+          upRow.innerHTML = '📁 <b>.. (Up)</b>';
+          upRow.onclick = () => {
+            currentDir.pop();
+            loadDir();
+          };
+          dirList.appendChild(upRow);
+        }
+
+        const folders = (data.entries || []).filter(e => e.isDir);
+        if (folders.length === 0) {
+          const empty = document.createElement('div');
+          empty.style.cssText = 'color:#888;padding:8px;font-style:italic;';
+          empty.textContent = '(No subfolders - click Open to select this folder)';
+          dirList.appendChild(empty);
+        } else {
+          folders.forEach(f => {
+            const row = document.createElement('div');
+            row.style.cssText = 'padding:3px 6px;cursor:pointer;display:flex;align-items:center;gap:6px;';
+            row.innerHTML = '📁 ' + f.name;
+            row.onmouseover = () => { row.style.background = '#000080'; row.style.color = '#fff'; };
+            row.onmouseout = () => { row.style.background = ''; row.style.color = '#000'; };
+            row.onclick = () => {
+              pathInput.value = 'sk://' + currentSpace + '/' + [...currentDir, f.name].join('/');
+            };
+            row.ondblclick = () => {
+              currentDir.push(f.name);
+              loadDir();
+            };
+            dirList.appendChild(row);
+          });
+        }
+      } catch (err) {
+        dirList.innerHTML = '<div style="color:#c00;padding:4px;">Error: ' + err.message + '</div>';
+      }
+    };
+
+    try {
+      const meRes = await fetch('/api/me', { credentials: 'include' });
+      const me = meRes.ok ? await meRes.json() : null;
+      const spaces = (me?.spaces || []).filter(s => s.online);
+      spaceSelect.innerHTML = '';
+      if (spaces.length === 0) {
+        spaceSelect.innerHTML = '<option value="drive">Drive</option>';
+        currentSpace = 'drive';
+      } else {
+        spaces.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = s.name || s.id;
+          spaceSelect.appendChild(opt);
+        });
+        currentSpace = spaces[0].id;
+      }
+      spaceSelect.onchange = () => {
+        currentSpace = spaceSelect.value;
+        currentDir = [];
+        loadDir();
+      };
+      await loadDir();
+    } catch {
+      currentSpace = 'drive';
+      updatePath();
+    }
+  });
+};
+</script>
+`;
+
 /** The editor's own page and scripts, from the folder ops/rapidraw/setup.ps1 builds them into. */
 function rawUi(req, res, url) {
   if (!existsSync(join(RAW_UI, 'index.html'))) {
@@ -3755,6 +3986,11 @@ function rawUi(req, res, url) {
     'content-type': MIME[extname(target).toLowerCase()] || 'application/octet-stream',
     'cache-control': target.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
   });
+  if (target.endsWith('index.html')) {
+    const rawHtml = readFileSync(target, 'utf8');
+    const injected = rawHtml.replace('</head>', `${RAPIDRAW_HOMEPAGE_INJECTION}</head>`);
+    return res.end(injected);
+  }
   return pipeline(createReadStream(target), res);
 }
 const statSyncSafe = (f) => {
@@ -4566,8 +4802,16 @@ async function rawPreview(file, size) {
 }
 
 async function imageInput(file, size) {
-  if (RAW_PHOTO.has(extname(file).toLowerCase())) return rawPreview(file, size);
-  if (extname(file).toLowerCase() !== '.psd') return sharp(file, { animated: false });
+  const ext = extname(file).toLowerCase();
+  if (RAW_PHOTO.has(ext)) return rawPreview(file, size);
+  if (ext === '.ai') {
+    try {
+      return sharp(file, { page: 0 });
+    } catch {
+      fail(415, 'This Illustrator file cannot be previewed (save with Create PDF Compatible File enabled)');
+    }
+  }
+  if (ext !== '.psd') return sharp(file, { animated: false });
   if (size > PSD_MAX) fail(413, 'This Photoshop file is too large to preview');
   const psd = readPsd(await readFile(file), { skipLayerImageData: true, skipThumbnail: true, useImageData: true });
   if (!psd.imageData) fail(415, 'This PSD has no preview image (save it with "Maximize compatibility" on)');

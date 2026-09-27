@@ -35,7 +35,25 @@ const STUDIO_ICONS: DesktopIconDef[] = [
     width: 960,
     height: 620,
   },
+  {
+    id: 'calendar',
+    title: 'Calendar',
+    icon: '/images/icons/calendar-32x32.svg',
+    appType: 'studio',
+    appProps: { tab: 'calendar' },
+    width: 960,
+    height: 620,
+  },
   { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
+  {
+    id: 'rapidraw',
+    title: 'SANKTUARY RAW',
+    icon: '/images/icons/paint-file-32x32-higher-color.png',
+    appType: 'iframe',
+    appProps: { src: '/apps/rapidraw/' },
+    width: 1100,
+    height: 720,
+  },
   { id: 'teams', title: 'Messages', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
 ];
 
@@ -50,7 +68,25 @@ const PUBLIC_ICONS: DesktopIconDef[] = [
     width: 680,
     height: 500,
   },
+  {
+    id: 'calendar',
+    title: 'Calendar',
+    icon: '/images/icons/calendar-32x32.svg',
+    appType: 'studio',
+    appProps: { tab: 'calendar' },
+    width: 960,
+    height: 620,
+  },
   { id: 'producer', title: 'Producer', icon: '/images/icons/convert-audio-32x32.png', appType: 'producer', width: 720, height: 560 },
+  {
+    id: 'rapidraw',
+    title: 'SANKTUARY RAW',
+    icon: '/images/icons/paint-file-32x32-higher-color.png',
+    appType: 'iframe',
+    appProps: { src: '/apps/rapidraw/' },
+    width: 1100,
+    height: 720,
+  },
   {
     id: 'blog',
     title: 'Blog',
@@ -379,7 +415,9 @@ export const Desktop: React.FC = () => {
 
   // Where every icon goes: saved cells first (if still on screen and free), then the rest fill the first free
   // cells top-to-bottom, column by column. No two icons ever share a cell.
-  const rows = Math.max(1, Math.floor((size.h - PAD - 75) / GRID) + 1);
+  // Reserve 34px for taskbar + PAD so icons never overlap the taskbar or top of screen
+  const availHeight = Math.max(100, size.h - 34 - PAD);
+  const rows = Math.max(1, Math.floor((availHeight - 75) / GRID) + 1);
   const cols = Math.max(1, Math.floor((size.w - PAD - 75) / GRID) + 1);
   const key = ([c, r]: Cell) => `${c},${r}`;
   const layout: Record<string, Cell> = {};
@@ -586,7 +624,8 @@ export const Desktop: React.FC = () => {
       style={{
         backgroundColor: bgColor,
         backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
-        backgroundSize: 'cover',
+        backgroundSize: size.w < 768 ? 'contain' : 'cover',
+        backgroundRepeat: 'no-repeat',
         backgroundPosition: 'center',
         touchAction: 'none', // Prevents default gestures like pinch-to-zoom on desktop
       }}
@@ -596,7 +635,12 @@ export const Desktop: React.FC = () => {
         const isSelected = selectedIds.includes(icon.id);
         const isDragging = !!drag?.moved && drag.ids.includes(icon.id);
         const home = toPx(layout[icon.id]);
-        const pos = isDragging ? { x: home.x + drag!.dx, y: home.y + drag!.dy } : home;
+        const rawPos = isDragging ? { x: home.x + drag!.dx, y: home.y + drag!.dy } : home;
+        // Strict boundary clamping: never go above PAD or past taskbar / right edge
+        const pos = {
+          x: Math.max(PAD, Math.min(size.w - 75 - PAD, rawPos.x)),
+          y: Math.max(PAD, Math.min(size.h - 34 - 75, rawPos.y)),
+        };
         return (
           <div
             key={icon.id}

@@ -4,6 +4,8 @@ import { useWindowManager, AppType } from '../wm/manager';
 import sound from '../utils/sound';
 import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
+import { openStudio } from '../apps/Studio';
+import { button } from '../apps/TeamFiles';
 
 interface MenuItem {
   id: string;
@@ -79,6 +81,7 @@ export const Taskbar: React.FC = () => {
   const { windows, startMenuOpen, setStartMenuOpen, openWindow, focusWindow, minimizeWindow } = useWindowManager();
 
   const [timeStr, setTimeStr] = useState('');
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const startMenuRef = useRef<HTMLDivElement>(null);
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -218,8 +221,17 @@ export const Taskbar: React.FC = () => {
           </button>
         )}
         <img src="/images/icons/speaker-16x16.png" alt="Volume" className="w-4 h-4 mr-2 image-render-pixelated" />
-        <span className="taskbar-time">{timeStr}</span>
+        <span
+          className="taskbar-time cursor-pointer select-none px-1 hover:bg-[#000080] hover:text-white"
+          onClick={() => setCalendarOpen(!calendarOpen)}
+          title="Click to view calendar & clock"
+        >
+          {timeStr}
+        </span>
       </div>
+
+      {/* Mini Calendar Popup */}
+      {calendarOpen && <MiniCalendarPopup onClose={() => setCalendarOpen(false)} />}
 
       {/* Start Menu */}
       {startMenuOpen && (
@@ -375,3 +387,188 @@ const TeamsTray: React.FC = () => {
     </button>
   );
 };
+
+/** Authentic Windows 98 Mini Calendar Tray Popup */
+const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { openWindow } = useWindowManager();
+  const [viewDate, setViewDate] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date());
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [onClose]);
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const monthName = viewDate.toLocaleString('default', { month: 'long' });
+
+  // First day of month (0 = Sunday, 1 = Monday...)
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
+
+  const isCurrentDay = (d: number) =>
+    now.getFullYear() === year && now.getMonth() === month && now.getDate() === d;
+
+  return (
+    <div
+      ref={ref}
+      className="outset-deep"
+      style={{
+        position: 'fixed',
+        right: 4,
+        bottom: 'calc(100% + 2px)',
+        zIndex: 1000001,
+        width: 220,
+        background: '#c0c0c0',
+        padding: 4,
+        fontFamily: 'Tahoma, sans-serif',
+        fontSize: 11,
+        userSelect: 'none',
+      }}
+    >
+      {/* Title bar */}
+      <div
+        style={{
+          background: '#000080',
+          color: '#fff',
+          fontWeight: 700,
+          padding: '2px 4px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 4,
+        }}
+      >
+        <span>Date &amp; Time</span>
+        <button
+          onClick={onClose}
+          style={{
+            background: '#c0c0c0',
+            color: '#000',
+            border: '1px outset #fff',
+            fontSize: 10,
+            lineHeight: 1,
+            padding: '1px 3px',
+            cursor: 'pointer',
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Month / Year header with navigation */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 4,
+          padding: '2px 4px',
+        }}
+      >
+        <button
+          onClick={prevMonth}
+          style={{ ...button, padding: '1px 5px', fontSize: 10 }}
+          title="Previous Month"
+        >
+          ◀
+        </button>
+        <b style={{ fontSize: 11 }}>
+          {monthName} {year}
+        </b>
+        <button
+          onClick={nextMonth}
+          style={{ ...button, padding: '1px 5px', fontSize: 10 }}
+          title="Next Month"
+        >
+          ▶
+        </button>
+      </div>
+
+      {/* Calendar Grid */}
+      <div
+        style={{
+          background: '#fff',
+          border: '2px inset #808080',
+          padding: 2,
+        }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontWeight: 700, fontSize: 10, color: '#666', borderBottom: '1px solid #c0c0c0', paddingBottom: 2 }}>
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+            <span key={i}>{day}</span>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontSize: 11, gap: 1, marginTop: 2 }}>
+          {Array.from({ length: firstDay }).map((_, i) => (
+            <span key={`empty-${i}`} />
+          ))}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const dayNum = i + 1;
+            const current = isCurrentDay(dayNum);
+            return (
+              <span
+                key={dayNum}
+                style={{
+                  padding: '2px 0',
+                  background: current ? '#000080' : 'transparent',
+                  color: current ? '#fff' : '#000',
+                  fontWeight: current ? 700 : 400,
+                  borderRadius: 1,
+                }}
+              >
+                {dayNum}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Live Digital Clock Time */}
+      <div
+        style={{
+          marginTop: 4,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 6,
+          background: '#101410',
+          border: '2px inset #808080',
+          padding: '2px 6px',
+        }}
+      >
+        <span style={{ color: '#00ff66', fontFamily: 'monospace', fontSize: 13, fontWeight: 700, letterSpacing: 1 }}>
+          {now.toLocaleTimeString()}
+        </span>
+      </div>
+
+      {/* Open Calendar button */}
+      <div style={{ marginTop: 4, display: 'flex', justifyContent: 'center' }}>
+        <button
+          onClick={() => {
+            openStudio(openWindow, 'calendar');
+            onClose();
+          }}
+          style={{ ...button, width: '100%', fontSize: 11, padding: '3px 6px', fontWeight: 700 }}
+        >
+          Open Studio Calendar
+        </button>
+      </div>
+    </div>
+  );
+};
+

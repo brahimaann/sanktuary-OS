@@ -46,7 +46,7 @@ const Studio = lazy(() => import('./apps/Studio'));
 const Darkroom = lazy(() => import('./apps/Darkroom'));
 
 export const App: React.FC = () => {
-  const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
+  const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive, crtEnabled } = useWindowManager();
   const [isBooting, setIsBooting] = useState(true);
   const [powerOnClass, setPowerOnClass] = useState('');
 
@@ -107,10 +107,10 @@ export const App: React.FC = () => {
   // Large screens  (W >= 1400): 33px sides
   // Medium screens (1000 <= W < 1400): 28px sides
   // Small screens  (600 <= W < 1000): 12px sides
-  // Mobile         (W < 600):  8px sides
-  const borderX = W >= 1400 ? 33 : W >= 1000 ? 28 : W >= 600 ? 12 : 8;
-  const borderY = H >= 900 ? 33 : H >= 700 ? 28 : H >= 500 ? 10 : 8;
-  const borderBottom = W < 600 ? borderY * 1.2 : borderY * 1.4; // slimmer bottom chin on mobile
+  // Mobile         (W < 600):  4px sides (halved from 8px for maximum mobile viewport)
+  const borderX = W >= 1400 ? 33 : W >= 1000 ? 28 : W >= 600 ? 12 : 4;
+  const borderY = H >= 900 ? 33 : H >= 700 ? 28 : H >= 500 ? 10 : 4;
+  const borderBottom = W < 600 ? Math.round(borderY * 1.1) : borderY * 1.4; // slimmer bottom chin on mobile
 
   const curveX = borderX * 0.2;
   const curveY = borderY * 0.2;
@@ -299,9 +299,13 @@ export const App: React.FC = () => {
           height: H - borderY - borderBottom,
         }}
       >
-        <div className="crt-screen-vignette" />
-        <div className="crt-screen-filter" />
-        <div className="crt-screen-flicker" />
+        {crtEnabled && (
+          <>
+            <div className="crt-screen-vignette" />
+            <div className="crt-screen-filter" />
+            <div className="crt-screen-flicker" />
+          </>
+        )}
 
         {isScreensaverActive && <Screensaver type={screensaver} onDismiss={() => setScreensaverActive(false)} />}
 

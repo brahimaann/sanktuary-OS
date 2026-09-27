@@ -84,6 +84,8 @@ interface WindowManagerState {
   setScreensaver: (s: ScreensaverType) => void;
   setScreensaverTimeout: (mins: number) => void;
   setScreensaverActive: (active: boolean) => void;
+  crtEnabled: boolean;
+  setCrtEnabled: (enabled: boolean) => void;
 }
 
 export const useWindowManager = create<WindowManagerState>((set) => ({
@@ -275,4 +277,11 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
     set({ screensaverTimeout: mins });
   },
   setScreensaverActive: (active) => set({ isScreensaverActive: active }),
+  crtEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('sk_crt_enabled') !== '0' : true,
+  setCrtEnabled: (enabled) => {
+    try {
+      localStorage.setItem('sk_crt_enabled', enabled ? '1' : '0');
+    } catch (_) {}
+    set({ crtEnabled: enabled });
+  },
 }));

@@ -49,13 +49,13 @@ const FilePicker: React.FC<{
   return (
     <div
       style={{
-        position: 'absolute',
+        position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.25)',
+        background: 'rgba(0,0,0,0.4)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 20,
+        zIndex: 1000005,
       }}
     >
       <div style={{ width: 'min(420px, 96%)', background: '#c0c0c0', border: '2px outset #fff', display: 'flex', flexDirection: 'column' }}>

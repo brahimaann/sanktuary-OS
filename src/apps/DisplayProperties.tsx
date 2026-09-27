@@ -13,6 +13,8 @@ export const DisplayProperties: React.FC = () => {
     setScreensaver,
     setScreensaverTimeout,
     setScreensaverActive,
+    crtEnabled,
+    setCrtEnabled,
   } = useWindowManager();
   const [activeTab, setActiveTab] = useState<'background' | 'screensaver'>('background');
 
@@ -21,6 +23,7 @@ export const DisplayProperties: React.FC = () => {
   const [selectedBgColor, setSelectedBgColor] = useState(bgColor);
   const [selectedScreensaver, setSelectedScreensaver] = useState<ScreensaverType>(screensaver);
   const [selectedTimeout, setSelectedTimeout] = useState<number>(screensaverTimeout);
+  const [selectedCrt, setSelectedCrt] = useState<boolean>(crtEnabled);
 
   const wallpapers = [
     { name: '(None) - Teal', file: '', color: '#008080' },
@@ -34,6 +37,7 @@ export const DisplayProperties: React.FC = () => {
     setBgColor(selectedBgColor);
     setScreensaver(selectedScreensaver);
     setScreensaverTimeout(selectedTimeout);
+    setCrtEnabled(selectedCrt);
   };
 
   const handleOK = () => {
@@ -134,6 +138,20 @@ export const DisplayProperties: React.FC = () => {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+            {/* CRT Scanline Toggle */}
+            <div className="border border-t-gray-800 border-l-gray-800 border-r-white border-b-white p-2 bg-[#d4d0c8] mt-1">
+              <label className="flex items-center gap-2 cursor-pointer font-bold">
+                <input
+                  type="checkbox"
+                  checked={selectedCrt}
+                  onChange={(e) => setSelectedCrt(e.target.checked)}
+                />
+                <span>CRT Scanlines & Retro Monitor Overlay</span>
+              </label>
+              <div className="text-[10px] text-gray-600 ml-5">
+                Turn off to view full-resolution photos and videos with 100% clean fidelity.
               </div>
             </div>
           </>

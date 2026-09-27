@@ -12,12 +12,12 @@ import { MyProjects } from './ProjectPanel';
 import PushSettings from '../components/PushSettings';
 import { useOpenRef } from '../utils/refs';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
+import BrandIcon from '../components/BrandIcon';
 
-const FIELDS: [keyof P, string, string][] = [
+const BASE_FIELDS: [keyof P, string, string][] = [
   ['displayName', 'Display name', 'How your name shows to the team'],
   ['status', 'Status / away message', 'e.g. in the studio till 9'],
   ['role', 'Role', 'e.g. producer, designer, photographer'],
-  ...PROFILE_LINKS.map(([k, label, , hint]): [keyof P, string, string] => [k, label, hint]),
 ];
 
 /** Your profile (editable) or another member's info card. */
@@ -39,6 +39,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   const p = byName[who];
   const [draft, setDraft] = useState<Partial<P>>({});
   const [msg, setMsg] = useState('');
+  const [activeLink, setActiveLink] = useState<string | null>(null);
   const picInput = useRef<HTMLInputElement>(null);
   const openRef = useOpenRef();
 
@@ -51,7 +52,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
       await api('/api/profiles/me', {
         method: 'PUT',
         body: JSON.stringify({
-          ...Object.fromEntries([...FIELDS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? ''])),
+          ...Object.fromEntries([...BASE_FIELDS.map(([k]) => k), ...PROFILE_LINKS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? ''])),
           listed: !!draft.listed,
         }),
       });
@@ -95,17 +96,32 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             <div style={{ fontStyle: 'italic', background: '#ffffe1', border: '1px solid #808080', padding: 6 }}>{p.status}</div>
           )}
           {p?.bio && <div style={{ whiteSpace: 'pre-wrap', background: '#fff', border: '2px inset #808080', padding: 6 }}>{p.bio}</div>}
-          {PROFILE_LINKS.map(
-            ([k, label]) =>
-              p?.[k] && (
-                <div key={k}>
-                  <b>{label}:</b>{' '}
-                  <a href={linkFor(k, p[k]!)} target="_blank" rel="noopener noreferrer">
-                    {p[k]}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+            {PROFILE_LINKS.map(
+              ([k, label]) =>
+                p?.[k] && (
+                  <a
+                    key={k}
+                    href={linkFor(k, p[k]!)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      ...button,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      textDecoration: 'none',
+                      color: 'inherit',
+                      padding: '2px 6px',
+                    }}
+                    title={`${label}: ${p[k]}`}
+                  >
+                    <BrandIcon name={k} size={14} useBrandColor />
+                    <span>{label}</span>
                   </a>
-                </div>
-              ),
-          )}
+                ),
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: 6 }}>
           <button
@@ -160,7 +176,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             <AccountButton />
           </div>
         </div>
-        {FIELDS.map(([k, label, hint]) => (
+        {BASE_FIELDS.map(([k, label, hint]) => (
           <label key={k} style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: 6 }}>
             {label}
             <input
@@ -171,6 +187,62 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             />
           </label>
         ))}
+
+        <div style={{ border: '2px groove #fff', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: 700 }}>Platforms & Links</span>
+            <span style={{ fontSize: 11, color: '#555' }}>Click logo to add or edit link</span>
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {PROFILE_LINKS.map(([k, label]) => {
+              const hasVal = !!draft[k];
+              const isSelected = activeLink === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setActiveLink(isSelected ? null : k)}
+                  style={{
+                    ...button,
+                    padding: '2px 6px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: isSelected ? '#000080' : hasVal ? '#e6f4ea' : '#c0c0c0',
+                    color: isSelected ? '#fff' : '#000',
+                    fontWeight: hasVal ? 700 : 400,
+                  }}
+                  title={label}
+                >
+                  <BrandIcon name={k} size={14} color={isSelected ? '#fff' : undefined} useBrandColor={!isSelected} />
+                  <span>{label}</span>
+                  {hasVal && <span style={{ width: 6, height: 6, borderRadius: '50%', background: isSelected ? '#55ff55' : '#00aa00' }} />}
+                </button>
+              );
+            })}
+          </div>
+          {activeLink && (() => {
+            const item = PROFILE_LINKS.find(([k]) => k === activeLink);
+            if (!item) return null;
+            const [k, label, prefix, hint] = item;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, background: '#fff', border: '2px inset #808080', padding: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <BrandIcon name={k} size={16} useBrandColor />
+                  <b>{label}</b>
+                  {prefix && <span style={{ color: '#666', fontSize: 11 }}>Prefix: {prefix}</span>}
+                </div>
+                <input
+                  value={(draft[k] as string) ?? ''}
+                  placeholder={hint}
+                  onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+                  style={input}
+                  autoFocus
+                />
+              </div>
+            );
+          })()}
+        </div>
         <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 6 }}>
           About me
           <textarea

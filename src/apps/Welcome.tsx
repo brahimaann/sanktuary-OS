@@ -51,13 +51,13 @@ const VISITOR_TOUR: Step[] = [
     open: win('blog', 'Blog', 'iframe', 'news-16x16.png', 760, 560, { src: '/blog' }),
   },
   {
-    title: 'Shop and money pools',
-    text: 'Merch and digital releases, and pools that fund what we make next. Payments go through Stripe.',
+    title: 'Shop',
+    text: 'Merch and digital releases. Payments go through Stripe.',
     open: win('shop', 'Shop', 'iframe', 'favorites-16x16.png', 760, 560, { src: '/shop' }),
   },
   {
-    title: 'Join the Village',
-    text: 'Artist, engineer, photographer or fan: tell us about you at the bottom of this window and we will reach out.',
+    title: 'Join the Team',
+    text: 'Artist, engineer, photographer or supporter: tell us about you at the bottom of this window and we will reach out.',
   },
 ];
 const MEMBER_TOUR: Step[] = [
@@ -296,12 +296,12 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
           </Section>
         )}
 
-        <Section title="Join the Village">
+        <Section title="Join the Team">
           {joining ? (
             <JoinForm onDone={() => setJoining(false)} />
           ) : (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ flex: 1, minWidth: 180 }}>Artist, designer, engineer, photographer or just a fan? Tell us about you.</span>
+              <span style={{ flex: 1, minWidth: 180 }}>Artist, designer, engineer, photographer or supporter? Tell us about you.</span>
               <button style={{ ...button, fontWeight: 700 }} onClick={() => setJoining(true)}>
                 <IconLabel icon="plus">Join...</IconLabel>
               </button>
@@ -363,7 +363,7 @@ const JoinForm: React.FC<{ onDone: () => void }> = ({ onDone }) => {
       I'm a...
       <select style={field} value={v.role} onChange={set('role')}>
         <option value="">(choose)</option>
-        {['Musician', 'Producer', 'Designer', 'Photographer', 'Videographer', 'Writer', 'Developer', 'Fan', 'Other'].map((r) => (
+        {['Musician', 'Producer', 'Designer', 'Photographer', 'Videographer', 'Writer', 'Developer', 'Supporter', 'Other'].map((r) => (
           <option key={r}>{r}</option>
         ))}
       </select>

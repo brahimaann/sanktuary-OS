@@ -7,6 +7,7 @@ import FilePicker from '../components/FilePicker';
 import { fileKind } from './fileTypes';
 import { IconLabel } from '../components/RetroIcon';
 import { GUIDE } from './producerGuide';
+import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 
 // Producer: a companion for making music. Drop a song to get its tempo, key, loudness and tonal balance
 // (worked out in the browser: nothing is uploaded), compare a mix with a reference, get delay and reverb times
@@ -194,15 +195,19 @@ const Report: React.FC<{ a: Named }> = ({ a: { name, result: r } }) => {
         <b>{name}</b>
       </legend>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
-        <Stat
-          label="Tempo"
-          value={t ? `${t.bpm} BPM` : '?'}
-          note={
-            t
-              ? `${t.confidence > 0.5 ? 'clear beat' : 'loose beat: check it'}${t.alternatives.length ? ` · or ${t.alternatives.join(' / ')}` : ''}`
-              : 'too short to tell'
-          }
-        />
+        <div style={{ background: '#fff', border: '2px inset #808080', padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ color: '#666', fontSize: 10 }}>Tempo</span>
+            {t && <SevenSegmentDisplay value={Math.round(t.bpm)} height={18} color="#00ff66" label="BPM" />}
+          </div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{t ? `${t.bpm} BPM` : '?'}</div>
+          {t && (
+            <div style={{ color: '#444', fontSize: 10 }}>
+              {t.confidence > 0.5 ? 'clear beat' : 'loose beat: check it'}
+              {t.alternatives.length ? ` · or ${t.alternatives.join(' / ')}` : ''}
+            </div>
+          )}
+        </div>
         <Stat
           label="Key"
           value={k ? k.name : '?'}
@@ -417,38 +422,62 @@ const TempoTab: React.FC<{
   })();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        Tempo
-        <input
-          style={{ ...field, width: 70 }}
-          type="number"
-          min={20}
-          max={400}
-          step={0.1}
-          value={bpm}
-          onChange={(e) => setBpm(Number(e.target.value))}
-        />
-        BPM
-        <button style={button} onClick={tap} title="Tap along with the beat">
-          Tap
-        </button>
-        <span style={{ width: 12 }} />
-        Key
-        <select style={field} value={keySel.root} onChange={(e) => setKey({ ...keySel, root: Number(e.target.value) })}>
-          {NOTE_NAMES.map((n, i) => (
-            <option key={n} value={i}>
-              {n}
-            </option>
-          ))}
-        </select>
-        <select
-          style={field}
-          value={keySel.minor ? 'minor' : 'major'}
-          onChange={(e) => setKey({ ...keySel, minor: e.target.value === 'minor' })}
-        >
-          <option>major</option>
-          <option>minor</option>
-        </select>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: '#dcdcdc', padding: 8, border: '2px groove #fff' }}>
+        <SevenSegmentDisplay value={bpm.toFixed(1)} height={30} color="#00ff66" label="BPM" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700 }}>Tempo:</span>
+            <input
+              style={{ ...field, width: 70 }}
+              type="number"
+              min={20}
+              max={400}
+              step={0.1}
+              value={bpm}
+              onChange={(e) => setBpm(Number(e.target.value))}
+            />
+            <button style={button} onClick={tap} title="Tap along with the beat">
+              Tap
+            </button>
+            <div style={{ display: 'flex', gap: 3 }}>
+              <button
+                style={{ ...button, fontSize: 11, padding: '2px 6px' }}
+                onClick={() => setBpm(Math.round(bpm * 0.5 * 10) / 10)}
+                title="Half tempo (0.5x)"
+              >
+                0.5x
+              </button>
+              <button
+                style={{ ...button, fontSize: 11, padding: '2px 6px' }}
+                onClick={() => setBpm(Math.round(bpm * 2 * 10) / 10)}
+                title="Double tempo (2x)"
+              >
+                2x
+              </button>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700 }}>Key:</span>
+            <select style={field} value={keySel.root} onChange={(e) => setKey({ ...keySel, root: Number(e.target.value) })}>
+              {NOTE_NAMES.map((n, i) => (
+                <option key={n} value={i}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <select
+              style={field}
+              value={keySel.minor ? 'minor' : 'major'}
+              onChange={(e) => setKey({ ...keySel, minor: e.target.value === 'minor' })}
+            >
+              <option>major</option>
+              <option>minor</option>
+            </select>
+            <span style={{ fontSize: 11, color: '#333', marginLeft: 4 }}>
+              Camelot: <b>{camelotKey}</b>
+            </span>
+          </div>
+        </div>
       </div>
       {valid && (
         <>

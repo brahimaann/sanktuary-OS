@@ -105,6 +105,12 @@ html {
       0 / 3px 100%;
 }
 
+/* Allow photos, videos, and Darkroom canvas to bypass scanlines for clean viewing */
+.media-clean, video, .darkroom-loupe, .darkroom-canvas, .sk-photo-clean {
+  position: relative;
+  z-index: 999999 !important;
+}
+
 /* Screen flicker animation overlay */
 .crt-screen-flicker {
   position: absolute;
@@ -204,45 +210,59 @@ html {
   border-left: 1px solid #808080;
   border-right: 1px solid #fff;
 }
+/* Authentic Retro Windows 98 Sliders */
+input[type='range'],
 .w98-track {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
-  height: 24px;
-  margin: 0;
+  height: 22px;
+  margin: 2px 0;
   cursor: pointer;
+  vertical-align: middle;
 }
+input[type='range']::-webkit-slider-runnable-track,
 .w98-track::-webkit-slider-runnable-track {
   height: 4px;
-  background: #fff;
+  background: #c0c0c0;
   border: 1px solid;
   border-color: #808080 #fff #fff #808080;
   box-shadow: inset 1px 1px #000;
 }
+input[type='range']::-moz-range-track,
 .w98-track::-moz-range-track {
   height: 4px;
-  background: #fff;
+  background: #c0c0c0;
   border: 1px solid;
   border-color: #808080 #fff #fff #808080;
+  box-shadow: inset 1px 1px #000;
 }
+input[type='range']::-webkit-slider-thumb,
 .w98-track::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 11px;
-  height: 21px;
+  height: 20px;
   margin-top: -9px;
   background: #c0c0c0;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
-  box-shadow: inset -1px -1px #808080;
+  box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080;
+  cursor: pointer;
 }
+input[type='range']::-moz-range-thumb,
 .w98-track::-moz-range-thumb {
-  width: 9px;
-  height: 19px;
+  width: 11px;
+  height: 20px;
   border-radius: 0;
   background: #c0c0c0;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
-  box-shadow: inset -1px -1px #808080;
+  box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080;
+  cursor: pointer;
+}
+input[type='range']:focus {
+  outline: 1px dotted #000;
+  outline-offset: 1px;
 }
 
 /* Retro.Icons glyphs (src/components/RetroIcon.tsx): Win98 etched look on disabled buttons */

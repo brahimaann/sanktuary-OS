@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <!-- Windows 98 16x16 Calendar Icon -->
+  <rect x="2" y="3" width="12" height="11" fill="#000000" opacity="0.3"/>
+  <rect x="1" y="2" width="12" height="12" fill="#ffffff"/>
+  <rect x="1" y="2" width="12" height="1" fill="#c0c0c0"/>
+  <rect x="1" y="2" width="1" height="12" fill="#c0c0c0"/>
+  <rect x="12" y="2" width="1" height="12" fill="#000000"/>
+  <rect x="1" y="13" width="12" height="1" fill="#000000"/>
+  <!-- Red Top Banner -->
+  <rect x="2" y="3" width="10" height="3" fill="#c00000"/>
+  <!-- Spiral hooks -->
+  <rect x="3" y="1" width="2" height="3" fill="#808080"/>
+  <rect x="9" y="1" width="2" height="3" fill="#808080"/>
+  <!-- Grid Dots -->
+  <rect x="3" y="7" width="1" height="1" fill="#000080"/>
+  <rect x="5" y="7" width="1" height="1" fill="#000080"/>
+  <rect x="7" y="7" width="1" height="1" fill="#000080"/>
+  <rect x="9" y="7" width="1" height="1" fill="#000080"/>
+  <rect x="3" y="9" width="1" height="1" fill="#000080"/>
+  <rect x="5" y="9" width="1" height="1" fill="#000080"/>
+  <rect x="7" y="9" width="1" height="1" fill="#000080"/>
+  <rect x="9" y="9" width="1" height="1" fill="#000080"/>
+  <rect x="3" y="11" width="1" height="1" fill="#000080"/>
+  <rect x="5" y="11" width="1" height="1" fill="#000080"/>
+  <rect x="7" y="11" width="1" height="1" fill="#000080"/>
+</svg>

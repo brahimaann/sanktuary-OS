@@ -181,11 +181,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         {EDITABLE_PHOTO.test(name) && (
           <button
             style={button}
-            title="Open in the RapidRAW photo editor (runs on the Sanktuary server)"
+            title="Open in the SANKTUARY photo editor (runs on the Sanktuary server)"
             onClick={() =>
               openWindow({
                 id: `rapidraw-${app}-${path}`,
-                title: `RapidRAW - ${name}`,
+                title: `SANKTUARY - ${name}`,
                 icon: '/images/icons/paint-16x16.png',
                 appType: 'iframe',
                 appProps: {
@@ -196,13 +196,13 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
               })
             }
           >
-            Edit photo
+            SANKTUARY
           </button>
         )}
         {lightImage(name) && (
           <button
             style={button}
-            title="Film looks: bleach bypass, cross process, B&W..."
+            title="Darkroom: film looks, CCD bloom, JPEG degradation, glitch, collage..."
             onClick={() =>
               openWindow({
                 id: `darkroom-${app}-${path}`,
@@ -215,7 +215,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
               })
             }
           >
-            Film look
+            Darkroom
           </button>
         )}
         <span style={{ marginLeft: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>

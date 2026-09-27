@@ -8,22 +8,24 @@ import { openStudio } from './Studio';
 import { LogOn, shell, button } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { IconLabel, IconName } from '../components/RetroIcon';
+import { useOpenRef } from '../utils/refs';
 
-// "New..." from the Start menu: the few questions each kind of thing needs, and the rest is done for you.
-// A release gets its folders (Bounces / Stems / Projects / Artwork) so files dropped there fill Tracks in;
-// a shoot or video gets a folder for its files; dates are typed the way people say them ("next sat 8pm").
-type Kind = 'release' | 'song' | 'Shoot' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
+type Kind = 'release' | 'song' | 'session' | 'article' | 'Shoot' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
+
 const KINDS: { id: Kind; label: string; icon: IconName; hint: string }[] = [
   { id: 'release', label: 'Release', icon: 'archive', hint: 'Album, EP or single, with its folders' },
   { id: 'song', label: 'Song', icon: 'note', hint: 'A track, with its bounce' },
+  { id: 'session', label: 'Studio Scratch', icon: 'note', hint: 'Walk-in session with scratch folder & tags' },
+  { id: 'article', label: 'Article / Draft', icon: 'link', hint: 'Native blog post or essay draft' },
   { id: 'Shoot', label: 'Shoot', icon: 'calendar', hint: 'Photo or video shoot' },
-  { id: 'Artwork', label: 'Artwork', icon: 'calendar', hint: 'Cover, visuals, merch design' },
-  { id: 'Video', label: 'Video', icon: 'play', hint: 'Music video, visualizer, content' },
+  { id: 'Artwork', label: 'Artwork', icon: 'calendar', hint: 'Cover, visuals, merch design (or moodboard link)' },
+  { id: 'Video', label: 'Video', icon: 'play', hint: 'Music video, visualizer, video link' },
   { id: 'Event', label: 'Show / event', icon: 'bell', hint: 'Show, session, release party' },
   { id: 'Drop', label: 'Drop', icon: 'upload', hint: 'Merch or content drop' },
-  { id: 'post', label: 'Blog post', icon: 'external', hint: 'Write it on Substack' },
+  { id: 'post', label: 'Substack post', icon: 'external', hint: 'External Substack publish' },
 ];
-const FOLDER_BY_DEFAULT: Kind[] = ['Shoot', 'Artwork', 'Video'];
+
+const FOLDER_BY_DEFAULT: Kind[] = ['Shoot', 'Artwork', 'Video', 'session'];
 const SUBSTACK_NEW_POST = 'https://boroma.substack.com/publish/post';
 
 interface Release {
@@ -33,13 +35,13 @@ interface Release {
   folder?: FileRef | null;
 }
 
-/** A title that works as a Windows folder name. */
 const folderName = (s: string) =>
   s
     .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
     .trim()
     .replace(/[. ]+$/, '')
     .slice(0, 80);
+
 const remembered = (k: string) => {
   try {
     return localStorage.getItem(k) || '';
@@ -47,6 +49,7 @@ const remembered = (k: string) => {
     return '';
   }
 };
+
 const remember = (k: string, v: string) => {
   try {
     localStorage.setItem(k, v);
@@ -65,14 +68,32 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const { me } = useMe();
   const { getToken } = useAuth();
   const { openWindow } = useWindowManager();
+  const openRef = useOpenRef();
+
   const [kind, setKind] = useState<Kind | null>(initial || null);
   const [title, setTitle] = useState('');
   const [when, setWhen] = useState('');
   const [where, setWhere] = useState('');
   const [releaseKind, setReleaseKind] = useState('Album');
-  // Who it's by and who wrote it: asked first, carried into every song's BMI sheet
-  const [artist, setArtist] = useState(() => remembered('sk_new_artist'));
-  const [writers, setWriters] = useState(() => remembered('sk_new_writers'));
+  const [trackCount, setTrackCount] = useState(7);
+
+  // Multi-artist and Multi-writer Chip States
+  const [artistInput, setArtistInput] = useState('');
+  const [artists, setArtists] = useState<string[]>(() => {
+    const saved = remembered('sk_new_artist');
+    return saved ? saved.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  });
+
+  const [writerInput, setWriterInput] = useState('');
+  const [writersList, setWritersList] = useState<string[]>(() => {
+    const saved = remembered('sk_new_writers');
+    return saved ? saved.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  });
+
+  const [link, setLink] = useState('');
+  const [sessionNotes, setSessionNotes] = useState('');
+  const [articleBody, setArticleBody] = useState('');
+
   const [releases, setReleases] = useState<Release[]>([]);
   const [releaseId, setReleaseId] = useState(() => remembered('sk_tracks_release'));
   const [folderMode, setFolderMode] = useState<'new' | 'existing' | 'none'>('new');
@@ -90,19 +111,25 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
       () => {},
     );
   }, [api]);
+
   useEffect(() => {
     if (kind && kind !== 'release') setMakeFolder(FOLDER_BY_DEFAULT.includes(kind));
   }, [kind]);
 
-  // Team spaces this member can add to (My Space is different for everyone, so shared work never goes there)
+  // Adjust default track counts when release kind changes
+  useEffect(() => {
+    if (releaseKind === 'Album') setTrackCount(10);
+    else if (releaseKind === 'EP') setTrackCount(5);
+    else if (releaseKind === 'Single') setTrackCount(1);
+  }, [releaseKind]);
+
   const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && RANK[s.rights] >= RANK.upload);
   const spaceId = spaces.some((s) => s.id === space) ? space : spaces[0]?.id || '';
   const spaceName = spaces.find((s) => s.id === spaceId)?.name || '';
   const parsed = useMemo(() => parseWhen(when), [when]);
   const release = releases.find((r) => r.id === releaseId);
-  const isTimeline = !!kind && !['release', 'song', 'post'].includes(kind);
+  const isTimeline = !!kind && ['Shoot', 'Artwork', 'Video', 'Event', 'Drop'].includes(kind);
 
-  // Where a timeline entry's folder goes: inside its release's folder when it has one, else <space>/Timeline
   const entryFolder = (): FileRef | null => {
     if (!isTimeline || !makeFolder || !parsed) return null;
     const name = folderName(`${parsed.date} ${title}`);
@@ -112,6 +139,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     }
     return spaceId ? { space: spaceId, path: `Timeline/${name}` } : null;
   };
+
   const releaseFolder = (name: string): FileRef | null =>
     folderMode === 'existing'
       ? existing
@@ -124,34 +152,62 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     window.dispatchEvent(new CustomEvent('sk:tracks-release', { detail: id }));
     openStudio(openWindow, 'songs');
   };
+
   const openTimeline = (id: string) => {
     window.dispatchEvent(new CustomEvent('sk:timeline-entry', { detail: id }));
     openStudio(openWindow, 'calendar');
   };
+
   const reset = () => {
     setTitle('');
     setWhen('');
     setWhere('');
     setFile(null);
     setExisting(null);
+    setLink('');
+    setSessionNotes('');
+    setArticleBody('');
   };
+
   const post = (url: string, body: object, method = 'POST') => api(url, { method, body: JSON.stringify(body) });
-  // "HIMA, Amara" -> writers for the BMI sheets (PRO, IPI and exact shares are filled in on each song's sheet)
+
   const credits = () => {
-    remember('sk_new_artist', artist.trim());
-    remember('sk_new_writers', writers.trim());
+    const artistStr = artists.length > 0 ? artists.join(', ') : artistInput.trim();
+    const allWriters = [...writersList];
+    if (writerInput.trim() && !allWriters.includes(writerInput.trim())) {
+      allWriters.push(writerInput.trim());
+    }
+    remember('sk_new_artist', artistStr);
+    remember('sk_new_writers', allWriters.join(', '));
     return {
-      artist: artist.trim(),
-      writers: writers
-        .split(',')
-        .map((n) => n.trim())
-        .filter(Boolean)
-        .map((name) => ({ name, pro: 'BMI' })),
+      artist: artistStr,
+      writers: allWriters.map((name) => ({ name, pro: 'BMI' })),
     };
   };
-  const nextSteps = " Next: add its songs, then open each song's BMI sheet (it starts with this artist and these writers).";
-  const foundText = (f?: { added: string[]; bounces: string[] } | null) =>
-    f && (f.added.length || f.bounces.length) ? ` Found ${f.added.length} track(s) in the folder.` : '';
+
+  const addArtist = () => {
+    const val = artistInput.trim();
+    if (val && !artists.includes(val)) {
+      setArtists([...artists, val]);
+      setArtistInput('');
+    }
+  };
+
+  const removeArtist = (idx: number) => {
+    setArtists(artists.filter((_, i) => i !== idx));
+  };
+
+  const addWriter = () => {
+    const val = writerInput.trim();
+    if (val && !writersList.includes(val)) {
+      setWritersList([...writersList, val]);
+      setWriterInput('');
+    }
+  };
+
+  const removeWriter = (idx: number) => {
+    setWritersList(writersList.filter((_, i) => i !== idx));
+  };
 
   const create = async () => {
     const name = title.trim();
@@ -159,6 +215,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     if (when.trim() && !parsed) return setMsg(`Couldn't read "${when}" as a date. Try "fri", "oct 12" or "10/12".`);
     if (spaceId) remember('sk_new_space', spaceId);
     setMsg('');
+
     try {
       if (kind === 'release') {
         setBusy('Making the release...');
@@ -172,7 +229,16 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           setup: folderMode === 'new',
           ...credits(),
         });
-        setMsg(`Made ${r.title}${folder ? ` with its folder in ${spaceName || folder.space}` : ''}.${foundText(r.found)}${nextSteps}`);
+
+        // Dynamic track expander: generate placeholder tracks if count > 0 and not Single
+        if (releaseKind !== 'Single' && trackCount > 0) {
+          setBusy(`Generating ${trackCount} tracks...`);
+          for (let i = 1; i <= trackCount; i++) {
+            await post('/api/tracks/track', { release: r.id, title: `Track ${i}` });
+          }
+        }
+
+        setMsg(`Created ${r.title} with ${trackCount} track(s).`);
         openTracks(r.id);
       } else if (kind === 'song') {
         let r = release;
@@ -193,6 +259,40 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         }
         setMsg(`Added ${name} to ${r!.title}.`);
         openTracks(r!.id);
+      } else if (kind === 'session') {
+        // Walk-in studio scratch logger
+        setBusy('Creating scratch session workspace...');
+        const dateTag = parsed?.date || new Date().toISOString().slice(0, 10);
+        const sessDirName = folderName(`${dateTag} ${name}`);
+        const sessionPath = `Sessions/${sessDirName}`;
+        if (spaceId) {
+          await api(`/api/files/${spaceId}/${sessionPath.split('/').map(encodeURIComponent).join('/')}?mkdir&parents`, {
+            method: 'POST',
+          });
+        }
+        // Save scratch session notes if provided
+        if (sessionNotes.trim() && spaceId) {
+          const noteBlob = new Blob([sessionNotes], { type: 'text/plain' });
+          await uploadFiles(getToken, spaceId, ['Sessions', sessDirName], [{ file: noteBlob as File, name: 'session-notes.txt' }]);
+        }
+        setMsg(`Created scratch workspace in ${spaceName} › ${sessionPath}`);
+        if (spaceId) {
+          openRef({
+            kind: 'folder',
+            title: sessDirName,
+            app: spaceId,
+            dir: ['Sessions'],
+            name: sessDirName,
+          });
+        }
+      } else if (kind === 'article') {
+        // Native blog article authoring
+        setBusy('Creating draft article...');
+        const p = await post('/api/blog/posts', {
+          title: name,
+          body: articleBody.trim() || sessionNotes.trim(),
+        });
+        setMsg(`Draft article "${p.title}" created. You can review and publish it in Admin Panel > Blog.`);
       } else if (isTimeline) {
         if (!parsed) return setMsg('When is it? e.g. "fri", "next sat 8pm", "oct 12".');
         setBusy('Adding it to the timeline...');
@@ -209,6 +309,8 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           location: where.trim(),
           release: release?.id ?? null,
           folder,
+          ...(link.trim() ? { link: link.trim() } : {}),
+          ...(sessionNotes.trim() ? { notes: sessionNotes.trim() } : {}),
         });
         setMsg(`Added "${e.title}" on ${describeWhen(parsed)}${folder ? `, with a folder for its files` : ''}.`);
         openTimeline(e.id);
@@ -245,7 +347,8 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
 
   const label = KINDS.find((k) => k.id === kind)!.label;
   const row: React.CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' };
-  const cap: React.CSSProperties = { width: 70, flexShrink: 0 };
+  const cap: React.CSSProperties = { width: 75, flexShrink: 0, fontWeight: 700 };
+
   return (
     <div style={{ ...shell, padding: 10, gap: 8, overflow: 'auto', position: 'relative' }}>
       <div style={row}>
@@ -254,78 +357,254 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         </button>
         <b style={{ fontSize: 13 }}>New {label.toLowerCase()}</b>
       </div>
+
+      {/* Multi-Artist Tag/Chip Row */}
       {(kind === 'release' || (kind === 'song' && !release)) && (
-        <label style={row}>
-          <span style={cap}>Artist</span>
-          <input
-            autoFocus
-            style={{ ...field, flex: 1, minWidth: 160 }}
-            value={artist}
-            onChange={(e) => setArtist(e.target.value)}
-            placeholder="Who it's by, as it will show on Spotify"
-          />
-        </label>
+        <div style={{ ...row, alignItems: 'flex-start' }}>
+          <span style={{ ...cap, marginTop: 4 }}>Artists</span>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              {artists.map((a, i) => (
+                <span
+                  key={a}
+                  style={{
+                    background: '#e0e0e0',
+                    border: '1px solid #808080',
+                    padding: '1px 6px',
+                    borderRadius: 2,
+                    fontSize: 11,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  {a}
+                  <span
+                    onClick={() => removeArtist(i)}
+                    style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}
+                  >
+                    ×
+                  </span>
+                </span>
+              ))}
+              <input
+                style={{ ...field, width: 140 }}
+                value={artistInput}
+                onChange={(e) => setArtistInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addArtist();
+                  }
+                }}
+                placeholder="+ Add artist (Enter)"
+              />
+              <button style={{ ...button, padding: '1px 6px', fontSize: 10 }} onClick={addArtist}>
+                Add
+              </button>
+            </div>
+            <div style={{ fontSize: 10, color: '#666' }}>Multi-artist credits will be saved to track metadata.</div>
+          </div>
+        </div>
       )}
+
+      {/* Title */}
       <label style={row}>
         <span style={cap}>{kind === 'release' ? 'Title' : kind === 'song' ? 'Song title' : 'What'}</span>
         <input
-          autoFocus={!(kind === 'release' || (kind === 'song' && !release))}
+          autoFocus
           style={{ ...field, flex: 1, minWidth: 160 }}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && create()}
-          placeholder={kind === 'release' ? 'The Summer I Missed You' : kind === 'song' ? 'Summer Nights' : 'Cover shoot with Amara'}
+          placeholder={
+            kind === 'release'
+              ? 'The Summer I Missed You'
+              : kind === 'song'
+                ? 'Summer Nights'
+                : kind === 'session'
+                  ? 'Late Night Vocal Scratch'
+                  : kind === 'article'
+                    ? 'Reflections on the Suburbs'
+                    : 'Cover shoot with Amara'
+          }
         />
       </label>
+
+      {/* Multi-Writer Tag/Chip Row */}
       {(kind === 'release' || (kind === 'song' && !release)) && (
-        <label style={row} title="For the BMI sheets. Each writer's PRO, IPI number and exact share go on each song's sheet.">
-          <span style={cap}>Written by</span>
+        <div style={{ ...row, alignItems: 'flex-start' }} title="For the BMI sheets.">
+          <span style={{ ...cap, marginTop: 4 }}>Writers</span>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              {writersList.map((w, i) => (
+                <span
+                  key={w}
+                  style={{
+                    background: '#e0e0e0',
+                    border: '1px solid #808080',
+                    padding: '1px 6px',
+                    borderRadius: 2,
+                    fontSize: 11,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  {w}
+                  <span
+                    onClick={() => removeWriter(i)}
+                    style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}
+                  >
+                    ×
+                  </span>
+                </span>
+              ))}
+              <input
+                style={{ ...field, width: 140 }}
+                value={writerInput}
+                onChange={(e) => setWriterInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addWriter();
+                  }
+                }}
+                placeholder="+ Add songwriter (Enter)"
+              />
+              <button style={{ ...button, padding: '1px 6px', fontSize: 10 }} onClick={addWriter}>
+                Add
+              </button>
+            </div>
+            <div style={{ fontSize: 10, color: '#666' }}>Songwriters for BMI split registration.</div>
+          </div>
+        </div>
+      )}
+
+      {/* Release Kind & Dynamic Track Expander */}
+      {kind === 'release' && (
+        <>
+          <label style={row}>
+            <span style={cap}>Kind</span>
+            <select style={field} value={releaseKind} onChange={(e) => setReleaseKind(e.target.value)}>
+              {['Album', 'EP', 'Single'].map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+          </label>
+          {releaseKind !== 'Single' && (
+            <div style={row}>
+              <span style={cap}>Tracks</span>
+              <button
+                style={{ ...button, padding: '1px 6px', fontSize: 11 }}
+                onClick={() => setTrackCount((c) => Math.max(1, c - 1))}
+              >
+                -
+              </button>
+              <b style={{ minWidth: 24, textAlign: 'center' }}>{trackCount}</b>
+              <button
+                style={{ ...button, padding: '1px 6px', fontSize: 11 }}
+                onClick={() => setTrackCount((c) => Math.min(30, c + 1))}
+              >
+                +
+              </button>
+              <span style={{ fontSize: 10, color: '#666' }}>Will automatically create Track 1..{trackCount} in Tracks.</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Moodboard or Video URL Link Picker */}
+      {(kind === 'Artwork' || kind === 'Video') && (
+        <label style={row}>
+          <span style={cap}>{kind === 'Artwork' ? 'Moodboard' : 'Video Link'}</span>
           <input
             style={{ ...field, flex: 1, minWidth: 160 }}
-            value={writers}
-            onChange={(e) => setWriters(e.target.value)}
-            placeholder="Songwriters, e.g. HIMA, Amara"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder={
+              kind === 'Artwork'
+                ? 'https://... (Pinterest, Are.na, Figma, moodboard link)'
+                : 'https://... (YouTube, Vimeo, Frame.io video link)'
+            }
           />
         </label>
       )}
-      {kind === 'release' && (
-        <label style={row}>
-          <span style={cap}>Kind</span>
-          <select style={field} value={releaseKind} onChange={(e) => setReleaseKind(e.target.value)}>
-            {['Album', 'EP', 'Single'].map((k) => (
-              <option key={k}>{k}</option>
+
+      {/* When / 16-bit Retro Calendar */}
+      {kind !== 'article' && (
+        <div style={row}>
+          <span style={cap}>{kind === 'release' ? 'Out' : kind === 'song' ? 'Due' : 'When'}</span>
+          <input
+            style={{ ...field, width: 150 }}
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !busy && create()}
+            placeholder={isTimeline ? 'next sat 8pm' : 'optional: oct 12'}
+          />
+          <div style={{ display: 'flex', gap: 2 }}>
+            {['today', 'tomorrow', 'fri 8pm', 'next week'].map((quick) => (
+              <button
+                key={quick}
+                style={{ ...button, fontSize: 10, padding: '1px 4px' }}
+                onClick={() => setWhen(quick)}
+              >
+                {quick}
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+          <span style={{ color: when && !parsed ? '#a00000' : '#000080', fontSize: 11 }}>
+            {parsed
+              ? `→ ${describeWhen(kind === 'release' || kind === 'song' ? { ...parsed, time: '' } : parsed)}`
+              : when
+                ? "can't read that yet"
+                : ''}
+          </span>
+        </div>
       )}
-      <label style={row}>
-        <span style={cap}>{kind === 'release' ? 'Out' : kind === 'song' ? 'Due' : 'When'}</span>
-        <input
-          style={{ ...field, width: 170 }}
-          value={when}
-          onChange={(e) => setWhen(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && !busy && create()}
-          placeholder={isTimeline ? 'next sat 8pm' : 'optional: oct 12'}
-        />
-        <span style={{ color: when && !parsed ? '#a00000' : '#000080' }}>
-          {parsed
-            ? `→ ${describeWhen(kind === 'release' || kind === 'song' ? { ...parsed, time: '' } : parsed)}`
-            : when
-              ? "can't read that yet"
-              : ''}
-        </span>
-      </label>
+
+      {/* Where / Studio Location */}
       {isTimeline && (
-        <label style={row}>
+        <div style={row}>
           <span style={cap}>Where</span>
           <input
             style={{ ...field, flex: 1, minWidth: 160 }}
             value={where}
             onChange={(e) => setWhere(e.target.value)}
-            placeholder="optional"
+            placeholder="Studio, venue, address..."
           />
-        </label>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {['Studio A', 'Vocal Booth B', 'Warehouse', 'Online'].map((loc) => (
+              <button
+                key={loc}
+                style={{ ...button, fontSize: 10, padding: '1px 4px' }}
+                onClick={() => setWhere(loc)}
+              >
+                {loc}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
+
+      {/* Notes / Walk-in Session Scratch Notes */}
+      {(kind === 'session' || kind === 'article' || isTimeline) && (
+        <div style={{ ...row, alignItems: 'flex-start' }}>
+          <span style={{ ...cap, marginTop: 4 }}>{kind === 'article' ? 'Body' : 'Notes'}</span>
+          <textarea
+            style={{ ...field, flex: 1, minHeight: 60, fontFamily: 'inherit', resize: 'vertical' }}
+            value={kind === 'article' ? articleBody : sessionNotes}
+            onChange={(e) => (kind === 'article' ? setArticleBody(e.target.value) : setSessionNotes(e.target.value))}
+            placeholder={
+              kind === 'article'
+                ? 'Write your post here (blank line = new paragraph)...'
+                : 'Session scratch ideas, gear used, tempo, scratch lyric tags...'
+            }
+          />
+        </div>
+      )}
+
+      {/* Release Selection for Songs or Timeline */}
       {(kind === 'song' || isTimeline) && (
         <label style={row}>
           <span style={cap}>{kind === 'song' ? 'On' : 'For'}</span>
@@ -339,20 +618,23 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           </select>
         </label>
       )}
+
+      {/* Song Bounce Upload */}
       {kind === 'song' && (
         <div style={row}>
           <span style={cap}>Bounce</span>
           {!release || release.folder ? (
             <>
               <input type="file" accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-              <span style={{ color: '#444' }}>optional; goes in the release's Bounces folder</span>
+              <span style={{ color: '#444', fontSize: 11 }}>optional; goes in the release's Bounces folder</span>
             </>
           ) : (
-            <span style={{ color: '#444' }}>{release.title} has no folder yet: link one in Tracks to add files here.</span>
+            <span style={{ color: '#444', fontSize: 11 }}>{release.title} has no folder yet: link one in Tracks to add files here.</span>
           )}
         </div>
       )}
 
+      {/* Release Folders */}
       {kind === 'release' && (
         <fieldset
           style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}
@@ -379,12 +661,20 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
             <input type="radio" checked={folderMode === 'none'} onChange={() => setFolderMode('none')} />
             No folder for now
           </label>
-          <div style={{ color: '#444' }}>
-            Bounces, stems, Ableton projects and artwork put in the folder show up in Tracks by themselves: "03 Song v4.wav" becomes track 3
-            with v4 as its current bounce.
-          </div>
         </fieldset>
       )}
+
+      {/* Scratch Session Space */}
+      {kind === 'session' && (
+        <div style={row}>
+          <span style={cap}>Space</span>
+          <span>Save session workspace in </span>
+          <SpaceSelect spaces={spaces} value={spaceId} onChange={setSpace} />
+          <span style={{ color: '#666', fontSize: 11 }}>› Sessions</span>
+        </div>
+      )}
+
+      {/* Timeline Folder */}
       {isTimeline && (
         <label style={row}>
           <input
@@ -402,12 +692,15 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           {makeFolder && release?.folder && <span style={{ color: '#444' }}>in {release.title}'s folder</span>}
         </label>
       )}
+
+      {/* Submit Button */}
       <div style={{ ...row, marginTop: 4 }}>
         <button style={{ ...button, fontWeight: 700, padding: '4px 16px' }} disabled={!!busy} onClick={create}>
-          Create
+          {kind === 'article' ? 'Create Draft' : kind === 'session' ? 'Start Session' : 'Create'}
         </button>
-        <span>{busy || msg}</span>
+        <span style={{ fontSize: 11 }}>{busy || msg}</span>
       </div>
+
       {picking && (
         <FilePicker
           title="Choose the release's folder"

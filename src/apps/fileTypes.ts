@@ -5,8 +5,8 @@ const isRaw = (name: string) => RAW.split(' ').includes(name.split('.').pop()?.t
 type FileKind = 'image' | 'audio' | 'video' | 'pdf' | 'doc' | 'sheet' | 'text' | 'other';
 
 const EXTENSIONS: Record<Exclude<FileKind, 'other'>, string> = {
-  image: `jpg jpeg png gif webp avif svg tif tiff psd ${RAW}`,
-  audio: 'mp3 wav flac m4a aac ogg aif aiff',
+  image: `jpg jpeg png gif webp avif svg tif tiff psd ai ${RAW}`,
+  audio: 'mp3 wav flac m4a aac ogg aif aiff logicx',
   video: 'mp4 m4v mov webm',
   pdf: 'pdf',
   doc: 'docx',
@@ -21,17 +21,17 @@ const KINDS = Object.fromEntries(Object.entries(EXTENSIONS).flatMap(([kind, exts
 export const fileKind = (name: string): FileKind => KINDS[name.split('.').pop()?.toLowerCase() || ''] || 'other';
 
 /** Browsers can't show these, so the server converts them (?preview) — see thumb() in server/index.mjs. */
-export const needsConversion = (name: string) => /\.(psd|tiff?)$/i.test(name) || isRaw(name);
+export const needsConversion = (name: string) => /\.(psd|tiff?|ai)$/i.test(name) || isRaw(name);
 
 /**
  * Play / show the server's lighter copy (?preview) instead of the original: a 256 kbps MP3 for WAV/AIFF/FLAC
  * (~1/5 the size) and a 2400 px WebP for photos and artwork. Download always gets the original.
  */
 export const lightAudio = (name: string) => /\.(wav|aiff?|flac)$/i.test(name);
-export const lightImage = (name: string) => /\.(jpe?g|png|webp|avif|tiff?|psd)$/i.test(name) || isRaw(name);
+export const lightImage = (name: string) => /\.(jpe?g|png|webp|avif|tiff?|psd|ai)$/i.test(name) || isRaw(name);
 
 /** Thumbnails are generated server-side for these (see THUMBABLE in server/index.mjs). */
-export const hasThumb = (name: string) => /\.(jpe?g|png|webp|gif|avif|tiff?|psd)$/i.test(name) || isRaw(name);
+export const hasThumb = (name: string) => /\.(jpe?g|png|webp|gif|avif|tiff?|psd|ai)$/i.test(name) || isRaw(name);
 
 const ICONS: Record<FileKind | 'folder', string> = {
   folder: 'folder',
