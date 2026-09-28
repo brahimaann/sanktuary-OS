@@ -3920,7 +3920,7 @@ window.__rapidraw_open_dialog = function() {
           folders.forEach(f => {
             const row = document.createElement('div');
             row.style.cssText = 'padding:3px 6px;cursor:pointer;display:flex;align-items:center;gap:6px;';
-            row.innerHTML = '📁 ' + f.name;
+            row.textContent = '📁 ' + f.name; // text, never HTML: folder names come from the drive
             row.onmouseover = () => { row.style.background = '#000080'; row.style.color = '#fff'; };
             row.onmouseout = () => { row.style.background = ''; row.style.color = '#000'; };
             row.onclick = () => {
@@ -3934,7 +3934,8 @@ window.__rapidraw_open_dialog = function() {
           });
         }
       } catch (err) {
-        dirList.innerHTML = '<div style="color:#c00;padding:4px;">Error: ' + err.message + '</div>';
+        dirList.innerHTML = '<div style="color:#c00;padding:4px;"></div>';
+        dirList.firstChild.textContent = 'Error: ' + err.message;
       }
     };
 
