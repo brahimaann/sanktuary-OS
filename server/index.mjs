@@ -71,7 +71,7 @@ const MIME = {
   '.aiff': 'audio/aiff',
   '.mp4': 'video/mp4',
   '.m4v': 'video/mp4',
-  '.mov': 'video/quicktime',
+  '.mov': 'video/mp4', // QuickTime is MP4's parent format; Firefox refuses to play video/quicktime
   '.webm': 'video/webm',
   '.pdf': 'application/pdf',
   '.woff': 'font/woff',

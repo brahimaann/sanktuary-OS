@@ -107,16 +107,6 @@ const PUBLIC_ICONS: DesktopIconDef[] = [
   },
 ];
 
-// Visitors: the way in for members
-const LOG_ON_ICON: DesktopIconDef = {
-  id: 'profile-me',
-  title: 'Log On',
-  icon: '/images/icons/logoff-32x32.png',
-  appType: 'profile',
-  width: 420,
-  height: 520,
-};
-
 // Extras and games, last
 const EXTRA_ICONS: DesktopIconDef[] = [
   {
@@ -322,10 +312,11 @@ export const Desktop: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds, vfsIcons]);
 
-  // Logged on: studio apps first, then the front door (+ admin tools), then extras. Visitors: front door, Log On, extras.
+  // Logged on: studio apps first, then the front door (+ admin tools), then extras.
+  // Visitors: a simpler desktop (front door + extras, no Internet Explorer); Log On is the key in the taskbar.
   const allIcons = isSignedIn
     ? [...STUDIO_ICONS, ...PUBLIC_ICONS, ...(me?.admin ? [ADMIN_ICON, BUSINESS_ICON] : []), ...EXTRA_ICONS, ...vfsIcons]
-    : [...PUBLIC_ICONS, LOG_ON_ICON, ...EXTRA_ICONS, ...vfsIcons];
+    : [...PUBLIC_ICONS, ...EXTRA_ICONS.filter((i) => i.id !== 'ie'), ...vfsIcons];
 
   // Marquee Selection Logic / Clicking background
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -624,7 +615,7 @@ export const Desktop: React.FC = () => {
       style={{
         backgroundColor: bgColor,
         backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
-        backgroundSize: size.w < 768 ? 'contain' : 'cover',
+        backgroundSize: 'cover', // fills the whole screen at every size (phones used to get bars)
         backgroundRepeat: 'no-repeat',
         backgroundPosition: 'center',
         touchAction: 'none', // Prevents default gestures like pinch-to-zoom on desktop

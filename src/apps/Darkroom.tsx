@@ -8,6 +8,9 @@ import FilePicker, { FileRef } from '../components/FilePicker';
  * Darkroom: Professional retro image grading & degradation suite.
  * Lightroom Mobile-inspired progressive disclosure layout (65% photo loupe, 2-tier bottom thumb dock)
  * completely dressed in authentic Windows 98 / retro OS styling.
+ *
+ * Editing model: each tab shows only its own live edit. Save commits it as a new version (the next tab edits
+ * on top of it); switching tabs drops an unsaved edit. Undo / Redo step through the saved versions.
  */
 interface Props {
   app?: string;
@@ -27,22 +30,22 @@ export const PRESETS: FilterPreset[] = [
   { id: 0, name: 'None', category: 'swag', desc: 'Original unaltered photo' },
   // Swag Presets
   { id: 1, name: 'Nashville', category: 'swag', desc: 'Warm, faded contrast reminiscent of early Instagram' },
-  { id: 2, name: 'Chief Keef', category: 'swag', desc: 'High-saturation, punchy flash-photography grade' },
+  { id: 2, name: 'Chief Keef', category: 'swag', desc: 'High-saturation, punchy direct-flash grade with falloff' },
   { id: 3, name: 'Nuke', category: 'swag', desc: 'Blown-out, deep fried contrast & sharp clipped edges' },
   { id: 4, name: 'Phreshboy', category: 'swag', desc: 'Cool / magenta shifted modern vintage look' },
   { id: 5, name: 'Sepia', category: 'swag', desc: 'Classic warm monochrome tint with soft roll-off' },
   { id: 6, name: '2014', category: 'swag', desc: 'Muted shadows, lifted blacks and elevated midtone warmth' },
-  { id: 7, name: '$$$', category: 'swag', desc: 'Greenish, stylized analog currency contrast' },
+  { id: 7, name: '$$$', category: 'swag', desc: 'Green banknote ink with engraved line shading' },
   { id: 8, name: 'Pandora', category: 'swag', desc: 'Ethereal cyan & violet dream cast' },
   // Goth Presets
   { id: 9, name: 'Bleach Bypass', category: 'goth', desc: 'De-saturated high contrast silver retention film' },
   { id: 10, name: 'Silver B&W', category: 'goth', desc: 'Deep crushed blacks, metallic monochrome tone' },
   { id: 11, name: 'Cross Process', category: 'goth', desc: 'Slide film developed in negative chemistry (C-41)' },
   { id: 12, name: 'Faded Print', category: 'goth', desc: 'Muted highlights, lifted blacks and cyan/green wash' },
-  { id: 13, name: 'Teal & Orange', category: 'goth', desc: 'Stylized cinematic complementary split' },
-  { id: 14, name: 'Noir', category: 'goth', desc: 'Extreme contrast chiaroscuro hard light' },
+  { id: 13, name: 'Teal & Orange', category: 'goth', desc: 'Teal shadows, orange highlights, skin tones protected' },
+  { id: 14, name: 'Noir', category: 'goth', desc: 'Hard-light black & white with deep shadows' },
   // 1-Click Cameras
-  { id: 15, name: 'Nokia', category: 'camera', desc: '176x208 12-bit sensor, heavy edge ringing, Bayer dither' },
+  { id: 15, name: 'Nokia', category: 'camera', desc: '176px phone sensor, 12-bit colour, Bayer dither' },
   { id: 16, name: '1/4" Camcorder', category: 'camera', desc: 'Interlaced scanlines, chroma blur, warm tape gain' },
   { id: 17, name: 'iPhone 3GS', category: 'camera', desc: 'Plastic lens softness, blown highlights, early sensor curve' },
   { id: 18, name: '🧠🧼 Brainwash', category: 'camera', desc: 'Ultra-saturated Y2K direct-flash digicam look' },
@@ -61,7 +64,8 @@ export type CollageGridPreset =
   | 'hero-left'
   | 'hero-right';
 
-export type AspectRatioPreset = '1:1' | '4:3' | '16:9' | '3:4' | '9:16';
+export type AspectRatioPreset = 'photo' | '1:1' | '4:3' | '16:9' | '3:4' | '9:16';
+type Fit = 'crop' | 'fit' | 'stretch';
 
 export interface CollageSlotRect {
   x: number;
@@ -188,11 +192,18 @@ export interface AspectRatioDefinition {
 }
 
 export const ASPECT_RATIOS: AspectRatioDefinition[] = [
+  { id: 'photo', name: 'Same as photo', width: 0, height: 0 },
   { id: '1:1', name: '1:1 (Square)', width: 1200, height: 1200 },
   { id: '4:3', name: '4:3 (Standard digicam)', width: 1200, height: 900 },
   { id: '16:9', name: '16:9 (Widescreen)', width: 1280, height: 720 },
   { id: '3:4', name: '3:4 (Portrait)', width: 900, height: 1200 },
   { id: '9:16', name: '9:16 (Vertical/Story)', width: 720, height: 1280 },
+];
+
+const FITS: [Fit, string, string][] = [
+  ['crop', 'Crop to fill', 'Fills each frame, trimming the edges that overflow (no distortion)'],
+  ['fit', 'Whole photo', 'Shows the whole photo, with background around it'],
+  ['stretch', 'Stretch', 'Stretches or squashes the photo to the frame'],
 ];
 
 export interface TextOverlayItem {
@@ -207,20 +218,20 @@ export interface TextOverlayItem {
   shadow: boolean;
 }
 
-function drawImageStretch(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  dx: number,
-  dy: number,
-  dw: number,
-  dh: number
-) {
-  if (!img.naturalWidth || !img.naturalHeight || dw <= 0 || dh <= 0) return;
+type Source = HTMLImageElement | HTMLCanvasElement;
+const dims = (s: Source) => (s instanceof HTMLImageElement ? [s.naturalWidth, s.naturalHeight] : [s.width, s.height]);
+
+// crop: fill the slot and trim the overflow; fit: whole photo inside the slot; stretch: fill it, distorting
+function drawImageIn(ctx: CanvasRenderingContext2D, img: Source, dx: number, dy: number, dw: number, dh: number, fit: Fit) {
+  const [iw, ih] = dims(img);
+  if (!iw || !ih || dw <= 0 || dh <= 0) return;
+  const s = fit === 'crop' ? Math.max(dw / iw, dh / ih) : Math.min(dw / iw, dh / ih);
+  const [w, h] = fit === 'stretch' ? [dw, dh] : [iw * s, ih * s];
   ctx.save();
   ctx.beginPath();
   ctx.rect(dx, dy, dw, dh);
   ctx.clip();
-  ctx.drawImage(img, dx, dy, dw, dh);
+  ctx.drawImage(img, dx + (dw - w) / 2, dy + (dh - h) / 2, w, h);
   ctx.restore();
 }
 
@@ -246,10 +257,11 @@ export interface DarkroomParams {
   ccdNoise: number; // 0 to 1
   // Blur / Pixelate
   blurMode: 0 | 1 | 2 | 3; // 0: None, 1: Uniform, 2: Vignette, 3: Pixelate
-  blurRadius: number; // 0 to 30
+  blurRadius: number; // 0 to 25 (px on a 1000px photo; scales with the photo)
   // Glitch
   glitchMode: 0 | 1 | 2 | 3 | 4; // 0: none, 1: datamosh, 2: vhs, 3: lcd, 4: galaxy
   glitchAmount: number; // 0 to 1
+  glitchThreshold: number; // 0 to 1: datamosh only moves blocks at least this bright
 }
 
 const DEFAULT_PARAMS: DarkroomParams = {
@@ -274,11 +286,17 @@ const DEFAULT_PARAMS: DarkroomParams = {
   blurRadius: 0,
   glitchMode: 0,
   glitchAmount: 0,
+  glitchThreshold: 0,
 };
 
 const VERT = `attribute vec2 p; varying vec2 uv; void main() { uv = (p + 1.0) / 2.0; gl_Position = vec4(p, 0.0, 1.0); }`;
 
-const FRAG = `precision highp float;
+// Sizes that should look the same on a phone snap and a 24MP file scale with `big` (the long side in pixels).
+const FRAG = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
 uniform sampler2D img;
 uniform vec2 res;
 uniform int preset;
@@ -287,7 +305,7 @@ uniform float bloomAmount, bloomTint, lensReflection, ccdNoise;
 uniform int blurMode;
 uniform float blurRadius;
 uniform int glitchMode;
-uniform float glitchAmount;
+uniform float glitchAmount, glitchThreshold;
 uniform float jpegRes;
 uniform float jpegQual;
 uniform float uNoise;
@@ -297,8 +315,18 @@ uniform float uTime;
 
 varying vec2 uv;
 
+// NTSC YIQ (GLSL matrices are column-major)
+const mat3 RGB2YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
+const mat3 YIQ2RGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
+
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+vec2 snap(vec2 st, vec2 grid) { return (floor(st * grid) + 0.5) / grid; }
 
 // ── Oklab Transformations (Ottosson) ──
 vec3 srgb_to_oklab(vec3 c) {
@@ -328,42 +356,45 @@ vec3 oklab_to_srgb(vec3 lab) {
   return pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / 2.2));
 }
 
+// 7x7 box blur over +-off. Each pixel jitters the grid, so big radii come out smooth instead of as ghost copies.
+vec3 box_blur(vec2 st, vec2 off) {
+  vec3 s = vec3(0.0);
+  vec2 j = vec2(hash12(gl_FragCoord.xy), hash12(gl_FragCoord.yx + 3.1)) - 0.5;
+  for (int i = -3; i <= 3; i++) {
+    for (int k = -3; k <= 3; k++) s += texture2D(img, st + (vec2(float(i), float(k)) + j) * off / 3.0).rgb;
+  }
+  return s / 49.0;
+}
+
 // ── Physical Degradation Module 1: CCD Bloom & Vertical Smear ──
-vec3 apply_ccd_smear(vec2 uvCoord, vec2 texelSize, sampler2D tex) {
+vec3 apply_ccd_smear(vec2 uvCoord, float stepY) {
   vec3 smear = vec3(0.0);
   for (float i = -12.0; i <= 12.0; i += 1.0) {
-    vec2 sample_uv = uvCoord + vec2(0.0, i * texelSize.y * 3.0);
-    vec3 sampleColor = texture2D(tex, sample_uv).rgb;
-    float lumaVal = dot(sampleColor, vec3(0.2126, 0.7152, 0.0722));
-    float bloom = smoothstep(0.95, 1.0, lumaVal);
+    vec3 sampleColor = texture2D(img, uvCoord + vec2(0.0, i * stepY)).rgb;
+    float bloom = smoothstep(0.9, 1.0, luma(sampleColor));
     smear += sampleColor * bloom * (1.0 - abs(i) / 12.0);
   }
   return smear * 0.18;
 }
 
-// ── Physical Degradation Module 2: JPEG DCT Quantization Artifacts ──
-vec3 apply_jpeg_dct(vec2 uvCoord, vec2 resolution, sampler2D tex, float quality) {
-  vec2 grid_uv = floor(uvCoord * resolution / 8.0) * 8.0 / resolution;
-  vec3 block_avg = texture2D(tex, grid_uv).rgb;
-  vec2 local_uv = fract(uvCoord * resolution / 8.0);
-  float ringing = cos(local_uv.x * 3.14159265) * cos(local_uv.y * 3.14159265);
-  vec3 orig = texture2D(tex, uvCoord).rgb;
-  float q_step = mix(3.0, 15.0, quality);
-  vec3 quantized = floor(orig * q_step + 0.5) / q_step;
-  return mix(block_avg + ringing * 0.1, quantized, quality);
+// ── Physical Degradation Module 2: JPEG blocks, ringing & quantisation, applied on top of the grade ──
+vec3 apply_jpeg(vec3 c, vec2 st, float q, float big) {
+  float bs = 8.0 * max(1.0, floor(big / 1600.0));
+  vec2 cell = floor(st * res / bs);
+  vec3 blockAvg = texture2D(img, (cell + 0.5) * bs / res).rgb;
+  vec3 orig = texture2D(img, st).rgb;
+  vec2 local = fract(st * res / bs);
+  float ring = cos(local.x * 6.2831853) * cos(local.y * 6.2831853);
+  c += (blockAvg - orig) * q + ring * q * 0.035;
+  float steps = mix(48.0, 6.0, q);
+  return floor(c * steps + 0.5) / steps;
 }
 
 // ── Physical Degradation Module 3: Photographic Grain (Poisson / sqrt variance) ──
-float hash12(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-
-vec3 apply_film_grain(vec3 c, vec2 uvCoord, float timeVal, float grainAmt) {
-  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+vec3 apply_film_grain(vec3 c, vec2 cell, float timeVal, float grainAmt) {
+  float Y = luma(c);
   float variance = sqrt(max(0.0, Y * (1.0 - Y)));
-  float noise = (hash12(uvCoord * 100.0 + timeVal) - 0.5) * 2.0;
+  float noise = (hash12(cell + timeVal * 61.0) - 0.5) * 2.0;
   return c + noise * variance * grainAmt;
 }
 
@@ -377,21 +408,21 @@ vec3 nashville_grade(vec3 c) {
   return clamp(peach_blend, 0.0, 1.0);
 }
 
-// ── Preset 2: Chief Keef ──
+// ── Preset 2: Chief Keef (on-camera flash: hot centre, falling off to the edges) ──
 vec3 chief_keef_grade(vec3 c, vec2 uvCoord) {
   float dist = distance(uvCoord, vec2(0.5, 0.5));
   float falloff = clamp(1.0 / (1.0 + 3.5 * dist * dist), 0.0, 1.0);
-  vec3 flashed = c * (falloff * 1.6 + 0.1);
-  float Y = dot(flashed, vec3(0.2126, 0.7152, 0.0722));
+  vec3 flashed = c * (0.35 + falloff * 0.95);
+  float Y = luma(flashed);
   vec3 saturated = Y + 1.85 * (flashed - vec3(Y));
   return smoothstep(vec3(0.04), vec3(0.92), saturated);
 }
 
 // ── Preset 3: Nuke (Deep Fried) ──
-vec3 nuke_grade(vec3 c, vec2 uvCoord, vec2 resolution, sampler2D tex) {
-  vec2 texel = 1.0 / resolution;
-  vec3 n1 = texture2D(tex, uvCoord + vec2(texel.x * 2.0, 0.0)).rgb;
-  vec3 n2 = texture2D(tex, uvCoord - vec2(0.0, texel.y * 2.0)).rgb;
+vec3 nuke_grade(vec3 c, vec2 uvCoord, float big) {
+  vec2 texel = vec2(max(2.0, big / 800.0)) / res;
+  vec3 n1 = texture2D(img, uvCoord + vec2(texel.x, 0.0)).rgb;
+  vec3 n2 = texture2D(img, uvCoord - vec2(0.0, texel.y)).rgb;
   vec3 edge = (c - (n1 + n2) * 0.5) * 12.0;
   vec3 sharp = clamp(c + edge, 0.0, 1.0);
   sharp = pow(sharp, vec3(0.5));
@@ -405,7 +436,7 @@ vec3 nuke_grade(vec3 c, vec2 uvCoord, vec2 resolution, sampler2D tex) {
 
 // ── Preset 4: Phreshboy ──
 vec3 phreshboy_grade(vec3 c) {
-  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float Y = luma(c);
   vec3 shadow_tint = vec3(0.08, 0.12, 0.22);
   vec3 highlight_tint = vec3(0.92, 0.85, 0.96);
   vec3 split = mix(shadow_tint, highlight_tint, Y);
@@ -417,18 +448,17 @@ vec3 phreshboy_grade(vec3 c) {
 
 // ── Preset 5: Sepia (Silver Sulfide) ──
 vec3 sepia_grade(vec3 c) {
-  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float Y = luma(c);
   vec3 shadow = vec3(0.12, 0.08, 0.05);
   vec3 midtone = vec3(0.68, 0.48, 0.25);
   vec3 highlight = vec3(0.97, 0.93, 0.88);
-  vec3 toned = mix(mix(shadow, midtone, Y), mix(midtone, highlight, Y), Y);
-  return toned;
+  return mix(mix(shadow, midtone, Y), mix(midtone, highlight, Y), Y);
 }
 
 // ── Preset 6: 2014 (Matte Film) ──
 vec3 matte_2014_grade(vec3 c) {
   vec3 matte = c * 0.86 + 0.12;
-  float Y = dot(matte, vec3(0.2126, 0.7152, 0.0722));
+  float Y = luma(matte);
   matte.g = mix(matte.g, Y, 0.45);
   matte.b = mix(matte.b, Y, 0.55);
   vec3 warm_mid = vec3(1.12, 1.04, 0.92);
@@ -437,20 +467,15 @@ vec3 matte_2014_grade(vec3 c) {
   return clamp(matte, 0.0, 1.0);
 }
 
-// ── Preset 7: $$$ (Banknote Intaglio) ──
-vec3 banknote_grade(vec3 c) {
-  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float edgeY = smoothstep(0.25, 0.75, Y);
+// ── Preset 7: $$$ (Banknote Intaglio: three inks plus engraved hatching in the shadows) ──
+vec3 banknote_grade(vec3 c, vec2 fc, float big) {
+  float edgeY = smoothstep(0.25, 0.75, luma(c));
   vec3 ink_dark = vec3(0.08, 0.14, 0.10);
   vec3 ink_green = vec3(0.32, 0.58, 0.44);
   vec3 paper = vec3(0.93, 0.95, 0.90);
-  vec3 grade;
-  if (edgeY < 0.5) {
-    grade = mix(ink_dark, ink_green, edgeY * 2.0);
-  } else {
-    grade = mix(ink_green, paper, (edgeY - 0.5) * 2.0);
-  }
-  return grade;
+  vec3 grade = edgeY < 0.5 ? mix(ink_dark, ink_green, edgeY * 2.0) : mix(ink_green, paper, (edgeY - 0.5) * 2.0);
+  float lines = 0.5 + 0.5 * sin((fc.x + fc.y) * 6.2831853 / max(3.0, big / 400.0));
+  return mix(grade, ink_dark, (1.0 - edgeY) * (1.0 - lines) * 0.6);
 }
 
 // ── Preset 8: Pandora (Oklab Gradient Mapping) ──
@@ -466,8 +491,7 @@ vec3 pandora_grade(vec3 c) {
 
 // ── Preset 9: Bleach Bypass (Silver Density) ──
 vec3 bleach_bypass_grade(vec3 c) {
-  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  float silver = pow(Y, 1.5);
+  float silver = pow(luma(c), 1.5);
   vec3 blend;
   blend.r = (silver < 0.5) ? (2.0 * c.r * silver) : (1.0 - 2.0 * (1.0 - c.r) * (1.0 - silver));
   blend.g = (silver < 0.5) ? (2.0 * c.g * silver) : (1.0 - 2.0 * (1.0 - c.g) * (1.0 - silver));
@@ -479,15 +503,11 @@ vec3 bleach_bypass_grade(vec3 c) {
 // ── Preset 10: Silver B&W (Tri-X 400 H&D Curve) ──
 vec3 trix_bw_grade(vec3 c) {
   float E = dot(c, vec3(0.25, 0.60, 0.15));
-  float Dmin = 0.02;
-  float Dmax = 0.98;
-  float k = 6.0;
-  float E0 = 0.45;
-  float density = Dmin + (Dmax - Dmin) / (1.0 + exp(-k * (E - E0)));
+  float density = 0.02 + 0.96 / (1.0 + exp(-6.0 * (E - 0.45)));
   return vec3(density);
 }
 
-// ── Preset 11: Cross Process (X-Pro) ──
+// ── Preset 11: Cross Process (X-Pro: cyan shadows, yellow highlights) ──
 vec3 cross_process_grade(vec3 c) {
   vec3 graded;
   graded.b = clamp(c.b * 0.65 + 0.20, 0.0, 1.0);
@@ -503,41 +523,31 @@ vec3 faded_print_grade(vec3 c) {
   faded.r = c.r * 0.96 + 0.04;
   faded.g = c.g * 0.82 + 0.08;
   faded.b = c.b * 0.38 + 0.15;
-  float Y = dot(faded, vec3(0.2126, 0.7152, 0.0722));
-  faded = mix(faded, vec3(Y), 0.15);
+  faded = mix(faded, vec3(luma(faded)), 0.15);
   return clamp(faded, 0.0, 1.0);
 }
 
-// ── Preset 13: Teal & Orange (YIQ Skin Protection) ──
+// ── Preset 13: Teal & Orange (the I axis runs teal to orange; skin sits on +I and is protected) ──
 vec3 teal_orange_grade(vec3 c) {
-  mat3 rgb2yiq = mat3(
-    0.299, -0.147, 0.615,
-    0.587, -0.289, -0.515,
-    0.114, 0.436, -0.100
-  );
-  mat3 yiq2rgb = mat3(
-    1.0, 1.0, 1.0,
-    0.956, -0.272, -1.106,
-    0.621, -0.647, 1.703
-  );
-  vec3 yiq = rgb2yiq * c;
-  float skin_protect = exp(-pow(yiq.y - 0.45, 2.0) * 12.0);
-  float target_Q = mix(-0.15, 0.15, yiq.x);
-  yiq.z = mix(target_Q + yiq.z * 0.5, yiq.z, skin_protect);
-  return clamp(yiq2rgb * yiq, 0.0, 1.0);
+  vec3 yiq = RGB2YIQ * c;
+  float t = smoothstep(0.1, 0.9, yiq.x);
+  vec2 target = mix(vec2(-0.10, -0.035), vec2(0.12, -0.012), t);
+  vec2 d = yiq.yz - vec2(0.15, 0.01);
+  float skin = exp(-dot(d, d) * 60.0);
+  yiq.yz = mix(yiq.yz * 0.6 + target * 0.7, yiq.yz, skin * 0.75);
+  return clamp((YIQ2RGB * yiq - 0.5) * 1.08 + 0.5, 0.0, 1.0);
 }
 
-// ── Preset 14: Noir (Orthochromatic Bias) ──
+// ── Preset 14: Noir (orthochromatic: blue-sensitive, red-blind; S-curve keeps some midtones) ──
 vec3 noir_grade(vec3 c) {
   float Y = dot(c, vec3(0.10, 0.40, 0.50));
-  float contrastY = pow(clamp((Y - 0.06) * 1.12, 0.0, 1.0), 2.6);
-  return vec3(contrastY);
+  return vec3(pow(smoothstep(0.12, 0.88, Y), 1.35));
 }
 
-// ── Preset 15: Nokia 3310 / N-Gage (Bayer + RGB565) ──
-vec3 nokia_grade(vec3 c, vec2 fragCoord) {
-  int x = int(mod(fragCoord.x, 4.0));
-  int y = int(mod(fragCoord.y, 4.0));
+// ── Preset 15: Nokia (4x4 Bayer dither, 12-bit RGB444; the 176px grid is applied in main) ──
+vec3 nokia_grade(vec3 c, vec2 cell) {
+  int x = int(mod(cell.x, 4.0));
+  int y = int(mod(cell.y, 4.0));
   int idx = x + y * 4;
   float dither = 0.0;
   if (idx == 0) dither = 0.0;
@@ -556,165 +566,115 @@ vec3 nokia_grade(vec3 c, vec2 fragCoord) {
   else if (idx == 13) dither = 7.0;
   else if (idx == 14) dither = 13.0;
   else dither = 5.0;
-
-  float dVal = (dither / 16.0) - 0.5;
-  vec3 dithered = c + dVal * 0.12;
-
-  vec3 q;
-  q.r = floor(dithered.r * 31.0 + 0.5) / 31.0;
-  q.g = floor(dithered.g * 63.0 + 0.5) / 63.0;
-  q.b = floor(dithered.b * 31.0 + 0.5) / 31.0;
-  return clamp(q, 0.0, 1.0);
+  vec3 dithered = c + ((dither / 16.0) - 0.5) / 15.0;
+  return clamp(floor(dithered * 15.0 + 0.5) / 15.0, 0.0, 1.0);
 }
 
 // ── Preset 16: 1/4" Camcorder (Horizontal Chroma Smear) ──
-vec3 camcorder_grade(vec3 c, vec2 uvCoord, vec2 texelSize, sampler2D tex) {
-  mat3 rgb2yiq = mat3(0.299, -0.147, 0.615, 0.587, -0.289, -0.515, 0.114, 0.436, -0.100);
-  mat3 yiq2rgb = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
-
-  vec3 c_left = texture2D(tex, uvCoord - vec2(texelSize.x * 2.5, 0.0)).rgb;
-  vec3 c_right = texture2D(tex, uvCoord + vec2(texelSize.x * 2.5, 0.0)).rgb;
-
-  vec3 yiq_c = rgb2yiq * c;
-  vec3 yiq_l = rgb2yiq * c_left;
-  vec3 yiq_r = rgb2yiq * c_right;
-
-  float blur_I = (yiq_l.y + yiq_c.y * 2.0 + yiq_r.y) / 4.0;
-  float blur_Q = (yiq_l.z + yiq_c.z * 2.0 + yiq_r.z) / 4.0;
-
-  vec3 final_yiq = vec3(yiq_c.x, blur_I, blur_Q);
-  vec3 out_c = clamp(yiq2rgb * final_yiq, 0.0, 1.0);
-
+vec3 camcorder_grade(vec3 c, vec2 uvCoord, float big) {
+  vec2 off = vec2(max(2.5, big / 256.0) / res.x, 0.0);
+  vec3 yiq_c = RGB2YIQ * c;
+  vec3 yiq_l = RGB2YIQ * texture2D(img, uvCoord - off).rgb;
+  vec3 yiq_r = RGB2YIQ * texture2D(img, uvCoord + off).rgb;
+  vec2 chroma = (yiq_l.yz + yiq_c.yz * 2.0 + yiq_r.yz) / 4.0;
+  vec3 out_c = clamp(YIQ2RGB * vec3(yiq_c.x, chroma), 0.0, 1.0) * vec3(1.04, 1.0, 0.93);
   float lines = sin(uvCoord.y * 480.0 * 3.14159265) * 0.05;
   return out_c * (1.0 - lines);
 }
 
-// ── Preset 17: iPhone 3GS (OV3640 ISP Knee Curve + Softness) ──
-vec3 iphone3gs_grade(vec3 c, vec2 uvCoord) {
-  vec3 out_c;
-  out_c.r = 1.0 - exp(-c.r * 2.5);
-  out_c.g = 1.0 - exp(-c.g * 2.8);
-  out_c.b = 1.0 - exp(-c.b * 2.9);
-
-  float dist = distance(uvCoord, vec2(0.5));
-  float vignette = smoothstep(0.85, 0.35, dist);
-  return clamp(out_c * vignette, 0.0, 1.0);
+// ── Preset 17: iPhone 3GS (soft plastic lens, knee curve that still reaches white, lens falloff) ──
+vec3 iphone3gs_grade(vec3 c, vec2 uvCoord, float big) {
+  vec2 o = vec2(big / 700.0) / res;
+  vec3 soft = (texture2D(img, uvCoord + vec2(o.x, 0.0)).rgb + texture2D(img, uvCoord - vec2(o.x, 0.0)).rgb +
+               texture2D(img, uvCoord + vec2(0.0, o.y)).rgb + texture2D(img, uvCoord - vec2(0.0, o.y)).rgb) * 0.25;
+  c = mix(c, soft, 0.5);
+  vec3 k = vec3(2.5, 2.8, 2.9);
+  vec3 out_c = (1.0 - exp(-c * k)) / (1.0 - exp(-k));
+  out_c *= vec3(1.0, 1.02, 0.94);
+  float vig = mix(0.6, 1.0, 1.0 - smoothstep(0.3, 0.85, distance(uvCoord, vec2(0.5))));
+  return clamp(out_c * vig, 0.0, 1.0);
 }
 
 // ── Preset 18: Brainwash (Y2K Digicam CCD Bleed) ──
 vec3 brainwash_grade(vec3 c) {
-  mat3 satMatrix = mat3(
-    1.6, -0.3, -0.3,
-    -0.3, 1.6, -0.3,
-    -0.3, -0.3, 1.6
-  );
-  vec3 sat = clamp(satMatrix * c, 0.0, 1.0);
-  return smoothstep(0.04, 0.92, sat);
+  mat3 satMatrix = mat3(1.6, -0.3, -0.3, -0.3, 1.6, -0.3, -0.3, -0.3, 1.6);
+  return smoothstep(0.04, 0.92, clamp(satMatrix * c, 0.0, 1.0));
 }
 
 void main() {
   vec2 st = uv;
+  float big = max(res.x, res.y);
 
   // 1. Resolution / Pixelate 2x emulation
-  if (uPixel2x > 0.5) {
-    vec2 grid = res / 2.0;
-    st = floor(st * grid) / grid;
-  }
-  if (jpegRes < 0.99) {
-    vec2 grid = max(vec2(16.0), res * jpegRes);
-    st = floor(st * grid) / grid;
+  if (uPixel2x > 0.5) st = snap(st, res / 2.0);
+  if (jpegRes < 0.99) st = snap(st, max(vec2(16.0), res * jpegRes));
+  vec2 nokiaCell = vec2(0.0);
+  if (preset == 15) {
+    vec2 grid = mix(res, res * (176.0 / min(res.x, res.y)), amount);
+    nokiaCell = floor(st * grid);
+    st = (nokiaCell + 0.5) / grid;
   }
 
   // 2. Glitch coordinate distortions
-  if (glitchMode == 1 && glitchAmount > 0.01) { // Datamosh
-    vec2 block = floor(st * 16.0);
-    float shift = hash(block) * glitchAmount * 0.08;
-    if (hash(block + 1.3) > 0.6) st.x += shift;
-  } else if (glitchMode == 2 && glitchAmount > 0.01) { // VHS
-    float scan = sin(st.y * res.y * 0.5 + uTime * 5.0);
-    st.x += scan * glitchAmount * 0.005;
+  if (glitchMode == 1 && glitchAmount > 0.01) { // Datamosh: bright-enough blocks slide like broken motion vectors
+    vec2 grid = vec2(24.0, 16.0);
+    vec2 block = floor(st * grid);
+    float bright = luma(texture2D(img, (block + 0.5) / grid).rgb);
+    if (bright >= glitchThreshold && hash(block + 1.3) > 0.7 - glitchAmount * 0.4) {
+      st += (vec2(hash(block), hash(block + 7.1)) - 0.5) * vec2(0.2, 0.08) * glitchAmount;
+    }
+  } else if (glitchMode == 2 && glitchAmount > 0.01) { // VHS: each band of lines jitters sideways
+    float line = floor(st.y * 240.0);
+    st.x += (hash(vec2(line, floor(uTime * 8.0))) - 0.5) * glitchAmount * 0.012;
   }
 
   // Base texture sample with optional chromatic aberration (Glitch mode 4 - Galaxy)
-  vec3 o;
+  vec3 c;
   if (glitchMode == 4 && glitchAmount > 0.01) {
     vec2 dist = (st - 0.5) * glitchAmount * 0.04;
-    o.r = texture2D(img, st + dist).r;
-    o.g = texture2D(img, st).g;
-    o.b = texture2D(img, st - dist).b;
+    c.r = texture2D(img, st + dist).r;
+    c.g = texture2D(img, st).g;
+    c.b = texture2D(img, st - dist).b;
   } else {
-    o = texture2D(img, st).rgb;
+    c = texture2D(img, st).rgb;
   }
 
-  vec3 c = o;
-
-  // 3. Blur / Pixelate modes
-  if (blurMode == 1 && blurRadius > 0.5) { // Uniform blur
-    vec2 off = vec2(blurRadius) / res;
-    c = (texture2D(img, st + vec2(off.x, 0.0)).rgb +
-         texture2D(img, st - vec2(off.x, 0.0)).rgb +
-         texture2D(img, st + vec2(0.0, off.y)).rgb +
-         texture2D(img, st - vec2(0.0, off.y)).rgb) * 0.25;
-  } else if (blurMode == 2 && blurRadius > 0.5) { // Vignette blur
-    float dist = length(st - 0.5);
-    float factor = smoothstep(0.2, 0.6, dist) * blurRadius;
-    vec2 off = vec2(factor) / res;
-    vec3 bl = (texture2D(img, st + vec2(off.x, 0.0)).rgb +
-               texture2D(img, st - vec2(off.x, 0.0)).rgb +
-               texture2D(img, st + vec2(0.0, off.y)).rgb +
-               texture2D(img, st - vec2(0.0, off.y)).rgb) * 0.25;
-    c = mix(c, bl, smoothstep(0.2, 0.6, dist));
-  } else if (blurMode == 3 && blurRadius > 1.0) { // Pixelate mosaic
-    vec2 blocks = res / blurRadius;
-    vec2 bCoord = floor(st * blocks) / blocks;
-    c = texture2D(img, bCoord).rgb;
+  // 3. Blur / Pixelate modes (radius is in px on a 1000px photo)
+  float radius = blurRadius * big / 1000.0;
+  if (blurMode == 1 && blurRadius > 0.5) {
+    c = box_blur(st, vec2(radius) / res);
+  } else if (blurMode == 2 && blurRadius > 0.5) {
+    c = mix(c, box_blur(st, vec2(radius) / res), smoothstep(0.2, 0.6, length(st - 0.5)));
+  } else if (blurMode == 3 && blurRadius > 1.0) {
+    c = texture2D(img, snap(st, res / radius)).rgb;
   }
 
   // 4. Photometric Color Grading Presets (1-18)
   vec3 graded = c;
-  if (preset == 1) {
-    graded = nashville_grade(c);
-  } else if (preset == 2) {
-    graded = chief_keef_grade(c, st);
-  } else if (preset == 3) {
-    graded = nuke_grade(c, st, res, img);
-  } else if (preset == 4) {
-    graded = phreshboy_grade(c);
-  } else if (preset == 5) {
-    graded = sepia_grade(c);
-  } else if (preset == 6) {
-    graded = matte_2014_grade(c);
-  } else if (preset == 7) {
-    graded = banknote_grade(c);
-  } else if (preset == 8) {
-    graded = pandora_grade(c);
-  } else if (preset == 9) {
-    graded = bleach_bypass_grade(c);
-  } else if (preset == 10) {
-    graded = trix_bw_grade(c);
-  } else if (preset == 11) {
-    graded = cross_process_grade(c);
-  } else if (preset == 12) {
-    graded = faded_print_grade(c);
-  } else if (preset == 13) {
-    graded = teal_orange_grade(c);
-  } else if (preset == 14) {
-    graded = noir_grade(c);
-  } else if (preset == 15) {
-    graded = nokia_grade(c, st * res);
-  } else if (preset == 16) {
-    graded = camcorder_grade(c, st, 1.0 / res, img);
-  } else if (preset == 17) {
-    graded = iphone3gs_grade(c, st);
-  } else if (preset == 18) {
-    graded = brainwash_grade(c);
-  }
+  if (preset == 1) graded = nashville_grade(c);
+  else if (preset == 2) graded = chief_keef_grade(c, st);
+  else if (preset == 3) graded = nuke_grade(c, st, big);
+  else if (preset == 4) graded = phreshboy_grade(c);
+  else if (preset == 5) graded = sepia_grade(c);
+  else if (preset == 6) graded = matte_2014_grade(c);
+  else if (preset == 7) graded = banknote_grade(c, st * res, big);
+  else if (preset == 8) graded = pandora_grade(c);
+  else if (preset == 9) graded = bleach_bypass_grade(c);
+  else if (preset == 10) graded = trix_bw_grade(c);
+  else if (preset == 11) graded = cross_process_grade(c);
+  else if (preset == 12) graded = faded_print_grade(c);
+  else if (preset == 13) graded = teal_orange_grade(c);
+  else if (preset == 14) graded = noir_grade(c);
+  else if (preset == 15) graded = nokia_grade(c, nokiaCell);
+  else if (preset == 16) graded = camcorder_grade(c, st, big);
+  else if (preset == 17) graded = iphone3gs_grade(c, st, big);
+  else if (preset == 18) graded = brainwash_grade(c);
 
   c = mix(c, graded, amount);
 
   // 5. Sensor Degradation Module 1: CCD Bloom & Vertical Smear
   if (bloomAmount > 0.01) {
-    vec3 smear = apply_ccd_smear(st, 1.0 / res, img) * bloomAmount;
+    vec3 smear = apply_ccd_smear(st, max(3.0, res.y / 300.0) / res.y) * bloomAmount;
     vec3 bColor = vec3(1.0 + bloomTint * 0.3, 1.0, 1.0 - bloomTint * 0.3);
     c += smear * bColor * 1.5;
   }
@@ -729,80 +689,180 @@ void main() {
   c = c * (1.0 - fade * 0.32) + fade * 0.14;
   c *= 1.0 - vignette * smoothstep(0.3, 0.8, length(st - 0.5) * 1.25);
 
-  // 7. Sensor Degradation Module 3: Photographic Poisson-style Film Grain
+  // 7. Sensor Degradation Module 3: grain in film-grain-sized cells, CCD colour noise per pixel
   if (grain > 0.01) {
-    c = apply_film_grain(c, st, uTime, grain * 0.35);
+    c = apply_film_grain(c, floor(gl_FragCoord.xy / max(1.0, big / 1500.0)), uTime, grain * 0.35);
   }
   if (ccdNoise > 0.01) {
-    vec3 cnoise = vec3(hash(st * res + 1.0), hash(st * res + 2.0), hash(st * res + 3.0)) - 0.5;
+    vec3 cnoise = vec3(hash12(gl_FragCoord.xy + 1.7), hash12(gl_FragCoord.xy + 11.3), hash12(gl_FragCoord.xy + 23.9)) - 0.5;
     c += cnoise * ccdNoise * 0.3;
   }
 
-  // 8. Sensor Degradation Module 2: JPEG DCT Quantization Artifacts & Extras
+  // 8. Sensor Degradation Module 2: JPEG artifacts & extras
   if (jpegQual < 95.0) {
-    float q = clamp(1.0 - (jpegQual / 100.0), 0.0, 1.0);
-    c = apply_jpeg_dct(st, res, img, q);
+    c = apply_jpeg(c, st, clamp(1.0 - (jpegQual / 100.0), 0.0, 1.0), big);
   }
   if (uNoise > 0.5) {
-    c += (hash(st * 400.0) - 0.5) * 0.12;
+    c += (hash12(gl_FragCoord.xy * 1.7) - 0.5) * 0.12;
   }
-  if (uSharpen > 0.5) {
-    c = (c - 0.5) * 1.2 + 0.5;
+  if (uSharpen > 0.5) { // unsharp mask: add back the difference from a small blur
+    vec2 t = vec2(max(1.0, big / 1200.0)) / res;
+    vec3 bl = (texture2D(img, st + vec2(t.x, 0.0)).rgb + texture2D(img, st - vec2(t.x, 0.0)).rgb +
+               texture2D(img, st + vec2(0.0, t.y)).rgb + texture2D(img, st - vec2(0.0, t.y)).rgb) * 0.25;
+    c += (texture2D(img, st).rgb - bl) * 1.5;
   }
 
-  // 9. Glitch modes: VHS lines / LCD striping
+  // 9. Glitch modes: VHS tracking bar / LCD subpixel grid
   if (glitchMode == 2 && glitchAmount > 0.01) {
     float bar = smoothstep(0.9, 0.98, sin(st.y * 8.0 + uTime * 3.0));
-    c = mix(c, vec3(hash(st * 100.0)), bar * glitchAmount * 0.6);
+    c = mix(c, vec3(hash12(gl_FragCoord.xy)), bar * glitchAmount * 0.6);
   } else if (glitchMode == 3 && glitchAmount > 0.01) {
-    int sub = int(mod(st.x * res.x, 3.0));
+    float px = max(1.0, floor(big / 640.0));
+    int sub = int(mod(floor(st.x * res.x / px), 3.0));
     if (sub == 0) c.gb *= (1.0 - glitchAmount * 0.4);
     else if (sub == 1) c.rb *= (1.0 - glitchAmount * 0.4);
     else c.rg *= (1.0 - glitchAmount * 0.4);
+    if (mod(floor(st.y * res.y / px), 3.0) < 1.0) c *= 1.0 - glitchAmount * 0.3;
   }
 
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
-interface BakeStep {
-  id: string;
+const TABS = [
+  ['collage', 'Collage'],
+  ['swag', 'Swag Filters'],
+  ['goth', 'Goth Filters'],
+  ['jpeg', 'JPEG Degradation'],
+  ['ccd', 'CCD Bloom'],
+  ['camera', '1-Click Cameras'],
+  ['blur', 'Blur & Pixel'],
+  ['glitch', 'Glitch FX'],
+  ['versions', 'Versions'],
+] as const;
+type Tab = (typeof TABS)[number][0];
+
+/** A saved step. Undo / Redo move through these. */
+interface Version {
+  img: HTMLImageElement;
   name: string;
-  imgData: ImageData;
   time: string;
 }
+
+const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const forget = (vs: Version[]) => vs.forEach((v) => v.img.src.startsWith('blob:') && URL.revokeObjectURL(v.img.src));
 
 const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const { getToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram; texture: WebGLTexture } | null>(null);
+  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram } | null>(null);
 
-  // Images state
-  const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
-  const [baseImg, setBaseImg] = useState<HTMLImageElement | null>(null);
+  const [history, setHistory] = useState<Version[]>([]);
+  const [pos, setPos] = useState(0);
+  const saved = history[pos]?.img ?? null;
   const [title, setTitle] = useState(name || 'Untitled');
   const [params, setParams] = useState<DarkroomParams>(DEFAULT_PARAMS);
   const [compare, setCompare] = useState(false);
   const [status, setStatus] = useState('');
-  const [activeTab, setActiveTab] = useState<
-    'collage' | 'swag' | 'goth' | 'jpeg' | 'ccd' | 'camera' | 'blur' | 'glitch' | 'versions'
-  >('swag');
-
-  // Non-destructive Bake history
-  const [bakes, setBakes] = useState<BakeStep[]>([]);
-  const [activeBakeId, setActiveBakeId] = useState<string>('original');
+  const [activeTab, setActiveTab] = useState<Tab>('swag');
 
   // Server file picker state for iPhone / mobile & desktop
   const [showServerPicker, setShowServerPicker] = useState(false);
 
   // Collage State
   const [collageGrid, setCollageGrid] = useState<CollageGridPreset>('single');
-  const [collageAspect, setCollageAspect] = useState<AspectRatioPreset>('1:1');
+  const [collageAspect, setCollageAspect] = useState<AspectRatioPreset>('photo');
+  const [collageFit, setCollageFit] = useState<Fit>('crop');
   const [collageSlots, setCollageSlots] = useState<(HTMLImageElement | null)[]>([null]);
   const [collageBgColor, setCollageBgColor] = useState<string>('#222222');
   const [collageBgImage, setCollageBgImage] = useState<HTMLImageElement | null>(null);
   const [collageGap, setCollageGap] = useState<number>(8);
   const [textOverlays, setTextOverlays] = useState<TextOverlayItem[]>([]);
+  // The collage is only composed once it's been changed on the Collage tab, so just opening the tab changes nothing
   const [isCollageActive, setIsCollageActive] = useState<boolean>(false);
+  const [collageOut, setCollageOut] = useState<HTMLCanvasElement | null>(null);
+
+  // What the loupe edits: the collage preview while composing one, otherwise the current saved version
+  // (holding Compare on the Collage tab shows the photo before the collage)
+  const source: Source | null = activeTab === 'collage' && collageOut && !(compare && saved) ? collageOut : saved;
+  const dirty =
+    isCollageActive || (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => params[k] !== DEFAULT_PARAMS[k]);
+  const canUndo = dirty || pos > 0;
+  const canRedo = pos < history.length - 1;
+
+  const startWith = (img: HTMLImageElement, t?: string) => {
+    forget(history);
+    setHistory([{ img, name: 'Original', time: now() }]);
+    setPos(0);
+    setParams(DEFAULT_PARAMS);
+    setIsCollageActive(false);
+    setCollageSlots((prev) => [img, ...prev.slice(1)]);
+    if (t) setTitle(t);
+  };
+
+  const dropEdit = () => {
+    setParams(DEFAULT_PARAMS);
+    setIsCollageActive(false);
+  };
+
+  const switchTab = (t: Tab) => {
+    if (t === activeTab) return;
+    if (dirty) setStatus('Unsaved edit dropped. Press Save before switching tabs to keep an edit.');
+    dropEdit();
+    setActiveTab(t);
+  };
+
+  const goTo = (i: number) => {
+    dropEdit();
+    setPos(i);
+    setStatus(`Showing "${history[i].name}".`);
+  };
+
+  const undo = () => {
+    if (dirty) {
+      dropEdit();
+      return setStatus('Unsaved edit cleared.');
+    }
+    if (pos > 0) goTo(pos - 1);
+  };
+  const redo = () => {
+    if (!canRedo) return;
+    goTo(pos + 1);
+    if (dirty) setStatus(`Unsaved edit cleared. Showing "${history[pos + 1].name}".`);
+  };
+
+  // Save: the edit on screen becomes the new version the next edits build on
+  const saving = useRef(false); // a big PNG takes a moment; a double-click mustn't save twice
+  const save = () => {
+    const cv = canvasRef.current;
+    if (!cv || !dirty || saving.current) return;
+    saving.current = true;
+    const label =
+      activeTab === 'collage'
+        ? 'Collage'
+        : (params.preset && PRESETS.find((p) => p.id === params.preset)?.name) || TABS.find(([id]) => id === activeTab)![1];
+    cv.toBlob((b) => {
+      if (!b) {
+        saving.current = false;
+        return setStatus("Couldn't save this edit.");
+      }
+      const img = new Image();
+      img.onload = () => {
+        saving.current = false;
+        forget(history.slice(pos + 1)); // saving after an undo replaces the steps that were undone
+        const next = [...history.slice(0, pos + 1), { img, name: label, time: now() }];
+        if (next.length > 25) forget(next.splice(1, 1)); // ponytail: keeps the original + last 24 saves (~100MB each at 24MP)
+        setHistory(next);
+        setPos(next.length - 1);
+        dropEdit();
+        setStatus(`Saved "${label}". The next edit builds on it; Undo steps back.`);
+      };
+      img.onerror = () => {
+        saving.current = false;
+        setStatus("Couldn't save this edit.");
+      };
+      img.src = URL.createObjectURL(b);
+    }, 'image/png');
+  };
 
   // Switch collage grid and resize slots array gracefully
   const selectCollageGrid = (newGridId: CollageGridPreset) => {
@@ -812,37 +872,34 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     if (!def) return;
     setCollageSlots((prev) => {
       const next = [...prev];
-      if (!next[0] && (baseImg || originalImg)) {
-        next[0] = baseImg || originalImg;
-      }
       while (next.length < def.slotCount) next.push(null);
       return next.slice(0, def.slotCount);
     });
   };
 
-  // When switching to collage, automatically ensure the current photo is loaded into slot 1
+  // Opening the Collage tab puts the current saved version (with its edits) in slot 1,
+  // unless slot 1 holds a photo chosen for the collage
   useEffect(() => {
-    if (activeTab === 'collage') {
-      setIsCollageActive(true);
-      setCollageSlots((prev) => {
-        if (!prev[0] && (baseImg || originalImg)) {
-          const next = [...prev];
-          next[0] = baseImg || originalImg;
-          return next;
-        }
-        return prev;
-      });
-    }
-  }, [activeTab, baseImg, originalImg]);
+    // (not right after saving a collage: that would put the collage inside itself)
+    if (activeTab !== 'collage' || !saved || history[pos]?.name === 'Collage') return;
+    setCollageSlots((prev) => (!prev[0] || history.some((v) => v.img === prev[0]) ? [saved, ...prev.slice(1)] : prev));
+  }, [activeTab, saved]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-composite collage and update baseImg whenever collage parameters change
+  // Compose the collage preview whenever collage settings change
   useEffect(() => {
-    if (!isCollageActive) return;
+    if (!isCollageActive || activeTab !== 'collage') return setCollageOut(null);
     const gridDef = COLLAGE_GRIDS.find((g) => g.id === collageGrid) || COLLAGE_GRIDS[0];
     const aspectDef = ASPECT_RATIOS.find((a) => a.id === collageAspect) || ASPECT_RATIOS[0];
     const canvas = document.createElement('canvas');
-    canvas.width = aspectDef.width;
-    canvas.height = aspectDef.height;
+    if (aspectDef.id === 'photo') {
+      const [iw, ih] = collageSlots[0] ? dims(collageSlots[0]) : [1200, 1200];
+      const s = Math.min(1, Math.sqrt(16e6 / (iw * ih))); // up to 16MP: iPhone Safari's canvas limit
+      canvas.width = Math.round(iw * s);
+      canvas.height = Math.round(ih * s);
+    } else {
+      canvas.width = aspectDef.width;
+      canvas.height = aspectDef.height;
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -853,12 +910,10 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.fillStyle = collageBgColor || '#222222';
     ctx.fillRect(0, 0, W, H);
 
-    // 2. Custom Background image (stretch and shrink to fill)
-    if (collageBgImage) {
-      drawImageStretch(ctx, collageBgImage, 0, 0, W, H);
-    }
+    // 2. Custom Background image (always fills the frame)
+    if (collageBgImage) drawImageIn(ctx, collageBgImage, 0, 0, W, H, 'crop');
 
-    // 3. Render grid slots (stretch and shrink to fill slot bounds, no cropping)
+    // 3. Render grid slots
     const outerMargin = collageGap;
     const innerW = W - outerMargin * 2;
     const innerH = H - outerMargin * 2;
@@ -871,7 +926,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
 
       const img = collageSlots[idx];
       if (img) {
-        drawImageStretch(ctx, img, sx, sy, sw, sh);
+        drawImageIn(ctx, img, sx, sy, sw, sh, collageFit);
       } else {
         // Retro placeholder slot box
         ctx.save();
@@ -912,17 +967,13 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       ctx.restore();
     });
 
-    const dataUrl = canvas.toDataURL('image/png');
-    const compImg = new Image();
-    compImg.onload = () => {
-      setBaseImg(compImg);
-      if (!originalImg) setOriginalImg(compImg);
-    };
-    compImg.src = dataUrl;
+    setCollageOut(canvas);
   }, [
+    activeTab,
     isCollageActive,
     collageGrid,
     collageAspect,
+    collageFit,
     collageSlots,
     collageBgColor,
     collageBgImage,
@@ -940,13 +991,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       i.crossOrigin = 'anonymous';
       i.onload = () => {
         if (!live) return;
-        setOriginalImg(i);
-        setBaseImg(i);
-        setCollageSlots((prev) => {
-          const next = [...prev];
-          next[0] = i;
-          return next;
-        });
+        startWith(i);
         setStatus('');
       };
       i.onerror = () => live && setStatus("Couldn't open this photo.");
@@ -962,164 +1007,91 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     if (!f) return;
     const i = new Image();
     i.onload = () => {
-      setOriginalImg(i);
-      setBaseImg(i);
-      setCollageSlots((prev) => {
-        const next = [...prev];
-        next[0] = i;
-        return next;
-      });
-      setTitle(f.name);
-      setBakes([]);
-      setActiveBakeId('original');
+      startWith(i, f.name);
       setStatus('');
     };
     i.onerror = () => setStatus("That file isn't an image this browser can open.");
     i.src = URL.createObjectURL(f);
   };
 
-  // Setup WebGL texture whenever baseImg changes
+  // Upload the picture to the GPU whenever it changes (the shader program is built once per canvas)
   useEffect(() => {
     const cv = canvasRef.current;
-    if (!baseImg || !cv) return;
-    const ctx = cv.getContext('webgl', { preserveDrawingBuffer: true });
-    if (!ctx) return setStatus("This browser can't run WebGL, which Darkroom needs.");
-
+    if (!source || !cv) return;
+    if (glRef.current?.ctx.canvas !== cv) {
+      const ctx = cv.getContext('webgl', { preserveDrawingBuffer: true });
+      if (!ctx) return setStatus("This browser can't run WebGL, which Darkroom needs.");
+      const prog = ctx.createProgram()!;
+      for (const [type, src] of [
+        [ctx.VERTEX_SHADER, VERT],
+        [ctx.FRAGMENT_SHADER, FRAG],
+      ] as const) {
+        const s = ctx.createShader(type)!;
+        ctx.shaderSource(s, src);
+        ctx.compileShader(s);
+        if (!ctx.getShaderParameter(s, ctx.COMPILE_STATUS)) return setStatus('Shader error: ' + ctx.getShaderInfoLog(s));
+        ctx.attachShader(prog, s);
+      }
+      ctx.linkProgram(prog);
+      if (!ctx.getProgramParameter(prog, ctx.LINK_STATUS)) {
+        return setStatus('Shader compilation error: ' + ctx.getProgramInfoLog(prog));
+      }
+      ctx.useProgram(prog);
+      ctx.bindBuffer(ctx.ARRAY_BUFFER, ctx.createBuffer());
+      ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), ctx.STATIC_DRAW);
+      ctx.enableVertexAttribArray(0);
+      ctx.vertexAttribPointer(0, 2, ctx.FLOAT, false, 0, 0);
+      ctx.bindTexture(ctx.TEXTURE_2D, ctx.createTexture());
+      ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, true);
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_S, ctx.CLAMP_TO_EDGE);
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_T, ctx.CLAMP_TO_EDGE);
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_MIN_FILTER, ctx.LINEAR);
+      glRef.current = { ctx, prog };
+    }
+    const { ctx } = glRef.current;
+    const [w, h] = dims(source);
     const max = Math.min(ctx.getParameter(ctx.MAX_TEXTURE_SIZE), 8192);
-    const scale = Math.min(1, max / Math.max(baseImg.naturalWidth, baseImg.naturalHeight));
-    cv.width = Math.round(baseImg.naturalWidth * scale);
-    cv.height = Math.round(baseImg.naturalHeight * scale);
-
-    const prog = ctx.createProgram()!;
-    for (const [type, src] of [
-      [ctx.VERTEX_SHADER, VERT],
-      [ctx.FRAGMENT_SHADER, FRAG],
-    ] as const) {
-      const s = ctx.createShader(type)!;
-      ctx.shaderSource(s, src);
-      ctx.compileShader(s);
-      ctx.attachShader(prog, s);
-    }
-    ctx.linkProgram(prog);
-    if (!ctx.getProgramParameter(prog, ctx.LINK_STATUS)) {
-      return setStatus('Shader compilation error: ' + ctx.getProgramInfoLog(prog));
-    }
-    ctx.useProgram(prog);
-
-    ctx.bindBuffer(ctx.ARRAY_BUFFER, ctx.createBuffer());
-    ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), ctx.STATIC_DRAW);
-    ctx.enableVertexAttribArray(0);
-    ctx.vertexAttribPointer(0, 2, ctx.FLOAT, false, 0, 0);
-
-    const texture = ctx.createTexture()!;
-    ctx.bindTexture(ctx.TEXTURE_2D, texture);
-    ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, true);
-    ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_S, ctx.CLAMP_TO_EDGE);
-    ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_T, ctx.CLAMP_TO_EDGE);
-    ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_MIN_FILTER, ctx.LINEAR);
-    ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, baseImg);
+    const scale = Math.min(1, max / Math.max(w, h));
+    cv.width = Math.round(w * scale);
+    cv.height = Math.round(h * scale);
+    ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, source);
     ctx.viewport(0, 0, cv.width, cv.height);
-
-    glRef.current = { ctx, prog, texture };
     if (scale < 1) setStatus(`Preview scaled to ${cv.width}×${cv.height} (max GPU limit).`);
-  }, [baseImg]);
+  }, [source]);
 
   // Re-render WebGL frame on param update or compare
   useEffect(() => {
-    if (!glRef.current || !canvasRef.current) return;
+    if (!glRef.current || !canvasRef.current || !source) return;
     const { ctx, prog } = glRef.current;
     const p = compare ? DEFAULT_PARAMS : params;
+    const u = (n: string) => ctx.getUniformLocation(prog, n);
 
-    ctx.uniform2f(ctx.getUniformLocation(prog, 'res'), canvasRef.current.width, canvasRef.current.height);
-    ctx.uniform1i(ctx.getUniformLocation(prog, 'preset'), p.preset);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'amount'), p.amount);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'contrast'), p.contrast);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'warmth'), p.warmth);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'fade'), p.fade);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'vignette'), p.vignette);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'grain'), p.iphone6Grain ? Math.max(p.grain, 0.45) : p.grain);
-
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'bloomAmount'), p.bloomAmount);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'bloomTint'), p.bloomTint);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'lensReflection'), p.lensReflection);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'ccdNoise'), p.ccdNoise);
-
-    ctx.uniform1i(ctx.getUniformLocation(prog, 'blurMode'), p.blurMode);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'blurRadius'), p.blurRadius);
-
-    ctx.uniform1i(ctx.getUniformLocation(prog, 'glitchMode'), p.glitchMode);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'glitchAmount'), p.glitchAmount);
-
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'jpegRes'), p.resolution);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'jpegQual'), p.jpegQuality);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'uNoise'), p.jpegNoise ? 1.0 : 0.0);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'uSharpen'), p.jpegSharpen ? 1.0 : 0.0);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'uPixel2x'), p.pixelate2x ? 1.0 : 0.0);
-    ctx.uniform1f(ctx.getUniformLocation(prog, 'uTime'), (Date.now() % 100000) / 1000.0);
+    ctx.uniform2f(u('res'), canvasRef.current.width, canvasRef.current.height);
+    ctx.uniform1i(u('preset'), p.preset);
+    ctx.uniform1f(u('amount'), p.amount);
+    ctx.uniform1f(u('contrast'), p.contrast);
+    ctx.uniform1f(u('warmth'), p.warmth);
+    ctx.uniform1f(u('fade'), p.fade);
+    ctx.uniform1f(u('vignette'), p.vignette);
+    ctx.uniform1f(u('grain'), p.iphone6Grain ? Math.max(p.grain, 0.45) : p.grain);
+    ctx.uniform1f(u('bloomAmount'), p.bloomAmount);
+    ctx.uniform1f(u('bloomTint'), p.bloomTint);
+    ctx.uniform1f(u('lensReflection'), p.lensReflection);
+    ctx.uniform1f(u('ccdNoise'), p.ccdNoise);
+    ctx.uniform1i(u('blurMode'), p.blurMode);
+    ctx.uniform1f(u('blurRadius'), p.blurRadius);
+    ctx.uniform1i(u('glitchMode'), p.glitchMode);
+    ctx.uniform1f(u('glitchAmount'), p.glitchAmount);
+    ctx.uniform1f(u('glitchThreshold'), p.glitchThreshold);
+    ctx.uniform1f(u('jpegRes'), p.resolution);
+    ctx.uniform1f(u('jpegQual'), p.jpegQuality);
+    ctx.uniform1f(u('uNoise'), p.jpegNoise ? 1.0 : 0.0);
+    ctx.uniform1f(u('uSharpen'), p.jpegSharpen ? 1.0 : 0.0);
+    ctx.uniform1f(u('uPixel2x'), p.pixelate2x ? 1.0 : 0.0);
+    ctx.uniform1f(u('uTime'), (Date.now() % 100000) / 1000.0);
 
     ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
-  }, [baseImg, params, compare]);
-
-  // Non-destructive Bake: bake current canvas as new base image
-  const bakeCurrentEdit = () => {
-    if (!canvasRef.current) return;
-    const cv = canvasRef.current;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = cv.width;
-    offscreen.height = cv.height;
-    const octx = offscreen.getContext('2d');
-    if (!octx) return;
-    octx.drawImage(cv, 0, 0);
-    const imgData = octx.getImageData(0, 0, cv.width, cv.height);
-
-    const stepId = `bake-${Date.now()}`;
-    const activePresetName = PRESETS.find((pr) => pr.id === params.preset)?.name || 'Custom';
-    const newStep: BakeStep = {
-      id: stepId,
-      name: `Bake ${bakes.length + 1} (${activePresetName})`,
-      imgData,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    const newImg = new Image();
-    newImg.onload = () => {
-      setBaseImg(newImg);
-      setBakes((prev) => [...prev, newStep]);
-      setActiveBakeId(stepId);
-      setParams(DEFAULT_PARAMS);
-      setStatus(`Bake applied. Canvas is ready for layered stacking.`);
-    };
-    newImg.src = offscreen.toDataURL('image/png');
-  };
-
-  // Switch to an earlier bake version or original
-  const restoreBake = (stepId: string) => {
-    if (stepId === 'original') {
-      if (originalImg) {
-        setBaseImg(originalImg);
-        setActiveBakeId('original');
-        setParams(DEFAULT_PARAMS);
-        setStatus('Reverted to original photo.');
-      }
-      return;
-    }
-    const target = bakes.find((b) => b.id === stepId);
-    if (!target) return;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = target.imgData.width;
-    offscreen.height = target.imgData.height;
-    const octx = offscreen.getContext('2d');
-    if (!octx) return;
-    octx.putImageData(target.imgData, 0, 0);
-    const img = new Image();
-    img.onload = () => {
-      setBaseImg(img);
-      setActiveBakeId(stepId);
-      setParams(DEFAULT_PARAMS);
-      setStatus(`Restored to ${target.name}.`);
-    };
-    img.src = offscreen.toDataURL('image/png');
-  };
+  }, [source, params, compare]);
 
   const toJpeg = () =>
     new Promise<Blob>((ok, no) =>
@@ -1139,7 +1111,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
 
   const saveToFolder = async () => {
     if (!app) return;
-    setStatus('Saving to folder...');
+    setStatus('Exporting to folder...');
     try {
       const body = await toJpeg();
       const q = `upload=${crypto.randomUUID()}&chunks=1&size=${body.size}&chunkSize=${body.size}&chunk=0`;
@@ -1149,9 +1121,9 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         body,
       });
       if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-      setStatus(`Saved "${outName}" in ${dir.join('/') || 'Root'}.`);
+      setStatus(`Exported "${outName}" to ${dir.join('/') || 'Root'}.`);
     } catch (e) {
-      setStatus(`Failed to save: ${(e as Error).message}`);
+      setStatus(`Failed to export: ${(e as Error).message}`);
     }
   };
 
@@ -1159,8 +1131,58 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const setParam = <K extends keyof DarkroomParams>(key: K, val: DarkroomParams[K]) =>
     setParams((prev) => ({ ...prev, [key]: val }));
 
+  const slider = (label: string, key: keyof DarkroomParams, min: number, max: number, step: number, shown: string) => (
+    <label style={{ fontSize: 11 }}>
+      {label}: {shown}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={params[key] as number}
+        onChange={(e) => setParam(key, +e.target.value as never)}
+        style={{ width: '100%' }}
+      />
+    </label>
+  );
+  const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
+  const strength = slider('Strength', 'amount', 0, 1, 0.01, pct(params.amount));
+
+  const presetButtons = (category: FilterPreset['category'], padding = '2px 8px') => (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      {PRESETS.filter((p) => p.category === category).map((p) => (
+        <button
+          key={p.id}
+          onClick={() => setParam('preset', p.id)}
+          style={{
+            ...button,
+            fontSize: 11,
+            padding,
+            fontWeight: params.preset === p.id ? 700 : 400,
+            background: params.preset === p.id ? '#000080' : '#c0c0c0',
+            color: params.preset === p.id ? '#fff' : '#000',
+          }}
+          title={p.desc}
+        >
+          {p.name}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div style={{ ...shell, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <div
+      style={{ ...shell, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}
+      onKeyDown={(e) => {
+        // Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z), except while typing text
+        if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement).matches('input[type=text],input[type=number],textarea')) return;
+        const k = e.key.toLowerCase();
+        if (k !== 'z' && k !== 'y') return;
+        e.preventDefault();
+        if (k === 'y' || e.shiftKey) redo();
+        else undo();
+      }}
+    >
       {/* ── Retro Win98 Menu / Action Bar ── */}
       <div style={{ ...toolbar, flexWrap: 'wrap', gap: 4, padding: '3px 4px' }}>
         <label style={{ ...button, cursor: 'pointer' }}>
@@ -1176,32 +1198,39 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         </button>
         <button
           style={{ ...button, fontWeight: compare ? 700 : 400, background: compare ? '#000080' : '#c0c0c0', color: compare ? '#fff' : '#000' }}
-          disabled={!baseImg}
+          disabled={!source}
           onPointerDown={() => setCompare(true)}
           onPointerUp={() => setCompare(false)}
           onPointerLeave={() => setCompare(false)}
-          title="Press & hold to compare original"
+          title="Press & hold to see the photo without this tab's edit"
         >
           {compare ? '◀ Comparing...' : 'Hold: Compare'}
         </button>
-        <button
-          style={{ ...button, background: '#008080', color: '#fff', fontWeight: 700 }}
-          disabled={!baseImg}
-          onClick={bakeCurrentEdit}
-          title="Bake current color grade into a new base layer so you can stack more effects"
-        >
-          Bake Edit
+        <button style={button} disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z): clear the unsaved edit, or step back one save">
+          ↶ Undo
         </button>
-        <button style={button} disabled={!baseImg} onClick={download}>
+        <button style={button} disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Y)">
+          ↷ Redo
+        </button>
+        <button
+          style={{ ...button, background: dirty ? '#008080' : '#c0c0c0', color: dirty ? '#fff' : '#000', fontWeight: 700 }}
+          disabled={!source || !dirty}
+          onClick={save}
+          title="Keep this edit. Other tabs then edit on top of it; switching tabs without saving drops it."
+        >
+          Save
+        </button>
+        <button style={button} disabled={!source} onClick={download}>
           Download
         </button>
         {app && (
-          <button style={button} disabled={!baseImg} onClick={saveToFolder}>
-            Save to Folder
+          <button style={button} disabled={!source} onClick={saveToFolder}>
+            Export to Folder
           </button>
         )}
         <span style={{ marginLeft: 6, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {title} {bakes.length > 0 ? `(Layer ${bakes.length + 1})` : ''}
+          {title} {history.length > 1 ? `(version ${pos + 1} of ${history.length})` : ''}
+          {dirty ? ' • unsaved' : ''}
         </span>
       </div>
 
@@ -1224,13 +1253,13 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             overflow: 'hidden',
           }}
           onPointerDown={(e) => {
-            // Long press / click-hold on photo also compares
-            if (e.button === 0) setCompare(true);
+            // Long press / click-hold on photo also compares (not on a collage: that swaps the whole picture; use the button)
+            if (e.button === 0 && activeTab !== 'collage') setCompare(true);
           }}
           onPointerUp={() => setCompare(false)}
           onPointerLeave={() => setCompare(false)}
         >
-          {baseImg ? (
+          {source ? (
             <canvas
               ref={canvasRef}
               style={{
@@ -1258,7 +1287,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 <button
                   style={{ ...button, fontWeight: 700, background: '#008080', color: '#fff' }}
                   onClick={() => {
-                    setActiveTab('collage');
+                    switchTab('collage');
                     setIsCollageActive(true);
                   }}
                 >
@@ -1267,7 +1296,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               </div>
             </div>
           )}
-          {compare && (
+          {compare && source && (
             <div
               style={{
                 position: 'absolute',
@@ -1281,7 +1310,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 border: '1px solid #fff',
               }}
             >
-              ORIGINAL PHOTO
+              BEFORE THIS EDIT
             </div>
           )}
         </div>
@@ -1310,22 +1339,12 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               whiteSpace: 'nowrap',
             }}
           >
-            {[
-              ['collage', 'Collage'],
-              ['swag', 'Swag Filters'],
-              ['goth', 'Goth Filters'],
-              ['jpeg', 'JPEG Degradation'],
-              ['ccd', 'CCD Bloom'],
-              ['camera', '1-Click Cameras'],
-              ['blur', 'Blur & Pixel'],
-              ['glitch', 'Glitch FX'],
-              ['versions', `Versions (${bakes.length})`],
-            ].map(([tabId, tabTitle]) => {
+            {TABS.map(([tabId, tabTitle]) => {
               const active = activeTab === tabId;
               return (
                 <button
                   key={tabId}
-                  onClick={() => setActiveTab(tabId as any)}
+                  onClick={() => switchTab(tabId)}
                   style={{
                     ...button,
                     borderBottom: active ? 'none' : button.borderBottom,
@@ -1337,7 +1356,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                     fontSize: 11,
                   }}
                 >
-                  {tabTitle}
+                  {tabId === 'versions' ? `${tabTitle} (${history.length})` : tabTitle}
                 </button>
               );
             })}
@@ -1374,11 +1393,9 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   </div>
                 </div>
 
-                {/* 2. Aspect Ratios */}
+                {/* 2. Aspect Ratios + how photos fill their frames */}
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>
-                    Aspect Ratios (5 standards):
-                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Aspect Ratio:</div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {ASPECT_RATIOS.map((a) => (
                       <button
@@ -1397,6 +1414,31 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         }}
                       >
                         {a.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Photos in frames:</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {FITS.map(([id, label, desc]) => (
+                      <button
+                        key={id}
+                        title={desc}
+                        onClick={() => {
+                          setCollageFit(id);
+                          setIsCollageActive(true);
+                        }}
+                        style={{
+                          ...button,
+                          fontSize: 11,
+                          padding: '2px 8px',
+                          fontWeight: collageFit === id ? 700 : 400,
+                          background: collageFit === id ? '#000080' : '#c0c0c0',
+                          color: collageFit === id ? '#fff' : '#000',
+                        }}
+                      >
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -1425,9 +1467,10 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                                     im.onload = () => resolve(im);
                                     im.onerror = reject;
                                     im.src = URL.createObjectURL(f);
-                                  })
-                              )
-                            );
+                                  }),
+                              ),
+                            ).catch(() => null);
+                            if (!loaded) return setStatus("One of those files isn't an image this browser can open.");
                             setCollageSlots((prev) => {
                               const next = [...prev];
                               const gridDef = COLLAGE_GRIDS.find((g) => g.id === collageGrid) || COLLAGE_GRIDS[0];
@@ -1443,7 +1486,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                       </label>
                     </div>
                     <span style={{ fontSize: 11, color: '#444' }}>
-                      Populates slots in order. You can also customize individual slots below:
+                      Slot 1 starts as your current edit. Populates slots in order, or change single slots below:
                     </span>
                   </div>
 
@@ -1743,62 +1786,11 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             {/* ── Swag Filters ── */}
             {activeTab === 'swag' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {PRESETS.filter((p) => p.category === 'swag').map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setParam('preset', p.id)}
-                      style={{
-                        ...button,
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        fontWeight: params.preset === p.id ? 700 : 400,
-                        background: params.preset === p.id ? '#000080' : '#c0c0c0',
-                        color: params.preset === p.id ? '#fff' : '#000',
-                      }}
-                      title={p.desc}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
+                {presetButtons('swag')}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
-                  <label style={{ fontSize: 11 }}>
-                    Strength: {(params.amount * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.amount}
-                      onChange={(e) => setParam('amount', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Vignette: {(params.vignette * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.vignette}
-                      onChange={(e) => setParam('vignette', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Grain: {(params.grain * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.grain}
-                      onChange={(e) => setParam('grain', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
+                  {strength}
+                  {slider('Vignette', 'vignette', 0, 1, 0.01, pct(params.vignette))}
+                  {slider('Grain', 'grain', 0, 1, 0.01, pct(params.grain))}
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <input
                       type="checkbox"
@@ -1814,62 +1806,12 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             {/* ── Goth Filters ── */}
             {activeTab === 'goth' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {PRESETS.filter((p) => p.category === 'goth').map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setParam('preset', p.id)}
-                      style={{
-                        ...button,
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        fontWeight: params.preset === p.id ? 700 : 400,
-                        background: params.preset === p.id ? '#000080' : '#c0c0c0',
-                        color: params.preset === p.id ? '#fff' : '#000',
-                      }}
-                      title={p.desc}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
+                {presetButtons('goth')}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
-                  <label style={{ fontSize: 11 }}>
-                    Contrast: {params.contrast.toFixed(2)}x
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={2.0}
-                      step={0.01}
-                      value={params.contrast}
-                      onChange={(e) => setParam('contrast', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Warmth: {params.warmth.toFixed(2)}
-                    <input
-                      type="range"
-                      min={-1}
-                      max={1}
-                      step={0.02}
-                      value={params.warmth}
-                      onChange={(e) => setParam('warmth', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Fade (lifted blacks): {(params.fade * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.fade}
-                      onChange={(e) => setParam('fade', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
+                  {strength}
+                  {slider('Contrast', 'contrast', 0.5, 2, 0.01, `${params.contrast.toFixed(2)}x`)}
+                  {slider('Warmth', 'warmth', -1, 1, 0.02, params.warmth.toFixed(2))}
+                  {slider('Fade (lifted blacks)', 'fade', 0, 1, 0.01, pct(params.fade))}
                 </div>
               </div>
             )}
@@ -1879,17 +1821,16 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span style={{ fontSize: 11, fontWeight: 700 }}>Quality Presets:</span>
-                  {[
-                    ['High', 85, 1.0],
-                    ['Medium', 45, 0.65],
-                    ['Low', 12, 0.35],
-                  ].map(([qName, qVal, rVal]) => (
+                  {(
+                    [
+                      ['High', 85, 1.0],
+                      ['Medium', 45, 0.65],
+                      ['Low', 12, 0.35],
+                    ] as const
+                  ).map(([qName, qVal, rVal]) => (
                     <button
-                      key={qName as string}
-                      onClick={() => {
-                        setParam('jpegQuality', qVal as number);
-                        setParam('resolution', rVal as number);
-                      }}
+                      key={qName}
+                      onClick={() => setParams((prev) => ({ ...prev, jpegQuality: qVal, resolution: rVal }))}
                       style={{ ...button, fontSize: 10, padding: '1px 6px' }}
                     >
                       {qName}
@@ -1900,30 +1841,8 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
-                  <label style={{ fontSize: 11 }}>
-                    JPEG Quality: {Math.round(params.jpegQuality)}%
-                    <input
-                      type="range"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={params.jpegQuality}
-                      onChange={(e) => setParam('jpegQuality', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Resolution Scale: {Math.round(params.resolution * 100)}%
-                    <input
-                      type="range"
-                      min={0.05}
-                      max={1.0}
-                      step={0.01}
-                      value={params.resolution}
-                      onChange={(e) => setParam('resolution', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
+                  {slider('JPEG Quality', 'jpegQuality', 1, 100, 1, `${Math.round(params.jpegQuality)}%`)}
+                  {slider('Resolution Scale', 'resolution', 0.05, 1, 0.01, pct(params.resolution))}
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1956,84 +1875,21 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
 
             {/* ── CCD Bloom ── */}
             {activeTab === 'ccd' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
-                  <label style={{ fontSize: 11 }}>
-                    Bloom Amount: {(params.bloomAmount * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.bloomAmount}
-                      onChange={(e) => setParam('bloomAmount', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Bloom Tint: {params.bloomTint < 0 ? 'Cool' : params.bloomTint > 0 ? 'Warm' : 'Neutral'}
-                    <input
-                      type="range"
-                      min={-1}
-                      max={1}
-                      step={0.05}
-                      value={params.bloomTint}
-                      onChange={(e) => setParam('bloomTint', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    Lens Reflection: {(params.lensReflection * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.lensReflection}
-                      onChange={(e) => setParam('lensReflection', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11 }}>
-                    CCD Sensor Noise: {(params.ccdNoise * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={params.ccdNoise}
-                      onChange={(e) => setParam('ccdNoise', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
+                {slider('Bloom Amount', 'bloomAmount', 0, 1, 0.01, pct(params.bloomAmount))}
+                {slider('Bloom Tint', 'bloomTint', -1, 1, 0.05, params.bloomTint < 0 ? 'Cool' : params.bloomTint > 0 ? 'Warm' : 'Neutral')}
+                {slider('Lens Reflection', 'lensReflection', 0, 1, 0.01, pct(params.lensReflection))}
+                {slider('CCD Sensor Noise', 'ccdNoise', 0, 1, 0.01, pct(params.ccdNoise))}
               </div>
             )}
 
             {/* ── 1-Click Cameras ── */}
             {activeTab === 'camera' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {PRESETS.filter((p) => p.category === 'camera').map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setParam('preset', p.id)}
-                      style={{
-                        ...button,
-                        fontSize: 11,
-                        padding: '4px 8px',
-                        fontWeight: params.preset === p.id ? 700 : 400,
-                        background: params.preset === p.id ? '#000080' : '#c0c0c0',
-                        color: params.preset === p.id ? '#fff' : '#000',
-                      }}
-                      title={p.desc}
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
+                {presetButtons('camera', '4px 8px')}
+                {params.preset > 0 && strength}
                 <div style={{ fontSize: 11, color: '#444', fontStyle: 'italic', marginTop: 4 }}>
-                  {PRESETS.find((p) => p.id === params.preset)?.desc || 'Select a vintage camera profile above.'}
+                  {(params.preset && PRESETS.find((p) => p.id === params.preset)?.desc) || 'Select a vintage camera profile above.'}
                 </div>
               </div>
             )}
@@ -2042,15 +1898,18 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             {activeTab === 'blur' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {[
-                    [0, 'Off'],
-                    [1, 'Uniform Blur'],
-                    [2, 'Vignette Blur (Center sharp)'],
-                    [3, 'Pixelate Mosaic'],
-                  ].map(([mId, mLabel]) => (
+                  {(
+                    [
+                      [0, 'Off'],
+                      [1, 'Uniform Blur'],
+                      [2, 'Vignette Blur (Center sharp)'],
+                      [3, 'Pixelate Mosaic'],
+                    ] as const
+                  ).map(([mId, mLabel]) => (
                     <button
-                      key={mId as number}
-                      onClick={() => setParam('blurMode', mId as any)}
+                      key={mId}
+                      // A mode starts at a visible size instead of doing nothing until the slider moves
+                      onClick={() => setParams((prev) => ({ ...prev, blurMode: mId, blurRadius: mId ? prev.blurRadius || 8 : 0 }))}
                       style={{
                         ...button,
                         fontSize: 11,
@@ -2064,20 +1923,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                     </button>
                   ))}
                 </div>
-                {params.blurMode > 0 && (
-                  <label style={{ fontSize: 11 }}>
-                    Radius / Pixel Size: {params.blurRadius.toFixed(0)} px
-                    <input
-                      type="range"
-                      min={1}
-                      max={25}
-                      step={1}
-                      value={params.blurRadius}
-                      onChange={(e) => setParam('blurRadius', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
-                )}
+                {params.blurMode > 0 && slider('Radius / Pixel Size', 'blurRadius', 1, 25, 1, `${params.blurRadius.toFixed(0)}`)}
               </div>
             )}
 
@@ -2085,16 +1931,20 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             {activeTab === 'glitch' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {[
-                    [0, 'Off'],
-                    [1, 'Datamosh'],
-                    [2, 'VHS Tracking'],
-                    [3, 'LCD Subpixels'],
-                    [4, 'Galaxy (Chroma Fringing)'],
-                  ].map(([gId, gLabel]) => (
+                  {(
+                    [
+                      [0, 'Off'],
+                      [1, 'Datamosh'],
+                      [2, 'VHS Tracking'],
+                      [3, 'LCD Subpixels'],
+                      [4, 'Galaxy (Chroma Fringing)'],
+                    ] as const
+                  ).map(([gId, gLabel]) => (
                     <button
-                      key={gId as number}
-                      onClick={() => setParam('glitchMode', gId as any)}
+                      key={gId}
+                      onClick={() =>
+                        setParams((prev) => ({ ...prev, glitchMode: gId, glitchAmount: gId ? prev.glitchAmount || 0.5 : 0, glitchThreshold: gId ? prev.glitchThreshold : 0 }))
+                      }
                       style={{
                         ...button,
                         fontSize: 11,
@@ -2109,56 +1959,43 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   ))}
                 </div>
                 {params.glitchMode > 0 && (
-                  <label style={{ fontSize: 11 }}>
-                    Glitch Intensity: {(params.glitchAmount * 100).toFixed(0)}%
-                    <input
-                      type="range"
-                      min={0.05}
-                      max={1.0}
-                      step={0.02}
-                      value={params.glitchAmount}
-                      onChange={(e) => setParam('glitchAmount', +e.target.value)}
-                      style={{ width: '100%' }}
-                    />
-                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
+                    {slider('Glitch Intensity', 'glitchAmount', 0.05, 1, 0.02, pct(params.glitchAmount))}
+                    {params.glitchMode === 1 &&
+                      slider(
+                        'Threshold (only blocks brighter than this move)',
+                        'glitchThreshold',
+                        0,
+                        1,
+                        0.01,
+                        pct(params.glitchThreshold),
+                      )}
+                  </div>
                 )}
               </div>
             )}
 
-            {/* ── Versions & Bake Drawer ── */}
+            {/* ── Versions ── */}
             {activeTab === 'versions' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ fontSize: 11, color: '#333', marginBottom: 2 }}>
-                  Non-destructive edit stack. Click any step to restore or inspect.
+                  Every Save adds a version. Click one to go back to it; saving from there replaces the later ones.
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={() => restoreBake('original')}
-                    style={{
-                      ...button,
-                      fontSize: 11,
-                      padding: '3px 8px',
-                      fontWeight: activeBakeId === 'original' ? 700 : 400,
-                      background: activeBakeId === 'original' ? '#000080' : '#c0c0c0',
-                      color: activeBakeId === 'original' ? '#fff' : '#000',
-                    }}
-                  >
-                    Original Base
-                  </button>
-                  {bakes.map((b) => (
+                  {history.map((v, i) => (
                     <button
-                      key={b.id}
-                      onClick={() => restoreBake(b.id)}
+                      key={i}
+                      onClick={() => goTo(i)}
                       style={{
                         ...button,
                         fontSize: 11,
                         padding: '3px 8px',
-                        fontWeight: activeBakeId === b.id ? 700 : 400,
-                        background: activeBakeId === b.id ? '#000080' : '#c0c0c0',
-                        color: activeBakeId === b.id ? '#fff' : '#000',
+                        fontWeight: pos === i ? 700 : 400,
+                        background: pos === i ? '#000080' : '#c0c0c0',
+                        color: pos === i ? '#fff' : '#000',
                       }}
                     >
-                      {b.name} <span style={{ fontSize: 9, opacity: 0.8 }}>({b.time})</span>
+                      {i + 1}. {v.name} <span style={{ fontSize: 9, opacity: 0.8 }}>({v.time})</span>
                     </button>
                   ))}
                 </div>
@@ -2191,16 +2028,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             const i = new Image();
             i.crossOrigin = 'anonymous';
             i.onload = () => {
-              setOriginalImg(i);
-              setBaseImg(i);
-              setCollageSlots((prev) => {
-                const next = [...prev];
-                next[0] = i;
-                return next;
-              });
-              setTitle(fileName);
-              setBakes([]);
-              setActiveBakeId('original');
+              startWith(i, fileName);
               setStatus(`Opened ${fileName} from server.`);
             };
             i.onerror = () => setStatus(`Could not open ${fileName} from server.`);

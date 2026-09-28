@@ -228,6 +228,18 @@ export const Taskbar: React.FC = () => {
         >
           {timeStr}
         </span>
+        {/* Log On (visitors) / your account (members), in the corner */}
+        <button
+          onClick={() =>
+            openWindow({ id: 'profile-me', title: isSignedIn ? 'My Account' : 'Log On', appType: 'profile', icon: icon('logoff-32x32.png'), width: 420, height: 520 })
+          }
+          className="ml-1 cursor-pointer border-none bg-transparent outline-none flex items-center"
+          style={{ fontSize: 14, lineHeight: 1 }}
+          title={isSignedIn ? 'My account' : 'Log on'}
+          aria-label={isSignedIn ? 'My account' : 'Log on'}
+        >
+          🔑
+        </button>
       </div>
 
       {/* Mini Calendar Popup */}
