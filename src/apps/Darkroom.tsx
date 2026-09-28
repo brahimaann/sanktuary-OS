@@ -53,16 +53,7 @@ export const PRESETS: FilterPreset[] = [
 
 // ── Collage Presets & Types ──
 export type CollageGridPreset =
-  | 'single'
-  | 'split-v'
-  | 'split-h'
-  | '3-col'
-  | '3-row'
-  | '2x2'
-  | 'banner-top'
-  | 'banner-bottom'
-  | 'hero-left'
-  | 'hero-right';
+  'single' | 'split-v' | 'split-h' | '3-col' | '3-row' | '2x2' | 'banner-top' | 'banner-bottom' | 'hero-left' | 'hero-right';
 
 export type AspectRatioPreset = 'photo' | '1:1' | '4:3' | '16:9' | '3:4' | '9:16';
 type Fit = 'crop' | 'fit' | 'stretch';
@@ -784,8 +775,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   // What the loupe edits: the collage preview while composing one, otherwise the current saved version
   // (holding Compare on the Collage tab shows the photo before the collage)
   const source: Source | null = activeTab === 'collage' && collageOut && !(compare && saved) ? collageOut : saved;
-  const dirty =
-    isCollageActive || (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => params[k] !== DEFAULT_PARAMS[k]);
+  const dirty = isCollageActive || (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => params[k] !== DEFAULT_PARAMS[k]);
   const canUndo = dirty || pos > 0;
   const canRedo = pos < history.length - 1;
 
@@ -1094,9 +1084,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   }, [source, params, compare]);
 
   const toJpeg = () =>
-    new Promise<Blob>((ok, no) =>
-      canvasRef.current!.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94),
-    );
+    new Promise<Blob>((ok, no) => canvasRef.current!.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94));
 
   const outName = `${title.replace(/\.[^.]+$/, '') || 'photo'}-darkroom.jpg`;
 
@@ -1128,8 +1116,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   };
 
   // Helper setter for params
-  const setParam = <K extends keyof DarkroomParams>(key: K, val: DarkroomParams[K]) =>
-    setParams((prev) => ({ ...prev, [key]: val }));
+  const setParam = <K extends keyof DarkroomParams>(key: K, val: DarkroomParams[K]) => setParams((prev) => ({ ...prev, [key]: val }));
 
   const slider = (label: string, key: keyof DarkroomParams, min: number, max: number, step: number, shown: string) => (
     <label style={{ fontSize: 11 }}>
@@ -1197,7 +1184,12 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
           Server Files...
         </button>
         <button
-          style={{ ...button, fontWeight: compare ? 700 : 400, background: compare ? '#000080' : '#c0c0c0', color: compare ? '#fff' : '#000' }}
+          style={{
+            ...button,
+            fontWeight: compare ? 700 : 400,
+            background: compare ? '#000080' : '#c0c0c0',
+            color: compare ? '#fff' : '#000',
+          }}
           disabled={!source}
           onPointerDown={() => setCompare(true)}
           onPointerUp={() => setCompare(false)}
@@ -1272,7 +1264,9 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
           ) : (
             <div style={{ color: '#c0c0c0', textAlign: 'center', padding: 16 }}>
               <b>No photo open</b>
-              <div style={{ fontSize: 11, marginTop: 4 }}>Open a photo from your device, browse server files, or create a multi-image collage.</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>
+                Open a photo from your device, browse server files, or create a multi-image collage.
+              </div>
               <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
                 <label style={{ ...button, fontWeight: 700, cursor: 'pointer' }}>
                   Open Device Photo...
@@ -1369,9 +1363,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {/* 1. Layout Grid Presets (10 options) */}
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>
-                    Layout Grid Presets (10 options):
-                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Layout Grid Presets (10 options):</div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {COLLAGE_GRIDS.map((g) => (
                       <button
@@ -1445,11 +1437,30 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 </div>
 
                 {/* 3. Multi-Image Slot Loader */}
-                <div style={{ background: '#dcdcdc', border: '1px solid #808080', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div
+                  style={{
+                    background: '#dcdcdc',
+                    border: '1px solid #808080',
+                    padding: 6,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 11, fontWeight: 700 }}>Multi-Image Slot Loader:</span>
-                      <label style={{ ...button, fontWeight: 700, background: '#000080', color: '#fff', cursor: 'pointer', padding: '2px 8px', fontSize: 11 }}>
+                      <label
+                        style={{
+                          ...button,
+                          fontWeight: 700,
+                          background: '#000080',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          padding: '2px 8px',
+                          fontSize: 11,
+                        }}
+                      >
                         Choose Files...
                         <input
                           type="file"
@@ -1554,7 +1565,17 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 </div>
 
                 {/* 4. Background Customization */}
-                <div style={{ background: '#dcdcdc', border: '1px solid #808080', padding: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div
+                  style={{
+                    background: '#dcdcdc',
+                    border: '1px solid #808080',
+                    padding: 6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                  }}
+                >
                   <span style={{ fontSize: 11, fontWeight: 700 }}>Background:</span>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <input
@@ -1641,7 +1662,16 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 </div>
 
                 {/* 5. Text Overlay */}
-                <div style={{ background: '#dcdcdc', border: '1px solid #808080', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div
+                  style={{
+                    background: '#dcdcdc',
+                    border: '1px solid #808080',
+                    padding: 6,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 11, fontWeight: 700 }}>Text Overlay:</span>
@@ -1792,11 +1822,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   {slider('Vignette', 'vignette', 0, 1, 0.01, pct(params.vignette))}
                   {slider('Grain', 'grain', 0, 1, 0.01, pct(params.grain))}
                   <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={params.iphone6Grain}
-                      onChange={(e) => setParam('iphone6Grain', e.target.checked)}
-                    />
+                    <input type="checkbox" checked={params.iphone6Grain} onChange={(e) => setParam('iphone6Grain', e.target.checked)} />
                     iPhone 6 Digital Grain
                   </label>
                 </div>
@@ -1846,27 +1872,15 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={params.jpegNoise}
-                      onChange={(e) => setParam('jpegNoise', e.target.checked)}
-                    />
+                    <input type="checkbox" checked={params.jpegNoise} onChange={(e) => setParam('jpegNoise', e.target.checked)} />
                     Apply Noise (High-freq noise)
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={params.jpegSharpen}
-                      onChange={(e) => setParam('jpegSharpen', e.target.checked)}
-                    />
+                    <input type="checkbox" checked={params.jpegSharpen} onChange={(e) => setParam('jpegSharpen', e.target.checked)} />
                     Apply Sharpen (Unsharp mask)
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={params.pixelate2x}
-                      onChange={(e) => setParam('pixelate2x', e.target.checked)}
-                    />
+                    <input type="checkbox" checked={params.pixelate2x} onChange={(e) => setParam('pixelate2x', e.target.checked)} />
                     Pixelate (2x Upscale)
                   </label>
                 </div>
@@ -1943,7 +1957,12 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                     <button
                       key={gId}
                       onClick={() =>
-                        setParams((prev) => ({ ...prev, glitchMode: gId, glitchAmount: gId ? prev.glitchAmount || 0.5 : 0, glitchThreshold: gId ? prev.glitchThreshold : 0 }))
+                        setParams((prev) => ({
+                          ...prev,
+                          glitchMode: gId,
+                          glitchAmount: gId ? prev.glitchAmount || 0.5 : 0,
+                          glitchThreshold: gId ? prev.glitchThreshold : 0,
+                        }))
                       }
                       style={{
                         ...button,
@@ -1962,14 +1981,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
                     {slider('Glitch Intensity', 'glitchAmount', 0.05, 1, 0.02, pct(params.glitchAmount))}
                     {params.glitchMode === 1 &&
-                      slider(
-                        'Threshold (only blocks brighter than this move)',
-                        'glitchThreshold',
-                        0,
-                        1,
-                        0.01,
-                        pct(params.glitchThreshold),
-                      )}
+                      slider('Threshold (only blocks brighter than this move)', 'glitchThreshold', 0, 1, 0.01, pct(params.glitchThreshold))}
                   </div>
                 )}
               </div>
@@ -2006,7 +2018,9 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       </div>
 
       {/* ── Status Bar ── */}
-      <div style={{ padding: '2px 6px', borderTop: '1px solid #808080', minHeight: 18, fontSize: 11, background: '#c0c0c0', color: '#222' }}>
+      <div
+        style={{ padding: '2px 6px', borderTop: '1px solid #808080', minHeight: 18, fontSize: 11, background: '#c0c0c0', color: '#222' }}
+      >
         {status || 'Ready.'}
       </div>
 

@@ -36,6 +36,9 @@ export interface Profile extends Partial<Record<LinkKey, string>> {
   bio?: string;
   avatar?: number;
   listed?: boolean;
+  pro?: string; // roster, members only: "BMI · IPI 123456789"
+  rates?: string; // roster, members only: rate card and availability
+  bookable?: boolean; // a Book button on their public directory card
 }
 
 export const displayName = (p?: Profile, fallback = '') => p?.displayName || p?.username || fallback;

@@ -1298,11 +1298,24 @@ const ShopTab: React.FC = () => {
 };
 
 type Join = { id: string; name: string; email: string; role: string; links: string; message: string; at: string; status: string };
+type Booking = {
+  id: string;
+  artist: string;
+  name: string;
+  email: string;
+  date: string | null;
+  event: string;
+  location: string;
+  budget: string;
+  message: string;
+  at: string;
+  status: string;
+};
 
 /** What visitors see in the Welcome window, and the "Join the Village" requests. */
 const FrontTab: React.FC = () => {
   const api = useApi();
-  const [d, setD] = useState<{ intro: string; portfolio: Record<string, string>; joins: Join[] } | null>(null);
+  const [d, setD] = useState<{ intro: string; portfolio: Record<string, string>; joins: Join[]; bookings: Booking[] } | null>(null);
   const [msg, setMsg] = useState('');
   const load = useCallback(() => api('/api/public/admin').then(setD, (e) => setMsg(e.message)), [api]);
   useEffect(() => {
@@ -1378,7 +1391,7 @@ const FrontTab: React.FC = () => {
           >
             <div style={row}>
               <b>{j.name}</b>
-              <a href={`mailto:${j.email}`}>{j.email}</a>
+              <a href={`mailto:${encodeURIComponent(j.email).replace('%40', '@')}`}>{j.email}</a>
               {j.role && <span>· {j.role}</span>}
               <span style={{ color: '#555' }}>· {new Date(j.at).toLocaleDateString()}</span>
               <span style={{ flex: 1 }} />
@@ -1390,6 +1403,34 @@ const FrontTab: React.FC = () => {
             </div>
             {j.links && <div style={{ wordBreak: 'break-all' }}>{j.links}</div>}
             {j.message && <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{j.message}</div>}
+          </div>
+        ))}
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Booking requests ({d.bookings.filter((b) => b.status === 'New').length} new)</legend>
+        <p style={hint}>
+          From the <b>Book</b> button on public profiles (members turn it on in their profile under Roster). The artist is told too.
+        </p>
+        {!d.bookings.length && <div style={{ color: '#555' }}>None yet.</div>}
+        {d.bookings.map((b) => (
+          <div
+            key={b.id}
+            style={{ background: b.status === 'New' ? '#ffffe1' : '#fff', border: '1px solid #808080', padding: 6, marginBottom: 6 }}
+          >
+            <div style={row}>
+              <b>@{b.artist}</b>
+              <span>← {b.name}</span>
+              <a href={`mailto:${encodeURIComponent(b.email).replace('%40', '@')}`}>{b.email}</a>
+              <span style={{ color: '#555' }}>· {new Date(b.at).toLocaleDateString()}</span>
+              <span style={{ flex: 1 }} />
+              <select style={input} value={b.status} onChange={(e) => save({ booking: { id: b.id, status: e.target.value } })}>
+                {['New', 'Contacted', 'Confirmed', 'Declined', 'Archived'].map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div>{[b.event, b.date, b.location, b.budget && `budget ${b.budget}`].filter(Boolean).join(' · ')}</div>
+            {b.message && <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{b.message}</div>}
           </div>
         ))}
       </fieldset>

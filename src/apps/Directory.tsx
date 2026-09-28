@@ -13,6 +13,7 @@ interface Person {
   bio: string;
   links: Partial<Record<LinkKey, string>>;
   avatar: boolean;
+  bookable: boolean;
 }
 interface Dir {
   intro: string;
@@ -239,6 +240,7 @@ const Details: React.FC<{ d: Dir; section: Section; i: number }> = ({ d, section
                 ),
             )}
           </div>
+          {p.bookable && <BookForm person={p} />}
         </div>
       </div>
     );
@@ -271,6 +273,80 @@ const Details: React.FC<{ d: Dir; section: Section; i: number }> = ({ d, section
         </a>
       )}
     </div>
+  );
+};
+
+/** "Book [artist]": a request to the Sanktuary team and the artist. No account needed. */
+const BookForm: React.FC<{ person: Person }> = ({ person }) => {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ name: '', email: '', date: '', event: '', location: '', budget: '', message: '', website: '' });
+  const [msg, setMsg] = useState('');
+  const [sent, setSent] = useState(false);
+  if (sent)
+    return (
+      <div style={{ color: '#006000' }}>Thanks! Your request is with {person.displayName} and the Sanktuary team. We'll email you.</div>
+    );
+  if (!open)
+    return (
+      <div>
+        <button style={{ ...button, fontWeight: 700 }} onClick={() => setOpen(true)}>
+          Book {person.displayName}...
+        </button>
+      </div>
+    );
+  const field = (k: keyof typeof f, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 4, alignItems: 'center' }}>
+      {label}
+      <input value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} style={{ fontFamily: 'inherit', minWidth: 0 }} {...props} />
+    </label>
+  );
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg('Sending...');
+    const r = await fetch('/api/public/book', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...f, artist: person.username }),
+    }).catch(() => null);
+    if (r?.ok) setSent(true);
+    else setMsg(r ? await r.text() : "Couldn't send. Check your connection and try again.");
+  };
+  return (
+    <form onSubmit={send} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid #808080', paddingTop: 6 }}>
+      <b>Book {person.displayName}</b>
+      {field('name', 'Your name', { required: true, maxLength: 100, autoComplete: 'name' })}
+      {field('email', 'Email', { required: true, type: 'email', maxLength: 200, autoComplete: 'email' })}
+      {field('event', 'What for', { maxLength: 200, placeholder: 'Show, feature, session, event...' })}
+      {field('date', 'Date', { type: 'date' })}
+      {field('location', 'Where', { maxLength: 200 })}
+      {field('budget', 'Budget', { maxLength: 60, placeholder: 'optional' })}
+      <textarea
+        value={f.message}
+        onChange={(e) => setF({ ...f, message: e.target.value })}
+        rows={3}
+        maxLength={2000}
+        placeholder="Anything else we should know"
+        style={{ fontFamily: 'inherit', resize: 'vertical' }}
+      />
+      {/* honeypot: hidden from people, bots fill it in */}
+      <input
+        value={f.website}
+        onChange={(e) => setF({ ...f, website: e.target.value })}
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden="true"
+        style={{ position: 'absolute', left: -9999, width: 1, height: 1 }}
+      />
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button type="submit" style={{ ...button, fontWeight: 700 }}>
+          Send request
+        </button>
+        <button type="button" style={button} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+        <span style={{ color: '#a00000' }}>{msg !== 'Sending...' && msg}</span>
+      </div>
+    </form>
   );
 };
 

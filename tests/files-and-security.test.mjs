@@ -253,6 +253,12 @@ try {
   const P = (u, space, action, extra = '') => call(u, `/api/projects?space=${space}&path=Song%20A&action=${action}${extra}`, 'POST');
   const listing = JSON.parse((await call('bob', '/api/files/up/?list')).text);
   check('listing marks Ableton project folders', listing.entries.find((e) => e.name === 'Song A')?.project?.kind === 'Ableton Live');
+  const songZ = async () => JSON.parse((await call('bob', '/api/files/up/?list')).text).entries.find((e) => e.name === 'Song Z');
+  mkdirSync(join(drive, 'team', 'Song Z'));
+  check('plain folder is not a project', !(await songZ()).project);
+  await up('bob', 'up', 'Song%20Z/Song%20Z.als', als([]));
+  check('remembered "not a project" is dropped once a set is uploaded into the folder', (await songZ())?.project?.kind === 'Ableton Live');
+  rmSync(join(drive, 'team', 'Song Z'), { recursive: true });
   check('view rights cannot check out', (await P('carol', 'view', 'checkout')).status === 403);
   check('upload rights can check out', (await P('bob', 'up', 'checkout')).status === 200);
   check('second check-out refused', (await P('alice', 'ed', 'checkout')).status === 409);
@@ -1225,6 +1231,24 @@ try {
     pub1.releases.some((r) => r.title === 'Open EP' && !('members' in r) && !('owner' in r)),
   );
   check('private releases never leak, even marked public', !pub1.releases.some((r) => r.title === 'TSIMY'));
+  // Campaign entries for a private release are private from the moment they're made, and its owner still sees them
+  const single = JSON.parse(
+    (await call('bob', '/api/timeline', 'POST', { title: 'Single 1: Unreleased', kind: 'Drop', start: day(20), release: album.id })).text,
+  );
+  const sees = async (u) => JSON.parse((await call(u, '/api/timeline')).text).items.some((i) => i.id === single.id);
+  check(
+    'a private release’s timeline entry is private from the start',
+    !(await sees('carol')) && (await sees('alice')) && (await sees('bob')),
+  );
+  check(
+    'entries can only be tied to a release you can see',
+    (await call('carol', '/api/timeline', 'POST', { title: 'x', start: day(20), release: album.id })).status === 404,
+  );
+  const openShoot = JSON.parse((await call('bob', '/api/timeline', 'POST', { title: 'Open shoot', start: day(21), public: true })).text);
+  const moved = JSON.parse((await call('bob', `/api/timeline/${openShoot.id}`, 'PATCH', { release: album.id })).text);
+  check('moving an entry onto a private release makes it private and not public', !!moved.members && moved.public === false);
+  const onEp = JSON.parse((await call('bob', '/api/timeline', 'POST', { title: 'EP video', start: day(22), release: ep.id })).text);
+  check('entries tied to an open release stay open to everyone', onEp.members === null);
 
   // Stories (Heart of the Cities): a folder told as a guided story, public only when published
   const hotc = join(drive, 'team', 'hotc');
@@ -1366,6 +1390,83 @@ try {
       !JSON.parse((await call('carol', '/api/opportunities')).text).items.some((o) => o.id === grant.id),
   );
   check('opportunities are for members only', (await fetch(B + '/api/opportunities')).status === 401);
+  check('only admins add the Minnesota funders', (await call('bob', '/api/opportunities?starter', 'POST')).status === 403);
+  const starter = JSON.parse((await call('alice', '/api/opportunities?starter', 'POST')).text);
+  const starter2 = JSON.parse((await call('alice', '/api/opportunities?starter', 'POST')).text);
+  const funders = JSON.parse((await call('carol', '/api/opportunities')).text).items.filter(
+    (o) => o.title === 'Metropolitan Regional Arts Council',
+  );
+  check(
+    'Minnesota funders are added once, with https links and a checklist',
+    starter.added === 6 &&
+      starter2.added === 0 &&
+      funders.length === 1 &&
+      /^https:\/\//.test(funders[0].link) &&
+      /Application checklist/.test(funders[0].notes),
+  );
+  await call('alice', `/api/opportunities/${funders[0].id}`, 'DELETE');
+  check('a funder you took down stays down', JSON.parse((await call('alice', '/api/opportunities?starter', 'POST')).text).added === 0);
+
+  // Outreach: shared pitch list, 7-day follow-up reminder to whoever pitched
+  check('outreach is for members only', (await fetch(B + '/api/outreach')).status === 401);
+  check('an outreach contact needs a name', (await call('bob', '/api/outreach', 'POST', { kind: 'Radio' })).status === 400);
+  check(
+    'outreach links must be https',
+    (await call('bob', '/api/outreach', 'POST', { name: 'X', link: 'javascript:alert(1)' })).status === 400,
+  );
+  check('outreach emails must look real', (await call('bob', '/api/outreach', 'POST', { name: 'X', email: 'nope' })).status === 400);
+  const radio = JSON.parse(
+    (await call('bob', '/api/outreach', 'POST', { name: 'DJ Sam', outlet: 'Radio K', kind: 'Radio', email: 'sam@radiok.example' })).text,
+  );
+  check('a member adds a contact', radio.status === 'To pitch' && radio.by === 'bob');
+  const pitched = JSON.parse((await call('bob', `/api/outreach/${radio.id}`, 'PATCH', { status: 'Pitched' })).text);
+  check(
+    'marking Pitched records who and when',
+    pitched.pitchedBy === 'bob' && pitched.pitchedAt === new Date().toLocaleDateString('en-CA'),
+  );
+  check(
+    'a refused change leaves the contact as it was',
+    (await call('carol', `/api/outreach/${radio.id}`, 'PATCH', { email: 'bad', notes: 'x' })).status === 400 &&
+      JSON.parse((await call('bob', '/api/outreach')).text).items.find((o) => o.id === radio.id).notes === '',
+  );
+  check(
+    'a pitch date cannot be in the future',
+    (await call('bob', `/api/outreach/${radio.id}`, 'PATCH', { pitchedAt: '2999-01-01' })).status === 400,
+  );
+  const weekAgo = new Date(Date.now() - 8 * 864e5).toLocaleDateString('en-CA');
+  await call('bob', `/api/outreach/${radio.id}`, 'PATCH', { pitchedAt: weekAgo });
+  await call('bob', `/api/outreach/${radio.id}`, 'PATCH', { notes: 'sent the single' }); // no second reminder
+  await call('bob', `/api/outreach/${radio.id}`, 'PATCH', { pitchedAt: weekAgo }); // same day saved again: still none
+  const followUpNotes = JSON.parse((await call('bob', '/api/projects?notifications')).text).filter((n) =>
+    /Follow up with DJ Sam \(Radio K\)/.test(n.text),
+  );
+  check('no reply after a week: whoever pitched is reminded once', followUpNotes.length === 1);
+  // Ids from the address never reach JavaScript's shared prototype ("__proto__", "constructor")
+  const polluters = [
+    ['bob', '/api/outreach/__proto__', { name: 'x', status: 'Yes' }],
+    ['bob', '/api/outreach/constructor', { name: 'x' }],
+    ['bob', '/api/tracks/release/__proto__', { title: 'x' }],
+    ['bob', '/api/tracks/track/__proto__', { title: 'x' }],
+    ['bob', '/api/opportunities/__proto__', { status: 'interested' }],
+    ['alice', '/api/opportunities/__proto__', { title: 'x' }],
+    ['bob', '/api/timeline/__proto__', { title: 'x' }],
+    ['alice', '/api/stories/__proto__', { title: 'x' }],
+    ['alice', '/api/links/__proto__', undefined, 'DELETE'],
+  ];
+  const pollution = [];
+  for (const [u, path, body, method = 'PATCH'] of polluters) pollution.push((await call(u, path, method, body)).status);
+  check(
+    '"__proto__" and "constructor" ids are just not found',
+    pollution.every((s) => s === 404),
+    pollution.join(),
+  );
+  check('the server is fine afterwards', JSON.parse((await call('bob', '/api/outreach')).text).items.length > 0);
+  check('only whoever added it or an admin removes it', (await call('carol', `/api/outreach/${radio.id}`, 'DELETE')).status === 403);
+  check(
+    'removed contacts disappear',
+    (await call('alice', `/api/outreach/${radio.id}`, 'DELETE')).status === 200 &&
+      !JSON.parse((await call('bob', '/api/outreach')).text).items.some((o) => o.id === radio.id),
+  );
 
   // Health check and usage numbers
   const hz = await pub('/healthz');
@@ -1657,6 +1758,60 @@ try {
   check(
     'visitors cannot read the join list',
     (await fetch(B + '/api/public/admin')).status === 401 && (await call('bob', '/api/public/admin')).status === 403,
+  );
+
+  // Roster + "Book [artist]": booking requests only for listed members who take bookings; rates and PRO stay private
+  const book = (body) => fetch(B + '/api/public/book', { method: 'POST', body: JSON.stringify(body) });
+  const gigDay = new Date(Date.now() + 40 * 864e5).toLocaleDateString('en-CA');
+  const req1 = { artist: 'bob', name: 'Venue Co', email: 'booker@example.com', event: 'Friday show', date: gigDay, budget: '$500' };
+  check('cannot book someone who does not take bookings', (await book(req1)).status === 400);
+  await call('bob', '/api/profiles/me', 'PUT', { pro: 'BMI · IPI 123456789', rates: 'Verse $300', bookable: true });
+  await call('carol', '/api/profiles/me', 'PUT', { bookable: true }); // not listed publicly
+  const bobPublic = (await (await fetch(B + '/api/public/directory')).json()).people.find((p) => p.username === 'bob');
+  check('bookable shows on the public card', bobPublic?.bookable === true);
+  check('rates and PRO never go public', !JSON.stringify(bobPublic).includes('Verse') && !JSON.stringify(bobPublic).includes('IPI'));
+  check(
+    'members see the roster fields',
+    JSON.parse((await call('carol', '/api/profiles')).text).find((p) => p.username === 'bob')?.rates === 'Verse $300',
+  );
+  check('cannot book someone who is not listed publicly', (await book({ ...req1, artist: 'carol' })).status === 400);
+  check('booking needs a real email', (await book({ ...req1, email: 'x' })).status === 400);
+  check('booking works', (await book(req1)).status === 200);
+  await book({ ...req1, name: 'Spam Bot', website: 'http://spam' });
+  const bookings = JSON.parse((await call('alice', '/api/public/admin')).text).bookings;
+  const b1 = bookings.find((b) => b.name === 'Venue Co');
+  check(
+    'booking reaches admins with its details',
+    b1?.artist === 'bob' && b1.date === gigDay && b1.budget === '$500' && b1.status === 'New',
+  );
+  check('bots filling the hidden booking field are dropped', !bookings.some((b) => b.name === 'Spam Bot'));
+  check(
+    'the artist is told about the booking request',
+    JSON.parse((await call('bob', '/api/projects?notifications')).text).some((n) =>
+      /Booking request for Bob B from Venue Co.*team has the details/.test(n.text),
+    ),
+  );
+  await call('alice', '/api/public/admin', 'PATCH', { booking: { id: b1.id, status: 'Confirmed' } });
+  await call('alice', '/api/public/admin', 'PATCH', { booking: { id: b1.id, status: '<b>hax' } });
+  check(
+    'admins update booking status (known statuses only)',
+    JSON.parse((await call('alice', '/api/public/admin')).text).bookings.find((b) => b.id === b1.id)?.status === 'Confirmed',
+  );
+  for (let i = 0; i < 6; i++) await book(req1);
+  check('booking form is rate limited', (await book(req1)).status === 429);
+  check(
+    'the join form has its own limit',
+    (await fetch(B + '/api/public/join', { method: 'POST', body: JSON.stringify({ name: 'Zed', email: 'zed@example.com' }) })).status ===
+      200,
+  );
+  await fetch(B + '/api/public/book', {
+    method: 'POST',
+    headers: { 'cf-connecting-ip': '198.51.100.7' },
+    body: JSON.stringify({ ...req1, name: 'Time Traveller', date: '2020-01-01' }),
+  });
+  check(
+    'booking dates in the past are dropped',
+    JSON.parse((await call('alice', '/api/public/admin')).text).bookings.find((b) => b.name === 'Time Traveller')?.date === null,
   );
 
   // Pool: public counter, Stripe Checkout, signed webhooks only, each payment counted once

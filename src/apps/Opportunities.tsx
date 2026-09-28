@@ -96,6 +96,23 @@ const Board: React.FC = () => {
           Show past
         </label>
         <span style={{ flex: 1 }} />
+        {me?.admin && (
+          <button
+            style={button}
+            title="Adds the main Minnesota arts funders (once each) with an application checklist"
+            onClick={() =>
+              api('/api/opportunities?starter', { method: 'POST' }).then(
+                (r: { added: number }) => (
+                  setMsg(r.added ? `Added ${r.added} Minnesota funders.` : 'The Minnesota funders are already here.'),
+                  load()
+                ),
+                (e) => setMsg(e.message),
+              )
+            }
+          >
+            Add Minnesota funders
+          </button>
+        )}
         <button style={button} onClick={copyPortfolio} title="Your portfolio page, for 'work samples' fields">
           Copy portfolio link
         </button>

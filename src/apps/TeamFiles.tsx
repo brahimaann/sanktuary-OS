@@ -49,12 +49,31 @@ async function pool<T>(items: T[], n: number, worker: (item: T) => Promise<void>
 
 export const fileUrl = (app: string, parts: string[]) => `/api/files/${app}/${parts.map(encodeURIComponent).join('/')}`;
 
+interface Listing {
+  entries: Entry[];
+  rights: Rights;
+  combined?: boolean;
+  lockedBy: { user: string; project: string } | null;
+  used?: number;
+  quota?: number;
+}
+
+// Folders already seen in this tab (per signed-in user): opening one again shows it at once and refreshes it
+// in the background. Hovering a folder loads it ahead of the click.
+const listings = new Map<string, Listing>();
+const remember = (key: string, l: Listing) => {
+  listings.delete(key);
+  listings.set(key, l);
+  if (listings.size > 300) listings.delete(listings.keys().next().value!);
+};
+const PAGE = 500; // rows drawn at once; huge folders (sample packs) draw the rest on request
+
 /**
  * Win98 Explorer-style window onto a team folder on the home server.
  * Requires a Clerk sign-in; the server checks it and reads the drive directly.
  */
 const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, userId } = useAuth();
   const { openWindow } = useWindowManager();
   const [path, setPath] = useState<string[]>(initialPath || []);
   const [sharing, setSharing] = useState(false);
@@ -127,26 +146,81 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     return res;
   };
 
-  const load = useCallback(async () => {
-    setStatus('Loading...');
-    const t = (await getToken()) || '';
-    setToken(t);
-    const res = await fetch(`${url(path)}?list`, { headers: { Authorization: `Bearer ${t}` } });
+  const listKey = (parts: string[]) => `${userId}|${app}|${parts.join('/')}`;
+  /** Fetches a folder listing (sorted, remembered); the failed Response when the server says no. */
+  const fetchListing = async (parts: string[], t: string): Promise<Listing | Response> => {
+    const res = await fetch(`${url(parts)}?list`, { headers: { Authorization: `Bearer ${t}` } });
     if (!res.ok) {
-      setEntries([]);
-      setStatus(res.status === 401 ? 'Access denied.' : res.status === 503 ? 'Drive offline — try again soon.' : await res.text());
-      return;
+      if (res.status !== 503) listings.delete(listKey(parts)); // drive offline: keep the copy; refused or gone: forget it
+      return res;
     }
-    const data = await res.json();
-    const list: Entry[] = data.entries;
+    const data: Listing = await res.json();
+    data.entries.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    remember(listKey(parts), data);
+    return data;
+  };
+  const show = (data: Listing) => {
     setRights(data.combined ? 'view' : data.rights); // top of a combined space: only its folders, nothing to add here
     setLockedBy(data.lockedBy);
-    setQuota(data.quota ? { used: data.used, quota: data.quota } : null);
-    list.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name, undefined, { numeric: true }));
-    setEntries(list);
+    setQuota(data.quota ? { used: data.used || 0, quota: data.quota } : null);
+    setEntries(data.entries);
+  };
+  const [shown, setShown] = useState(PAGE);
+  const seq = useRef(0); // only the newest load may fill the window (a slow reply for the last folder mustn't)
+  const lastKey = useRef('');
+  const load = useCallback(async () => {
+    const mine = ++seq.current;
+    const key = listKey(path);
+    // Opening another folder: show what we remember of it at once. Reloading this one (Refresh, after an upload,
+    // rename or delete) waits for the server, so a just-deleted file never flashes back.
+    const moved = key !== lastKey.current;
+    lastKey.current = key;
+    const cached = moved && listings.get(key);
     setSelected(null);
+    if (moved) setShown(PAGE);
+    if (cached) {
+      show(cached);
+      setStatus('Refreshing...');
+    } else {
+      if (moved) setEntries([]); // never the last folder's files under this folder's name
+      setStatus('Loading...');
+    }
+    const t = (await getToken()) || '';
+    const got = await fetchListing(path, t).catch(() => null);
+    const why =
+      got instanceof Response
+        ? got.status === 401
+          ? 'Access denied.'
+          : got.status === 503
+            ? 'Drive offline — try again soon.'
+            : await got.text()
+        : '';
+    if (mine !== seq.current) return;
+    setToken(t);
+    if (!got || got instanceof Response) {
+      // offline for a moment: keep what's on screen; refused (no rights, gone): clear it
+      if (!got || got.status === 503)
+        setStatus(
+          `${!got ? "Couldn't reach the server — check your connection." : why}${listings.has(key) ? ' Showing the last copy.' : ''}`,
+        );
+      else {
+        setEntries([]);
+        setStatus(why);
+      }
+      return;
+    }
+    show(got);
     setStatus('');
-  }, [app, path, getToken]);
+  }, [app, path, getToken, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Hovering a folder for a moment loads it, so the click opens it at once
+  const hover = useRef(0);
+  useEffect(() => () => clearTimeout(hover.current), []);
+  const prefetch = (parts: string[]) => {
+    clearTimeout(hover.current);
+    if (listings.has(listKey(parts))) return;
+    hover.current = window.setTimeout(async () => fetchListing(parts, (await getToken()) || '').catch(() => {}), 250);
+  };
 
   useEffect(() => {
     if (isSignedIn) load();
@@ -486,6 +560,9 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       touchDrag.current = d;
     },
     onContextMenu: (ev: React.MouseEvent) => isTouch && ev.preventDefault(), // no long-press menu on phones
+    ...(e.isDir && !isTouch
+      ? { onPointerEnter: () => prefetch([...path, e.name]), onPointerLeave: () => clearTimeout(hover.current) }
+      : {}),
     ...(e.isDir ? dropProps([...path, e.name]) : {}),
     style: {
       ...(selected === e.name ? selectedStyle : {}),
@@ -607,7 +684,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
               </tr>
             </thead>
             <tbody>
-              {entries.map((e) => (
+              {entries.slice(0, shown).map((e) => (
                 <tr key={e.name} {...rowProps(e)}>
                   <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     <img
@@ -636,7 +713,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           </table>
         ) : (
           <div style={grid}>
-            {entries.map((e) => (
+            {entries.slice(0, shown).map((e) => (
               <div
                 key={e.name}
                 {...rowProps(e)}
@@ -664,6 +741,13 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {entries.length > shown && (
+          <div style={{ padding: 6, textAlign: 'center' }}>
+            <button style={button} onClick={() => setShown((n) => n + PAGE * 4)}>
+              Show more ({(entries.length - shown).toLocaleString()} not shown yet)
+            </button>
           </div>
         )}
         {dragging && <div style={dropOverlay}>Drop files or folders to upload to {[name, ...path].join(' \\ ')}</div>}

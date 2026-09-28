@@ -52,8 +52,14 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
       await api('/api/profiles/me', {
         method: 'PUT',
         body: JSON.stringify({
-          ...Object.fromEntries([...BASE_FIELDS.map(([k]) => k), ...PROFILE_LINKS.map(([k]) => k), 'bio'].map((k) => [k, draft[k as keyof P] ?? ''])),
+          ...Object.fromEntries(
+            [...BASE_FIELDS.map(([k]) => k), ...PROFILE_LINKS.map(([k]) => k), 'bio', 'pro', 'rates'].map((k) => [
+              k,
+              draft[k as keyof P] ?? '',
+            ]),
+          ),
           listed: !!draft.listed,
+          bookable: !!draft.bookable,
         }),
       });
       setMsg('Saved.');
@@ -96,6 +102,14 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             <div style={{ fontStyle: 'italic', background: '#ffffe1', border: '1px solid #808080', padding: 6 }}>{p.status}</div>
           )}
           {p?.bio && <div style={{ whiteSpace: 'pre-wrap', background: '#fff', border: '2px inset #808080', padding: 6 }}>{p.bio}</div>}
+          {(p?.pro || p?.rates) && (
+            <fieldset style={{ border: '2px groove #fff', margin: 0, padding: '2px 8px 6px' }}>
+              <legend>Roster (members only)</legend>
+              {p.pro && <div>PRO: {p.pro}</div>}
+              {p.rates && <div style={{ whiteSpace: 'pre-wrap' }}>{p.rates}</div>}
+              {p.bookable && <div style={{ color: '#006000' }}>Takes bookings through Sanktuary</div>}
+            </fieldset>
+          )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
             {PROFILE_LINKS.map(
               ([k, label]) =>
@@ -221,27 +235,38 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
               );
             })}
           </div>
-          {activeLink && (() => {
-            const item = PROFILE_LINKS.find(([k]) => k === activeLink);
-            if (!item) return null;
-            const [k, label, prefix, hint] = item;
-            return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, background: '#fff', border: '2px inset #808080', padding: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <BrandIcon name={k} size={16} useBrandColor />
-                  <b>{label}</b>
-                  {prefix && <span style={{ color: '#666', fontSize: 11 }}>Prefix: {prefix}</span>}
+          {activeLink &&
+            (() => {
+              const item = PROFILE_LINKS.find(([k]) => k === activeLink);
+              if (!item) return null;
+              const [k, label, prefix, hint] = item;
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                    marginTop: 4,
+                    background: '#fff',
+                    border: '2px inset #808080',
+                    padding: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <BrandIcon name={k} size={16} useBrandColor />
+                    <b>{label}</b>
+                    {prefix && <span style={{ color: '#666', fontSize: 11 }}>Prefix: {prefix}</span>}
+                  </div>
+                  <input
+                    value={(draft[k] as string) ?? ''}
+                    placeholder={hint}
+                    onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+                    style={input}
+                    autoFocus
+                  />
                 </div>
-                <input
-                  value={(draft[k] as string) ?? ''}
-                  placeholder={hint}
-                  onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
-                  style={input}
-                  autoFocus
-                />
-              </div>
-            );
-          })()}
+              );
+            })()}
         </div>
         <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 6 }}>
           About me
@@ -256,6 +281,42 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
           <input type="checkbox" checked={!!draft.listed} onChange={(e) => setDraft({ ...draft, listed: e.target.checked })} />
           Show me in the public directory (name, picture, role, about me and links; never your status)
         </label>
+        <fieldset
+          style={{ border: '2px groove #fff', margin: 0, padding: '2px 8px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}
+        >
+          <legend>Roster (members only, never public)</legend>
+          <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: 6 }}>
+            PRO / IPI
+            <input
+              value={draft.pro ?? ''}
+              placeholder="e.g. BMI · IPI 123456789"
+              onChange={(e) => setDraft({ ...draft, pro: e.target.value })}
+              style={input}
+            />
+          </label>
+          <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 6 }}>
+            Rates & availability
+            <textarea
+              value={draft.rates ?? ''}
+              rows={3}
+              placeholder={'e.g. Feature verse $300 · Mix $150/song · Shows: weekends from June'}
+              onChange={(e) => setDraft({ ...draft, rates: e.target.value })}
+              style={{ ...input, resize: 'vertical' }}
+            />
+          </label>
+          <label
+            style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+            title="Visitors see a Book button on your public card; requests go to the Sanktuary admins and to you"
+          >
+            <input
+              type="checkbox"
+              checked={!!draft.bookable}
+              disabled={!draft.listed}
+              onChange={(e) => setDraft({ ...draft, bookable: e.target.checked })}
+            />
+            Take bookings through Sanktuary (a Book button on my public card{draft.listed ? '' : '; needs the public directory'})
+          </label>
+        </fieldset>
         {mySpace && (
           <div style={{ border: '2px groove #fff', padding: 6 }}>
             <b>My Space</b>:{' '}

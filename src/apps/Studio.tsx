@@ -10,13 +10,15 @@ const Timeline = lazy(() => import('./Timeline'));
 const Boards = lazy(() => import('./Boards'));
 const Opportunities = lazy(() => import('./Opportunities'));
 const Archive = lazy(() => import('./Archive'));
+const Outreach = lazy(() => import('./Outreach'));
 
-export type StudioTab = 'songs' | 'calendar' | 'boards' | 'opportunities' | 'archive';
+export type StudioTab = 'songs' | 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'archive';
 const TABS: [StudioTab, string][] = [
   ['songs', 'Songs'],
   ['calendar', 'Calendar'],
   ['boards', 'Boards'],
   ['opportunities', 'Opportunities'],
+  ['outreach', 'Outreach'],
   ['archive', 'Archive'],
 ];
 
@@ -73,6 +75,8 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'songs' }) => {
                     <Boards kind="kanban" />
                   ) : id === 'opportunities' ? (
                     <Opportunities />
+                  ) : id === 'outreach' ? (
+                    <Outreach />
                   ) : (
                     <Archive />
                   )}

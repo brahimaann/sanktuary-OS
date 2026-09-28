@@ -105,6 +105,8 @@ class HttpError extends Error {
 const fail = (status, message) => {
   throw new HttpError(status, message);
 };
+/** db[id] for an id from a request, only if db really holds it: "__proto__" or "constructor" must never reach the prototype. */
+const own = (db, id) => (db && typeof id === 'string' && Object.hasOwn(db, id) ? db[id] : undefined);
 
 // ── Config & status files ──────────────────────────────────────────────
 const readJson = async (file, fallback) =>
@@ -287,7 +289,7 @@ function onDrive(space, file) {
 // Folder sizes (personal-space quotas, zip progress) are cached for a minute and dropped on any write, so
 // refreshing the desktop doesn't re-walk every file on the drive each time.
 const sizeCache = new Map(); // dir -> { size, at }
-const forgetSizes = () => sizeCache.clear();
+const forgetSizes = () => (sizeCache.clear(), kindCache.clear()); // also which subfolders are projects (see listedKind)
 async function folderSize(dir) {
   const hit = sizeCache.get(dir);
   if (hit && Date.now() - hit.at < 60_000) return hit.size;
@@ -370,18 +372,25 @@ async function files(req, res, url) {
   // Downloads of projects say why: view only / playground copy / check-out
   const purpose = { view: ' (view only)', playground: ' (playground copy)', checkout: ' (checked out)' }[q.get('purpose')] || '';
   const transfer = (action, bytes, path = rel) => logTransfer(req, user, action + purpose, space, shown(path), bytes);
-  if (req.method !== 'GET') forgetSizes(); // any change to files: cached folder sizes are stale
+  if (req.method !== 'GET') forgetSizes(); // any change to files: cached folder sizes and project kinds are stale
   if (req.method === 'GET') {
     need('view');
     if (q.has('list')) {
       const all = await loadProjects();
       const entries = await listDir(target);
-      for (const e of entries) {
-        const abs = join(target, e.name);
-        const p = all[ownerKey(space, abs)];
-        const kind = p?.kind || (await projectKind(abs, e.isDir));
-        if (kind) e.project = p ? projectView(p, user.username) : { kind, status: 'Not started', lock: null, turn: null, queue: [] };
-      }
+      // Subfolders are checked for a project file 12 at a time (was one after another; all at once would queue
+      // thousands of disk reads ahead of everyone else's downloads on a huge folder)
+      let next = 0;
+      const check = async () => {
+        while (next < entries.length) {
+          const e = entries[next++];
+          const abs = join(target, e.name);
+          const p = all[ownerKey(space, abs)];
+          const kind = p?.kind || (await listedKind(abs, e.isDir));
+          if (kind) e.project = p ? projectView(p, user.username) : { kind, status: 'Not started', lock: null, turn: null, queue: [] };
+        }
+      };
+      await Promise.all(Array.from({ length: 12 }, check));
       const lock = Object.entries(all).find(([k, p]) => p.lock && (ownerKey(space, target) + '/').startsWith(k + '/'))?.[1];
       return json(res, {
         rights: space.rights,
@@ -683,6 +692,20 @@ async function projectKind(abs, isDir) {
   for (const n of await readdir(abs).catch(() => []))
     if (PROJECT_FILES[extname(n).toLowerCase()]) return PROJECT_FILES[extname(n).toLowerCase()];
   return null;
+}
+
+// Whether a subfolder is a project, remembered for a minute so moving around a folder doesn't re-read every
+// subfolder each time. Dropped with forgetSizes() on every write through Sanktuary; the minute covers changes made
+// on the drive directly (a folder's modified time can't be trusted for that: FAT32 USB drives never update it).
+const kindCache = new Map(); // folder -> { at, kind }
+async function listedKind(abs, isDir) {
+  if (!isDir) return projectKind(abs, false);
+  const hit = kindCache.get(abs);
+  if (hit && Date.now() - hit.at < 60_000) return hit.kind;
+  const kind = await projectKind(abs, true);
+  if (kindCache.size > 50_000) kindCache.clear();
+  kindCache.set(abs, { at: Date.now(), kind });
+  return kind;
 }
 
 /** The project's record, created on first use. */
@@ -1180,7 +1203,7 @@ async function linksApi(req, res, url) {
   const token = url.pathname.split('/')[3];
 
   if (token && req.method === 'DELETE') {
-    const l = all[token] || fail(404, 'No such link');
+    const l = own(all, token) || fail(404, 'No such link');
     if (!(await canManageLink(l, user))) fail(403, 'Only whoever made the link, the owner or an admin can turn it off');
     l.revoked = true;
     saveLinks();
@@ -1536,7 +1559,7 @@ async function tracksApi(req, res, url) {
       changed(r);
       return json(res, { ...r, folderKey: undefined, found });
     }
-    const r = (db.releases[id] && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
+    const r = (own(db.releases, id) && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
     if (req.method === 'GET' && url.searchParams.has('ready')) return json(res, await releaseReadiness(db, r));
     if (req.method === 'POST' && url.searchParams.has('scan')) {
       if (!r.folder) fail(400, 'Link the release to a folder first');
@@ -1597,15 +1620,15 @@ async function tracksApi(req, res, url) {
     if (req.method === 'POST' && !id) {
       const input = await jsonBody(req);
       const r =
-        (db.releases[input.release] && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
+        (own(db.releases, input.release) && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
         fail(404, 'No such release');
       const t = newTrack(db, r, input.title, me, 'added the track');
       changed(r);
       return json(res, t);
     }
-    const t = db.tracks[id];
+    const t = own(db.tracks, id);
     const r =
-      (t && !t.deleted && db.releases[t.release] && canSeeRelease(user, db.releases[t.release]) && db.releases[t.release]) ||
+      (t && !t.deleted && own(db.releases, t.release) && canSeeRelease(user, db.releases[t.release]) && db.releases[t.release]) ||
       fail(404, 'No such track');
     if (req.method === 'POST' && url.searchParams.has('signoff')) {
       // "I agree to these master splits": only the members on the split, only for splits that add up
@@ -1976,6 +1999,59 @@ const OPP_FIELDS = ['Music', 'Visual art', 'Film & video', 'Photography', 'Writi
 const OPP_KINDS = ['Grant', 'Residency', 'Open call', 'Competition', 'Gig', 'Job', 'Other'];
 const OPP_STATUSES = ['interested', 'applying', 'applied', 'no'];
 const OPP_TEXT = { title: 120, org: 120, amount: 60, notes: 4000 };
+const MN_STARTER = [
+  [
+    'Minnesota State Arts Board',
+    'State of Minnesota',
+    'https://www.arts.state.mn.us',
+    ['Any'],
+    'State grants for individual artists and arts projects across Minnesota.',
+  ],
+  [
+    'Metropolitan Regional Arts Council',
+    'MRAC (Twin Cities metro)',
+    'https://mrac.org',
+    ['Any'],
+    'Grants for artists and community arts in the seven-county Twin Cities metro.',
+  ],
+  [
+    'McKnight Artist Fellowships',
+    'The McKnight Foundation',
+    'https://www.mcknight.org',
+    ['Music', 'Visual art', 'Writing', 'Photography'],
+    'Fellowships for mid-career Minnesota artists, including musicians and visual artists.',
+  ],
+  [
+    'Jerome Foundation',
+    'Jerome Foundation',
+    'https://www.jeromefdn.org',
+    ['Any'],
+    'Support for early-career artists in Minnesota and New York City.',
+  ],
+  [
+    'Springboard for the Arts',
+    'Springboard for the Arts',
+    'https://springboardforthearts.org',
+    ['Any'],
+    'Artist resources, workshops, and emergency relief funds for Minnesota artists.',
+  ],
+  [
+    'Forecast Public Art',
+    'Forecast Public Art',
+    'https://forecastpublicart.org',
+    ['Visual art', 'Design & fashion'],
+    'Grants and support for public art and artists working in public space.',
+  ],
+];
+const GRANT_OUTLINE = [
+  'Application checklist:',
+  '- Artist statement: what you make and why (the portfolio page has it)',
+  '- Project: what you will do, why now, who it is for, what changes because of it',
+  '- Timeline: start, milestones, finish (the Timeline can hold them)',
+  '- Budget: fees, studio, gear rental, marketing; match what the grant allows',
+  '- Work samples: sanktuary.studio/portfolio (Copy portfolio link)',
+  '- Bio: short and long versions',
+].join('\n');
 let oppsDb = null;
 let oppsSaved = Promise.resolve();
 const loadOpps = async () => (oppsDb ??= await readJson('opportunities.json', { items: {} }));
@@ -2020,6 +2096,33 @@ async function opportunitiesApi(req, res, url) {
       kinds: OPP_KINDS,
     });
 
+  if (req.method === 'POST' && !id && url.searchParams.has('starter')) {
+    // Admins: the Minnesota funders worth knowing, once each (no deadlines: they change every year)
+    if (!user.admin) fail(403, 'Administrators only');
+    const have = new Set(Object.values(db.items).map((o) => o.link)); // taken-down ones too: they stay down
+    let added = 0;
+    for (const [title, org, link, fields, what] of MN_STARTER) {
+      if (have.has(link)) continue;
+      const o = {
+        id: randomUUID().slice(0, 10),
+        title,
+        org,
+        amount: '',
+        link,
+        deadline: null,
+        kind: 'Grant',
+        fields,
+        people: {},
+        by: me,
+        created: new Date().toISOString(),
+      };
+      o.notes = `${what}\nCheck their site for this year's programs and deadlines, then set the deadline here so the team gets reminders.\n\n${GRANT_OUTLINE}`;
+      db.items[o.id] = o;
+      added++;
+    }
+    if (added) changed();
+    return json(res, { added });
+  }
   if (req.method === 'POST' && !id) {
     const input = await jsonBody(req);
     const o = {
@@ -2046,7 +2149,7 @@ async function opportunitiesApi(req, res, url) {
     return json(res, view(o));
   }
 
-  const o = (db.items[id] && !db.items[id].archived && db.items[id]) || fail(404, 'No such opportunity');
+  const o = (own(db.items, id) && !db.items[id].archived && db.items[id]) || fail(404, 'No such opportunity');
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
     // Anyone sets their own status; only whoever posted it (or an admin) edits the details
@@ -2072,6 +2175,112 @@ async function opportunitiesApi(req, res, url) {
   }
   fail(404, 'Unknown opportunities action');
 }
+
+// ── /api/outreach: who we pitch (radio, playlists, press, venues, brands) and where each pitch stands — data/outreach.json ──
+// Shared by the team so two people never pitch the same curator twice. Marking one "Pitched" starts a clock: after
+// 7 days with no reply, whoever pitched is reminded to follow up.
+const OUT_KINDS = ['Radio', 'Playlist', 'Blog / press', 'Venue', 'Brand / sponsor', 'Other'];
+const OUT_STATUSES = ['To pitch', 'Pitched', 'Replied', 'Yes', 'No'];
+const OUT_TEXT = { name: 100, outlet: 120, email: 200, notes: 2000 };
+let outDb = null;
+let outSaved = Promise.resolve();
+const loadOutreach = async () => (outDb ??= await readJson('outreach.json', { items: {} }));
+const saveOutreach = () => (outSaved = outSaved.then(() => saveJson('outreach.json', outDb)).catch(console.error));
+
+async function outreachApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const me = user.username;
+  const db = await loadOutreach();
+  const id = url.pathname.split('/')[3];
+  const changed = () => {
+    saveOutreach();
+    emit('outreach', {}, () => true);
+  };
+  const apply = (o, input) => {
+    for (const [k, max] of Object.entries(OUT_TEXT))
+      if (input[k] !== undefined)
+        o[k] = String(input[k] ?? '')
+          .trim()
+          .slice(0, max);
+    if (o.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(o.email)) fail(400, 'That email address looks wrong');
+    if (input.link !== undefined) {
+      const v = String(input.link || '').trim();
+      o.link = !v ? '' : /^https:\/\/\S+$/i.test(v) && v.length <= 500 ? v : fail(400, 'The link must start with https://');
+    }
+    if (input.kind !== undefined) o.kind = OUT_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+    if (input.status !== undefined && input.status !== o.status) {
+      o.status = OUT_STATUSES.includes(input.status) ? input.status : fail(400, 'Bad status');
+      if (o.status === 'Pitched') Object.assign(o, { pitchedAt: localDate(), pitchedBy: me, reminded: null });
+    }
+    if (input.pitchedAt !== undefined && o.status === 'Pitched') {
+      // logging a pitch sent earlier: the follow-up clock starts from that day
+      const d = dateOrNull(input.pitchedAt);
+      if (!d || d > localDate()) fail(400, 'Pick the day it was pitched (not in the future)');
+      if (d !== o.pitchedAt) Object.assign(o, { pitchedAt: d, reminded: null });
+    }
+  };
+
+  if (req.method === 'GET' && !id)
+    return json(res, { items: Object.values(db.items).filter((o) => !o.deleted), kinds: OUT_KINDS, statuses: OUT_STATUSES });
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const o = {
+      id: randomUUID().slice(0, 10),
+      name: '',
+      outlet: '',
+      email: '',
+      link: '',
+      notes: '',
+      kind: 'Playlist',
+      status: 'To pitch',
+      pitchedAt: null,
+      pitchedBy: null,
+      by: me,
+      created: new Date().toISOString(),
+    };
+    apply(o, input);
+    if (!o.name && !o.outlet) fail(400, 'Give it a name or an outlet');
+    db.items[o.id] = o;
+    changed();
+    return json(res, o);
+  }
+  const o = (own(db.items, id) && !db.items[id].deleted && db.items[id]) || fail(404, 'No such contact');
+  if (req.method === 'PATCH') {
+    const next = { ...o }; // a refused change leaves the contact as it was
+    apply(next, await jsonBody(req));
+    if (!next.name && !next.outlet) fail(400, 'Give it a name or an outlet');
+    Object.assign(o, next, { updated: new Date().toISOString() });
+    changed();
+    await outreachFollowUps(); // logged a pitch from over a week ago: the reminder comes now
+    return json(res, o);
+  }
+  if (req.method === 'DELETE') {
+    if (o.by !== me && !user.admin) fail(403, 'Only whoever added it or an admin can remove it');
+    o.deleted = new Date().toISOString(); // kept in the file, just hidden
+    changed();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown outreach action');
+}
+
+/** A pitch with no answer after 7 days: whoever sent it is reminded once to follow up. */
+async function outreachFollowUps() {
+  const db = await loadOutreach();
+  const today = localDate();
+  for (const o of Object.values(db.items)) {
+    if (o.deleted || o.status !== 'Pitched' || !o.pitchedAt || o.reminded === o.pitchedAt || !o.pitchedBy) continue;
+    if ((Date.parse(today) - Date.parse(o.pitchedAt)) / 864e5 < 7) continue;
+    o.reminded = o.pitchedAt;
+    saveOutreach();
+    await notify(
+      o.pitchedBy,
+      `Follow up with ${o.name || o.outlet}${o.outlet && o.name ? ` (${o.outlet})` : ''}: you pitched on ${o.pitchedAt} and there's no reply yet.`,
+      {},
+    );
+  }
+}
+setInterval(() => outreachFollowUps().catch(console.error), 3.6e6).unref();
 
 /** Deadline reminders: 7 days and 1 day before, to each person interested or applying (not once they've applied).
  * Kept per person, so someone who marks it later still gets the reminder that's due. */
@@ -2134,6 +2343,13 @@ async function timelineApi(req, res, url) {
   const me = user.username;
   const id = url.pathname.split('/')[3];
   const view = (i) => ({ ...i, following: i.followers.includes(me) });
+  // An entry can only be tied to a release you can see; a private release's entries get its people (else null)
+  // ponytail: copied when tied; people added to the release later don't see older entries until someone re-ties them
+  const releasePrivacy = async (id) => {
+    const r = own((await loadTracks()).releases, String(id));
+    if (!r || r.deleted || !canSeeRelease(user, r)) fail(404, 'No such release');
+    return r.members ? usernameList([...r.members, r.owner]) : null;
+  };
   const changed = (i) => {
     saveTimeline();
     emit('timeline', { id: i.id }, (u) => canSeeRelease({ username: u.username, admin: cfg.admins.includes(u.username) }, i));
@@ -2231,6 +2447,8 @@ async function timelineApi(req, res, url) {
     apply(i, input);
     i.title = i.title.trim() || fail(400, 'Give it a title');
     if (!i.start) fail(400, 'An entry needs a date');
+    const m = i.release && (await releasePrivacy(i.release));
+    if (m) i.members = m.filter((u) => u !== me);
     db.items[i.id] = i;
     changed(i);
     for (const u of i.people) if (u !== me) await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
@@ -2238,7 +2456,7 @@ async function timelineApi(req, res, url) {
     return json(res, view(i));
   }
 
-  const i = (db.items[id] && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such entry');
+  const i = (own(db.items, id) && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such entry');
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
     const before = { status: i.status, start: i.start, people: [...i.people] };
@@ -2247,7 +2465,9 @@ async function timelineApi(req, res, url) {
       i.members = Array.isArray(input.members) ? usernameList(input.members) : null;
     }
     if (input.follow !== undefined) i.followers = i.followers.filter((u) => u !== me).concat(input.follow ? [me] : []);
+    const m = input.release && (await releasePrivacy(input.release)); // checked before anything changes
     apply(i, input);
+    if (m) Object.assign(i, { members: m.filter((u) => u !== i.owner), public: false }); // moved onto a private release
     changed(i);
     const told = new Set([...i.people, ...i.followers].filter((u) => u !== me));
     const news = [];
@@ -2408,7 +2628,7 @@ async function businessApi(req, res, url) {
           .sort((a, b) => (b.paid || '').localeCompare(a.paid || '')),
       );
     }
-    if (req.method === 'PATCH' && shop.orders[id]) {
+    if (req.method === 'PATCH' && own(shop.orders, id)) {
       const { status, note } = await jsonBody(req);
       if (status !== undefined)
         shop.orders[id].status = ['Paid', 'Shipped', 'Delivered', 'Refunded'].includes(status) ? status : fail(400, 'Bad status');
@@ -2420,7 +2640,7 @@ async function businessApi(req, res, url) {
     fail(404, 'No such order');
   }
 
-  const spec = BIZ_KINDS[kind] || fail(404, 'Unknown section');
+  const spec = own(BIZ_KINDS, kind) || fail(404, 'Unknown section');
   const coll = db[kind];
   if (req.method === 'GET' && !id) {
     await audit(req, user, `listed ${kind}`);
@@ -2433,13 +2653,13 @@ async function businessApi(req, res, url) {
     for (const [k, max] of Object.entries(spec.text)) if (input[k] !== undefined) x[k] = String(input[k] ?? '').slice(0, max);
     if (input.status !== undefined) x.status = spec.status.includes(input.status) ? input.status : fail(400, 'Bad status');
     if (input.client !== undefined)
-      x.client = input.client && db.clients[input.client] ? input.client : input.client ? fail(400, 'No such client') : null;
+      x.client = input.client && own(db.clients, input.client) ? input.client : input.client ? fail(400, 'No such client') : null;
     if (kind === 'jobs') {
       if (input.amount !== undefined) x.amount = money(input.amount || 0);
       if (input.due !== undefined) x.due = dateOrNull(input.due);
     }
     if (kind === 'invoices') {
-      if (input.job !== undefined) x.job = input.job && db.jobs[input.job] ? input.job : null;
+      if (input.job !== undefined) x.job = input.job && own(db.jobs, input.job) ? input.job : null;
       for (const k of ['issued', 'due', 'paidOn']) if (input[k] !== undefined) x[k] = dateOrNull(input[k]);
       if (input.items !== undefined)
         x.items = (Array.isArray(input.items) ? input.items : []).slice(0, 50).map((it) => ({
@@ -2477,7 +2697,7 @@ async function businessApi(req, res, url) {
     await audit(req, user, `added ${kind.slice(0, -1)}`, x.name || x.title || x.number);
     return json(res, x);
   }
-  const x = (coll[id] && !coll[id].deleted && coll[id]) || fail(404, 'Not found');
+  const x = (own(coll, id) && !coll[id].deleted && coll[id]) || fail(404, 'Not found');
   if (req.method === 'GET') {
     await audit(req, user, `opened ${kind.slice(0, -1)}`, x.name || x.title || x.number);
     return json(res, x);
@@ -2514,7 +2734,7 @@ async function businessDocs(req, res, url, user, db, id, sub) {
     const d = {
       id: randomUUID().slice(0, 12),
       name,
-      client: q.get('client') && db.clients[q.get('client')] ? q.get('client') : null,
+      client: q.get('client') && own(db.clients, q.get('client')) ? q.get('client') : null,
       vault: q.get('vault') === '1',
       size: 0,
       added: new Date().toISOString(),
@@ -2529,7 +2749,7 @@ async function businessDocs(req, res, url, user, db, id, sub) {
     await audit(req, user, `uploaded${d.vault ? ' to the vault' : ''}`, name);
     return json(res, d);
   }
-  const d = (db.docs[id] && !db.docs[id].deleted && db.docs[id]) || fail(404, 'No such document');
+  const d = (own(db.docs, id) && !db.docs[id].deleted && db.docs[id]) || fail(404, 'No such document');
   const file = join(BIZ(), 'files', d.id + extname(d.name).toLowerCase());
   if (req.method === 'GET' && sub === 'file') {
     if (d.vault && viaTunnel(req)) {
@@ -2542,7 +2762,7 @@ async function businessDocs(req, res, url, user, db, id, sub) {
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
     if (input.vault !== undefined) d.vault = !!input.vault;
-    if (input.client !== undefined) d.client = input.client && db.clients[input.client] ? input.client : null;
+    if (input.client !== undefined) d.client = input.client && own(db.clients, input.client) ? input.client : null;
     saveBiz();
     await audit(req, user, 'changed document', d.name);
     return json(res, d);
@@ -2918,7 +3138,7 @@ async function blogApi(req, res, url) {
       saveBlog();
       return json(res, p);
     }
-    const p = (db.posts[id] && !db.posts[id].deleted && db.posts[id]) || fail(404, 'No such post');
+    const p = (own(db.posts, id) && !db.posts[id].deleted && db.posts[id]) || fail(404, 'No such post');
     if (req.method === 'PATCH') {
       apply(p);
       saveBlog();
@@ -3015,6 +3235,7 @@ async function listedPeople() {
           .filter(([, v]) => v),
       ),
       avatar: !!p.avatar && existsSync(join(DATA, 'profiles', 'avatars', `${username}.webp`)),
+      bookable: p.bookable === true, // "Take bookings through Sanktuary": a Book button on their public card
     });
   }
   return people.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -3095,14 +3316,17 @@ async function publicApi(req, res, url) {
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, { intro: front.intro, posts, events, releases, pools });
   }
-  if (req.method === 'POST' && what === 'join') {
-    const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+  // Visitor forms (join, book): 5 an hour per address and form, a hidden honeypot field, a name and a real-looking email
+  const visitor = async (form) => {
+    // cf-connecting-ip can be trusted because the server only listens on 127.0.0.1, behind the Cloudflare tunnel
+    const ip = `${form}:${req.headers['cf-connecting-ip'] || req.socket.remoteAddress}`;
     const t = joinTries.get(ip);
     const tries = t && Date.now() - t.since < 60 * 60_000 ? t : { n: 0, since: Date.now() };
     if (tries.n >= 5) fail(429, 'Thanks! We already got your note. Try again later if you need to.');
+    if (joinTries.size > 5000) for (const [k, x] of joinTries) if (Date.now() - x.since > 60 * 60_000) joinTries.delete(k);
     joinTries.set(ip, { ...tries, n: tries.n + 1 });
     const input = await jsonBody(req);
-    if (input.website) return json(res, { ok: true }); // honeypot: people never fill the hidden field, bots do
+    if (input.website) return null; // honeypot: people never fill the hidden field, bots do
     const name =
       String(input.name || '')
         .trim()
@@ -3111,6 +3335,56 @@ async function publicApi(req, res, url) {
       .trim()
       .slice(0, 200);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'That email address looks wrong');
+    return { input, name, email };
+  };
+  if (req.method === 'POST' && what === 'book') {
+    // "Book [artist]": a booking request for someone listed publicly who takes bookings, to the agency (admins) and them
+    const v = await visitor('book');
+    if (!v) return json(res, { ok: true });
+    const { input, name, email } = v;
+    const artist = (await listedPeople()).find((p) => p.bookable && p.username === input.artist) || fail(400, 'Pick who you want to book');
+    const text = (k, max) =>
+      String(input[k] || '')
+        .trim()
+        .slice(0, max);
+    const b = {
+      id: randomUUID().slice(0, 10),
+      artist: artist.username,
+      name,
+      email,
+      // a real calendar day (not "2026-02-30"), today or later
+      date:
+        typeof input.date === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(input.date) &&
+        !isNaN(Date.parse(`${input.date}T00:00:00Z`)) &&
+        new Date(`${input.date}T00:00:00Z`).toISOString().slice(0, 10) === input.date &&
+        input.date >= localDate()
+          ? input.date
+          : null,
+      event: text('event', 200),
+      location: text('location', 200),
+      budget: text('budget', 60),
+      message: text('message', 2000),
+      at: new Date().toISOString(),
+      status: 'New',
+    };
+    front.bookings ??= {};
+    // A flood aimed at one artist (many addresses at once) is still kept, but only the first 10 a day notify anyone
+    const today = Object.values(front.bookings).filter((x) => x.artist === artist.username && Date.now() - Date.parse(x.at) < 864e5).length;
+    front.bookings[b.id] = b;
+    saveFront();
+    if (today >= 10) return json(res, { ok: true });
+    const cfg = await loadConfig();
+    const note = `Booking request for ${artist.displayName} from ${name}${b.date ? ` for ${b.date}` : ''}${b.event ? `: ${b.event}` : ''}${b.location ? ` in ${b.location}` : ''}.`;
+    for (const u of cfg.admins) await notify(u, `${note} See Admin Panel > Front page.`, {});
+    if (!cfg.admins.includes(artist.username))
+      await notify(artist.username, `${note} The Sanktuary team has the details and will follow up with you.`, {});
+    return json(res, { ok: true });
+  }
+  if (req.method === 'POST' && what === 'join') {
+    const v = await visitor('join');
+    if (!v) return json(res, { ok: true });
+    const { input, name, email } = v;
     const j = {
       id: randomUUID().slice(0, 10),
       name,
@@ -3137,6 +3411,7 @@ async function publicApi(req, res, url) {
       intro: front.intro,
       portfolio: front.portfolio || {},
       joins: Object.values(front.joins).sort((a, b) => b.at.localeCompare(a.at)),
+      bookings: Object.values(front.bookings || {}).sort((a, b) => b.at.localeCompare(a.at)),
     });
   if (req.method === 'PATCH' && what === 'admin') {
     const input = await jsonBody(req);
@@ -3147,8 +3422,11 @@ async function publicApi(req, res, url) {
         Object.entries(limits).map(([k, max]) => [k, String(input.portfolio[k] ?? front.portfolio?.[k] ?? '').slice(0, max)]),
       );
     }
-    if (input.join && front.joins[input.join.id] && ['New', 'Contacted', 'Joined', 'Archived'].includes(input.join.status))
+    if (input.join && own(front.joins, input.join.id) && ['New', 'Contacted', 'Joined', 'Archived'].includes(input.join.status))
       front.joins[input.join.id].status = input.join.status;
+    const booking = input.booking && own(front.bookings, input.booking.id);
+    if (booking && ['New', 'Contacted', 'Confirmed', 'Declined', 'Archived'].includes(input.booking.status))
+      booking.status = input.booking.status;
     saveFront();
     return json(res, { ok: true });
   }
@@ -3522,7 +3800,7 @@ async function shopApi(req, res, url) {
       saveShop();
       return json(res, productView(p, true));
     }
-    const p = (db.products[b] && !db.products[b].deleted && db.products[b]) || fail(404, 'No such product');
+    const p = (own(db.products, b) && !db.products[b].deleted && db.products[b]) || fail(404, 'No such product');
     if (req.method === 'PATCH') {
       await apply(p);
       if (p.active && p.kind === 'digital' && !p.file) fail(400, 'Pick the file to deliver before putting a digital product on sale');
@@ -4087,7 +4365,7 @@ async function storiesApi(req, res, url) {
     if (!items.length) fail(400, 'There are no photos or videos in that folder');
     const base = slugify(title) || 'story';
     let id = base;
-    for (let n = 2; db.stories[id]; n++) id = `${base}-${n}`;
+    for (let n = 2; own(db.stories, id) || id in Object.prototype; n++) id = `${base}-${n}`;
     const st = {
       slug: id,
       title,
@@ -4104,7 +4382,7 @@ async function storiesApi(req, res, url) {
     saveStories();
     return json(res, st);
   }
-  const st = (db.stories[slug] && !db.stories[slug].deleted && db.stories[slug]) || fail(404, 'No such story');
+  const st = (own(db.stories, slug) && !db.stories[slug].deleted && db.stories[slug]) || fail(404, 'No such story');
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
     for (const [k, max] of Object.entries({ title: 100, subtitle: 200, intro: 4000 }))
@@ -4146,7 +4424,7 @@ async function storiesApi(req, res, url) {
 /** /api/public/story/<slug> (the story) and /api/public/story/<slug>/<n>?w= (its n-th picture or video). */
 async function storyPublic(req, res, url) {
   const [, , , , slug, n] = url.pathname.split('/');
-  const st = (await loadStories()).stories[slug];
+  const st = own((await loadStories()).stories, slug);
   let ok = !!st && !st.deleted && st.public;
   if (st && !st.deleted && !ok) {
     // Admins can look at a story before it's public
@@ -4282,7 +4560,7 @@ async function releasePublic(req, res, url) {
     return thumb(res, file, [400, 800, 1600].includes(w) ? w : 800);
   }
   if (part === 'preview') {
-    const t = tdb.tracks[id];
+    const t = own(tdb.tracks, id);
     if (!t || t.deleted || t.release !== r.id || !t.onPage || t.previewAt === null || t.previewAt === undefined) fail(404, 'No preview');
     const file = (await releaseFile(t.bounce)) || fail(404, 'No preview');
     res.setHeader('cache-control', 'public, max-age=3600');
@@ -5625,6 +5903,8 @@ const PROFILE_FIELDS = {
   status: 140,
   role: 60,
   bio: 1000,
+  pro: 80, // roster: "BMI · IPI 123456789" (members only, never public)
+  rates: 1000, // roster: rate card / availability (members only, never public)
   ...Object.fromEntries(Object.keys(PROFILE_LINKS).map((k) => [k, 200])),
 };
 
@@ -5681,6 +5961,7 @@ async function profiles(req, res, url) {
     const profile = { ...(await readJson(`profiles/${name}.json`, {})) };
     for (const [k, max] of Object.entries(PROFILE_FIELDS)) if (k in input) profile[k] = String(input[k] ?? '').slice(0, max);
     if ('listed' in input) profile.listed = input.listed === true; // shown in the public directory (My Computer)
+    if ('bookable' in input) profile.bookable = input.bookable === true;
     profile.updated = new Date().toISOString();
     await mkdir(join(DATA, 'profiles'), { recursive: true });
     await saveJson(`profiles/${name}.json`, profile);
@@ -5781,6 +6062,7 @@ const routes = [
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
   ['/api/opportunities', opportunitiesApi],
+  ['/api/outreach', outreachApi],
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],

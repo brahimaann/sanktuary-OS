@@ -15,6 +15,7 @@ import MembersPicker from './MembersPicker';
 import { ProjectInfo } from './ProjectPanel';
 import { useProfiles } from '../utils/profiles';
 import { Term } from '../utils/glossary';
+import Campaign from './Campaign';
 
 interface Release {
   id: string;
@@ -145,6 +146,7 @@ const TracksApp: React.FC = () => {
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
   const [pageSetup, setPageSetup] = useState(false);
+  const [campaign, setCampaign] = useState(false);
   const [linking, setLinking] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -419,6 +421,13 @@ const TracksApp: React.FC = () => {
                 </button>
               )
             )}
+            <button
+              style={button}
+              onClick={() => setCampaign(true)}
+              title="Plan the singles and a 3-video campaign; pitches for radio, playlists and press"
+            >
+              Campaign...
+            </button>
             <button style={button} onClick={() => setSharing(true)} title="Who can see this release">
               {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}...
             </button>
@@ -563,6 +572,7 @@ const TracksApp: React.FC = () => {
             onClose={() => setPageSetup(false)}
           />
         )}
+        {campaign && release && <Campaign release={release} tracks={tracks} onClose={() => setCampaign(false)} />}
         {readyOpen && release && (
           <ReadinessPanel release={release} ready={ready} onUpc={(upc) => patchRelease({ upc })} onClose={() => setReadyOpen(false)} />
         )}
@@ -897,6 +907,7 @@ const TrackPage: React.FC<{
       </Section>
       <MasterSplits
         track={t}
+        release={release}
         me={me?.username || ''}
         save={save}
         signOff={() => api(`/api/tracks/track/${t.id}?signoff`, { method: 'POST' }).then(onChange, (e) => setMsg((e as Error).message))}
@@ -1005,6 +1016,18 @@ interface Bmi {
   writers: BmiWriter[];
 }
 const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
+
+// Printable documents: every value from the app is escaped (the page opens on our own origin)
+const esc = (s: string) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const printPage = (html: string) => {
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  const w = window.open(url);
+  if (!w) return void dialog.alert('Your browser blocked the new window. Allow pop-ups for this site and try again.');
+  w.onload = () => {
+    w.print();
+    URL.revokeObjectURL(url);
+  };
+};
 const NEW_WRITER: BmiWriter = { name: '', pro: 'BMI', ipi: '', share: 0, publisher: '', publisherIpi: '' };
 const emptyBmi = (): Bmi => ({
   altTitle: '',
@@ -1087,7 +1110,6 @@ const BmiSheet: React.FC<{ track: Track; release: Release; onSave: (bmi: Bmi) =>
       .filter((l) => l !== null)
       .join('\n');
   const splitSheet = () => {
-    const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
     const rows = b.writers
       .map(
         (w) =>
@@ -1106,8 +1128,7 @@ ${b.isrc ? `<p><b>ISRC:</b> ${esc(b.isrc)}</p>` : ''}${b.iswc ? `<p><b>ISWC:</b>
 <tr><th colspan="3">Total</th><th>${shareTotal(b)}%</th><th colspan="3"></th></tr></table>
 ${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${esc(b.samples)}</p>` : ''}
 <p style="margin-top:24px;color:#555">Everyone signing agrees to these writer shares of the composition.</p>`;
-    const w = window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })));
-    if (w) w.onload = () => w.print();
+    printPage(html);
   };
   const field = (k: keyof Bmi, label: React.ReactNode, hint = '') => (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1321,12 +1342,59 @@ const REGISTRATIONS: [key: string, label: string, link: string, term: string][] 
  * Who owns the recording (the master) and in what shares: separate from the songwriters on the BMI sheet.
  * Members on the split sign off here; changing the splits puts their sign-off out of date.
  */
-const MasterSplits: React.FC<{ track: Track; me: string; save: (body: object) => Promise<void>; signOff: () => Promise<void> }> = ({
-  track: t,
-  me,
-  save,
-  signOff,
-}) => {
+/**
+ * A master-retaining net-profit agreement from the saved splits: whoever is listed as Label keeps the master
+ * (Sanktuary if nobody is), and everyone listed shares net profits in their percentages (e.g. 50/50).
+ * A template to fill and sign on paper or here; the page says to have a lawyer look at it.
+ */
+function printAgreement(t: Track, release: Release) {
+  const splits = t.master!.splits;
+  const owners = splits.filter((r) => r.role === 'Label').map((r) => r.name);
+  const owner = esc(owners.join(' and ') || 'Sanktuary');
+  const signed = (r: MasterSplit) => t.master!.signoffs.find((s) => s.user === r.member && s.hash === t.master!.hash);
+  const rows = splits
+    .map((r) => {
+      const s = signed(r);
+      return `<tr><td>${esc(r.name)}</td><td>${esc(r.role)}</td><td>${Number(r.share) || 0}%</td><td class="sig">${
+        s ? `Signed in Sanktuary by @${esc(r.member)}<br><small>${esc(new Date(s.at).toLocaleString())}</small>` : ''
+      }</td><td class="sig"></td></tr>`;
+    })
+    .join('');
+  printPage(`<!doctype html><meta charset="utf-8"><title>Master agreement - ${esc(t.title)}</title>
+<style>body{font:14px Georgia,serif;margin:40px;max-width:760px}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 4px}
+table{border-collapse:collapse;width:100%;margin-top:8px}td,th{border:1px solid #000;padding:6px;text-align:left;vertical-align:top}
+.sig{width:170px;height:44px}.note{color:#555;font:12px Arial,sans-serif;border:1px solid #999;padding:8px;margin-top:24px}</style>
+<h1>Master Recording &amp; Net Profit Agreement</h1>
+<p><b>Recording:</b> "${esc(t.title)}"${release.artist ? ` by ${esc(release.artist)}` : ''}${release.title ? ` (from ${esc(release.title)})` : ''}<br>
+<b>Date:</b> ____________________</p>
+<h2>1. Ownership of the master</h2>
+<p>${owner} ("the Owner") owns the master recording above and keeps all rights in it, including the copyright in the sound
+recording. The other parties do not own the master; they share in its net profits as set out below.</p>
+<h2>2. Net profit shares</h2>
+<p>Net profits from the recording are paid to the parties in these shares:</p>
+<table><tr><th>Name</th><th>Role</th><th>Share of net profits</th><th>Agreed in Sanktuary</th><th>Signature</th></tr>${rows}</table>
+<h2>3. What "net profits" means</h2>
+<p>All money actually received for the recording (streaming, downloads, physical, sync and licensing), less the documented
+costs of making and releasing it that the parties agreed to in writing (recording, mixing, mastering, artwork, video,
+marketing and distribution). Costs are recovered once, from the recording's income only; nobody owes money out of pocket.</p>
+<h2>4. Statements and payment</h2>
+<p>The Owner sends every party a statement of income, costs and shares at least every six months, and pays each share within
+30 days of the statement. Any party may ask to see the records behind a statement.</p>
+<h2>5. Credit</h2>
+<p>Each party is credited for their role, as listed above, wherever credits for the recording appear.</p>
+<h2>6. Songwriting is separate</h2>
+<p>This agreement covers the sound recording only. Songwriting and publishing shares are on the song's split sheet.</p>
+<p class="note">Template only, not legal advice. Before relying on it, have a music lawyer review it for your situation
+(term, territory, advances, sync approvals and what happens if the recording is sold).</p>`);
+}
+
+const MasterSplits: React.FC<{
+  track: Track;
+  release: Release;
+  me: string;
+  save: (body: object) => Promise<void>;
+  signOff: () => Promise<void>;
+}> = ({ track: t, release, me, save, signOff }) => {
   const { profiles } = useProfiles();
   const [rows, setRows] = useState<MasterSplit[]>(t.master?.splits || []);
   useEffect(() => setRows(t.master?.splits || []), [t.master?.hash]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1413,6 +1481,15 @@ const MasterSplits: React.FC<{ track: Track; me: string; save: (body: object) =>
             onClick={signOff}
           >
             Sign off on these splits
+          </button>
+        )}
+        {!dirty && total === 100 && !!t.master?.splits.length && (
+          <button
+            style={button}
+            onClick={() => printAgreement(t, release)}
+            title="A master-retaining net-profit agreement from these splits (whoever is listed as Label keeps the master), to sign"
+          >
+            Print agreement
           </button>
         )}
         {total !== 100 && rows.length > 0 && <span style={{ color: '#a00000' }}>Shares add up to {total}%, not 100%.</span>}

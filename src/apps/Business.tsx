@@ -58,6 +58,22 @@ interface Settings {
   payment: string;
 }
 
+/**
+ * Opens a print window straight away (browsers block pop-ups opened after waiting on the network), then fills it
+ * with a page built from the business details.
+ */
+const printWindow = async (b: B, page: (s: Settings) => string) => {
+  const w = window.open('', '_blank');
+  if (!w) return dialog.alert('Your browser blocked the new window. Allow pop-ups for this site and try again.');
+  try {
+    w.document.write(page(await b('/settings')));
+    w.document.close();
+  } catch (e) {
+    w.close();
+    dialog.alert((e as Error).message, { icon: 'error' });
+  }
+};
+
 const TABS = ['Overview', 'Clients', 'Jobs', 'Invoices', 'Orders', 'Documents', 'Access log'] as const;
 const usd = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 const total = (i: Invoice) => i.items.reduce((n, it) => n + it.qty * it.rate, 0);
@@ -168,7 +184,7 @@ const BusinessApp: React.FC = () => {
       </div>
       <div style={page}>
         {tab === 'Overview' && <Overview b={b} clientName={clientName} />}
-        {tab === 'Clients' && <Clients {...shared} />}
+        {tab === 'Clients' && <Clients {...shared} b={b} />}
         {tab === 'Jobs' && <Jobs {...shared} />}
         {tab === 'Invoices' && <Invoices {...shared} b={b} />}
         {tab === 'Documents' && <Documents b={b} clients={clients} clientName={clientName} setMsg={setMsg} />}
@@ -359,52 +375,133 @@ const Pick: React.FC<{ label: string; value: string; options: [string, string][]
   </label>
 );
 
-const Clients: React.FC<Shared> = ({ clients, jobs, invoices, create, patch, remove }) => (
-  <ListAndEdit
-    rows={clients}
-    columns={[
-      ['Name', (c) => <b>{c.name}</b>],
-      ['Company', (c) => c.company],
-      ['Email', (c) => c.email],
-      ['Status', (c) => c.status],
-    ]}
-    add={
-      <button
-        style={{ ...button, fontWeight: 700 }}
-        onClick={async () => {
-          const name = (await dialog.prompt('Client name:', '', { title: 'Add client' }))?.trim();
-          if (name) create('clients', { name });
-        }}
-      >
-        <IconLabel icon="plus">Add client...</IconLabel>
-      </button>
-    }
-    edit={(c) => (
-      <>
-        <Field label="Name" value={c.name} onSave={(v) => patch('clients', c.id, { name: v })} />
-        <Field label="Company" value={c.company} onSave={(v) => patch('clients', c.id, { company: v })} />
-        <Field label="Email" value={c.email} type="email" onSave={(v) => patch('clients', c.id, { email: v })} />
-        <Field label="Phone" value={c.phone} type="tel" onSave={(v) => patch('clients', c.id, { phone: v })} />
-        <Pick
-          label="Status"
-          value={c.status}
-          options={STATUSES.clients.map((s) => [s, s])}
-          onSave={(v) => patch('clients', c.id, { status: v })}
-        />
-        <Field label="Notes" value={c.notes} area onSave={(v) => patch('clients', c.id, { notes: v })} />
-        <div style={{ color: '#444' }}>
-          {jobs.filter((j) => j.client === c.id).length} job(s) · {invoices.filter((i) => i.client === c.id).length} invoice(s) ·{' '}
-          {usd(invoices.filter((i) => i.client === c.id && i.status === 'Paid').reduce((n, i) => n + total(i), 0))} paid so far
-        </div>
-        <div>
-          <button style={button} onClick={() => remove('clients', c.id, c.name)}>
-            <IconLabel icon="close">Remove client</IconLabel>
-          </button>
-        </div>
-      </>
-    )}
-  />
-);
+/**
+ * A partnership proposal letter to a venue, cafe or brand (e.g. a pop-up series): filled from the client and your
+ * business details, edited here, then printed or saved as PDF.
+ */
+const Proposal: React.FC<{ c: Client; b: B; onClose: () => void }> = ({ c, b, onClose }) => {
+  const [p, setP] = useState({
+    idea: 'Sanktuary pop-up: live music, DJs and local art',
+    when: 'One Sunday a month, 2-6 pm, starting [month]',
+    bring:
+      'Curated live sets and DJs from the Sanktuary roster\nA small art / merch table from local makers\nPromotion to our audience on Instagram, TikTok and our mailing list\nWe handle sound, setup and cleanup',
+    ask: 'Use of the space and a power outlet\nA shared post on your socials before each date\n[Fee / bar split / food for the artists]',
+    why: 'New customers on a slow afternoon, a regular community event tied to your name, and content you can share.',
+  });
+  const set = (k: keyof typeof p) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setP({ ...p, [k]: e.target.value });
+  const print = () =>
+    printWindow(b, (s) => {
+      const esc = (t: string) => String(t ?? '').replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+      const list = (t: string) =>
+        `<ul>${t
+          .split('\n')
+          .filter((l) => l.trim())
+          .map((l) => `<li>${esc(l.trim())}</li>`)
+          .join('')}</ul>`;
+      return `<!doctype html><html><head><title>Proposal - ${esc(c.company || c.name)}</title><style>
+      body{font:15px/1.55 Georgia,serif;color:#111;max-width:680px;margin:40px auto;padding:0 24px}
+      h1{font:700 24px Arial,sans-serif;margin:0 0 4px} h2{font:700 15px Arial,sans-serif;margin:20px 0 4px} .muted{color:#555}
+      @media print{button{display:none}}</style></head><body>
+      <button onclick="print()">Print / Save as PDF</button>
+      <h1>${esc(s.name || 'Sanktuary')}</h1><div class="muted">${esc(s.email)}${s.address ? `<br>${esc(s.address).replace(/\n/g, '<br>')}` : ''}</div>
+      <p style="margin-top:28px">${esc(new Date().toLocaleDateString([], { dateStyle: 'long' }))}</p>
+      <p>Dear ${esc(c.name)}${c.company ? `, ${esc(c.company)}` : ''},</p>
+      <p>We'd love to partner with you on <b>${esc(p.idea)}</b>.</p>
+      <h2>When</h2><p>${esc(p.when)}</p>
+      <h2>What we bring</h2>${list(p.bring)}
+      <h2>What we ask</h2>${list(p.ask)}
+      <h2>Why it works for you</h2><p>${esc(p.why)}</p>
+      <p>Our work, releases and past events: ${esc(location.origin)}/portfolio</p>
+      <p>Thank you for considering it. We're happy to meet and walk through it.</p>
+      <p>Warmly,<br>${esc(s.name || 'Sanktuary')}</p></body></html>`;
+    });
+  const row = (k: keyof typeof p, label: string, rows = 1) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 6, alignItems: 'start' }}>
+      {label}
+      {rows === 1 ? (
+        <input style={input} value={p[k]} onChange={set(k)} />
+      ) : (
+        <textarea rows={rows} style={{ ...input, resize: 'vertical' }} value={p[k]} onChange={set(k)} />
+      )}
+    </label>
+  );
+  return (
+    <fieldset style={fieldset}>
+      <legend>Proposal to {c.company || c.name}</legend>
+      {row('idea', 'The idea')}
+      {row('when', 'When')}
+      {row('bring', 'What we bring (one per line)', 4)}
+      {row('ask', 'What we ask (one per line)', 3)}
+      {row('why', 'Why it works for them', 2)}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button style={{ ...button, fontWeight: 700 }} onClick={print}>
+          Print / PDF
+        </button>
+        <button style={button} onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </fieldset>
+  );
+};
+
+const Clients: React.FC<Shared & { b: B }> = ({ clients, jobs, invoices, create, patch, remove, b }) => {
+  const [proposing, setProposing] = useState<string | null>(null);
+  return (
+    <ListAndEdit
+      rows={clients}
+      columns={[
+        ['Name', (c) => <b>{c.name}</b>],
+        ['Company', (c) => c.company],
+        ['Email', (c) => c.email],
+        ['Status', (c) => c.status],
+      ]}
+      add={
+        <button
+          style={{ ...button, fontWeight: 700 }}
+          onClick={async () => {
+            const name = (await dialog.prompt('Client name:', '', { title: 'Add client' }))?.trim();
+            if (name) create('clients', { name });
+          }}
+        >
+          <IconLabel icon="plus">Add client...</IconLabel>
+        </button>
+      }
+      edit={(c) => (
+        <>
+          <Field label="Name" value={c.name} onSave={(v) => patch('clients', c.id, { name: v })} />
+          <Field label="Company" value={c.company} onSave={(v) => patch('clients', c.id, { company: v })} />
+          <Field label="Email" value={c.email} type="email" onSave={(v) => patch('clients', c.id, { email: v })} />
+          <Field label="Phone" value={c.phone} type="tel" onSave={(v) => patch('clients', c.id, { phone: v })} />
+          <Pick
+            label="Status"
+            value={c.status}
+            options={STATUSES.clients.map((s) => [s, s])}
+            onSave={(v) => patch('clients', c.id, { status: v })}
+          />
+          <Field label="Notes" value={c.notes} area onSave={(v) => patch('clients', c.id, { notes: v })} />
+          <div style={{ color: '#444' }}>
+            {jobs.filter((j) => j.client === c.id).length} job(s) · {invoices.filter((i) => i.client === c.id).length} invoice(s) ·{' '}
+            {usd(invoices.filter((i) => i.client === c.id && i.status === 'Paid').reduce((n, i) => n + total(i), 0))} paid so far
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              style={button}
+              onClick={() => setProposing(proposing === c.id ? null : c.id)}
+              title="A partnership proposal letter (pop-up, event, sponsorship)"
+            >
+              Proposal...
+            </button>
+            <button style={button} onClick={() => remove('clients', c.id, c.name)}>
+              <IconLabel icon="close">Remove client</IconLabel>
+            </button>
+          </div>
+          {proposing === c.id && <Proposal c={c} b={b} onClose={() => setProposing(null)} />}
+        </>
+      )}
+    />
+  );
+};
 
 const Jobs: React.FC<Shared> = ({ jobs, clients, clientName, create, patch, remove }) => {
   const clientOptions: [string, string][] = [['', '(no client)'], ...clients.map((c) => [c.id, c.name] as [string, string])];
@@ -455,13 +552,11 @@ const Jobs: React.FC<Shared> = ({ jobs, clients, clientName, create, patch, remo
 
 const Invoices: React.FC<Shared & { b: B }> = ({ invoices, clients, jobs, clientName, create, patch, remove, b }) => {
   const clientOptions: [string, string][] = [['', '(no client)'], ...clients.map((c) => [c.id, c.name] as [string, string])];
-  const print = async (i: Invoice) => {
-    const s: Settings = await b('/settings');
-    const c = clients.find((x) => x.id === i.client);
-    const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><title>${esc(i.number)}</title><style>
+  const print = (i: Invoice) =>
+    printWindow(b, (s) => {
+      const c = clients.find((x) => x.id === i.client);
+      const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
+      return `<!doctype html><html><head><title>${esc(i.number)}</title><style>
       body{font:14px/1.45 Georgia,serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px}
       h1{font:700 26px Arial,sans-serif;margin:0} .muted{color:#555} table{width:100%;border-collapse:collapse;margin:24px 0}
       th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #ccc} td.n,th.n{text-align:right}
@@ -475,9 +570,8 @@ const Invoices: React.FC<Shared & { b: B }> = ({ invoices, clients, jobs, client
       ${i.items.map((it) => `<tr><td>${esc(it.desc)}</td><td class="n">${it.qty}</td><td class="n">${usd(it.rate)}</td><td class="n">${usd(it.qty * it.rate)}</td></tr>`).join('')}
       </table><div class="tot">Total ${usd(total(i))}${i.status === 'Paid' ? ` · PAID ${esc(i.paidOn || '')}` : ''}</div>
       ${s.payment ? `<p><b>How to pay</b><br>${esc(s.payment).replace(/\n/g, '<br>')}</p>` : ''}
-      ${i.notes ? `<p class="muted">${esc(i.notes).replace(/\n/g, '<br>')}</p>` : ''}</body></html>`);
-    w.document.close();
-  };
+      ${i.notes ? `<p class="muted">${esc(i.notes).replace(/\n/g, '<br>')}</p>` : ''}</body></html>`;
+    });
   return (
     <ListAndEdit
       rows={[...invoices].sort((a, b) => b.number.localeCompare(a.number))}
