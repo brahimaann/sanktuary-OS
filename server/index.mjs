@@ -2616,6 +2616,7 @@ async function businessApi(req, res, url) {
     return json(res, db.settings);
   }
   if (kind === 'docs') return businessDocs(req, res, url, user, db, id, sub);
+  if (kind === 'revenue') return businessRevenue(req, res, url, user, db, id);
   if (kind === 'orders') {
     // Shop orders live here (not the Admin Panel) because they carry customers' names and addresses
     const shop = await loadShop();
@@ -2624,14 +2625,19 @@ async function businessApi(req, res, url) {
       return json(
         res,
         Object.values(shop.orders)
-          .filter((o) => o.status !== 'Pending')
+          .filter((o) => o.paid) // real money only: not open, abandoned or replaced checkouts
           .sort((a, b) => (b.paid || '').localeCompare(a.paid || '')),
       );
     }
     if (req.method === 'PATCH' && own(shop.orders, id)) {
       const { status, note } = await jsonBody(req);
       if (status !== undefined)
-        shop.orders[id].status = ['Paid', 'Shipped', 'Delivered', 'Refunded'].includes(status) ? status : fail(400, 'Bad status');
+        shop.orders[id].status = (shop.orders[id].status === 'Oversold'
+          ? ['Refunded']
+          : ['Paid', 'Shipped', 'Delivered', 'Refunded']
+        ).includes(status)
+          ? status
+          : fail(400, shop.orders[id].status === 'Oversold' ? 'An oversold order can only be marked Refunded' : 'Bad status');
       if (note !== undefined) shop.orders[id].note = String(note).slice(0, 500);
       saveShop();
       await audit(req, user, `set order ${id} to ${shop.orders[id].status}`);
@@ -2716,6 +2722,342 @@ async function businessApi(req, res, url) {
     return json(res, { ok: true });
   }
   fail(405, 'Not allowed');
+}
+
+// ── Revenue: money in and out, per release, and net-profit statements from the master splits ──
+// Lines are typed in (tickets, sponsorships, costs...) or imported from a distributor's CSV (DistroKid and most
+// others: a sale month, a store, a title/ISRC and an earnings column). Paid shop orders count by themselves.
+// A release's statement: its income minus its costs. Each song's earnings are shared by that song's master splits,
+// money for the release as a whole (tickets, sponsorship) by the average of its songs' splits; everyone's part of
+// the income is then their part of the net profit. A loss is "still to recoup": costs come out of income first.
+const REV_SOURCES = {
+  income: ['Streaming', 'Tickets', 'Sponsorship', 'Sync & licensing', 'Performance fees', 'Grants', 'Other'], // Shop: automatic
+  cost: ['Recording', 'Mixing & mastering', 'Artwork & video', 'Marketing', 'Distribution', 'Travel', 'Equipment', 'Other'],
+};
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * A CSV, semicolon or tab-separated file as rows of cells (quotes, "" escapes, newlines inside quotes, CRLF).
+ * The separator is whichever of tab ; , the header row uses most (outside quotes). `rows.sep` says which.
+ */
+function parseCsv(text) {
+  const first = text.split('\n', 1)[0].replace(/"[^"]*"/g, '');
+  const count = (ch) => first.split(ch).length - 1;
+  const sep = ['\t', ';', ','].reduce((best, ch) => (count(ch) > count(best) ? ch : best), ',');
+  const rows = [];
+  let row = [];
+  let f = '';
+  let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c !== '"') f += c;
+      else if (text[i + 1] === '"') ((f += '"'), i++);
+      else q = false;
+    } else if (c === '"') q = true;
+    else if (c === sep) (row.push(f), (f = ''));
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      (row.push(f), rows.push(row), (row = []), (f = ''));
+    } else f += c;
+  }
+  if (f || row.length) (row.push(f), rows.push(row));
+  return Object.assign(
+    rows.filter((r) => r.some((x) => x.trim())),
+    { sep },
+  );
+}
+
+/**
+ * A money cell: "$1,234.56", "1.234,56", "3,50", "0,0041", "(1.50)" or "-1.50" (negative), "USD 2.00".
+ * A cell with no digits ("", "-", "N/A") is 0; anything else unreadable is NaN.
+ */
+function parseMoney(v, decimalComma = false) {
+  const n = readMoney(v, decimalComma);
+  return Number.isFinite(n) && Math.abs(n) < 1e9 ? n : NaN; // "1e400" or a billion on one row is a broken file
+}
+function readMoney(v, decimalComma) {
+  const s = String(v ?? '').trim();
+  if (!/\d/.test(s)) return 0;
+  if (/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s) && !decimalComma) return Number(s); // plain, or Excel's 4.1E-05
+  // Scientific notation anywhere else ("4,1E-05" from Excel in Europe, "$4.1E-05"): read the number itself, never
+  // strip the E; anything odd around it is refused rather than guessed
+  const sci = s.match(/^\(?\s*([^\d\s(+-]*)\s*([-+]?)(\d+(?:[.,]\d+)?)e([-+]?\d+)\s*\)?$/i);
+  if (sci) {
+    if (sci[1] && !/^([a-z]{3}|[$€£¥])$/i.test(sci[1])) return NaN;
+    const n = Number(`${sci[3].replace(',', '.')}e${sci[4]}`);
+    return /^\(.*\)$/.test(s) || sci[2] === '-' ? -n : n;
+  }
+  if (/\de[-+]?\d/i.test(s)) return NaN;
+  const neg = /^\(.*\)$/.test(s) || /^[^\d]*-/.test(s) || /-[^\d]*$/.test(s); // (1.50), -1.50, $-1.50, 1.50-
+  let t = s.replace(/[^\d.,]/g, '');
+  // thousands only in groups of three: "1,2,3" is a mistake, not 123
+  if (!(decimalComma ? /^(\d{1,3}(\.\d{3})+|\d+)(,\d+)?$/ : /^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/).test(t)) return NaN;
+  t = decimalComma ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  const n = Number(t);
+  return Number.isFinite(n) ? (neg ? -n : n) : NaN;
+}
+/**
+ * Whether a file writes money with a decimal comma (1.234,56 / 3,50 / 0,0041), decided once for the whole file from
+ * the cells that can only mean one thing: semicolon-separated files are European too. A file with nothing to go on
+ * is read the US way (1,234.56).
+ */
+function decimalCommaFile(cells, sep) {
+  if (sep === ';') return true;
+  for (const c of cells) {
+    if (/\d,\d+e[-+]?\d/i.test(c)) return true; // 4,1E-05
+    if (/\de[-+]?\d/i.test(c)) continue; // 4.1E-05 says nothing about the others
+    const t = String(c).replace(/[^\d.,]/g, '');
+    if (/^0,\d/.test(t) || /,\d{1,2}$/.test(t) || /,\d{4,}$/.test(t) || /\.\d{3},\d/.test(t)) return true; // comma is the decimal
+    if (/^0\.\d/.test(t) || /\.\d{1,2}$/.test(t) || /\.\d{4,}$/.test(t) || /,\d{3}\.\d/.test(t)) return false; // dot is the decimal
+  }
+  return false;
+}
+
+/** A sale month: "2026-07", "2026-07-15", "07/2026", US "7/15/2026", "Jul 2026", "July 2026". Else null. */
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function parseMonth(v) {
+  const s = String(v ?? '')
+    .trim()
+    .toLowerCase();
+  const ym = (y, m) => (+m >= 1 && +m <= 12 ? `${y}-${String(+m).padStart(2, '0')}` : null);
+  let m;
+  if ((m = s.match(/^(\d{4})[-/](\d{1,2})\b/))) return ym(m[1], m[2]);
+  if ((m = s.match(/^(\d{1,2})\/(\d{4})\b/))) return ym(m[2], m[1]);
+  if ((m = s.match(/^(\d{1,2})\/\d{1,2}\/(\d{4})\b/))) return ym(m[2], m[1]); // US distributors: month first
+  if ((m = s.match(/^([a-z]{3})[a-z]*\.?[\s-]+(\d{4})\b/))) return MONTHS.includes(m[1]) ? ym(m[2], MONTHS.indexOf(m[1]) + 1) : null;
+  return null;
+}
+
+/** One song's master splits if they add up to exactly 100%, else null. */
+const songSplits = (t) => {
+  const s = (t?.master?.splits || []).filter((x) => String(x.name || '').trim());
+  const total = s.reduce((n, x) => n + (Number(x.share) || 0), 0);
+  return s.length && Math.abs(total - 100) < 0.01 ? s.map((x) => ({ name: String(x.name).trim(), share: Number(x.share) || 0 })) : null;
+};
+/** A release's splits: the average of its songs' complete splits ([] if none have any). */
+function releaseSplits(tdb, releaseId) {
+  const all = Object.values(tdb.tracks)
+    .filter((t) => t.release === releaseId && !t.deleted)
+    .map(songSplits)
+    .filter(Boolean);
+  const by = new Map();
+  for (const splits of all) for (const s of splits) by.set(s.name, (by.get(s.name) || 0) + s.share / all.length);
+  return [...by].map(([name, share]) => ({ name, share }));
+}
+/** Shares out a sum in cents so the parts add up exactly (largest remainder). */
+function allocate(cents, weights) {
+  const exact = weights.map((w) => cents * w);
+  const out = exact.map(Math.floor);
+  let left = cents - out.reduce((a, b) => a + b, 0);
+  for (const i of exact
+    .map((e, i) => [e - out[i], i])
+    .sort((a, b) => b[0] - a[0])
+    .map(([, i]) => i)) {
+    if (left <= 0) break;
+    out[i]++;
+    left--;
+  }
+  return out;
+}
+
+async function businessRevenue(req, res, url, user, db, id) {
+  const q = url.searchParams;
+  db.revenue ??= {};
+  // ponytail: one ~50-byte entry per imported row, kept in business.json; move to its own file past ~100k rows
+  db.revenueRows ??= {}; // every imported row, by a hash of its cells -> the line it went into
+  const tdb = await loadTracks();
+  if (req.method === 'POST' && q.has('import')) {
+    // A distributor's CSV. Every row is remembered, so importing the full history again only adds rows that are
+    // new (late earnings for an old month included); new rows become one line per song, month and store.
+    const rows = parseCsv((await body(req, 20e6)).replace(/^﻿/, '')); // Excel starts files with a BOM
+    const head = (rows.shift() || []).map((h) => h.trim().toLowerCase());
+    const col = (...res) => {
+      for (const re of res) {
+        const i = head.findIndex((h) => re.test(h));
+        if (i >= 0) return i;
+      }
+      return -1;
+    };
+    const cEarn = col(/earnings/, /net (revenue|amount|payable)/, /^(amount|revenue|royalties)\b/, /revenue/, /amount/);
+    const cMonth = col(/sale month/, /sales? period/, /^month/, /period/, /month/, /date/);
+    const cStore = col(/^store$/, /store|service|platform|retailer|dsp/);
+    const cIsrc = col(/isrc/);
+    const cTitle = col(/^title$/, /^(track|song)( title| name)?$/, /title/);
+    if (cEarn < 0 || cMonth < 0) fail(400, "Couldn't find the earnings and month columns in that file (it needs a header row)");
+    const comma = decimalCommaFile(
+      rows.map((r) => r[cEarn] ?? ''),
+      rows.sep,
+    );
+    // ISRCs (from the BMI sheets) and unique song titles point a line at its song and release
+    const byIsrc = new Map();
+    const byTitle = new Map();
+    for (const t of Object.values(tdb.tracks)) {
+      if (t.deleted) continue;
+      const isrc = (t.bmi?.isrc || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      if (isrc) byIsrc.set(isrc, t);
+      const k = t.title.trim().toLowerCase();
+      byTitle.set(k, byTitle.has(k) ? null : t); // two songs with one title: can't tell which
+    }
+    const seen = new Map(); // identical rows in one file are separate sales: count them
+    const fresh = [];
+    const bad = [];
+    let already = 0;
+    rows.forEach((r, i) => {
+      const cells = r.map((x) => x.trim());
+      const base = createHash('sha1').update(cells.join('\u0001')).digest('hex').slice(0, 24);
+      const n = (seen.get(base) || 0) + 1;
+      seen.set(base, n);
+      const key = `${base}.${n}`;
+      const amount = parseMoney(cells[cEarn], comma);
+      const month = parseMonth(cells[cMonth]);
+      if (Number.isNaN(amount) || (amount && !month)) return bad.push(i + 2); // +2: the header, and counting from 1
+      if (!amount) return;
+      if (own(db.revenueRows, key)) return already++;
+      fresh.push({ key, amount, month, cells });
+    });
+    if (bad.length)
+      fail(
+        400,
+        `${bad.length} row(s) have an earnings amount or sale month that can't be read (first: row ${bad[0]}). Nothing was imported.`,
+      );
+    const batch = randomUUID().slice(0, 8);
+    const sums = new Map();
+    for (const f of fresh) {
+      const isrc = cIsrc >= 0 ? f.cells[cIsrc].replace(/[^A-Z0-9]/gi, '').toUpperCase() : '';
+      const title = cTitle >= 0 ? f.cells[cTitle].slice(0, 120) : '';
+      const store = cStore >= 0 ? f.cells[cStore].slice(0, 60) : '';
+      const k = `${isrc || title.toLowerCase()}|${f.month}|${store.toLowerCase()}`;
+      // summed in millionths: distributors pay per stream in fractions of a cent, rounded once per line
+      const s = sums.get(k) || { month: f.month, isrc, title, store, micro: 0, keys: [] };
+      s.micro += Math.round(f.amount * 1e6);
+      s.keys.push(f.key);
+      sums.set(k, s);
+    }
+    let unmatched = 0;
+    for (const s of sums.values()) {
+      const t = byIsrc.get(s.isrc) || byTitle.get(s.title.toLowerCase()) || null;
+      if (!t) unmatched++;
+      const l = {
+        id: randomUUID().slice(0, 10),
+        batch,
+        date: `${s.month}-01`,
+        type: 'income',
+        source: 'Streaming',
+        amount: s.micro / 1e6, // kept to the millionth; totals are rounded to cents once
+        release: t?.release || null,
+        track: t?.id || null, // its song: shared by that song's splits
+        note: [s.store, s.title, s.isrc].filter(Boolean).join(' · ').slice(0, 300),
+        by: user.username,
+      };
+      db.revenue[l.id] = l;
+      for (const key of s.keys) db.revenueRows[key] = l.id;
+    }
+    saveBiz();
+    await audit(req, user, 'imported distributor earnings', `${fresh.length} new row(s), batch ${batch}`);
+    return json(res, { added: sums.size, rows: fresh.length, skipped: already, unmatched, batch });
+  }
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const type = input.type === 'cost' ? 'cost' : 'income';
+    const l = {
+      id: randomUUID().slice(0, 10),
+      date: dateOrNull(input.date) || fail(400, 'Pick the date'),
+      type,
+      source: REV_SOURCES[type].includes(input.source) ? input.source : fail(400, 'Pick where it came from'),
+      amount: money(input.amount),
+      release: input.release ? (own(tdb.releases, String(input.release)) ? String(input.release) : fail(400, 'No such release')) : null,
+      note: String(input.note ?? '').slice(0, 300),
+      by: user.username,
+    };
+    if (!(l.amount > 0)) fail(400, 'The amount must be more than 0');
+    db.revenue[l.id] = l;
+    saveBiz();
+    await audit(req, user, `added ${type}`, `${l.source} ${l.amount}`);
+    return json(res, l);
+  }
+  if (req.method === 'DELETE') {
+    // One line, or a whole import (?batch=) to undo it (its rows can then be imported again)
+    const batch = q.get('batch');
+    const gone = batch
+      ? Object.values(db.revenue).filter((l) => l.batch && l.batch === batch)
+      : [own(db.revenue, id) || fail(404, 'No such line')];
+    for (const l of gone) delete db.revenue[l.id];
+    const ids = new Set(gone.map((l) => l.id)); // their rows can be imported again
+    for (const [k, lineId] of Object.entries(db.revenueRows)) if (ids.has(lineId)) delete db.revenueRows[k];
+    saveBiz();
+    await audit(req, user, 'removed revenue lines', String(gone.length));
+    return json(res, { removed: gone.length });
+  }
+  if (req.method !== 'GET') fail(405, 'Not allowed');
+
+  // The picture for a period (default: this year)
+  const from = dateOrNull(q.get('from') || '') || `${localDate().slice(0, 4)}-01-01`;
+  const to = dateOrNull(q.get('to') || '') || localDate();
+  const inRange = (d) => d >= from && d <= to;
+  const lines = Object.values(db.revenue).filter((l) => inRange(l.date));
+  const shop = Object.values((await loadShop()).orders).filter(
+    (o) => ['Paid', 'Shipped', 'Delivered'].includes(o.status) && o.paid && inRange(localDate(new Date(o.paid))), // paid is UTC; the period is in local days
+  );
+  const all = [...lines, ...shop.map((o) => ({ type: 'income', source: 'Shop', amount: o.amount, release: null }))];
+  const cents = (xs) => Math.round(xs.reduce((n, l) => n + Math.round(l.amount * 1e6), 0) / 1e4); // summed exactly, rounded once
+  const bySource = {};
+  for (const l of all) bySource[`${l.type}:${l.source}`] = (bySource[`${l.type}:${l.source}`] || 0) + Math.round(l.amount * 1e6);
+  for (const k in bySource) bySource[k] = Math.round(bySource[k] / 1e4) / 100; // summed exactly like the totals
+  const releases = Object.values(tdb.releases)
+    .filter((r) => !r.deleted && lines.some((l) => l.release === r.id))
+    .map((r) => {
+      const mine = lines.filter((l) => l.release === r.id);
+      const inc = mine.filter((l) => l.type === 'income');
+      const income = cents(inc);
+      const net = income - cents(mine.filter((l) => l.type === 'cost'));
+      const whole = releaseSplits(tdb, r.id);
+      // Each person's part of the income (song lines by the song's splits, the rest by the release's), names
+      // matched without case ("Hima" and "HIMA" are one person)
+      const weight = new Map();
+      const add = (name, w) => {
+        const k = name.toLowerCase();
+        const x = weight.get(k) || { name, w: 0 };
+        x.w += w;
+        weight.set(k, x);
+      };
+      for (const l of inc) for (const s of songSplits(own(tdb.tracks, l.track)) || whole) add(s.name, (l.amount * s.share) / 100);
+      let parts = [...weight.values()].filter((p) => p.w > 0);
+      const total = parts.reduce((n, p) => n + p.w, 0);
+      if (!(total > 0)) parts = whole.map((s) => ({ name: s.name, w: s.share })); // no income yet: the plain splits
+      const sumW = parts.reduce((n, p) => n + p.w, 0);
+      const amounts = allocate(
+        Math.max(0, net),
+        parts.map((p) => p.w / sumW),
+      );
+      return {
+        id: r.id,
+        title: r.title,
+        artist: r.artist || '',
+        income: income / 100,
+        costs: (income - net) / 100,
+        net: net / 100,
+        toRecoup: net < 0 ? -net / 100 : 0,
+        parties: parts.map((p, i) => ({ name: p.name, share: round2((p.w / sumW) * 100), amount: amounts[i] / 100 })),
+      };
+    });
+  await audit(req, user, 'opened revenue', `${from} to ${to}`);
+  const tin = cents(all.filter((l) => l.type === 'income'));
+  const tout = cents(all.filter((l) => l.type === 'cost'));
+  return json(res, {
+    from,
+    to,
+    income: tin / 100,
+    costs: tout / 100,
+    bySource,
+    releases,
+    lines: lines.sort((a, b) => b.date.localeCompare(a.date)),
+    shopOrders: shop.length,
+    sources: REV_SOURCES,
+    allReleases: Object.values(tdb.releases)
+      .filter((r) => !r.deleted)
+      .map((r) => ({ id: r.id, title: r.title })),
+  });
 }
 
 /** Contracts, briefs, receipts... stored on the PC itself (data/business/files), never on a USB space. */
@@ -3638,6 +3980,14 @@ async function stripeWebhook(req, res) {
     }
     if (s.metadata?.order) await shopPaid(s); // the shop (below)
   }
+  if (event.type === 'checkout.session.expired' && event.data.object.metadata?.order) {
+    // An abandoned checkout: its hold ends now (needs "checkout.session.expired" ticked on the Stripe webhook)
+    const o = own((await loadShop()).orders, event.data.object.metadata.order);
+    if (o?.status === 'Pending') {
+      o.status = 'Expired';
+      saveShop();
+    }
+  }
   return json(res, { received: true });
 }
 
@@ -3651,18 +4001,59 @@ const loadShop = async () => (shopDb ??= await readJson('shop.json', { products:
 const saveShop = () => (shopSaved = shopSaved.then(() => saveJson('shop.json', shopDb)).catch(console.error));
 // What the shop sells; the storefront filters by these (labels live in store.html and the Admin Panel)
 const SHOP_CATEGORIES = ['merch', 'presets', 'vocal-chains', 'samples', 'software', 'courses', 'other'];
-const productView = (p, admin) => ({
-  id: p.id,
-  slug: p.slug,
-  title: p.title,
-  description: p.description,
-  price: p.price,
-  kind: p.kind,
-  category: p.category || (p.kind === 'digital' ? 'other' : 'merch'),
-  image: p.image,
-  soldOut: p.stock !== null && p.stock <= 0,
-  ...(admin ? { stock: p.stock, active: p.active, file: p.file ? { space: p.file.space, path: p.file.path } : null } : {}),
-});
+// Capsule drops: a product can go on sale at a set time (a countdown until then), belong to a named capsule, and
+// retire to The Vault (a public gallery of past pieces, not for sale) when it sells out or is retired by hand.
+// Checkout holds: an unpaid Stripe checkout holds its items for HOLD_MS (the session expires then), so a limited
+// drop can't be oversold by people paying at the same time.
+// Stripe stops taking payment at 31 minutes; the extra 14 are for a payment made at the last moment whose webhook
+// is slow. An expired checkout ends its hold at once (checkout.session.expired); a late payment that finds the
+// stock gone is marked Oversold for an admin to refund (shopPaid).
+const HOLD_MS = 45 * 60_000;
+const buyTries = new Map(); // hashed address -> { n, since }
+/**
+ * An address for limits: IPv4 as is; IPv6 cut to its /64 (one household or phone gets a whole /64), with "::"
+ * expanded first so "2001:db8::a:b:c:d" and "2001:db8::1" are the same network.
+ */
+function net64(addr) {
+  const a = addr
+    .replace(/%.*$/, '')
+    .replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '')
+    .toLowerCase();
+  if (!a.includes(':')) return a;
+  const [head, tail] = a.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail !== undefined && tail ? tail.split(':') : [];
+  const groups = a.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
+  return groups
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ''))
+    .join(':');
+}
+const held = (db, p) =>
+  Object.values(db.orders)
+    .filter((o) => o.product === p.id && o.status === 'Pending' && Date.now() - Date.parse(o.created) < HOLD_MS)
+    .reduce((n, o) => n + o.qty, 0);
+const productView = (p, admin, db = shopDb) => {
+  const left = p.stock === null ? null : Math.max(0, p.stock - (db ? held(db, p) : 0));
+  return {
+    id: p.id,
+    slug: p.slug,
+    title: p.title,
+    description: p.description,
+    price: p.price,
+    kind: p.kind,
+    category: p.category || (p.kind === 'digital' ? 'other' : 'merch'),
+    image: p.image,
+    soldOut: p.stock !== null && p.stock <= 0,
+    left: admin || (left !== null && left <= 10) ? left : null, // "Only 3 left" (the public only sees it when it's low)
+    dropAt: p.dropAt || null, // on sale from this moment (ISO); a countdown until then
+    capsule: p.capsule || '',
+    vault: !!p.vault || (p.stock !== null && p.stock <= 0), // in The Vault: shown, never sold
+    ...(admin
+      ? { stock: p.stock, active: p.active, retired: !!p.vault, file: p.file ? { space: p.file.space, path: p.file.path } : null }
+      : {}),
+  };
+};
 
 async function shopApi(req, res, url) {
   const db = await loadShop();
@@ -3685,6 +4076,7 @@ async function shopApi(req, res, url) {
         : null;
     return json(res, {
       status: o.status,
+      oversold: !!o.oversold, // sold out while they paid (stays true once refunded)
       title: o.title,
       qty: o.qty,
       amount: o.amount,
@@ -3698,7 +4090,27 @@ async function shopApi(req, res, url) {
     if (!stripeReady()) fail(503, "The shop isn't taking payments yet");
     const asked = Math.max(1, Math.min(10, Math.floor(Number((await jsonBody(req)).qty) || 1)));
     const qty = p.kind === 'digital' ? 1 : asked; // one download link per order
-    if (p.stock !== null && p.stock < qty) fail(409, p.stock ? `Only ${p.stock} left` : 'Sold out');
+    if (p.vault) fail(409, 'This piece is in The Vault: no longer for sale');
+    if (p.dropAt && Date.parse(p.dropAt) > Date.now()) fail(409, `This drops ${new Date(p.dropAt).toUTCString()}`);
+    // Holds can't be hoarded: 20 checkouts an hour per address, and one open checkout per address per item
+    // (starting a new one releases the last). ponytail: many addresses at once can still tie up a drop for 45 min.
+    const who = createHash('sha256')
+      .update(net64(String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress)))
+      .digest('hex')
+      .slice(0, 16);
+    const t = buyTries.get(who);
+    const tries = t && Date.now() - t.since < 60 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 20) fail(429, 'Too many checkouts from here. Try again in an hour.');
+    if (buyTries.size > 5000) for (const [k, x] of buyTries) if (Date.now() - x.since > 60 * 60_000) buyTries.delete(k);
+    buyTries.set(who, { ...tries, n: tries.n + 1 });
+    // This buyer's own open checkout for it doesn't count against them: the new one replaces it once it exists
+    const mine = Object.values(db.orders).filter((o) => o.product === p.id && o.status === 'Pending' && o.who === who);
+    const left = p.stock === null ? Infinity : p.stock - held(db, p) + mine.reduce((n, o) => n + o.qty, 0);
+    if (left < qty)
+      fail(
+        409,
+        left > 0 ? `Only ${left} left` : p.stock > 0 ? 'All left are in checkouts right now. Try again in half an hour.' : 'Sold out',
+      );
     const order = {
       id: randomUUID().slice(0, 10),
       product: p.id,
@@ -3708,7 +4120,9 @@ async function shopApi(req, res, url) {
       amount: p.price * qty,
       status: 'Pending',
       created: new Date().toISOString(),
+      who, // a hash of the buyer's address, only to limit open checkouts
     };
+    db.orders[order.id] = order; // held from now, before waiting on Stripe, so two buyers can't take the same last one
     const session = await stripe('/checkout/sessions', {
       mode: 'payment',
       line_items: {
@@ -3718,9 +4132,18 @@ async function shopApi(req, res, url) {
       success_url: `${siteOrigin(req)}/shop/thanks?session={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteOrigin(req)}/shop/${p.slug}`,
       metadata: { order: order.id },
+      expires_at: Math.floor((Date.now() + 31 * 60_000) / 1000), // before the hold ends (Stripe's minimum is 30 min)
+    }).catch((e) => {
+      delete db.orders[order.id];
+      throw e;
     });
     order.session = session.id;
-    db.orders[order.id] = order;
+    for (const o of mine) {
+      // the old checkout stops holding stock, and Stripe closes it so it can't be paid any more
+      if (o.status !== 'Pending') continue; // paid while we waited on Stripe: it's a real order now
+      o.status = 'Replaced';
+      if (o.session) await stripe(`/checkout/sessions/${encodeURIComponent(o.session)}/expire`, {}).catch(() => {});
+    }
     saveShop();
     return json(res, { url: session.url });
   }
@@ -3762,6 +4185,17 @@ async function shopApi(req, res, url) {
       if (input.stock !== undefined)
         p.stock = input.stock === null || input.stock === '' ? null : Math.max(0, Math.floor(Number(input.stock) || 0));
       if (input.active !== undefined) p.active = !!input.active;
+      if (input.dropAt !== undefined)
+        p.dropAt = !input.dropAt
+          ? null
+          : !isNaN(Date.parse(input.dropAt))
+            ? new Date(input.dropAt).toISOString()
+            : fail(400, 'Pick a drop date and time');
+      if (input.capsule !== undefined)
+        p.capsule = String(input.capsule ?? '')
+          .trim()
+          .slice(0, 60);
+      if (input.vault !== undefined) p.vault = !!input.vault;
       if (input.image !== undefined) p.image = input.image && /^\/api\/shop\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
       if (input.file !== undefined) {
         // Digital product: remember where the file is on its drive, so the delivery link survives spaces changing
@@ -3819,9 +4253,22 @@ async function shopApi(req, res, url) {
 /** Called from the Stripe webhook when an order is paid: mark it, count stock down, deliver digital files. */
 async function shopPaid(s) {
   const db = await loadShop();
-  const o = db.orders[s.metadata.order];
-  if (!o || o.status !== 'Pending' || s.payment_status !== 'paid') return;
-  const p = db.products[o.product];
+  const o = own(db.orders, s.metadata.order);
+  // Money really arrived: a replaced or expired checkout that was paid anyway still counts
+  if (!o || !['Pending', 'Replaced', 'Expired'].includes(o.status) || s.payment_status !== 'paid') return;
+  const p = own(db.products, o.product);
+  if (p && p.stock !== null && p.stock < o.qty) {
+    // Paid after its hold ran out and someone else got the last ones: never counted as sold, flagged to refund
+    Object.assign(o, { status: 'Oversold', oversold: true, paid: new Date().toISOString(), amount: (s.amount_total || 0) / 100 });
+    saveShop();
+    for (const a of (await loadConfig()).admins)
+      await notify(
+        a,
+        `Oversold: an order for ${o.qty} × ${o.title} was paid after the last ones sold. Refund it in Stripe (Business > Orders).`,
+        {},
+      );
+    return;
+  }
   o.status = o.kind === 'digital' ? 'Delivered' : 'Paid';
   o.paid = new Date().toISOString();
   o.amount = (s.amount_total || 0) / 100;
@@ -5586,14 +6033,20 @@ async function health() {
 }
 
 // ── Plumbing ───────────────────────────────────────────────────────────
-function body(req) {
+// The request body as text, at most `max` bytes: past that nothing more is kept (the rest is read and thrown away,
+// so the "Too large" answer still reaches the sender; Cloudflare caps a request at 100 MB). Decoded once at the
+// end, so an é split between two chunks stays an é.
+function body(req, max = 1e6) {
   return new Promise((resolve, reject) => {
-    let data = '';
+    let chunks = [];
+    let size = 0;
     req.on('data', (c) => {
-      data += c;
-      if (data.length > 1e6) reject(new HttpError(413, 'Too large'));
+      size += c.length;
+      if (size <= max) return chunks.push(c);
+      chunks = [];
+      reject(new HttpError(413, 'Too large'));
     });
-    req.on('end', () => resolve(data));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
 }

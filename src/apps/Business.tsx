@@ -74,7 +74,7 @@ const printWindow = async (b: B, page: (s: Settings) => string) => {
   }
 };
 
-const TABS = ['Overview', 'Clients', 'Jobs', 'Invoices', 'Orders', 'Documents', 'Access log'] as const;
+const TABS = ['Overview', 'Clients', 'Jobs', 'Invoices', 'Orders', 'Revenue', 'Documents', 'Access log'] as const;
 const usd = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 const total = (i: Invoice) => i.items.reduce((n, it) => n + it.qty * it.rate, 0);
 const STATUSES = {
@@ -190,6 +190,7 @@ const BusinessApp: React.FC = () => {
         {tab === 'Documents' && <Documents b={b} clients={clients} clientName={clientName} setMsg={setMsg} />}
         {tab === 'Orders' && <Orders b={b} setMsg={setMsg} />}
         {tab === 'Access log' && <AccessLog b={b} />}
+        {tab === 'Revenue' && <Revenue b={b} />}
       </div>
       <div style={statusBar}>{msg || 'Private: admins with two-step verification only. Every access is logged.'}</div>
     </div>
@@ -197,6 +198,270 @@ const BusinessApp: React.FC = () => {
 };
 
 type B = (path: string, init?: RequestInit) => Promise<any>;
+
+interface RevLine {
+  id: string;
+  date: string;
+  type: 'income' | 'cost';
+  source: string;
+  amount: number;
+  release: string | null;
+  note: string;
+  batch?: string;
+}
+interface RevRelease {
+  id: string;
+  title: string;
+  artist: string;
+  income: number;
+  costs: number;
+  net: number;
+  toRecoup: number;
+  parties: { name: string; share: number; amount: number }[];
+}
+interface RevData {
+  from: string;
+  to: string;
+  income: number;
+  costs: number;
+  bySource: Record<string, number>;
+  releases: RevRelease[];
+  lines: RevLine[];
+  shopOrders: number;
+  sources: { income: string[]; cost: string[] };
+  allReleases: { id: string; title: string }[];
+}
+
+/**
+ * Money in and out for a period: distributor imports, shop sales, tickets, sponsorships, costs. Each release gets a
+ * net-profit statement split by its master splits (Songs > a song > Master splits), printable to send to everyone on it.
+ */
+const Revenue: React.FC<{ b: B }> = ({ b }) => {
+  const year = new Date().getFullYear();
+  const [from, setFrom] = useState(`${year}-01-01`);
+  const [to, setTo] = useState(new Date().toLocaleDateString('en-CA'));
+  const [d, setD] = useState<RevData | null>(null);
+  const [msg, setMsg] = useState('');
+  const [line, setLine] = useState({
+    date: new Date().toLocaleDateString('en-CA'),
+    type: 'income',
+    source: 'Tickets',
+    amount: '',
+    release: '',
+    note: '',
+  });
+  const file = useRef<HTMLInputElement>(null);
+  const load = useCallback(() => b(`/revenue?from=${from}&to=${to}`).then(setD, (e) => setMsg(e.message)), [b, from, to]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!d) return <div>{msg || 'Loading...'}</div>;
+  const title = (id: string | null) => d.allReleases.find((r) => r.id === id)?.title || '';
+
+  const add = async () => {
+    try {
+      await b('/revenue', { method: 'POST', body: JSON.stringify({ ...line, release: line.release || null }) });
+      setLine({ ...line, amount: '', note: '' });
+      setMsg('');
+      load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const importCsv = async (f?: File) => {
+    if (!f) return;
+    setMsg('Importing...');
+    try {
+      const r = await b('/revenue?import', { method: 'POST', body: await f.text() });
+      setMsg(
+        `Imported ${r.added} line(s)${r.skipped ? `, ${r.skipped} already here` : ''}${
+          r.unmatched ? `. ${r.unmatched} couldn't be matched to a release (add the ISRC on the song's BMI sheet, then import again)` : ''
+        }.`,
+      );
+      load();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const remove = async (path: string, what: string) => {
+    if (!(await dialog.confirm(`Remove ${what}?`, { icon: 'warning' }))) return;
+    await b(path, { method: 'DELETE' }).then(load, (e) => setMsg(e.message));
+  };
+  const statement = (r: RevRelease) =>
+    printWindow(b, (s) => {
+      const esc = (t: string) => String(t ?? '').replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+      const rows = d.lines.filter((l) => l.release === r.id);
+      return `<!doctype html><html><head><title>Statement - ${esc(r.title)}</title><style>
+      body{font:14px/1.45 Georgia,serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px}
+      h1{font:700 22px Arial,sans-serif;margin:0} .muted{color:#555} table{width:100%;border-collapse:collapse;margin:14px 0}
+      th,td{text-align:left;padding:5px 4px;border-bottom:1px solid #ccc} td.n,th.n{text-align:right}
+      @media print{button{display:none}}</style></head><body>
+      <button onclick="print()">Print / Save as PDF</button>
+      <h1>${esc(s.name || 'Sanktuary')}: royalty statement</h1>
+      <p><b>${esc(r.title)}</b>${r.artist ? ` by ${esc(r.artist)}` : ''}<br><span class="muted">${esc(d.from)} to ${esc(d.to)}</span></p>
+      <table><tr><th>Date</th><th>What</th><th>Note</th><th class="n">Amount</th></tr>
+      ${rows.map((l) => `<tr><td>${esc(l.date)}</td><td>${esc(l.source)}${l.type === 'cost' ? ' (cost)' : ''}</td><td>${esc(l.note)}</td><td class="n">${l.type === 'cost' ? '-' : ''}${usd(l.amount)}</td></tr>`).join('')}
+      </table>
+      <p>Income ${usd(r.income)} · Costs ${usd(r.costs)} · <b>Net ${usd(r.net)}</b>${r.toRecoup ? ` · still to recoup ${usd(r.toRecoup)}` : ''}</p>
+      <table><tr><th>Name</th><th class="n">Share</th><th class="n">This period</th></tr>
+      ${r.parties.map((p) => `<tr><td>${esc(p.name)}</td><td class="n">${p.share}%</td><td class="n">${usd(p.amount)}</td></tr>`).join('')}
+      </table>
+      <p class="muted">Net profit is income minus the costs of making and releasing the recording; costs are recovered from income first.
+      Shares are the master splits on file. Each line is shown rounded to the cent; the totals are exact.</p></body></html>`;
+    });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        From <input type="date" style={input} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} />
+        to <input type="date" style={input} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />
+        <span style={{ flex: 1 }} />
+        <button
+          style={button}
+          onClick={() => file.current?.click()}
+          title="DistroKid (Bank > See Excruciating Detail > Download) or any distributor's CSV"
+        >
+          <IconLabel icon="upload">Import distributor CSV...</IconLabel>
+        </button>
+        <input
+          ref={file}
+          type="file"
+          accept=".csv,.tsv,.txt,text/csv"
+          hidden
+          onChange={(e) => {
+            importCsv(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Stat label="Income" value={usd(d.income)} />
+        <Stat label="Costs" value={usd(d.costs)} />
+        <Stat label="Net" value={usd(Math.round((d.income - d.costs) * 100) / 100)} />
+      </div>
+      <fieldset style={fieldset}>
+        <legend>Where it came from</legend>
+        {Object.entries(d.bySource)
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => (
+            <div key={k} style={{ display: 'flex', gap: 8 }}>
+              <span style={{ width: 200 }}>
+                {k.split(':')[1]} {k.startsWith('cost') ? '(cost)' : ''}
+              </span>
+              <b style={{ color: k.startsWith('cost') ? '#a00000' : '#006000' }}>{usd(v)}</b>
+            </div>
+          ))}
+        {!Object.keys(d.bySource).length && <div style={{ color: '#555' }}>Nothing in this period yet.</div>}
+        {d.shopOrders > 0 && <div style={{ color: '#555' }}>Shop: {d.shopOrders} paid order(s), counted automatically.</div>}
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Statements by release</legend>
+        {d.releases.map((r) => (
+          <div key={r.id} style={{ ...box, background: '#fff', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <b>{r.title}</b>
+              <span>
+                in {usd(r.income)} · out {usd(r.costs)} · <b>net {usd(r.net)}</b>
+              </span>
+              {r.toRecoup > 0 && <span style={{ color: '#a00000' }}>still to recoup {usd(r.toRecoup)}</span>}
+              <span style={{ flex: 1 }} />
+              <button style={button} onClick={() => statement(r)} title="A statement to send to everyone on the split">
+                Print statement
+              </button>
+            </div>
+            {r.parties.length ? (
+              <div>{r.parties.map((p) => `${p.name} ${p.share}%: ${usd(p.amount)}`).join(' · ')}</div>
+            ) : (
+              <div style={{ color: '#a00000' }}>No master splits yet: add them on its songs (Songs &gt; a song &gt; Master splits).</div>
+            )}
+          </div>
+        ))}
+        {!d.releases.length && <div style={{ color: '#555' }}>Lines tied to a release show up here with their split.</div>}
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Add money in or out</legend>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input type="date" style={input} value={line.date} onChange={(e) => setLine({ ...line, date: e.target.value })} />
+          <select
+            style={input}
+            value={line.type}
+            onChange={(e) => setLine({ ...line, type: e.target.value, source: d.sources[e.target.value as 'income' | 'cost'][0] })}
+          >
+            <option value="income">Money in</option>
+            <option value="cost">Money out (cost)</option>
+          </select>
+          <select style={input} value={line.source} onChange={(e) => setLine({ ...line, source: e.target.value })}>
+            {d.sources[line.type as 'income' | 'cost'].map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+          $
+          <input
+            style={{ ...input, width: 80 }}
+            type="number"
+            min={0.01}
+            step="0.01"
+            value={line.amount}
+            onChange={(e) => setLine({ ...line, amount: e.target.value })}
+          />
+          <select style={input} value={line.release} onChange={(e) => setLine({ ...line, release: e.target.value })}>
+            <option value="">(no release)</option>
+            {d.allReleases.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.title}
+              </option>
+            ))}
+          </select>
+          <input
+            style={{ ...input, flex: 1, minWidth: 120 }}
+            placeholder="Note (venue, sponsor, vendor...)"
+            value={line.note}
+            onChange={(e) => setLine({ ...line, note: e.target.value })}
+          />
+          <button style={{ ...button, fontWeight: 700 }} disabled={!(Number(line.amount) > 0)} onClick={add}>
+            Add
+          </button>
+        </div>
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Lines ({d.lines.length})</legend>
+        <div style={{ maxHeight: 240, overflow: 'auto', background: '#fff', border: '2px inset #808080' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              {d.lines.map((l) => (
+                <tr key={l.id}>
+                  <td style={td}>{l.date}</td>
+                  <td style={td}>{l.source}</td>
+                  <td style={{ ...td, color: l.type === 'cost' ? '#a00000' : '#006000' }}>
+                    {l.type === 'cost' ? '-' : ''}
+                    {usd(l.amount)}
+                  </td>
+                  <td style={td}>{title(l.release)}</td>
+                  <td style={{ ...td, whiteSpace: 'normal' }}>{l.note}</td>
+                  <td style={td}>
+                    <button style={button} title="Remove this line" onClick={() => remove(`/revenue/${l.id}`, 'this line')}>
+                      ×
+                    </button>
+                    {l.batch && (
+                      <button
+                        style={button}
+                        title="Undo the whole import this line came from"
+                        onClick={() => remove(`/revenue?batch=${l.batch}`, 'that whole import')}
+                      >
+                        Undo import
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </fieldset>
+      {msg && <div style={{ color: /^Imported/.test(msg) ? '#006000' : '#a00000' }}>{msg}</div>}
+    </div>
+  );
+};
 type Shared = {
   clients: Client[];
   jobs: Job[];
@@ -879,11 +1144,16 @@ const Orders: React.FC<{ b: B; setMsg: (m: string) => void }> = ({ b, setMsg }) 
                   )
                 }
               >
-                {['Paid', 'Shipped', 'Delivered', 'Refunded'].map((s) => (
+                {(o.status === 'Oversold' ? ['Oversold', 'Refunded'] : ['Paid', 'Shipped', 'Delivered', 'Refunded']).map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </select>
             </div>
+            {o.status === 'Oversold' && (
+              <div style={{ color: '#a00000' }}>
+                Paid after the last ones sold (their checkout ran out). Refund it in the Stripe dashboard, then mark it Refunded.
+              </div>
+            )}
             <div>
               {o.customer?.name} · <a href={`mailto:${o.customer?.email}`}>{o.customer?.email}</a>
               {o.kind === 'digital' && ' · digital, delivered automatically'}

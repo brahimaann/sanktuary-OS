@@ -662,6 +662,11 @@ type Pool = {
   supporters: number;
   payments: boolean;
 };
+/** An ISO time as a datetime-local input value, in this computer's time zone. */
+const localInput = (iso: string) => {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
 type Product = {
   id: string;
   slug: string;
@@ -674,6 +679,10 @@ type Product = {
   stock: number | null;
   active: boolean;
   soldOut: boolean;
+  left: number | null;
+  dropAt: string | null;
+  capsule: string;
+  retired: boolean;
   file: { space: string; path: string } | null;
 };
 
@@ -1223,6 +1232,29 @@ const ShopTab: React.FC = () => {
               defaultValue={product.stock ?? ''}
               onBlur={(e) => patchProduct(product.id, { stock: e.target.value === '' ? null : e.target.value })}
             />
+            Drops at
+            <span style={row}>
+              <input
+                style={input}
+                type="datetime-local"
+                key={product.dropAt || ''}
+                defaultValue={product.dropAt ? localInput(product.dropAt) : ''}
+                onBlur={(e) =>
+                  (e.target.value ? new Date(e.target.value).toISOString() : null) !== product.dropAt &&
+                  patchProduct(product.id, { dropAt: e.target.value ? new Date(e.target.value).toISOString() : null })
+                }
+              />
+              <span style={{ color: '#555' }}>empty = on sale now; before this the shop shows a countdown</span>
+            </span>
+            Capsule
+            <input
+              style={input}
+              key={`c-${product.capsule}`}
+              placeholder="e.g. Capsule 01: TSIMY (groups a drop)"
+              maxLength={60}
+              defaultValue={product.capsule}
+              onBlur={(e) => e.target.value !== product.capsule && patchProduct(product.id, { capsule: e.target.value })}
+            />
             Picture
             <span style={row}>
               {product.image ? <img src={product.image} alt="" style={{ height: 48, border: '1px solid #808080' }} /> : 'none'}
@@ -1262,6 +1294,10 @@ const ShopTab: React.FC = () => {
               <label>
                 <input type="checkbox" checked={product.active} onChange={(e) => patchProduct(product.id, { active: e.target.checked })} />{' '}
                 On sale
+              </label>
+              <label title="Shown in The Vault (sanktuary.studio/shop?c=vault) as a past piece, never sold. Sold-out items go there by themselves.">
+                <input type="checkbox" checked={product.retired} onChange={(e) => patchProduct(product.id, { vault: e.target.checked })} />{' '}
+                Retire to The Vault
               </label>
               <a href={`/shop/${product.slug}`} target="_blank" rel="noopener noreferrer">
                 Open its page

@@ -102,8 +102,8 @@ const fakeStripe = http
   })
   .listen(3195);
 const WEBHOOK_SECRET = 'whsec_test_secret';
-const stripeHook = (object, secret = WEBHOOK_SECRET, t = Math.floor(Date.now() / 1000)) => {
-  const raw = JSON.stringify({ type: 'checkout.session.completed', data: { object } });
+const stripeHook = (object, secret = WEBHOOK_SECRET, t = Math.floor(Date.now() / 1000), type = 'checkout.session.completed') => {
+  const raw = JSON.stringify({ type, data: { object } });
   const sig = createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex');
   return fetch(B + '/api/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': `t=${t},v1=${sig}` }, body: raw });
 };
@@ -1933,6 +1933,356 @@ try {
   );
   check('orders are not in the open admin API', (await call('bob', '/api/business/orders')).status === 401);
   check('shop pages load', (await fetch(B + '/shop')).status === 200 && (await fetch(B + `/shop/${tee.slug}`)).status === 200);
+  check('checkouts expire before their hold ends', Number(teeCall.form.get('expires_at')) > Date.now() / 1000 + 29 * 60);
+
+  // Capsule drops: on sale from a set time, checkout holds so a limited drop can't oversell, The Vault
+  const cap = JSON.parse((await call('alice', '/api/shop/products', 'POST', { title: 'Capsule Hoodie', price: 80, stock: 3 })).text);
+  check(
+    'a drop time must be a real time',
+    (await call('alice', `/api/shop/products/${cap.id}`, 'PATCH', { dropAt: 'soon' })).status === 400,
+  );
+  const dropSoon = new Date(Date.now() + 864e5).toISOString();
+  await call('alice', `/api/shop/products/${cap.id}`, 'PATCH', { active: true, dropAt: dropSoon, capsule: 'Capsule 01: TSIMY' });
+  const capView = async () => (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === cap.id);
+  // each buyer from their own address (one open checkout per address per item)
+  const capBuy = (qty, ip = '203.0.113.1') =>
+    fetch(B + `/api/shop/${cap.slug}/buy`, { method: 'POST', headers: { 'cf-connecting-ip': ip }, body: JSON.stringify({ qty }) });
+  const pre = await capView();
+  check(
+    'visitors see the drop time, capsule and how many are left',
+    pre.dropAt === dropSoon && pre.capsule === 'Capsule 01: TSIMY' && pre.left === 3,
+  );
+  check('nothing sells before the drop', (await capBuy(1)).status === 409);
+  await call('alice', `/api/shop/products/${cap.id}`, 'PATCH', { dropAt: new Date(Date.now() - 1000).toISOString() });
+  check('the drop opens on time', (await capBuy(2, '203.0.113.1')).status === 200);
+  const checkouts = () => stripeCalls.filter((c) => c.path.endsWith('/checkout/sessions'));
+  const firstHold = checkouts().at(-1);
+  check('an open checkout holds its items', (await capView()).left === 1);
+  const oversell = await capBuy(2, '203.0.113.2');
+  check('a limited drop cannot be oversold', oversell.status === 409 && /Only 1 left/.test(await oversell.text()));
+  check(
+    'a new checkout from the same buyer releases their last one',
+    (await capBuy(1, '203.0.113.1')).status === 200 && (await capView()).left === 2,
+  );
+  const replacedOrder = firstHold.form.get('metadata[order]');
+  await capBuy(2, '203.0.113.3');
+  const heldUp = await capBuy(1, '203.0.113.4');
+  check('when the rest are in checkouts, buyers are told to come back', heldUp.status === 409 && /checkouts/.test(await heldUp.text()));
+  // All three checkouts get paid (the replaced one too: that money is real), 5 items of 3: the last one to arrive is flagged
+  await stripeHook({
+    id: 'cs_late',
+    payment_status: 'paid',
+    amount_total: 16000,
+    customer_details: { name: 'Late', email: 'l@example.com' },
+    metadata: { order: replacedOrder },
+  });
+  check(
+    'a replaced checkout is closed at Stripe',
+    stripeCalls.some((c) => /\/checkout\/sessions\/cs_test_\d+\/expire$/.test(c.path)),
+  );
+  const lastCalls = checkouts().slice(-2);
+  const lastHolds = lastCalls.map((c) => c.form.get('metadata[order]'));
+  for (const [i, order] of lastHolds.entries())
+    await stripeHook({
+      id: `cs_ok_${i}`,
+      payment_status: 'paid',
+      amount_total: 8000,
+      customer_details: { name: 'B', email: 'b@example.com' },
+      metadata: { order },
+    });
+  const capOrders = JSON.parse((await biz('alice', '/orders')).text).filter((o) => o.product === cap.id);
+  check(
+    'a payment that finds the stock gone is flagged Oversold, never counted as sold',
+    capOrders.filter((o) => o.status === 'Paid').length === 2 && capOrders.some((o) => o.status === 'Oversold'),
+    JSON.stringify(capOrders.map((o) => o.status)),
+  );
+  check(
+    'admins are told to refund an oversold order',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /Oversold/.test(n.text)),
+  );
+  const oversoldSession = `cs_test_${stripeCalls.indexOf(lastCalls[1]) + 1}`;
+  check(
+    'the buyer of an oversold order is told it sold out (thank-you page)',
+    (await (await fetch(B + `/api/shop/order/${oversoldSession}`)).json()).oversold === true,
+  );
+  // Compressed IPv6 in one /64 is one buyer: the second checkout replaces the first
+  const v6 = JSON.parse((await call('alice', '/api/shop/products', 'POST', { title: 'V6 Tee', price: 10, stock: 5 })).text);
+  await call('alice', `/api/shop/products/${v6.id}`, 'PATCH', { active: true });
+  const v6buy = (ip) => fetch(B + `/api/shop/${v6.slug}/buy`, { method: 'POST', headers: { 'cf-connecting-ip': ip }, body: '{"qty":3}' });
+  await v6buy('2001:db8::a:b:c:d');
+  await v6buy('2001:db8:0:0:1:2:3:4');
+  check(
+    'IPv6 addresses in one /64 count as one buyer',
+    (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === v6.id).left === 2,
+  );
+  check('abandoned checkouts are not in the orders list', !JSON.parse((await biz('alice', '/orders')).text).some((o) => !o.paid));
+  // An expired checkout gives its hold back at once
+  const oneOff = JSON.parse((await call('alice', '/api/shop/products', 'POST', { title: 'One Off', price: 10, stock: 1 })).text);
+  await call('alice', `/api/shop/products/${oneOff.id}`, 'PATCH', { active: true });
+  await fetch(B + `/api/shop/${oneOff.slug}/buy`, { method: 'POST', headers: { 'cf-connecting-ip': '203.0.113.9' }, body: '{"qty":1}' });
+  const expOrder = checkouts().at(-1).form.get('metadata[order]');
+  await stripeHook({ id: 'cs_exp', metadata: { order: expOrder } }, undefined, undefined, 'checkout.session.expired');
+  check(
+    'an expired checkout frees its hold',
+    (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === oneOff.id).left === 1,
+  );
+  let limited = 0;
+  for (let i = 0; i < 21; i++)
+    limited = (
+      await fetch(B + `/api/shop/${oneOff.slug}/buy`, {
+        method: 'POST',
+        headers: { 'cf-connecting-ip': '203.0.113.50' },
+        body: '{"qty":1}',
+      })
+    ).status;
+  check('checkouts are rate limited per address', limited === 429);
+  check(
+    'plenty in stock: visitors are not told the exact number',
+    (await (await fetch(B + '/api/shop')).json()).products.every((p) => p.left === null || p.left <= 10),
+  );
+  await call('alice', `/api/shop/products/${cap.id}`, 'PATCH', { vault: true });
+  check(
+    'retired pieces go to The Vault and are never sold',
+    (await capView()).vault === true && (await capBuy(1, '203.0.113.7')).status === 409,
+  );
+  check(
+    'sold-out pieces are in The Vault too',
+    (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === tee.id).vault === true,
+  );
+  check('The Vault page loads', (await fetch(B + '/shop?c=vault')).status === 200);
+
+  // Revenue: distributor CSV import (row by row, never counted twice), manual lines, shop sales, statements
+  check('revenue is in the business portal only', (await call('alice', '/api/business/revenue')).status === 401);
+  check(
+    'revenue changes need the portal too',
+    (await call('alice', '/api/business/revenue?import', 'POST', 'a')).status === 401 &&
+      (await biz('bob', '/revenue', 'POST', { amount: 1 })).status === 403,
+  );
+  const revRel = JSON.parse((await call('alice', '/api/tracks/release', 'POST', { title: 'Revenue EP', kind: 'EP' })).text);
+  const revSong = JSON.parse((await call('alice', '/api/tracks/track', 'POST', { release: revRel.id, title: 'Money Song' })).text);
+  await call('alice', `/api/tracks/track/${revSong.id}`, 'PATCH', {
+    bmi: { isrc: 'USXYZ2600009' },
+    master: [
+      { name: 'HIMA', role: 'Artist', share: 50, member: '' },
+      { name: 'Sanktuary', role: 'Label', share: 50, member: '' },
+    ],
+  });
+  const thisYear = new Date().getFullYear();
+  const header =
+    'Reporting Date\tSale Month\tStore\tArtist\tTitle\tISRC\tUPC\tQuantity\tTeam Percentage\tSong/Album\tCountry of Sale\tSongwriter Royalties Withheld\tEarnings (USD)';
+  const rowsV1 = [
+    `${thisYear}-03-05\t${thisYear}-01\tSpotify\tHIMA\tMoney Song\tUS-XYZ-26-00009\t\t1000\t100\tSong\tUS\t0\t3.50`,
+    `${thisYear}-03-05\t${thisYear}-01\tSpotify\tHIMA\tMoney Song\tUS-XYZ-26-00009\t\t500\t100\tSong\tCA\t0\t1.50`,
+    `${thisYear}-03-05\t${thisYear}-01\tApple Music\tHIMA\t"Other, Song"\t\t\t10\t100\tSong\tUS\t0\t0.25`,
+  ];
+  const period0 = `/revenue?from=${thisYear}-01-01&to=${thisYear}-12-31`;
+  const importCsv = async (lines) =>
+    JSON.parse((await biz('alice', '/revenue?import', 'POST', '﻿' + [header, ...lines].join('\r\n'), {}, true)).text);
+  const imp = await importCsv(rowsV1);
+  check(
+    'distributor rows become one line per song, month and store',
+    imp.added === 2 && imp.rows === 3 && imp.unmatched === 1,
+    JSON.stringify(imp),
+  );
+  const imp2 = await importCsv(rowsV1);
+  check('importing the same file again adds nothing', imp2.added === 0 && imp2.skipped === 3);
+  // The next download has the whole history plus late earnings for January: only the new row is added
+  const imp3 = await importCsv([
+    ...rowsV1,
+    `${thisYear}-04-05\t${thisYear}-01\tSpotify\tHIMA\tMoney Song\tUS-XYZ-26-00009\t\t160\t100\tSong\tUS\t0\t0.80`,
+  ]);
+  check('late earnings for an old month are added, not lost', imp3.added === 1 && imp3.rows === 1 && imp3.skipped === 3);
+  const odd = await biz(
+    'alice',
+    '/revenue?import',
+    'POST',
+    [header, `x\t${thisYear}-01\tSpotify\tA\tT\t\t\t1\t100\tSong\tUS\t0\t1,2,3`].join('\n'),
+    {},
+    true,
+  );
+  check('an unreadable amount stops the import (nothing half-imported)', odd.status === 400 && /row 2/.test(odd.text));
+  check(
+    'absurd amounts (1e400, a billion on one row) stop the import',
+    (await biz('alice', '/revenue?import', 'POST', `Sale Month,Title,Earnings (USD)\n${thisYear}-01,T,1e400`, {}, true)).status === 400 &&
+      (await biz('alice', '/revenue?import', 'POST', `Sale Month,Title,Earnings (USD)\n${thisYear}-01,T,2000000000`, {}, true)).status ===
+        400,
+  );
+  // Per-stream earnings are fractions of a cent: 1000 rows of $0.0041 are $4.10, not 0
+  const tiny = JSON.parse(
+    (
+      await biz(
+        'alice',
+        '/revenue?import',
+        'POST',
+        [
+          'Sale Month,Store,Title,Earnings (USD)',
+          ...Array.from({ length: 1000 }, (_, i) => `${thisYear}-03,Store${i % 3},Tiny Song,0.0041`),
+        ].join('\n'),
+        {},
+        true,
+      )
+    ).text,
+  );
+  const tinyLines = JSON.parse((await biz('alice', period0)).text).lines.filter((l) => l.batch === tiny.batch);
+  check(
+    'fractions of a cent add up',
+    Math.round(tinyLines.reduce((n, l) => n + l.amount, 0) * 100) === 410,
+    JSON.stringify(tinyLines.map((l) => l.amount)),
+  );
+  const tinyRev = JSON.parse((await biz('alice', period0)).text);
+  const streamed = JSON.parse((await biz('alice', period0)).text).lines.filter((l) => l.source === 'Streaming');
+  check(
+    '"where it came from" adds up exactly like the totals',
+    tinyRev.bySource['income:Streaming'] === Math.round(streamed.reduce((n, l) => n + Math.round(l.amount * 1e6), 0) / 1e4) / 100,
+    JSON.stringify(tinyRev.bySource),
+  );
+  await biz('alice', `/revenue?batch=${tiny.batch}`, 'DELETE');
+  // Excel in Europe writes tiny values as 4,1E-05; with a currency sign too
+  const euSci = JSON.parse(
+    (
+      await biz(
+        'alice',
+        '/revenue?import',
+        'POST',
+        `Month;Title;Amount\n${thisYear}-03;Sci EU;4,1E-05\n${thisYear}-03;Sci EU;€2,5E+00`,
+        {},
+        true,
+      )
+    ).text,
+  );
+  const euSciLine = JSON.parse((await biz('alice', period0)).text).lines.find((l) => l.batch === euSci.batch);
+  check(
+    'scientific notation with a decimal comma or currency is read right',
+    Math.abs(euSciLine?.amount - 2.500041) < 1e-9,
+    JSON.stringify(euSciLine),
+  );
+  await biz('alice', `/revenue?batch=${euSci.batch}`, 'DELETE');
+  const sci = JSON.parse(
+    (
+      await biz(
+        'alice',
+        '/revenue?import',
+        'POST',
+        `Sale Month,Store,Title,Earnings (USD)
+${thisYear}-03,Spotify,Sci Song,4.1E-05
+${thisYear}-03,Spotify,Sci Song,2.5`,
+        {},
+        true,
+      )
+    ).text,
+  );
+  const sciLine = JSON.parse((await biz('alice', period0)).text).lines.find((l) => l.batch === sci.batch);
+  check(
+    "Excel's scientific notation (4.1E-05) is a tiny amount, not a debt",
+    Math.abs(sciLine?.amount - 2.500041) < 1e-9,
+    JSON.stringify(sciLine),
+  );
+  await biz('alice', `/revenue?batch=${sci.batch}`, 'DELETE');
+  const cents3 = JSON.parse(
+    (
+      await biz(
+        'alice',
+        '/revenue?import',
+        'POST',
+        `Month;Title;Amount
+${thisYear}-03;Comma Song;0,123
+${thisYear}-03;Comma Song;0,456`,
+        {},
+        true,
+      )
+    ).text,
+  );
+  const c3 = JSON.parse((await biz('alice', period0)).text).lines.find((l) => l.batch === cents3.batch);
+  check('"0,123" in a European file is 12 cents, not $123', c3?.amount === 0.579, JSON.stringify(c3));
+  await biz('alice', `/revenue/${c3.id}`, 'DELETE');
+  check(
+    'a single removed line can be imported again',
+    JSON.parse(
+      (
+        await biz(
+          'alice',
+          '/revenue?import',
+          'POST',
+          `Month;Title;Amount
+${thisYear}-03;Comma Song;0,123
+${thisYear}-03;Comma Song;0,456`,
+          {},
+          true,
+        )
+      ).text,
+    ).rows === 2,
+  );
+  await biz(
+    'alice',
+    `/revenue?batch=${JSON.parse((await biz('alice', period0)).text).lines.find((l) => /Comma Song/.test(l.note)).batch}`,
+    'DELETE',
+  );
+  const euro = JSON.parse(
+    (
+      await biz(
+        'alice',
+        '/revenue?import',
+        'POST',
+        `Month;Store;Title;Amount\n${thisYear}-02;Deezer;Money Song;1.234,50\n"Jul ${thisYear}";Tidal;Money Song;(0,50)`,
+        {},
+        true,
+      )
+    ).text,
+  );
+  check('European numbers, semicolons, month names and (negative) amounts read right', euro.added === 2, JSON.stringify(euro));
+  check(
+    'a file without earnings and month columns is refused',
+    (await biz('alice', '/revenue?import', 'POST', 'a,b\n1,2', {}, true)).status === 400,
+  );
+  await biz('alice', `/revenue?batch=${euro.batch}`, 'DELETE');
+  check(
+    'manual lines need a known source and a positive amount',
+    (await biz('alice', '/revenue', 'POST', { date: `${thisYear}-02-01`, type: 'cost', source: 'Yachts', amount: 5 })).status === 400 &&
+      (await biz('alice', '/revenue', 'POST', { date: `${thisYear}-02-01`, type: 'cost', source: 'Recording', amount: -5 })).status === 400,
+  );
+  check(
+    'shop sales cannot be typed in too (they count by themselves)',
+    (await biz('alice', '/revenue', 'POST', { date: `${thisYear}-02-01`, type: 'income', source: 'Shop', amount: 5 })).status === 400,
+  );
+  await biz('alice', '/revenue', 'POST', { date: `${thisYear}-02-01`, type: 'cost', source: 'Recording', amount: 2, release: revRel.id });
+  await biz('alice', '/revenue', 'POST', {
+    date: `${thisYear}-02-10`,
+    type: 'income',
+    source: 'Tickets',
+    amount: 10.5,
+    release: revRel.id,
+  });
+  const period = `/revenue?from=${thisYear}-01-01&to=${thisYear}-12-31`;
+  const epRev = JSON.parse((await biz('alice', period)).text).releases.find((r) => r.id === revRel.id);
+  check(
+    'a release statement: income, costs, net, split by its master splits',
+    epRev?.income === 16.3 && epRev.costs === 2 && epRev.net === 14.3 && epRev.parties.find((p) => p.name === 'HIMA')?.amount === 7.15,
+    JSON.stringify(epRev),
+  );
+  // A second song that's all X's and earned nothing: X only shares in the release-wide money (the tickets)
+  const xSong = JSON.parse((await call('alice', '/api/tracks/track', 'POST', { release: revRel.id, title: 'X Song' })).text);
+  await call('alice', `/api/tracks/track/${xSong.id}`, 'PATCH', { master: [{ name: 'X', role: 'Artist', share: 100, member: '' }] });
+  const ep2 = JSON.parse((await biz('alice', period)).text).releases.find((r) => r.id === revRel.id);
+  const partsSum = Math.round(ep2.parties.reduce((n, p) => n + p.amount * 100, 0));
+  const xPart = ep2.parties.find((p) => p.name === 'X');
+  check(
+    "each song's earnings follow that song's splits, and the parts add up to the cent",
+    partsSum === 1430 && xPart && Math.abs(xPart.amount - (14.3 * (10.5 * 0.5)) / 16.3) < 0.011,
+    JSON.stringify(ep2.parties),
+  );
+  const rev = JSON.parse((await biz('alice', period)).text);
+  check('paid shop orders count as income by themselves', rev.bySource['income:Shop'] > 0 && rev.shopOrders >= 2);
+  await biz('alice', '/revenue', 'POST', { date: `${thisYear}-02-11`, type: 'cost', source: 'Marketing', amount: 100, release: revRel.id });
+  const lossy = JSON.parse((await biz('alice', period)).text).releases.find((r) => r.id === revRel.id);
+  check(
+    'a loss pays nobody and shows what is still to recoup',
+    lossy.net < 0 && lossy.toRecoup === 85.7 && lossy.parties.every((p) => p.amount === 0),
+    JSON.stringify(lossy),
+  );
+  const undo = JSON.parse((await biz('alice', `/revenue?batch=${imp.batch}`, 'DELETE')).text);
+  check('an import can be undone as a whole', undo.removed === 2);
+  check('once undone, its rows can be imported again', (await importCsv(rowsV1)).rows === 3);
+  check('revenue lines ids cannot reach the prototype', (await biz('alice', '/revenue/__proto__', 'DELETE')).status === 404);
 
   // RapidRAW editor proxy: allowlisted commands, Sanktuary paths only, rights checked, real paths never leak
   const raw = (u, command, args) => call(u, `/api/raw/invoke/${command}`, 'POST', args);

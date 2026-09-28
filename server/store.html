@@ -295,22 +295,64 @@
           other: 'Other',
         };
         const c = new URLSearchParams(location.search).get('c');
-        const used = Object.keys(CATS).filter((k) => s.products.some((p) => p.category === k));
-        const shown = s.products.filter((p) => !CATS[c] || p.category === c);
+        const vault = s.products.filter((p) => p.vault);
+        if (c === 'vault') return showVault(vault);
+        const selling = s.products.filter((p) => !p.vault);
+        const used = Object.keys(CATS).filter((k) => selling.some((p) => p.category === k));
+        const shown = selling.filter((p) => !CATS[c] || p.category === c);
         const chips =
           used.length > 1
             ? `<div class="row" style="margin-bottom:8px;flex-wrap:wrap">${[['', 'All'], ...used.map((k) => [k, CATS[k]])]
                 .map(([k, l]) => `<a class="btn${(CATS[c] ? c : '') === k ? ' on' : ''}" href="/shop${k ? '?c=' + k : ''}">${esc(l)}</a>`)
                 .join('')}</div>`
             : '';
-        app.innerHTML = shown.length
-          ? `${chips}<div class="grid">${shown
-              .map(
-                (p) => `<a class="card" href="/shop/${esc(p.slug)}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : ''}
-                <div class="t"><b>${esc(p.title)}</b><div class="muted">${p.soldOut ? 'Sold out' : usd(p.price)} · ${p.kind === 'digital' ? esc(CATS[p.category] || 'Digital') + ' · download' : 'shipped'}</div></div></a>`,
-              )
-              .join('')}</div>`
-          : '<div class="inset">Nothing for sale yet. Check back soon.</div>';
+        // Upcoming drops first (soonest first), then everything on sale
+        shown.sort((a, b) => Number(!upcoming(a)) - Number(!upcoming(b)) || (a.dropAt || '').localeCompare(b.dropAt || ''));
+        const vaultLink = vault.length
+          ? `<div><a class="btn" href="/shop?c=vault">The Vault: ${vault.length} past piece${vault.length === 1 ? '' : 's'} &rarr;</a></div>`
+          : '';
+        app.innerHTML =
+          (shown.length
+            ? `${chips}<div class="grid">${shown.map((p) => card(p, CATS)).join('')}</div>`
+            : '<div class="inset">Nothing for sale right now. Check back soon.</div>') + vaultLink;
+        tick();
+      }
+      // A drop that hasn't opened yet
+      const upcoming = (p) => p.dropAt && Date.parse(p.dropAt) > Date.now();
+      const until = (iso) => {
+        const s = Math.max(0, Math.floor((Date.parse(iso) - Date.now()) / 1000));
+        const d = Math.floor(s / 86400);
+        const hms = [Math.floor(s / 3600) % 24, Math.floor(s / 60) % 60, s % 60].map((n) => String(n).padStart(2, '0')).join(':');
+        return d ? `${d}d ${hms}` : hms;
+      };
+      // Live countdowns: every [data-drop] shows the time left; the page reloads the moment a drop opens
+      let ticking = 0;
+      function tick() {
+        clearInterval(ticking);
+        const els = [...document.querySelectorAll('[data-drop]')];
+        if (!els.length) return;
+        const step = () => {
+          for (const el of els) {
+            if (Date.parse(el.dataset.drop) <= Date.now()) return location.reload();
+            el.textContent = `Drops in ${until(el.dataset.drop)}`;
+          }
+        };
+        step();
+        ticking = setInterval(step, 1000);
+      }
+      const card = (
+        p,
+        CATS,
+      ) => `<a class="card" href="/shop/${esc(p.slug)}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : ''}
+        <div class="t">${p.capsule ? `<div class="muted" style="font-size:11px">${esc(p.capsule)}</div>` : ''}<b>${esc(p.title)}</b>
+        <div class="muted">${usd(p.price)} · ${p.kind === 'digital' ? esc(CATS[p.category] || 'Digital') + ' · download' : 'shipped'}</div>
+        ${upcoming(p) ? `<div style="color:var(--navy);font-weight:700" data-drop="${esc(p.dropAt)}"></div>` : p.left !== null && p.left <= 10 ? `<div class="err">${p.left ? `Only ${p.left} left` : 'All in checkouts right now'}</div>` : ''}</div></a>`;
+      // The Vault: everything sold out or retired, as a gallery (not for sale)
+      function showVault(vault) {
+        title('The Vault');
+        app.innerHTML = `<div class="inset"><h1>The Vault</h1><p class="muted">Past pieces and sold-out drops. Not for sale any more: kept here for the record.</p></div>
+          ${vault.length ? `<div class="grid">${vault.map((p) => `<a class="card" href="/shop/${esc(p.slug)}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" style="filter:grayscale(.35)">` : ''}<div class="t">${p.capsule ? `<div class="muted" style="font-size:11px">${esc(p.capsule)}</div>` : ''}<b>${esc(p.title)}</b><div class="muted">${p.soldOut ? 'Sold out' : 'Retired'}</div></div></a>`).join('')}</div>` : '<div class="inset">Nothing in The Vault yet.</div>'}
+          <div><a class="btn" href="/shop">&larr; Shop</a></div>`;
       }
       async function product() {
         let s;
@@ -323,17 +365,22 @@
         if (!p) return fail(new Error('This item is not available.'));
         title(p.title);
         app.innerHTML = `<div class="inset product">${p.image ? `<img src="${esc(p.image)}" alt="">` : '<div></div>'}
-          <div><h1>${esc(p.title)}</h1><div class="big-number" style="margin:8px 0">${usd(p.price)}</div>
+          <div>${p.capsule ? `<div class="muted">${esc(p.capsule)}</div>` : ''}<h1>${esc(p.title)}</h1><div class="big-number" style="margin:8px 0">${usd(p.price)}</div>
           <div class="muted">${p.kind === 'digital' ? 'Digital: you get a private download link right after paying.' : 'Shipped to the US and Canada. Stripe asks for your address.'}</div>
           ${p.description ? `<p>${para(p.description)}</p>` : ''}
           ${
-            p.soldOut
-              ? '<div class="note">Sold out.</div>'
-              : !s.payments
-                ? '<div class="note">The shop opens for orders soon.</div>'
-                : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? 'Qty <input id="qty" type="number" min="1" max="10" value="1" style="width:60px">' : ''}
-                  <button class="btn big" id="buy">Buy</button></div><div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
+            p.vault
+              ? `<div class="note">In <a href="/shop?c=vault">The Vault</a>: ${p.soldOut ? 'sold out' : 'retired'}, no longer for sale.</div>`
+              : upcoming(p)
+                ? `<div class="note"><b data-drop="${esc(p.dropAt)}"></b><div class="muted">${esc(new Date(p.dropAt).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }))}</div></div>`
+                : p.left === 0
+                  ? '<div class="note">All that are left are in other people\'s checkouts. Try again in half an hour.</div>'
+                  : !s.payments
+                    ? '<div class="note">The shop opens for orders soon.</div>'
+                    : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? 'Qty <input id="qty" type="number" min="1" max="10" value="1" style="width:60px">' : ''}
+                  <button class="btn big" id="buy">Buy</button></div>${p.left !== null && p.left <= 10 ? `<div class="err" style="margin-top:6px">Only ${p.left} left</div>` : ''}<div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
           }</div></div><div><a class="btn" href="/shop">&larr; All items</a></div>`;
+        tick();
         const buy = document.getElementById('buy');
         if (buy)
           buy.onclick = async () => {
@@ -363,6 +410,11 @@
           app.innerHTML = '<div class="inset">Confirming your payment with Stripe...</div>';
           return setTimeout(() => thanks(tries + 1), 2000);
         }
+        if (o.oversold)
+          return (app.innerHTML = `<div class="inset"><h1>Sorry: it sold out while you were paying</h1>
+            <p>${o.qty} × <b>${esc(o.title)}</b>: the last ones went to buyers who finished checkout first.
+            ${o.status === 'Refunded' ? 'Your payment has been refunded.' : 'You will be refunded in full; Stripe emails you when it goes through.'}</p></div>
+            <div><a class="btn" href="/shop">Back to the shop</a></div>`);
         app.innerHTML = `<div class="inset"><h1>Thank you!</h1><p>${o.qty} × <b>${esc(o.title)}</b> · ${usd(o.amount)}</p>
           ${
             o.download
