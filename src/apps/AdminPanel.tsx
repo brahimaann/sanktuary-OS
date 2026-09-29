@@ -67,7 +67,20 @@ interface Health {
   rapidraw?: Check;
 }
 
-const TABS = ['Health', 'Usage', 'Drives', 'Spaces', 'Members', 'Backups', 'Front page', 'Blog', 'Stories', 'Shop & pool', 'Log'] as const;
+const TABS = [
+  'Health',
+  'Usage',
+  'Drives',
+  'Spaces',
+  'Members',
+  'Backups',
+  'Front page',
+  'Mailing list',
+  'Blog',
+  'Stories',
+  'Shop & pool',
+  'Log',
+] as const;
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
 const AdminPanel: React.FC = () => {
@@ -244,6 +257,7 @@ const AdminPanel: React.FC = () => {
         {tab === 'Log' && <LogTab />}
         {tab === 'Blog' && <BlogTab />}
         {tab === 'Front page' && <FrontTab />}
+        {tab === 'Mailing list' && <MailTab />}
         {tab === 'Usage' && <UsageTab />}
         {tab === 'Stories' && <StoriesTab />}
         {tab === 'Shop & pool' && <ShopTab />}
@@ -1349,6 +1363,235 @@ type Booking = {
 };
 
 /** What visitors see in the Welcome window, and the "Join the Village" requests. */
+type MailStep = { id?: string; day: number; subject: string; body: string };
+type MailData = {
+  configured: boolean;
+  settings: { address: string; offerTitle: string; offerText: string };
+  counts: Record<'confirmed' | 'pending' | 'unsubscribed', number>;
+  subscribers: { id: string; email: string; name: string; status: string; source: string; created: string }[];
+  sequence: MailStep[];
+  broadcasts: { id: string; subject: string; at: string; to: number; sent: number; failed: number }[];
+};
+
+/** The mailing list: who's on it, the welcome sequence (drips), one-off emails, and the sign-up offer. */
+const MailTab: React.FC = () => {
+  const api = useApi();
+  const [d, setD] = useState<MailData | null>(null);
+  const [steps, setSteps] = useState<MailStep[]>([]);
+  const [draft, setDraft] = useState({ subject: '', body: '', testTo: '' });
+  const [msg, setMsg] = useState('');
+  const load = useCallback(
+    () =>
+      api('/api/mail/admin').then(
+        (x: MailData) => (setD(x), setSteps(x.sequence)),
+        (e) => setMsg(e.message),
+      ),
+    [api],
+  );
+  useEffect(() => {
+    load();
+  }, [load]);
+  if (!d) return <div>{msg || 'Loading...'}</div>;
+  const run = (p: Promise<unknown>, ok: string) =>
+    p.then(
+      () => (setMsg(ok), load()),
+      (e) => setMsg(e.message),
+    );
+  const setting = (k: keyof MailData['settings'], label: string, rows = 1) => (
+    <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 6, marginBottom: 6, alignItems: 'start' }}>
+      {label}
+      {rows === 1 ? (
+        <input
+          key={d.settings[k]}
+          style={input}
+          defaultValue={d.settings[k]}
+          onBlur={(e) =>
+            e.target.value !== d.settings[k] &&
+            run(api('/api/mail/settings', { method: 'PATCH', body: JSON.stringify({ [k]: e.target.value }) }), 'Saved.')
+          }
+        />
+      ) : (
+        <textarea
+          key={d.settings[k]}
+          rows={rows}
+          style={{ ...input, resize: 'vertical' }}
+          defaultValue={d.settings[k]}
+          onBlur={(e) =>
+            e.target.value !== d.settings[k] &&
+            run(api('/api/mail/settings', { method: 'PATCH', body: JSON.stringify({ [k]: e.target.value }) }), 'Saved.')
+          }
+        />
+      )}
+    </label>
+  );
+  const setStep = (i: number, k: keyof MailStep, v: string | number) => setSteps(steps.map((s, j) => (j === i ? { ...s, [k]: v } : s)));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {!d.configured && (
+        <p style={{ ...hint, background: '#ffffe1', border: '1px solid #808080', padding: 6 }}>
+          Email isn't set up on the server yet. Make a free Resend account, verify the sanktuary.studio domain there, and put RESEND_API_KEY
+          and MAIL_FROM (e.g. Sanktuary &lt;hello@sanktuary.studio&gt;) in .env. Until then the sign-up offer stays hidden.
+        </p>
+      )}
+      <div style={row}>
+        <b>{d.counts.confirmed}</b> on the list · {d.counts.pending} waiting to confirm · {d.counts.unsubscribed} unsubscribed
+      </div>
+      <fieldset style={fieldset}>
+        <legend>Settings</legend>
+        {setting('address', 'Postal address')}
+        <p style={hint}>Required by law in every email (a PO box works). Nothing sends until it's filled in.</p>
+        {setting('offerTitle', 'Sign-up offer title')}
+        {setting('offerText', 'Sign-up offer text', 2)}
+        <p style={hint}>Visitors see this in a small window after 10 seconds, once; closing it means it never comes back on that device.</p>
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Welcome sequence (sent after someone confirms)</legend>
+        <p style={hint}>
+          Day 0 goes right after they confirm: put the free guides' links there. {'{name}'} becomes their first name. A new email only
+          reaches people who get to its day after you add it.
+        </p>
+        {steps.map((s, i) => (
+          <div
+            key={s.id || i}
+            style={{
+              border: '1px solid #808080',
+              padding: 6,
+              marginBottom: 6,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              background: '#fff',
+            }}
+          >
+            <div style={row}>
+              Day
+              <input
+                style={{ ...input, width: 56 }}
+                type="number"
+                min={0}
+                max={365}
+                value={s.day}
+                onChange={(e) => setStep(i, 'day', +e.target.value)}
+              />
+              <input
+                style={{ ...input, flex: 1 }}
+                placeholder="Subject"
+                maxLength={150}
+                value={s.subject}
+                onChange={(e) => setStep(i, 'subject', e.target.value)}
+              />
+              <button style={button} onClick={() => setSteps(steps.filter((_, j) => j !== i))}>
+                ×
+              </button>
+            </div>
+            <textarea
+              style={{ ...input, resize: 'vertical' }}
+              rows={4}
+              value={s.body}
+              onChange={(e) => setStep(i, 'body', e.target.value)}
+              placeholder="Hi {name}, ..."
+            />
+          </div>
+        ))}
+        <div style={row}>
+          <button
+            style={button}
+            onClick={() => setSteps([...steps, { day: steps.length ? steps[steps.length - 1].day + 3 : 0, subject: '', body: '' }])}
+          >
+            Add email
+          </button>
+          <button
+            style={{ ...button, fontWeight: 700 }}
+            onClick={() => run(api('/api/mail/sequence', { method: 'PUT', body: JSON.stringify({ sequence: steps }) }), 'Sequence saved.')}
+          >
+            Save sequence
+          </button>
+        </div>
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Send an email to everyone on the list</legend>
+        <input
+          style={input}
+          placeholder="Subject"
+          maxLength={150}
+          value={draft.subject}
+          onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
+        />
+        <textarea
+          style={{ ...input, resize: 'vertical', marginTop: 4 }}
+          rows={6}
+          placeholder="Hi {name}, ..."
+          value={draft.body}
+          onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+        />
+        <div style={{ ...row, marginTop: 4 }}>
+          <input
+            style={{ ...input, width: 200 }}
+            type="email"
+            placeholder="your email, for a test"
+            value={draft.testTo}
+            onChange={(e) => setDraft({ ...draft, testTo: e.target.value })}
+          />
+          <button
+            style={button}
+            disabled={!draft.testTo || !draft.subject}
+            onClick={() =>
+              run(api('/api/mail/broadcast', { method: 'POST', body: JSON.stringify(draft) }), `Test sent to ${draft.testTo}.`)
+            }
+          >
+            Send test
+          </button>
+          <span style={{ flex: 1 }} />
+          <button
+            style={{ ...button, fontWeight: 700 }}
+            disabled={!draft.subject || !draft.body}
+            onClick={async () =>
+              (await dialog.confirm(`Send "${draft.subject}" to ${d.counts.confirmed} people now?`, { icon: 'warning' })) &&
+              run(
+                api('/api/mail/broadcast', { method: 'POST', body: JSON.stringify({ subject: draft.subject, body: draft.body }) }),
+                'Sending. You get a notification when it has gone to everyone.',
+              )
+            }
+          >
+            Send to {d.counts.confirmed}
+          </button>
+        </div>
+        {d.broadcasts.map((b) => (
+          <div key={b.id} style={{ color: '#444' }}>
+            {new Date(b.at).toLocaleDateString()} · {b.subject} · {b.sent} of {b.to} sent{b.failed ? `, ${b.failed} failed` : ''}
+          </div>
+        ))}
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>People ({d.subscribers.length})</legend>
+        <div style={{ maxHeight: 220, overflow: 'auto', background: '#fff', border: '2px inset #808080' }}>
+          {d.subscribers.map((s) => (
+            <div key={s.id} style={{ ...row, padding: '2px 6px', borderBottom: '1px solid #eee' }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {s.email} {s.name && `(${s.name})`}
+              </span>
+              <span style={{ color: s.status === 'confirmed' ? '#006000' : '#666' }}>{s.status}</span>
+              <span style={{ color: '#666' }}>{s.source}</span>
+              <button
+                style={button}
+                title="Remove them completely (when someone asks to be forgotten)"
+                onClick={async () =>
+                  (await dialog.confirm(`Remove ${s.email} completely?`)) &&
+                  run(api(`/api/mail/subscribers/${s.id}`, { method: 'DELETE' }), 'Removed.')
+                }
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          {!d.subscribers.length && <div style={{ padding: 6, color: '#555' }}>Nobody yet.</div>}
+        </div>
+      </fieldset>
+      {msg && <div style={{ color: /^(Saved|Sequence|Test|Sending|Removed)/.test(msg) ? '#006000' : '#a00000' }}>{msg}</div>}
+    </div>
+  );
+};
+
 /** The YouTube channel videos are posted to (Files > a video > Post to YouTube...). */
 const YouTubeSettings: React.FC = () => {
   const api = useApi();

@@ -160,6 +160,20 @@ const fakeGoogle = http
   })
   .listen(3192);
 
+// A fake Resend: records every email
+const mails = [];
+const fakeResend = http
+  .createServer((req, res) => {
+    let raw = '';
+    req.on('data', (d) => (raw += d));
+    req.on('end', () => {
+      if (req.headers.authorization !== 'Bearer re_test') return res.writeHead(401).end();
+      mails.push(JSON.parse(raw));
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: `m${mails.length}` }));
+    });
+  })
+  .listen(3191);
+
 const srv = spawn(process.execPath, [SERVER], {
   env: {
     ...process.env,
@@ -177,6 +191,9 @@ const srv = spawn(process.execPath, [SERVER], {
     RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
     RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
     AUTO_SCAN_MS: '400', // long enough for a test to set a bounce by hand right after uploading it
+    RESEND_API_URL: 'http://127.0.0.1:3191',
+    RESEND_API_KEY: 're_test',
+    MAIL_FROM: 'Sanktuary <hello@sanktuary.test>',
     GOOGLE_CLIENT_ID: 'gid',
     GOOGLE_CLIENT_SECRET: 'gsecret',
     GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
@@ -2548,12 +2565,102 @@ ${thisYear}-03;Comma Song;0,456`,
     'disconnecting forgets the channel',
     (await call('alice', '/api/youtube', 'DELETE')).status === 200 && !JSON.parse((await call('alice', '/api/youtube')).text).connected,
   );
+
+  // Mailing list: double opt-in, one-click unsubscribe, the postal address, drips and broadcasts
+  const mailSub = (body, ip = '198.51.100.20') =>
+    fetch(B + '/api/mail/subscribe', { method: 'POST', headers: { 'cf-connecting-ip': ip }, body: JSON.stringify(body) });
+  check('the list is open when email is set up', (await (await fetch(B + '/api/mail')).json()).open === true);
+  check('signing up needs the consent box', (await mailSub({ email: 'fan@example.com' })).status === 400);
+  check('signing up needs a real email', (await mailSub({ email: 'nope', consent: true })).status === 400);
+  await mailSub({ email: 'bot@example.com', consent: true, website: 'x' });
+  check('bots filling the hidden field get no email', !mails.some((m) => m.to[0] === 'bot@example.com'));
+  check('only admins manage the list', (await call('bob', '/api/mail/admin')).status === 403);
+  check(
+    'every email needs a subject; days 0 to 365',
+    (await call('alice', '/api/mail/sequence', 'PUT', { sequence: [{ day: 400, subject: 'x' }] })).status === 400 &&
+      (await call('alice', '/api/mail/sequence', 'PUT', { sequence: [{ day: 0, subject: '' }] })).status === 400,
+  );
+  await call('alice', '/api/mail/sequence', 'PUT', {
+    sequence: [
+      { day: 0, subject: 'Welcome\r\nBcc: evil@example.com', body: 'Hi {name}, here are your guides: <script>x</script>' },
+      { day: 3, subject: 'Day three', body: 'later' },
+    ],
+  });
+  check(
+    'a broadcast waits for the postal address',
+    (await call('alice', '/api/mail/broadcast', 'POST', { subject: 'News', body: 'hi' })).status === 400,
+  );
+  await call('alice', '/api/mail/settings', 'PATCH', { address: 'Sanktuary, 123 Main St, Minneapolis MN' });
+  check('signing up works', (await mailSub({ email: 'Fan@Example.com', name: 'Ama', consent: true, source: 'popup' })).status === 200);
+  const confirmMail = mails.find((m) => m.to[0] === 'fan@example.com');
+  const confirmLink = confirmMail?.text.match(/\/api\/mail\/confirm\?token=[\w-]+/)?.[0];
+  check(
+    'a confirmation email goes out first (no welcome yet)',
+    !!confirmLink && mails.filter((m) => m.to[0] === 'fan@example.com').length === 1,
+  );
+  await mailSub({ email: 'fan@example.com', consent: true });
+  check('signing up twice in a row sends one email', mails.filter((m) => m.to[0] === 'fan@example.com').length === 1);
+  check(
+    'the same answer whether or not someone is on the list',
+    (await mailSub({ email: 'fan@example.com', consent: true }, '198.51.100.21')).status === 200,
+  );
+  const confirmed = await fetch(B + confirmLink);
+  check('the confirm link says so', confirmed.status === 200 && /You(&#39;|')re in/.test(await confirmed.text()));
+  await new Promise((r) => setTimeout(r, 900));
+  const welcome = mails.find((m) => m.to[0] === 'fan@example.com' && /^Welcome/.test(m.subject));
+  check('the day-0 email follows the confirmation', !!welcome && !mails.some((m) => m.subject === 'Day three'));
+  check('subjects cannot add headers', welcome && !/[\r\n]/.test(welcome.subject));
+  check(
+    "the reader's name is filled in, and HTML in emails is escaped",
+    /Hi Ama/.test(welcome?.text) && !welcome?.html.includes('<script>'),
+  );
+  check(
+    'every email has the unsubscribe link, the one-click header and the postal address',
+    /unsubscribe\?id=/.test(welcome?.text) &&
+      /Minneapolis/.test(welcome?.text) &&
+      welcome?.headers['List-Unsubscribe-Post'] === 'List-Unsubscribe=One-Click',
+  );
+  const unsubUrl = welcome.headers['List-Unsubscribe'].slice(1, -1).replace(/^https?:\/\/[^/]+/, B);
+  const unsubPage = await fetch(unsubUrl);
+  check(
+    'opening the unsubscribe link only asks (link scanners never unsubscribe anyone)',
+    /Unsubscribe\?/.test(await unsubPage.text()) && JSON.parse((await call('alice', '/api/mail/admin')).text).counts.confirmed === 1,
+  );
+  check('a forged unsubscribe link does nothing', /broken/.test(await (await fetch(unsubUrl.replace(/sig=[\w-]+/, 'sig=forged'))).text()));
+  check('prototype ids too', /broken/.test(await (await fetch(B + '/api/mail/unsubscribe?id=__proto__&sig=x', { method: 'POST' })).text()));
+  const test = JSON.parse(
+    (await call('alice', '/api/mail/broadcast', 'POST', { subject: 'News', body: 'hi', testTo: 'me@example.com' })).text,
+  );
+  check(
+    'a test email goes only to the test address',
+    test.test && mails.at(-1).to[0] === 'me@example.com' && /^\[Test\]/.test(mails.at(-1).subject),
+  );
+  await mailSub({ email: 'second@example.com', consent: true }, '198.51.100.22'); // pending: never confirmed
+  const b = JSON.parse((await call('alice', '/api/mail/broadcast', 'POST', { subject: 'Big news', body: 'hi all' })).text);
+  await new Promise((r) => setTimeout(r, 900));
+  check(
+    'a broadcast goes only to confirmed people',
+    b.to === 1 &&
+      mails
+        .filter((m) => m.subject === 'Big news')
+        .map((m) => m.to[0])
+        .join() === 'fan@example.com',
+  );
+  await fetch(unsubUrl, { method: 'POST' });
+  check('one-click unsubscribe works', JSON.parse((await call('alice', '/api/mail/admin')).text).counts.unsubscribed === 1);
+  const who = JSON.parse((await call('alice', '/api/mail/admin')).text).subscribers.find((s) => s.email === 'second@example.com');
+  check(
+    'someone can be removed completely',
+    (await call('alice', `/api/mail/subscribers/${who.id}`, 'DELETE')).status === 200 &&
+      !JSON.parse((await call('alice', '/api/mail/admin')).text).subscribers.some((s) => s.email === 'second@example.com'),
+  );
 } finally {
   srv.kill();
   clerk.close();
   fakeStripe.close();
   fakeRaw.close();
   fakeGoogle.close();
+  fakeResend.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
   console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
   rmSync(dir, { recursive: true, force: true });

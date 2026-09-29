@@ -5,6 +5,7 @@ import { useMe } from '../utils/api';
 import { useAuth } from '@clerk/react';
 import { startLive } from '../utils/live';
 import { dialog } from '../utils/dialog';
+import LeadOffer from './LeadOffer';
 
 type Cell = [col: number, row: number];
 const GRID = 82; // Win98 desktop spacing
@@ -622,6 +623,7 @@ export const Desktop: React.FC = () => {
       }}
       data-view-mode="DESKTOP"
     >
+      {isLoaded && !isSignedIn && <LeadOffer />}
       {allIcons.map((icon) => {
         const isSelected = selectedIds.includes(icon.id);
         const isDragging = !!drag?.moved && drag.ids.includes(icon.id);

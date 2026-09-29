@@ -6521,6 +6521,269 @@ async function comments(req, res, url) {
   fail(405, 'Not allowed');
 }
 
+// ── /api/mail: the mailing list (Resend) — data/mail.json ──
+// Double opt-in: signing up sends a confirmation link; only confirmed people get mail. Every email has a one-click
+// unsubscribe link (and List-Unsubscribe headers mail apps show as a button) and the postal address the law asks for;
+// nothing sends until that address is set. Drips: day-N emails after someone confirms. Broadcasts: one email to all.
+// Needs RESEND_API_KEY and MAIL_FROM ("Sanktuary <hello@sanktuary.studio>", a domain verified in Resend).
+const RESEND = process.env.RESEND_API_URL || 'https://api.resend.com';
+const mailReady = () => !!(process.env.RESEND_API_KEY && process.env.MAIL_FROM);
+let mailDb = null;
+let mailSaved = Promise.resolve();
+const loadMail = async () =>
+  (mailDb ??= await readJson('mail.json', {
+    subscribers: {},
+    sequence: [],
+    broadcasts: [],
+    settings: {
+      address: '',
+      offerTitle: 'Free guides from Sanktuary',
+      offerText: 'Mixing tips, release checklists and first looks at new music. Straight to your inbox, now and then.',
+    },
+  }));
+const saveMail = () => (mailSaved = mailSaved.then(() => saveJson('mail.json', mailDb)).catch(console.error));
+const mailTries = new Map(); // address -> { n, since }
+const unsubSig = (id) => sign(`unsub:${id}`);
+const mailEsc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** A small page for the confirm / unsubscribe links (no scripts). */
+function mailPage(res, title, body) {
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+  });
+  res.end(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${mailEsc(title)}</title>` +
+      `<body style="font:16px/1.5 Arial,sans-serif;background:#008080;margin:0;padding:40px 16px"><div style="max-width:460px;margin:auto;background:#c0c0c0;border:2px outset #fff;padding:20px">` +
+      `<h1 style="font-size:20px;margin:0 0 10px">${mailEsc(title)}</h1>${body}<p><a href="/">Go to Sanktuary</a></p></div>`,
+  );
+}
+
+/** One email through Resend: plain text plus a simple HTML copy, with the unsubscribe link and the postal address. */
+async function sendMail(sub, subject, text, origin) {
+  const settings = (await loadMail()).settings;
+  const unsub = `${origin}/api/mail/unsubscribe?id=${sub.id}&sig=${unsubSig(sub.id)}`;
+  const body = String(text).replace(/\{name\}/g, sub.name || 'there');
+  const foot = `\n\n—\nYou get this because you signed up at ${origin}.\nUnsubscribe: ${unsub}\n${settings.address}`;
+  const html =
+    `<div style="font:15px/1.55 Arial,sans-serif;color:#111;max-width:560px">${mailEsc(body).replace(/\n/g, '<br>')}` +
+    `<p style="color:#777;font-size:12px;margin-top:28px">You get this because you signed up at ${mailEsc(origin)}.<br>` +
+    `<a href="${mailEsc(unsub)}">Unsubscribe</a> · ${mailEsc(settings.address)}</p></div>`;
+  const r = await fetch(`${RESEND}/emails`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      from: process.env.MAIL_FROM,
+      to: [sub.email],
+      subject: String(subject)
+        .replace(/[\r\n]+/g, ' ')
+        .slice(0, 150),
+      text: body + foot,
+      html,
+      headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+    }),
+  });
+  if (!r.ok) throw new Error(`Resend refused the email (${r.status})`);
+}
+
+/** Sends due drip emails (each step only to people who reach it after the step existed), paced for Resend's limits. */
+let mailRunning = false;
+async function mailDrips(origin) {
+  if (mailRunning || !mailReady()) return;
+  const db = await loadMail();
+  if (!db.settings.address) return;
+  mailRunning = true;
+  try {
+    let n = 0;
+    for (const sub of Object.values(db.subscribers)) {
+      if (sub.status !== 'confirmed') continue;
+      for (const step of [...db.sequence].sort((a, b) => a.day - b.day)) {
+        const due = Date.parse(sub.confirmed) + step.day * 864e5;
+        if (sub.sent?.[step.id] || due > Date.now() || due < Date.parse(step.created) - 864e5) continue;
+        if (n++ >= 100) return; // the rest go next hour
+        (sub.sent ??= {})[step.id] = new Date().toISOString();
+        saveMail();
+        await sendMail(sub, step.subject, step.body, origin).catch((e) => console.error('drip', e.message));
+        await new Promise((r) => setTimeout(r, 550));
+      }
+    }
+  } finally {
+    mailRunning = false;
+  }
+}
+setInterval(() => mailDrips(SITE_ORIGINS[0] || 'https://sanktuary.studio').catch(console.error), 3.6e6).unref();
+
+async function mailApi(req, res, url) {
+  const [, , , what, id] = url.pathname.split('/');
+  const db = await loadMail();
+  const q = url.searchParams;
+  const origin = siteOrigin(req);
+  if (req.method === 'GET' && !what) return json(res, { open: mailReady(), title: db.settings.offerTitle, text: db.settings.offerText });
+
+  if (req.method === 'POST' && what === 'subscribe') {
+    // Visitors: 5 tries an hour per address, a honeypot, a real-looking email and a ticked consent box
+    const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+    const t = mailTries.get(ip);
+    const tries = t && Date.now() - t.since < 60 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 5) fail(429, 'Too many tries. Try again in an hour.');
+    if (mailTries.size > 5000) for (const [k, x] of mailTries) if (Date.now() - x.since > 60 * 60_000) mailTries.delete(k);
+    mailTries.set(ip, { ...tries, n: tries.n + 1 });
+    const input = await jsonBody(req);
+    const done = () => json(res, { ok: true }); // the same answer whether or not they were already on the list
+    if (input.website) return done();
+    if (!mailReady()) fail(503, 'The mailing list opens soon.');
+    const email = String(input.email || '')
+      .trim()
+      .toLowerCase()
+      .slice(0, 200);
+    if (!/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email)) fail(400, 'That email address looks wrong');
+    if (input.consent !== true) fail(400, 'Tick the box to say we can email you');
+    let sub = Object.values(db.subscribers).find((s) => s.email === email);
+    if (sub?.status === 'confirmed') return done();
+    if (sub && sub.status === 'pending' && Date.now() - Date.parse(sub.asked || 0) < 10 * 60_000) return done();
+    sub ??= { id: randomUUID().slice(0, 12), email, created: new Date().toISOString() };
+    Object.assign(sub, {
+      name: String(input.name || '')
+        .trim()
+        .slice(0, 60),
+      source: String(input.source || 'site').slice(0, 40),
+      status: 'pending',
+      token: randomBytes(24).toString('base64url'),
+      asked: new Date().toISOString(),
+      consent: new Date().toISOString(), // when they ticked the box (kept as the record of consent)
+    });
+    db.subscribers[sub.id] = sub;
+    saveMail();
+    await sendMail(
+      sub,
+      'Confirm you want Sanktuary emails',
+      `Hi {name},\n\nConfirm your email to get ${db.settings.offerTitle.toLowerCase()}:\n${origin}/api/mail/confirm?token=${sub.token}\n\nIf this wasn't you, ignore this email and nothing happens.`,
+      origin,
+    ).catch((e) => console.error('confirm mail', e.message));
+    return done();
+  }
+  if (req.method === 'GET' && what === 'confirm') {
+    const sub = Object.values(db.subscribers).find((s) => s.token && s.token === q.get('token'));
+    if (!sub) return mailPage(res, 'That link has expired', '<p>Sign up again on the site to get a fresh one.</p>');
+    Object.assign(sub, { status: 'confirmed', confirmed: sub.confirmed || new Date().toISOString(), token: null });
+    saveMail();
+    mailDrips(origin).catch(console.error); // the welcome email goes now
+    return mailPage(res, "You're in", '<p>Thanks for confirming. The first email is on its way.</p>');
+  }
+  if (what === 'unsubscribe') {
+    // The link from every email: GET shows a button (link scanners never unsubscribe anyone), POST unsubscribes
+    // (mail apps' one-click unsubscribe POSTs here too)
+    const sub = own(db.subscribers, q.get('id') || '');
+    const sig = String(q.get('sig') || '');
+    const okSig =
+      !!sub &&
+      Buffer.byteLength(sig) === Buffer.byteLength(unsubSig(sub.id)) &&
+      timingSafeEqual(Buffer.from(sig), Buffer.from(unsubSig(sub.id)));
+    if (!okSig) return mailPage(res, 'That link is broken', '<p>Reply to any of our emails and we will take you off the list.</p>');
+    if (req.method === 'POST') {
+      req.resume();
+      Object.assign(sub, { status: 'unsubscribed', unsub: new Date().toISOString() });
+      saveMail();
+      return mailPage(res, "You're unsubscribed", `<p>${mailEsc(sub.email)} won't get any more emails from us.</p>`);
+    }
+    return mailPage(
+      res,
+      'Unsubscribe?',
+      `<p>Stop emails to ${mailEsc(sub.email)}?</p><form method="post"><button style="font:inherit;padding:6px 16px">Unsubscribe</button></form>`,
+    );
+  }
+
+  // Admins: the list, the drip sequence, broadcasts and settings
+  const user = await currentUser(req, url, await loadConfig());
+  if (!user.admin) fail(403, 'Administrators only');
+  if (req.method === 'GET' && what === 'admin') {
+    const subs = Object.values(db.subscribers);
+    return json(res, {
+      configured: mailReady(),
+      settings: db.settings,
+      counts: Object.fromEntries(['confirmed', 'pending', 'unsubscribed'].map((s) => [s, subs.filter((x) => x.status === s).length])),
+      subscribers: subs
+        .map(({ id, email, name, status, source, created, confirmed }) => ({ id, email, name, status, source, created, confirmed }))
+        .sort((a, b) => b.created.localeCompare(a.created)),
+      sequence: [...db.sequence].sort((a, b) => a.day - b.day),
+      broadcasts: db.broadcasts.slice(-20).reverse(),
+    });
+  }
+  if (req.method === 'PATCH' && what === 'settings') {
+    const input = await jsonBody(req);
+    for (const [k, max] of Object.entries({ address: 300, offerTitle: 80, offerText: 400 }))
+      if (input[k] !== undefined) db.settings[k] = String(input[k] ?? '').slice(0, max);
+    saveMail();
+    return json(res, db.settings);
+  }
+  if (req.method === 'PUT' && what === 'sequence') {
+    const input = await jsonBody(req);
+    const steps = (Array.isArray(input.sequence) ? input.sequence : []).slice(0, 20).map((s) => {
+      const old = s?.id && db.sequence.find((x) => x.id === s.id);
+      const day = Math.floor(Number(s?.day));
+      if (!(day >= 0 && day <= 365)) fail(400, 'Days go from 0 to 365');
+      const subject =
+        String(s?.subject || '')
+          .replace(/[\r\n]+/g, ' ')
+          .trim()
+          .slice(0, 150) || fail(400, 'Every email needs a subject');
+      return {
+        id: old?.id || randomUUID().slice(0, 8),
+        day,
+        subject,
+        body: String(s?.body || '').slice(0, 10000),
+        created: old?.created || new Date().toISOString(),
+      };
+    });
+    db.sequence = steps;
+    saveMail();
+    return json(res, steps);
+  }
+  if (req.method === 'POST' && what === 'broadcast') {
+    const input = await jsonBody(req);
+    if (!mailReady()) fail(503, 'Email isn’t set up on the server yet (RESEND_API_KEY / MAIL_FROM)');
+    if (!db.settings.address) fail(400, 'Add the postal address first (the law asks for it in every email)');
+    const subject =
+      String(input.subject || '')
+        .replace(/[\r\n]+/g, ' ')
+        .trim()
+        .slice(0, 150) || fail(400, 'Give it a subject');
+    const text = String(input.body || '').slice(0, 20000) || fail(400, 'Write something');
+    if (input.testTo) {
+      const to = String(input.testTo).trim().toLowerCase();
+      if (!/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(to)) fail(400, 'That test address looks wrong');
+      await sendMail({ id: 'test', email: to, name: user.username }, `[Test] ${subject}`, text, origin);
+      return json(res, { test: true });
+    }
+    const to = Object.values(db.subscribers).filter((s) => s.status === 'confirmed');
+    const b = { id: randomUUID().slice(0, 8), subject, by: user.username, at: new Date().toISOString(), to: to.length, sent: 0, failed: 0 };
+    db.broadcasts.push(b);
+    saveMail();
+    (async () => {
+      for (const sub of to) {
+        if (sub.status !== 'confirmed') continue; // unsubscribed while it was going out
+        await sendMail(sub, subject, text, origin).then(
+          () => b.sent++,
+          () => b.failed++,
+        );
+        saveMail();
+        await new Promise((r) => setTimeout(r, 550));
+      }
+      await notify(user.username, `Email "${subject}" sent to ${b.sent} people${b.failed ? ` (${b.failed} failed)` : ''}.`, {});
+    })().catch(console.error);
+    return json(res, b);
+  }
+  if (req.method === 'DELETE' && what === 'subscribers') {
+    // Someone asked to be forgotten: removed completely (not just unsubscribed)
+    own(db.subscribers, id || '') || fail(404, 'No such subscriber');
+    delete db.subscribers[id];
+    saveMail();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown mail action');
+}
+
 // ── /api/youtube: post videos from the drives straight to the Sanktuary YouTube channel ──
 // An admin connects the channel once (Google's own consent screen); the server keeps only the refresh token, in
 // data/youtube.json, and never sends it to a browser. Uploads stream from the drive to YouTube in the background and
@@ -6731,6 +6994,7 @@ const routes = [
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
   ['/api/youtube', youtubeApi],
+  ['/api/mail', mailApi],
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],
