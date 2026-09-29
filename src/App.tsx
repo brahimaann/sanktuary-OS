@@ -44,6 +44,7 @@ const Directory = lazy(() => import('./apps/Directory'));
 const Producer = lazy(() => import('./apps/Producer'));
 const Studio = lazy(() => import('./apps/Studio'));
 const Darkroom = lazy(() => import('./apps/Darkroom'));
+const VideoEditor = lazy(() => import('./apps/VideoEditor'));
 
 /** After a deploy the old build's files are gone, so an app opened in a tab from before can't load. */
 const isStaleBuild = (e: unknown) =>
@@ -266,6 +267,9 @@ export const App: React.FC = () => {
         break;
       case 'darkroom':
         content = <Darkroom {...win.appProps} />;
+        break;
+      case 'video-editor':
+        content = <VideoEditor clip={win.appProps?.clip} />;
         break;
       case 'studio':
         content = <Studio tab={win.appProps?.tab} />;

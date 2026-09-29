@@ -38,7 +38,8 @@ export type AppType =
   | 'directory'
   | 'producer'
   | 'studio'
-  | 'darkroom';
+  | 'darkroom'
+  | 'video-editor';
 
 export interface WindowInstance {
   id: string;

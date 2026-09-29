@@ -11,7 +11,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from 'node:fs';
-import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -6521,6 +6521,160 @@ async function comments(req, res, url) {
   fail(405, 'Not allowed');
 }
 
+// ── /api/video: the quick video editor's renders ──
+// The editor (in the browser) sends: a clip and an optional song from the drives, the part to use, a format, how the
+// clip fills it, a look, and its captions already drawn as transparent PNGs (so they match the preview exactly).
+// ffmpeg renders an MP4 into the chosen folder, one render at a time, and the editor of it gets a notification.
+// Only fixed filter snippets and checked numbers go into the ffmpeg command; nothing typed by a person does.
+const VIDEO_FORMATS = { '9:16': [1080, 1920], '4:5': [1080, 1350], '1:1': [1080, 1080], '16:9': [1920, 1080] };
+const VIDEO_IN = { '.mp4': 'mov', '.m4v': 'mov', '.mov': 'mov', '.webm': 'matroska' };
+const VIDEO_LOOKS = {
+  none: 'null',
+  lux: 'eq=contrast=1.12:saturation=1.5,unsharp=7:7:1.0,colorbalance=rs=0.06:gs=0.02:bs=-0.08:rm=0.05:bm=-0.07,vignette=PI/4',
+  faded: "curves=all='0/0.12 1/0.93',eq=saturation=0.9,colorbalance=rh=0.05:bh=-0.05",
+  bw: 'hue=s=0,eq=contrast=1.3',
+  cold: "colorbalance=rs=-0.1:bs=0.14:rm=-0.08:bm=0.1,eq=contrast=0.88:saturation=0.6,curves=all='0/0.1 1/0.9',noise=alls=6:allf=t",
+  tungsten: 'eq=brightness=-0.06:saturation=0.75:gamma=0.85,colorbalance=rs=0.15:gs=0.02:bs=-0.2:rm=0.12:bm=-0.15,vignette=PI/3.2',
+  club: 'colorbalance=rs=0.04:gs=-0.08:bs=0.16,eq=contrast=1.15:saturation=1.2,vignette=PI/4',
+};
+const videoJobs = new Map(); // id -> job (until the server restarts)
+let videoQueue = Promise.resolve();
+
+async function videoApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const [, , , what] = url.pathname.split('/');
+  if (req.method === 'GET' && !what)
+    return json(
+      res,
+      [...videoJobs.values()]
+        .filter((j) => j.by === user.username)
+        .slice(-10)
+        .reverse(),
+    );
+  if (!(req.method === 'POST' && what === 'render')) fail(404, 'Unknown video action');
+
+  // captions come as pictures: a bigger request than usual
+  const raw = await body(req, 40e6);
+  let input;
+  try {
+    input = JSON.parse(raw || '{}');
+  } catch {
+    fail(400, 'Bad JSON');
+  }
+  const spaces = spacesFor(user, cfg, await loadStatus());
+  const file = (ref, kinds, level = 'view') => {
+    const space = spaces.find((s) => s.id === String(ref?.space || '')) || fail(404, 'No such space');
+    if (!space.online) fail(503, 'Drive offline');
+    if (RANK[space.rights] < RANK[level]) fail(403, `You need ${level} rights in ${space.name}`);
+    const { abs } = locateIn(space, ref.path);
+    const fmt = kinds[extname(abs).toLowerCase()];
+    return { space, abs, fmt };
+  };
+  const clip = file(input.clip, VIDEO_IN);
+  if (!clip.fmt) fail(400, 'Pick a video (MP4, MOV, M4V or WebM)');
+  if (!(await stat(clip.abs).catch(() => null))?.isFile()) fail(404, 'That video is gone');
+  const song = input.song ? file(input.song, CLIP_FORMATS) : null;
+  if (song && !song.fmt) fail(400, 'Pick a song (WAV, AIFF, FLAC, MP3, M4A or OGG)');
+  if (song && !(await stat(song.abs).catch(() => null))?.isFile()) fail(404, 'That song is gone');
+  const num = (v, min, max, name) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? Math.round(n * 1000) / 1000 : fail(400, `Bad ${name}`);
+  };
+  const start = num(input.start ?? 0, 0, 36000, 'start');
+  const duration = num(input.duration, 1, 180, 'length (up to 3 minutes)');
+  const songAt = song ? num(input.songAt ?? 0, 0, 36000, 'song start') : 0;
+  const [W, H] = own(VIDEO_FORMATS, input.format) || fail(400, 'Pick a format');
+  const fit = ['crop', 'fit', 'stretch', 'duo'].includes(input.fit) ? input.fit : fail(400, 'Pick how the clip fills the frame');
+  const look = own(VIDEO_LOOKS, input.look) || fail(400, 'Pick a look');
+  const captions = (Array.isArray(input.captions) ? input.captions : []).slice(0, 80).map((c) => {
+    const png = Buffer.from(String(c?.png || '').replace(/^data:image\/png;base64,/, ''), 'base64');
+    if (png.length > 3e6 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') fail(400, 'Captions must be PNG pictures');
+    const from = num(c.start, 0, duration, 'caption start');
+    return { png, from, to: num(c.end, from, duration, 'caption end') };
+  });
+  // Where it goes: a folder you can add to, named after the clip unless you say otherwise
+  const out = file({ space: input.out?.space, path: input.out?.dir ?? '' }, { '': true }, 'upload');
+  if (!(await stat(out.abs).catch(() => null))?.isDirectory()) fail(404, 'That folder is gone');
+  const name = freeName(
+    out.abs,
+    `${safeName(
+      String(input.name || basename(clip.abs, extname(clip.abs)) + ' edit')
+        .replace(/\.mp4$/i, '')
+        .slice(0, 100),
+    )}.mp4`,
+  );
+  if ([...videoJobs.values()].filter((j) => j.by === user.username && ['Waiting', 'Rendering'].includes(j.status)).length >= 3)
+    fail(429, 'You already have 3 videos rendering. Wait for one to finish.');
+
+  const job = { id: randomUUID().slice(0, 10), by: user.username, name, status: 'Waiting', pct: 0, error: null, space: out.space.id };
+  videoJobs.set(job.id, job);
+  const outDir = relative(resolve(out.space.root), out.abs).split(sep).filter(Boolean);
+  videoQueue = videoQueue.then(async () => {
+    job.status = 'Rendering';
+    const tmp = await mkdtemp(join(os.tmpdir(), 'sk-render-'));
+    const part = join(out.abs, `.sk-render-${job.id}.mp4`);
+    try {
+      const caps = [];
+      for (const [i, c] of captions.entries()) {
+        const p = join(tmp, `c${i}.png`);
+        await writeFile(p, c.png);
+        caps.push({ ...c, p });
+      }
+      const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', '-protocol_whitelist', 'file'];
+      args.push('-ss', String(start), '-t', String(duration), '-f', clip.fmt, '-i', clip.abs);
+      if (song) args.push('-ss', String(songAt), '-t', String(duration), '-f', song.fmt, '-i', song.abs);
+      for (const c of caps) args.push('-f', 'image2', '-loop', '1', '-t', String(duration), '-i', c.p);
+      const fitChain =
+        fit === 'crop'
+          ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
+          : fit === 'fit'
+            ? `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`
+            : fit === 'stretch'
+              ? `scale=${W}:${H}`
+              : `scale=${W / 2}:${H},setsar=1,split[d1][d2];[d1][d2]hstack=inputs=2`; // the "stretch duo"
+      const graph = [`[0:v]${fitChain}[f]`, `[f]setsar=1,fps=30,${look}[v0]`];
+      const first = song ? 2 : 1;
+      caps.forEach((c, i) => graph.push(`[v${i}][${first + i}:v]overlay=0:0:enable='between(t,${c.from},${c.to})'[v${i + 1}]`));
+      graph.push(`[v${caps.length}]format=yuv420p[vout]`);
+      args.push('-filter_complex', graph.join(';'), '-map', '[vout]', '-map', song ? '1:a:0' : '0:a:0?');
+      args.push('-af', `afade=t=out:st=${Math.max(0, duration - 1)}:d=1`);
+      args.push('-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-b:a', '192k');
+      args.push('-movflags', '+faststart', '-f', 'mp4', '-y', part);
+      const code = await new Promise((done) => {
+        const ff = spawn(ffmpegPath, args, { windowsHide: true });
+        const timer = setTimeout(() => ff.kill(), 15 * 60_000);
+        let err = '';
+        ff.stderr.on('data', (d) => (err = (err + d).slice(-400)));
+        ff.stdout.on('data', (d) => {
+          const us = Number(String(d).match(/out_time_us=(\d+)/)?.[1]);
+          if (us) job.pct = Math.min(99, Math.floor(us / 1e4 / duration));
+        });
+        ff.on('error', () => done(-1));
+        ff.on('close', (c) => {
+          clearTimeout(timer);
+          if (c) job.error = err.trim().split('\n').pop()?.slice(0, 200) || null;
+          done(c);
+        });
+      });
+      if (code !== 0) throw new Error(job.error || "The render didn't finish");
+      await rename(part, join(out.abs, name));
+      forgetSizes();
+      await setOwner(out.space, join(out.abs, name), user);
+      Object.assign(job, { status: 'Done', pct: 100 });
+      await notify(user.username, `Your video "${name}" is ready.`, { open: { space: out.space.id, dir: outDir, name } });
+    } catch (e) {
+      await rm(part, { force: true });
+      Object.assign(job, { status: 'Failed', error: String(e.message || e).slice(0, 200) });
+      await notify(user.username, `The video "${name}" didn't render: ${job.error}`, {}).catch(() => {});
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+  res.writeHead(202, { 'content-type': 'application/json' });
+  return res.end(JSON.stringify(job));
+}
+
 // ── /api/mail: the mailing list (Resend) — data/mail.json ──
 // Double opt-in: signing up sends a confirmation link; only confirmed people get mail. Every email has a one-click
 // unsubscribe link (and List-Unsubscribe headers mail apps show as a button) and the postal address the law asks for;
@@ -6995,6 +7149,7 @@ const routes = [
   ['/api/outreach', outreachApi],
   ['/api/youtube', youtubeApi],
   ['/api/mail', mailApi],
+  ['/api/video', videoApi],
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],

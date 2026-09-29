@@ -56,6 +56,7 @@ const STUDIO_ICONS: DesktopIconDef[] = [
     height: 720,
   },
   { id: 'teams', title: 'Messages', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
+  { id: 'video-editor', title: 'Video Editor', icon: '/images/icons/video-32x32.png', appType: 'video-editor', width: 960, height: 680 },
 ];
 
 // The front door: works without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)

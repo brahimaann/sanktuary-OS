@@ -2654,6 +2654,81 @@ ${thisYear}-03;Comma Song;0,456`,
     (await call('alice', `/api/mail/subscribers/${who.id}`, 'DELETE')).status === 200 &&
       !JSON.parse((await call('alice', '/api/mail/admin')).text).subscribers.some((s) => s.email === 'second@example.com'),
   );
+
+  // Video editor renders: a real ffmpeg render of a tiny clip + song + caption, and what it refuses
+  const ffmpegBin = (await import(new URL('../server/node_modules/ffmpeg-static/index.js', import.meta.url))).default;
+  const { spawnSync } = await import('node:child_process');
+  spawnSync(ffmpegBin, [
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:rate=30:duration=2',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=2',
+    '-shortest',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-y',
+    join(drive, 'team', 'clip.mp4'),
+  ]);
+  spawnSync(ffmpegBin, ['-f', 'lavfi', '-i', 'sine=frequency=220:duration=3', '-y', join(drive, 'team', 'beat.wav')]);
+  const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const renderJob = (u, over = {}) =>
+    call(u, '/api/video/render', 'POST', {
+      clip: { space: 'up', path: 'clip.mp4' },
+      song: { space: 'up', path: 'beat.wav' },
+      songAt: 0.5,
+      start: 0,
+      duration: 2,
+      format: '9:16',
+      fit: 'duo',
+      look: 'lux',
+      captions: [{ start: 0, end: 1, png: PNG1 }],
+      out: { space: 'up', dir: '' },
+      name: 'drill edit',
+      ...over,
+    });
+  check('renders need a login', (await fetch(B + '/api/video/render', { method: 'POST', body: '{}' })).status === 401);
+  check('only known looks', (await renderJob('bob', { look: 'curves=all=0/1' })).status === 400);
+  check('only known formats (prototype names too)', (await renderJob('bob', { format: '__proto__' })).status === 400);
+  check(
+    'captions must be PNG pictures',
+    (await renderJob('bob', { captions: [{ start: 0, end: 1, png: 'data:image/png;base64,PHN2Zz4=' }] })).status === 400,
+  );
+  check('only videos as clips', (await renderJob('bob', { clip: { space: 'up', path: 'notes.txt' } })).status === 400);
+  check('paths stay inside the space', (await renderJob('bob', { clip: { space: 'up', path: '../../x.mp4' } })).status === 400);
+  check('three minutes at most', (await renderJob('bob', { duration: 500 })).status === 400);
+  check(
+    'the result needs a folder you can add to',
+    (await renderJob('carol', { clip: { space: 'view', path: 'clip.mp4' }, song: null, out: { space: 'view', dir: '' } })).status === 403,
+  );
+  check('a render starts', (await renderJob('bob')).status === 202);
+  let renderStatus;
+  for (let i = 0; i < 300; i++) {
+    renderStatus = JSON.parse((await call('bob', '/api/video')).text)[0];
+    if (!['Waiting', 'Rendering'].includes(renderStatus?.status)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const renderedFile = join(drive, 'team', 'drill edit.mp4');
+  const renderInfo = existsSync(renderedFile) ? spawnSync(ffmpegBin, ['-hide_banner', '-i', renderedFile]).stderr.toString() : '';
+  check(
+    'the video renders at 1080x1920 with sound',
+    renderStatus?.status === 'Done' && /1080x1920/.test(renderInfo) && /Audio: aac/.test(renderInfo),
+    renderStatus?.error || renderInfo.slice(-300),
+  );
+  check('no half-finished files are left behind', !readdirSync(join(drive, 'team')).some((n) => n.startsWith('.sk-render-')));
+  check(
+    'the editor is told where it is',
+    JSON.parse((await call('bob', '/api/projects?notifications')).text).some(
+      (n) => /drill edit\.mp4" is ready/.test(n.text) && n.open?.name === 'drill edit.mp4',
+    ),
+  );
 } finally {
   srv.kill();
   clerk.close();

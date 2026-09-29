@@ -201,6 +201,25 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
             Open in new tab
           </button>
         )}
+        {kind === 'video' && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
+          <button
+            style={button}
+            title="Make a promo or lyric video from this clip (Video Editor)"
+            onClick={() =>
+              openWindow({
+                id: `video-editor-${app}-${path}`,
+                title: `Video Editor - ${name}`,
+                icon: '/images/icons/video-16x16.png',
+                appType: 'video-editor',
+                appProps: { clip: { space: app, path } },
+                width: 960,
+                height: 680,
+              })
+            }
+          >
+            Edit video...
+          </button>
+        )}
         {kind === 'video' && isAdmin && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
           <button style={button} onClick={() => setPosting(true)} title="Post this video to the Sanktuary YouTube channel">
             Post to YouTube...
