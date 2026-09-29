@@ -87,6 +87,13 @@ try {
   Run 'tests' { npm test }
   if (Test-Path dist-next) { Remove-Item dist-next -Recurse -Force }
   Run 'build' { npm run build -- --outDir dist-next --emptyOutDir }
+  # Tabs opened before this deploy still load the last build's code files when someone opens an app: keep those
+  # (up to two weeks old; their names are content hashes, so they never clash) next to the new ones
+  if (Test-Path dist\assets) {
+    Get-ChildItem dist\assets -File |
+      Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-14) -and -not (Test-Path (Join-Path 'dist-next\assets' $_.Name)) } |
+      Copy-Item -Destination 'dist-next\assets'
+  }
 
   # Swap the new build in while the server is stopped (Windows won't rename folders with open files)
   StopServer

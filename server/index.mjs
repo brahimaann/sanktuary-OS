@@ -5571,11 +5571,29 @@ async function thumb(res, file, max = 256) {
 async function me(req, res, url) {
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
-  const spaces = await Promise.all(spacesFor(user, cfg, await loadStatus()).map(spaceInfo));
+  const visible = spacesFor(user, cfg, await loadStatus());
+  // Favourite folders: kept per person on the server (so they follow you between devices), never shown to others;
+  // one in a space you've lost access to just isn't listed
+  const prefsFile = `prefs/${user.username}.json`;
+  if (req.method === 'PUT') {
+    const input = await jsonBody(req);
+    const favorites = (Array.isArray(input.favorites) ? input.favorites : []).slice(0, 40).map((f) => {
+      const space = String(f?.space || '');
+      const path = String(f?.path ?? '');
+      if (!/^[\w.-]{1,64}$/.test(space) || path.length > 500 || /[\x00-\x1f:]/.test(path) || path.split('/').includes('..'))
+        fail(400, 'Bad favourite');
+      return { space, path, name: String(f?.name || '').slice(0, 100), spaceName: String(f?.spaceName || '').slice(0, 100) };
+    });
+    await mkdir(join(DATA, 'prefs'), { recursive: true });
+    await saveJson(prefsFile, { ...(await readJson(prefsFile, {})), favorites });
+    return json(res, { favorites: favorites.filter((f) => visible.some((s) => s.id === f.space)) });
+  }
+  const spaces = await Promise.all(visible.map(spaceInfo));
   for (const s of spaces)
     s.driveName = cfg.drives[(cfg.spaces.find((x) => x.id === s.id) || cfg.members[user.username])?.drive]?.name || null;
+  const favorites = ((await readJson(prefsFile, {})).favorites || []).filter((f) => visible.some((s) => s.id === f.space));
   res.setHeader('set-cookie', sessionCookie(req, user));
-  return json(res, { username: user.username, admin: user.admin, spaces });
+  return json(res, { username: user.username, admin: user.admin, spaces, favorites });
 }
 
 // ── /api/boards: infinite canvas boards, edited live by the whole team ──

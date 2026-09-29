@@ -1461,6 +1461,25 @@ try {
     pollution.join(),
   );
   check('the server is fine afterwards', JSON.parse((await call('bob', '/api/outreach')).text).items.length > 0);
+
+  // Favourite folders: per person, saved on the server, only for spaces they can still see
+  const favSaved = await call('bob', '/api/me', 'PUT', {
+    favorites: [
+      { space: 'up', path: 'docs', name: 'docs', spaceName: 'Up' },
+      { space: 'secret-space', path: 'x', name: 'x' },
+    ],
+  });
+  check('favourites are saved', favSaved.status === 200);
+  check(
+    'favourites come back with your account, minus spaces you cannot see',
+    JSON.stringify(JSON.parse((await call('bob', '/api/me')).text).favorites) ===
+      JSON.stringify([{ space: 'up', path: 'docs', name: 'docs', spaceName: 'Up' }]),
+  );
+  check('favourites are private to each person', (JSON.parse((await call('carol', '/api/me')).text).favorites || []).length === 0);
+  check(
+    'a favourite cannot point outside a space',
+    (await call('bob', '/api/me', 'PUT', { favorites: [{ space: 'up', path: 'docs/../../etc' }] })).status === 400,
+  );
   check('only whoever added it or an admin removes it', (await call('carol', `/api/outreach/${radio.id}`, 'DELETE')).status === 403);
   check(
     'removed contacts disappear',

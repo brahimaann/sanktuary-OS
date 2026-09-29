@@ -3,6 +3,7 @@ import { useAuth } from '@clerk/react';
 import { fileUrl, shell, toolbar, button } from './TeamFiles';
 import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 import FilePicker, { FileRef } from '../components/FilePicker';
+import { isTouch, saveToDevice } from './fileTypes';
 
 /**
  * Darkroom: Professional retro image grading & degradation suite.
@@ -297,8 +298,6 @@ uniform int blurMode;
 uniform float blurRadius;
 uniform int glitchMode;
 uniform float glitchAmount, glitchThreshold;
-uniform float jpegRes;
-uniform float jpegQual;
 uniform float uNoise;
 uniform float uSharpen;
 uniform float uPixel2x;
@@ -366,19 +365,6 @@ vec3 apply_ccd_smear(vec2 uvCoord, float stepY) {
     smear += sampleColor * bloom * (1.0 - abs(i) / 12.0);
   }
   return smear * 0.18;
-}
-
-// ── Physical Degradation Module 2: JPEG blocks, ringing & quantisation, applied on top of the grade ──
-vec3 apply_jpeg(vec3 c, vec2 st, float q, float big) {
-  float bs = 8.0 * max(1.0, floor(big / 1600.0));
-  vec2 cell = floor(st * res / bs);
-  vec3 blockAvg = texture2D(img, (cell + 0.5) * bs / res).rgb;
-  vec3 orig = texture2D(img, st).rgb;
-  vec2 local = fract(st * res / bs);
-  float ring = cos(local.x * 6.2831853) * cos(local.y * 6.2831853);
-  c += (blockAvg - orig) * q + ring * q * 0.035;
-  float steps = mix(48.0, 6.0, q);
-  return floor(c * steps + 0.5) / steps;
 }
 
 // ── Physical Degradation Module 3: Photographic Grain (Poisson / sqrt variance) ──
@@ -598,7 +584,6 @@ void main() {
 
   // 1. Resolution / Pixelate 2x emulation
   if (uPixel2x > 0.5) st = snap(st, res / 2.0);
-  if (jpegRes < 0.99) st = snap(st, max(vec2(16.0), res * jpegRes));
   vec2 nokiaCell = vec2(0.0);
   if (preset == 15) {
     vec2 grid = mix(res, res * (176.0 / min(res.x, res.y)), amount);
@@ -689,10 +674,7 @@ void main() {
     c += cnoise * ccdNoise * 0.3;
   }
 
-  // 8. Sensor Degradation Module 2: JPEG artifacts & extras
-  if (jpegQual < 95.0) {
-    c = apply_jpeg(c, st, clamp(1.0 - (jpegQual / 100.0), 0.0, 1.0), big);
-  }
+  // 8. Extras (real JPEG compression happens before the shader: see crushed)
   if (uNoise > 0.5) {
     c += (hash12(gl_FragCoord.xy * 1.7) - 0.5) * 0.12;
   }
@@ -840,7 +822,9 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         saving.current = false;
         forget(history.slice(pos + 1)); // saving after an undo replaces the steps that were undone
         const next = [...history.slice(0, pos + 1), { img, name: label, time: now() }];
-        if (next.length > 25) forget(next.splice(1, 1)); // ponytail: keeps the original + last 24 saves (~100MB each at 24MP)
+        // phones reload a page that uses too much memory (each version of a 24MP photo is ~100MB decoded):
+        // keep the original + the last 5 saves there, 24 on computers
+        if (next.length > (isTouch ? 6 : 25)) forget(next.splice(1, 1));
         setHistory(next);
         setPos(next.length - 1);
         dropEdit();
@@ -1004,6 +988,42 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     i.src = URL.createObjectURL(f);
   };
 
+  // Real JPEG (the JPEG tab): the picture is scaled down smoothly and saved as a JPEG at the chosen quality by the
+  // browser's own encoder, then drawn back at full size. Real 8x8 blocks, ringing and colour smear, not a filter.
+  const [crushed, setCrushed] = useState<HTMLImageElement | null>(null);
+  const keep = (img: HTMLImageElement | null) =>
+    setCrushed((prev) => {
+      if (prev && prev !== img) URL.revokeObjectURL(prev.src);
+      return img;
+    });
+  useEffect(() => {
+    if (!source || (params.jpegQuality >= 100 && params.resolution >= 1)) return keep(null);
+    let live = true;
+    const t = setTimeout(() => {
+      const [w, h] = dims(source);
+      const c = document.createElement('canvas');
+      c.width = Math.max(16, Math.round(w * params.resolution));
+      c.height = Math.max(16, Math.round(h * params.resolution));
+      const x = c.getContext('2d')!;
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(source, 0, 0, c.width, c.height);
+      c.toBlob(
+        (b) => {
+          if (!b || !live) return;
+          const img = new Image();
+          img.onload = () => (live ? keep(img) : URL.revokeObjectURL(img.src));
+          img.src = URL.createObjectURL(b);
+        },
+        'image/jpeg',
+        Math.max(0.01, params.jpegQuality / 100),
+      );
+    }, 120); // slider drags: encode once it settles
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [source, params.jpegQuality, params.resolution]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Upload the picture to the GPU whenever it changes (the shader program is built once per canvas)
   useEffect(() => {
     const cv = canvasRef.current;
@@ -1044,10 +1064,11 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     const scale = Math.min(1, max / Math.max(w, h));
     cv.width = Math.round(w * scale);
     cv.height = Math.round(h * scale);
-    ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, source);
+    // the canvas keeps the picture's full size; a smaller JPEG'd copy is stretched back up smoothly
+    ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, crushed && !compare ? crushed : source);
     ctx.viewport(0, 0, cv.width, cv.height);
     if (scale < 1) setStatus(`Preview scaled to ${cv.width}×${cv.height} (max GPU limit).`);
-  }, [source]);
+  }, [source, crushed, compare]);
 
   // Re-render WebGL frame on param update or compare
   useEffect(() => {
@@ -1073,15 +1094,13 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.uniform1i(u('glitchMode'), p.glitchMode);
     ctx.uniform1f(u('glitchAmount'), p.glitchAmount);
     ctx.uniform1f(u('glitchThreshold'), p.glitchThreshold);
-    ctx.uniform1f(u('jpegRes'), p.resolution);
-    ctx.uniform1f(u('jpegQual'), p.jpegQuality);
     ctx.uniform1f(u('uNoise'), p.jpegNoise ? 1.0 : 0.0);
     ctx.uniform1f(u('uSharpen'), p.jpegSharpen ? 1.0 : 0.0);
     ctx.uniform1f(u('uPixel2x'), p.pixelate2x ? 1.0 : 0.0);
     ctx.uniform1f(u('uTime'), (Date.now() % 100000) / 1000.0);
 
     ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
-  }, [source, params, compare]);
+  }, [source, crushed, params, compare]);
 
   const toJpeg = () =>
     new Promise<Blob>((ok, no) => canvasRef.current!.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94));
@@ -1089,12 +1108,9 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const outName = `${title.replace(/\.[^.]+$/, '') || 'photo'}-darkroom.jpg`;
 
   const download = async () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(await toJpeg());
-    a.download = outName;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    setStatus(`Exported ${outName} at full resolution.`);
+    const done = await saveToDevice(await toJpeg(), outName);
+    if (done !== 'cancelled')
+      setStatus(done === 'shared' ? `Sent ${outName} (choose Save Image to put it in Photos).` : `Exported ${outName} at full resolution.`);
   };
 
   const saveToFolder = async () => {
@@ -1213,7 +1229,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
           Save
         </button>
         <button style={button} disabled={!source} onClick={download}>
-          Download
+          {isTouch ? 'Save to Photos' : 'Download'}
         </button>
         {app && (
           <button style={button} disabled={!source} onClick={saveToFolder}>
@@ -1868,7 +1884,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
                   {slider('JPEG Quality', 'jpegQuality', 1, 100, 1, `${Math.round(params.jpegQuality)}%`)}
-                  {slider('Resolution Scale', 'resolution', 0.05, 1, 0.01, pct(params.resolution))}
+                  {slider('Size before saving (smaller = mushier)', 'resolution', 0.05, 1, 0.01, pct(params.resolution))}
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

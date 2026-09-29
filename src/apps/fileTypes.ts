@@ -59,3 +59,26 @@ export const formatSize = (b: number) =>
 
 /** Phones/tablets: open things with one tap instead of a double-click. */
 export const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
+/**
+ * Saves a file to this device. Phones get the share sheet, whose "Save Image" puts pictures straight into Photos
+ * (a plain download on iPhone only opens the picture in a tab); computers get a normal download.
+ * Returns what happened: 'shared' | 'cancelled' | 'downloaded'.
+ */
+export async function saveToDevice(blob: Blob, name: string) {
+  const file = new File([blob], name, { type: blob.type });
+  if (isTouch && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return 'shared';
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return 'cancelled'; // closed the share sheet: nothing else to do
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  return 'downloaded';
+}

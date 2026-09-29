@@ -88,6 +88,27 @@ interface WindowManagerState {
   setCrtEnabled: (enabled: boolean) => void;
 }
 
+// Each app's last size and place on this device, so it reopens where it was left
+type Place = { x: number; y: number; width: number; height: number };
+function lastPlace(appType: AppType): Place | null {
+  try {
+    const p = JSON.parse(localStorage.getItem(`sk_win_${appType}`) || 'null');
+    return p && [p.x, p.y, p.width, p.height].every(Number.isFinite) && p.width > 100 && p.height > 60 ? p : null;
+  } catch {
+    return null;
+  }
+}
+let placeTimer = 0;
+function rememberPlace(w?: WindowInstance) {
+  if (!w || w.isMaximized) return;
+  clearTimeout(placeTimer); // drags report every move: save once they settle
+  placeTimer = window.setTimeout(() => {
+    try {
+      localStorage.setItem(`sk_win_${w.appType}`, JSON.stringify({ x: w.x, y: w.y, width: w.width, height: w.height }));
+    } catch {}
+  }, 300);
+}
+
 export const useWindowManager = create<WindowManagerState>((set) => ({
   windows: [],
   maxZIndex: 100,
@@ -177,11 +198,20 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
         computedHeight = Math.round(desktopHeight * 0.9);
       }
 
-      // Compute cascaded initial position (x, y) relative to screen center
-      const offsetX = (state.windows.length * 25) % 125;
-      const offsetY = (state.windows.length * 25) % 125;
-      const x = Math.max(10, Math.round((desktopWidth - computedWidth) / 2) + offsetX - 50);
-      const y = Math.max(10, Math.round((desktopHeight - computedHeight) / 2) + offsetY - 50);
+      // Where this app was last left on this device (size and place), kept on screen; else centred, and later
+      // windows step down-right from the centre so they don't hide each other
+      const saved = spec.x === undefined ? lastPlace(spec.appType) : null;
+      if (saved) {
+        computedWidth = Math.min(saved.width, desktopWidth);
+        computedHeight = Math.min(saved.height, desktopHeight);
+      }
+      const step = (state.windows.length * 25) % 125;
+      const x = saved
+        ? Math.min(Math.max(0, saved.x), Math.max(0, desktopWidth - computedWidth))
+        : Math.max(10, Math.round((desktopWidth - computedWidth) / 2) + step);
+      const y = saved
+        ? Math.min(Math.max(0, saved.y), Math.max(0, desktopHeight - computedHeight))
+        : Math.max(10, Math.round((desktopHeight - computedHeight) / 2) + step);
 
       const nextZ = state.maxZIndex + 1;
       const newWindow: WindowInstance = {
@@ -241,14 +271,18 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
     })),
 
   updateWindowPosition: (id, x, y) =>
-    set((state) => ({
-      windows: state.windows.map((w) => (w.id === id ? { ...w, x, y } : w)),
-    })),
+    set((state) => {
+      const windows = state.windows.map((w) => (w.id === id ? { ...w, x, y } : w));
+      rememberPlace(windows.find((w) => w.id === id));
+      return { windows };
+    }),
 
   updateWindowSize: (id, width, height) =>
-    set((state) => ({
-      windows: state.windows.map((w) => (w.id === id ? { ...w, width, height } : w)),
-    })),
+    set((state) => {
+      const windows = state.windows.map((w) => (w.id === id ? { ...w, width, height } : w));
+      rememberPlace(windows.find((w) => w.id === id));
+      return { windows };
+    }),
 
   setStartMenuOpen: (open) => set({ startMenuOpen: open }),
   wallpaper: '/images/custom-wallpaper.png',

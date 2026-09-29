@@ -4,7 +4,7 @@ import { useApi } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
-import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion } from './fileTypes';
+import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion, saveToDevice } from './fileTypes';
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
 import { useWindowManager } from '../wm/manager';
@@ -149,6 +149,26 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         {siblings.length > 1 && (
           <button style={button} onClick={() => step(1)}>
             Next ▶
+          </button>
+        )}
+        {isTouch && kind === 'image' && (
+          <button
+            style={{ ...button, fontWeight: 700 }}
+            disabled={!token}
+            title="Opens your phone's share sheet: choose Save Image to put it in Photos"
+            onClick={async () => {
+              // phones can't keep RAW/PSD/TIFF: those go as the high-quality preview picture
+              const native = /\.(jpe?g|png|gif|webp|heic)$/i.test(name);
+              try {
+                const r = await fetch(native ? src : `${src}&preview`);
+                if (!r.ok) throw new Error(await r.text());
+                await saveToDevice(await r.blob(), native ? name : name.replace(/\.[^.]+$/, '') + '.webp');
+              } catch (e) {
+                dialog.alert((e as Error).message || "Couldn't save the picture.", { icon: 'error' });
+              }
+            }}
+          >
+            Save to Photos
           </button>
         )}
         <button style={button} disabled={!token} onClick={() => window.open(`${src}&download`, '_blank')}>

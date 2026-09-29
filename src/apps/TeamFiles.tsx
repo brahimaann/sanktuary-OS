@@ -19,6 +19,14 @@ interface TeamFilesProps {
   initialPath?: string[]; // open straight into a subfolder (links from chat/activity)
 }
 
+/** A folder to come back to: a favourite (saved to the account) or a recent one (this device). */
+interface Fav {
+  space: string;
+  path: string;
+  name: string;
+  spaceName?: string;
+}
+
 interface Entry {
   name: string;
   isDir: boolean;
@@ -76,6 +84,62 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   const { isLoaded, isSignedIn, getToken, userId } = useAuth();
   const { openWindow } = useWindowManager();
   const [path, setPath] = useState<string[]>(initialPath || []);
+
+  // Favourite folders (saved to your account, so every device has them), recent folders and the folder each space
+  // was last left in (this device)
+  const [favs, setFavs] = useState<Fav[]>([]);
+  const [favOpen, setFavOpen] = useState(false);
+  const [recent, setRecent] = useState<Fav[]>([]);
+  const here = path.join('/');
+  const isFav = favs.some((f) => f.space === app && f.path === here);
+  const local = (k: string) => `sk_${k}_${userId}`;
+  useEffect(() => {
+    if (!isSignedIn || !userId) return;
+    try {
+      setRecent(JSON.parse(localStorage.getItem(local('recent')) || '[]'));
+      const last = localStorage.getItem(local(`last_${app}`));
+      if (!initialPath && last) setPath(last.split('/').filter(Boolean)); // reopen where this space was left
+    } catch {}
+    getToken()
+      .then((t) => fetch('/api/me', { headers: { Authorization: `Bearer ${t}` } }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setFavs(d.favorites || []))
+      .catch(() => {});
+  }, [isSignedIn, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const folderName = (p: string[]) => p[p.length - 1] || name;
+  const rememberFolder = (p: string[]) => {
+    try {
+      localStorage.setItem(local(`last_${app}`), p.join('/'));
+      const entry: Fav = { space: app, path: p.join('/'), name: folderName(p), spaceName: name };
+      const next = [entry, ...recent.filter((r) => !(r.space === app && r.path === entry.path))].slice(0, 8);
+      localStorage.setItem(local('recent'), JSON.stringify(next));
+      setRecent(next);
+    } catch {}
+  };
+  const toggleFav = async () => {
+    const next = isFav
+      ? favs.filter((f) => !(f.space === app && f.path === here))
+      : [...favs, { space: app, path: here, name: folderName(path), spaceName: name }];
+    setFavs(next);
+    const r = await fetch('/api/me', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${await getToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ favorites: next }),
+    }).catch(() => null);
+    if (!r?.ok) setStatus("Couldn't save your favourites. Try again.");
+  };
+  const jump = (f: Fav) => {
+    setFavOpen(false);
+    const to = f.path.split('/').filter(Boolean);
+    if (f.space === app) return go(to);
+    openWindow({
+      id: `space-${f.space}-${f.path}`,
+      title: f.name || f.spaceName || 'Files',
+      icon: '/images/icons/folder-16x16.png',
+      appType: 'team-files',
+      appProps: { app: f.space, initialPath: to },
+    });
+  };
   const [sharing, setSharing] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -210,6 +274,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       return;
     }
     show(got);
+    rememberFolder(path); // recent folders, and where this space reopens
     setStatus('');
   }, [app, path, getToken, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -661,9 +726,43 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         <div style={{ flex: 1 }} />
         <AccountButton />
       </div>
-      <div style={address}>
+      <div style={{ ...address, position: 'relative' }}>
         <span style={{ color: '#444', marginRight: 6 }}>Address</span>
         <div style={addressBox}>\\SANKTUARY\{[name, ...path].join('\\')}</div>
+        <button
+          style={{ ...button, marginLeft: 4, fontWeight: 700, color: isFav ? '#a06000' : '#000' }}
+          onClick={toggleFav}
+          title={isFav ? 'Remove this folder from your favourites' : 'Add this folder to your favourites'}
+          aria-label={isFav ? 'Remove from favourites' : 'Add to favourites'}
+        >
+          {isFav ? '★' : '☆'}
+        </button>
+        <button style={{ ...button, marginLeft: 2 }} onClick={() => setFavOpen(!favOpen)} title="Favourite and recent folders">
+          Favorites ▾
+        </button>
+        {favOpen && (
+          <div style={favMenu} onMouseLeave={() => setFavOpen(false)}>
+            <b style={{ padding: '2px 6px' }}>Favorites</b>
+            {!favs.length && <div style={{ padding: '2px 6px', color: '#555' }}>Tap ☆ to keep a folder here.</div>}
+            {favs.map((f) => (
+              <div key={`${f.space}/${f.path}`} style={favRow} onClick={() => jump(f)}>
+                ★ {f.name}
+                <span style={{ color: '#666', marginLeft: 6 }}>{f.spaceName}</span>
+              </div>
+            ))}
+            {recent.filter((r) => !(r.space === app && r.path === here)).length > 0 && (
+              <b style={{ padding: '6px 6px 2px', borderTop: '1px solid #808080' }}>Recent</b>
+            )}
+            {recent
+              .filter((r) => !(r.space === app && r.path === here))
+              .map((r) => (
+                <div key={`r-${r.space}/${r.path}`} style={favRow} onClick={() => jump(r)}>
+                  🕘 {r.name}
+                  <span style={{ color: '#666', marginLeft: 6 }}>{r.spaceName}</span>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
       <div
         ref={listRef}
@@ -1017,6 +1116,29 @@ export const button: React.CSSProperties = {
   borderBottom: '1px solid #000',
 };
 const address: React.CSSProperties = { display: 'flex', alignItems: 'center', padding: '3px 4px' };
+const favMenu: React.CSSProperties = {
+  position: 'absolute',
+  right: 4,
+  top: '100%',
+  zIndex: 30,
+  minWidth: 220,
+  maxWidth: 'calc(100% - 8px)',
+  maxHeight: 320,
+  overflowY: 'auto',
+  background: '#c0c0c0',
+  border: '2px outset #fff',
+  boxShadow: '2px 2px 0 #000',
+  display: 'flex',
+  flexDirection: 'column',
+  padding: 2,
+};
+const favRow: React.CSSProperties = {
+  padding: '4px 6px',
+  cursor: 'default',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
 const addressBox: React.CSSProperties = {
   flex: 1,
   background: '#fff',

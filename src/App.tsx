@@ -45,6 +45,50 @@ const Producer = lazy(() => import('./apps/Producer'));
 const Studio = lazy(() => import('./apps/Studio'));
 const Darkroom = lazy(() => import('./apps/Darkroom'));
 
+/** After a deploy the old build's files are gone, so an app opened in a tab from before can't load. */
+const isStaleBuild = (e: unknown) =>
+  /dynamically imported module|Importing a module script failed|error loading dynamically|Failed to fetch dynamically/i.test(
+    String((e as Error)?.message || e),
+  );
+
+/**
+ * One app failing shows a message in its own window instead of taking the whole desktop down. Never reloads by
+ * itself: other windows may hold unsaved work.
+ */
+class WindowErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error) {
+    if (!isStaleBuild(error)) console.error(error);
+  }
+  render() {
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    const stale = isStaleBuild(error);
+    return (
+      <div className="w-full h-full bg-[#c0c0c0] p-4 text-xs flex flex-col gap-2">
+        <b>{stale ? 'Sanktuary was just updated.' : 'This window hit a problem.'}</b>
+        <div>
+          {stale
+            ? 'Save anything open in other windows, then reload to get the new version.'
+            : 'The rest of Sanktuary is fine. Try again, or close this window.'}
+        </div>
+        {!stale && <div className="text-gray-700 break-all">{String(error.message).slice(0, 300)}</div>}
+        <div className="flex gap-2">
+          <button
+            className="px-3 py-1 border-2 border-outset bg-[#c0c0c0]"
+            onClick={() => (stale ? location.reload() : this.setState({ error: null }))}
+          >
+            {stale ? 'Reload' : 'Try again'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 export const App: React.FC = () => {
   const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive, crtEnabled } = useWindowManager();
   const [isBooting, setIsBooting] = useState(true);
@@ -243,17 +287,19 @@ export const App: React.FC = () => {
     }
 
     return (
-      <Suspense
-        fallback={
-          <div className="w-full h-full flex items-center justify-center bg-[#c0c0c0] font-mono text-xs text-gray-700">
-            <div className="border border-t-white border-l-white border-r-gray-800 border-b-gray-800 p-2 bg-[#d4d0c8] shadow-sm">
-              Loading...
+      <WindowErrorBoundary>
+        <Suspense
+          fallback={
+            <div className="w-full h-full flex items-center justify-center bg-[#c0c0c0] font-mono text-xs text-gray-700">
+              <div className="border border-t-white border-l-white border-r-gray-800 border-b-gray-800 p-2 bg-[#d4d0c8] shadow-sm">
+                Loading...
+              </div>
             </div>
-          </div>
-        }
-      >
-        {content}
-      </Suspense>
+          }
+        >
+          {content}
+        </Suspense>
+      </WindowErrorBoundary>
     );
   };
 
