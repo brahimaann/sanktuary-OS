@@ -65,20 +65,25 @@ export const isTouch = typeof window !== 'undefined' && window.matchMedia('(poin
  * (a plain download on iPhone only opens the picture in a tab); computers get a normal download.
  * Returns what happened: 'shared' | 'cancelled' | 'downloaded'.
  */
-export async function saveToDevice(blob: Blob, name: string) {
-  const file = new File([blob], name, { type: blob.type });
-  if (isTouch && navigator.canShare?.({ files: [file] })) {
+export const saveToDevice = (blob: Blob, name: string) => saveFilesToDevice([new File([blob], name, { type: blob.type })]);
+
+/** Several files at once (a carousel's slides): one share sheet ("Save N Images") on phones, downloads elsewhere. */
+export async function saveFilesToDevice(files: File[]) {
+  if (isTouch && navigator.canShare?.({ files })) {
     try {
-      await navigator.share({ files: [file] });
+      await navigator.share({ files });
       return 'shared';
     } catch (e) {
       if ((e as Error).name === 'AbortError') return 'cancelled'; // closed the share sheet: nothing else to do
     }
   }
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  for (const f of files) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(f);
+    a.download = f.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    await new Promise((r) => setTimeout(r, 250)); // browsers drop downloads started all in the same instant
+  }
   return 'downloaded';
 }

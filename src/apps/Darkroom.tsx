@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { fileUrl, shell, toolbar, button } from './TeamFiles';
 import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 import FilePicker, { FileRef } from '../components/FilePicker';
-import { isTouch, saveToDevice } from './fileTypes';
+import { isTouch, saveFilesToDevice, saveToDevice } from './fileTypes';
+import { uploadFiles } from '../utils/upload';
 import { drawText, TEXT_STYLES, TextOverlayItem, TextStyle } from '../utils/captions';
 
 /**
@@ -209,6 +210,43 @@ const FITS: [Fit, string, string][] = [
 type Source = HTMLImageElement | HTMLCanvasElement;
 const dims = (s: Source) => (s instanceof HTMLImageElement ? [s.naturalWidth, s.naturalHeight] : [s.width, s.height]);
 
+/**
+ * Match look: the average and spread of a picture's light (L) and colour (a, b) in Oklab, from a small copy.
+ * The same maths as srgb_to_oklab in the shader, so the shader can move one picture's numbers onto another's
+ * (Reinhard-style colour transfer).
+ */
+function labStats(img: Source): [number[], number[]] {
+  const [w, h] = dims(img);
+  const k = Math.min(1, 256 / Math.max(w, h, 1));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(h * k));
+  const x = c.getContext('2d', { willReadFrequently: true })!;
+  x.drawImage(img, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  const sum = [0, 0, 0];
+  const sq = [0, 0, 0];
+  const lin = (v: number) => Math.pow(v / 255, 2.2);
+  for (let i = 0; i < d.length; i += 4) {
+    const [r, g, b] = [lin(d[i]), lin(d[i + 1]), lin(d[i + 2])];
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const lab = [
+      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+    ];
+    for (let j = 0; j < 3; j++) {
+      sum[j] += lab[j];
+      sq[j] += lab[j] * lab[j];
+    }
+  }
+  const n = d.length / 4;
+  const mean = sum.map((v) => v / n);
+  return [mean, sq.map((v, j) => Math.max(0.0001, Math.sqrt(Math.max(0, v / n - mean[j] * mean[j]))))];
+}
+
 // crop: fill the slot and trim the overflow; fit: whole photo inside the slot; stretch: fill it, distorting
 function drawImageIn(ctx: CanvasRenderingContext2D, img: Source, dx: number, dy: number, dw: number, dh: number, fit: Fit) {
   const [iw, ih] = dims(img);
@@ -250,6 +288,9 @@ export interface DarkroomParams {
   glitchMode: 0 | 1 | 2 | 3 | 4; // 0: none, 1: datamosh, 2: vhs, 3: lcd, 4: galaxy
   glitchAmount: number; // 0 to 1
   glitchThreshold: number; // 0 to 1: datamosh only moves blocks at least this bright
+  // Match look: how far the photo moves to the reference photo's colours (0 = off), and whether light moves too
+  match: number;
+  matchTone: boolean;
 }
 
 const DEFAULT_PARAMS: DarkroomParams = {
@@ -275,6 +316,8 @@ const DEFAULT_PARAMS: DarkroomParams = {
   glitchMode: 0,
   glitchAmount: 0,
   glitchThreshold: 0,
+  match: 0,
+  matchTone: true,
 };
 
 const VERT = `attribute vec2 p; varying vec2 uv; void main() { uv = (p + 1.0) / 2.0; gl_Position = vec4(p, 0.0, 1.0); }`;
@@ -294,6 +337,8 @@ uniform int blurMode;
 uniform float blurRadius;
 uniform int glitchMode;
 uniform float glitchAmount, glitchThreshold;
+uniform float uMatch, uMatchTone;
+uniform vec3 uSrcMean, uSrcStd, uRefMean, uRefStd;
 uniform float uNoise;
 uniform float uSharpen;
 uniform float uPixel2x;
@@ -668,6 +713,14 @@ void main() {
     c = texture2D(img, st).rgb;
   }
 
+  // Match look: move the colours (and light) statistics to the reference photo's, in Oklab
+  if (uMatch > 0.001) {
+    vec3 lab = srgb_to_oklab(c);
+    vec3 moved = (lab - uSrcMean) / max(uSrcStd, vec3(0.0001)) * uRefStd + uRefMean;
+    if (uMatchTone < 0.5) moved.x = lab.x;
+    c = mix(c, oklab_to_srgb(moved), uMatch);
+  }
+
   // 3. Blur / Pixelate modes (radius is in px on a 1000px photo)
   float radius = blurRadius * big / 1000.0;
   if (blurMode == 1 && blurRadius > 0.5) {
@@ -768,6 +821,8 @@ const TABS = [
   ['camera', '1-Click Cameras'],
   ['blur', 'Blur & Pixel'],
   ['glitch', 'Glitch FX'],
+  ['match', 'Match look'],
+  ['carousel', 'Carousel'],
   ['versions', 'Versions'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
@@ -797,7 +852,16 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const [activeTab, setActiveTab] = useState<Tab>('swag');
 
   // Server file picker state for iPhone / mobile & desktop
-  const [showServerPicker, setShowServerPicker] = useState(false);
+  // what the server picker is for: opening a photo, the Match look reference, or carousel slides
+  const [showServerPicker, setShowServerPicker] = useState<false | 'open' | 'ref' | 'slides'>(false);
+  const [matchRef, setMatchRef] = useState<{ img: HTMLImageElement; name: string } | null>(null);
+  const [refStats, setRefStats] = useState<[number[], number[]] | null>(null);
+  const pickReference = (img: HTMLImageElement, name: string) => {
+    setMatchRef({ img, name });
+    setRefStats(labStats(img));
+    setParams((prev) => ({ ...prev, match: prev.match || 0.8 }));
+    setStatus(`Matching the look of ${name}. Save to keep it.`);
+  };
 
   // Collage State
   const [collageGrid, setCollageGrid] = useState<CollageGridPreset>('single');
@@ -816,7 +880,79 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
 
   // What the loupe edits: the collage preview while composing one, otherwise the current saved version
   // (holding Compare on the Collage tab shows the photo before the collage)
-  const source: Source | null = activeTab === 'collage' && collageOut && !(compare && saved) ? collageOut : saved;
+  // Carousel (Instagram, 4:5 slides): one wide photo split into seamless slides, or one photo per slide
+  const [slides, setSlides] = useState<HTMLImageElement[]>([]);
+  const [carMode, setCarMode] = useState<'split' | 'photos'>('split');
+  const [carCount, setCarCount] = useState(3);
+  const [carText, setCarText] = useState<string[]>([]);
+  const [carStyle, setCarStyle] = useState<TextStyle>('plain');
+  const [carouselOut, setCarouselOut] = useState<HTMLCanvasElement | null>(null);
+  const [redraw, setRedraw] = useState(0); // bumped after an export used the canvas, to put the preview back
+  const addSlides = (imgs: HTMLImageElement[]) => {
+    setSlides((prev) => [...prev, ...imgs].slice(0, 10));
+    setCarMode('photos');
+    setStatus('');
+  };
+  const slideCount = carMode === 'split' ? carCount : slides.length;
+  /** Slide i as a canvas at `k` × 1080x1350: its part of the wide photo (or its own photo), then its caption. */
+  const slideCanvas = (i: number, k: number) => {
+    const [W, H] = [Math.round(1080 * k), Math.round(1350 * k)];
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    const x = c.getContext('2d')!;
+    x.fillStyle = '#000';
+    x.fillRect(0, 0, W, H);
+    if (carMode === 'split' && saved) {
+      const [iw, ih] = dims(saved);
+      const s = Math.max((slideCount * W) / iw, H / ih); // the photo covers the whole strip; this slide is one window of it
+      x.drawImage(saved, (slideCount * W - iw * s) / 2 - i * W, (H - ih * s) / 2, iw * s, ih * s);
+    } else if (slides[i]) drawImageIn(x, slides[i], 0, 0, W, H, 'crop');
+    if (carText[i]?.trim())
+      drawText(
+        x,
+        {
+          id: `s${i}`,
+          text: carText[i],
+          fontSize: 60,
+          color: '#ffffff',
+          fontFamily: 'Arial',
+          align: 'center',
+          xPercent: 50,
+          yPercent: 82,
+          shadow: true,
+          style: carStyle,
+        },
+        W,
+        H,
+      );
+    return c;
+  };
+  // The preview: every slide side by side (half size), with a gap where the swipe is
+  useEffect(() => {
+    if (activeTab !== 'carousel' || !slideCount || (carMode === 'split' && !saved)) return setCarouselOut(null);
+    const [w, h, gap] = [540, 675, 16];
+    const strip = document.createElement('canvas');
+    strip.width = slideCount * w + (slideCount - 1) * gap;
+    strip.height = h;
+    const x = strip.getContext('2d')!;
+    x.fillStyle = '#c0c0c0';
+    x.fillRect(0, 0, strip.width, h);
+    for (let i = 0; i < slideCount; i++) x.drawImage(slideCanvas(i, 0.5), i * (w + gap), 0);
+    setCarouselOut(strip);
+  }, [activeTab, carMode, carCount, slides, carText, carStyle, saved]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const source: Source | null =
+    activeTab === 'carousel' && carouselOut
+      ? carouselOut
+      : activeTab === 'collage' && collageOut && !(compare && saved)
+        ? collageOut
+        : saved;
+  // Match look: this photo's numbers and the reference's, for the shader
+  const matchStats = useMemo(
+    () => (refStats && source ? ([...labStats(source), ...refStats] as [number[], number[], number[], number[]]) : null),
+    [refStats, source],
+  );
   const dirty = isCollageActive || (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => params[k] !== DEFAULT_PARAMS[k]);
   const canUndo = dirty || pos > 0;
   const canRedo = pos < history.length - 1;
@@ -1225,7 +1361,59 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, crushed && !compare ? crushed : source);
     ctx.viewport(0, 0, cv.width, cv.height);
     if (scale < 1) setStatus(`Preview scaled to ${cv.width}×${cv.height} (max GPU limit).`);
-  }, [source, crushed, compare]);
+  }, [source, crushed, compare, redraw]);
+
+  /**
+   * The carousel's slides at full size (1080x1350), each drawn through the look chosen on this tab, as JPEGs: to
+   * this device (one share sheet on phones: "Save N Images") or into the photo's folder.
+   */
+  const exportSlides = async (to: 'device' | 'folder') => {
+    const g = glRef.current;
+    const cv = canvasRef.current;
+    if (!g || !cv || !slideCount) return;
+    const { ctx, prog } = g;
+    const base = title.replace(/\.[^.]+$/, '') || 'carousel';
+    const files: File[] = [];
+    try {
+      for (let i = 0; i < slideCount; i++) {
+        setStatus(`Rendering slide ${i + 1} of ${slideCount}...`);
+        cv.width = 1080;
+        cv.height = 1350;
+        ctx.viewport(0, 0, 1080, 1350);
+        ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, slideCanvas(i, 1));
+        ctx.uniform2f(ctx.getUniformLocation(prog, 'res'), 1080, 1350);
+        ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
+        const blob = await new Promise<Blob>((ok, no) =>
+          cv.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94),
+        );
+        files.push(new File([blob], `${base} ${String(i + 1).padStart(2, '0')}.jpg`, { type: 'image/jpeg' }));
+      }
+    } finally {
+      setRedraw((n) => n + 1); // the preview comes back
+    }
+    if (to === 'device') {
+      const done = await saveFilesToDevice(files);
+      if (done !== 'cancelled')
+        setStatus(
+          done === 'shared'
+            ? `Sent ${files.length} slides (Save Images puts them in Photos, in order).`
+            : `Downloaded ${files.length} slides.`,
+        );
+    } else if (app) {
+      setStatus('Saving the slides...');
+      try {
+        await uploadFiles(
+          getToken,
+          app,
+          dir,
+          files.map((f) => ({ file: f, name: f.name })),
+        );
+        setStatus(`Saved ${files.length} slides in ${dir.join('/') || 'Root'}.`);
+      } catch (e) {
+        setStatus(`Failed to save: ${(e as Error).message}`);
+      }
+    }
+  };
 
   // Re-render WebGL frame on param update or compare
   useEffect(() => {
@@ -1251,13 +1439,25 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.uniform1i(u('glitchMode'), p.glitchMode);
     ctx.uniform1f(u('glitchAmount'), p.glitchAmount);
     ctx.uniform1f(u('glitchThreshold'), p.glitchThreshold);
+    ctx.uniform1f(u('uMatch'), matchStats ? p.match : 0);
+    ctx.uniform1f(u('uMatchTone'), p.matchTone ? 1 : 0);
+    const [sm, ss, rm, rs] = matchStats || [
+      [0, 0, 0],
+      [1, 1, 1],
+      [0, 0, 0],
+      [1, 1, 1],
+    ];
+    ctx.uniform3fv(u('uSrcMean'), sm);
+    ctx.uniform3fv(u('uSrcStd'), ss);
+    ctx.uniform3fv(u('uRefMean'), rm);
+    ctx.uniform3fv(u('uRefStd'), rs);
     ctx.uniform1f(u('uNoise'), p.jpegNoise ? 1.0 : 0.0);
     ctx.uniform1f(u('uSharpen'), p.jpegSharpen ? 1.0 : 0.0);
     ctx.uniform1f(u('uPixel2x'), p.pixelate2x ? 1.0 : 0.0);
     ctx.uniform1f(u('uTime'), (Date.now() % 100000) / 1000.0);
 
     ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
-  }, [source, crushed, params, compare]);
+  }, [source, crushed, params, compare, matchStats, redraw]);
 
   const toJpeg = () =>
     new Promise<Blob>((ok, no) => canvasRef.current!.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94));
@@ -1351,7 +1551,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         </label>
         <button
           style={{ ...button, fontWeight: 700 }}
-          onClick={() => setShowServerPicker(true)}
+          onClick={() => setShowServerPicker('open')}
           title="Browse photos from team and server folders"
         >
           Server Files...
@@ -1379,7 +1579,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         </button>
         <button
           style={{ ...button, background: dirty ? '#008080' : '#c0c0c0', color: dirty ? '#fff' : '#000', fontWeight: 700 }}
-          disabled={!source || !dirty}
+          disabled={!source || !dirty || activeTab === 'carousel'} // carousel slides are exported, not saved as a version
           onClick={save}
           title="Keep this edit. Other tabs then edit on top of it; switching tabs without saving drops it."
         >
@@ -1447,7 +1647,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 </label>
                 <button
                   style={{ ...button, fontWeight: 700, background: '#000080', color: '#fff' }}
-                  onClick={() => setShowServerPicker(true)}
+                  onClick={() => setShowServerPicker('open')}
                 >
                   Browse Server Files...
                 </button>
@@ -2221,6 +2421,196 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               </div>
             )}
 
+            {/* ── Match look ── */}
+            {activeTab === 'match' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b>Reference:</b>
+                  <label style={{ ...button, cursor: 'pointer', fontSize: 11 }}>
+                    Choose photo...
+                    <input
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        const im = new Image();
+                        im.onload = () => pickReference(im, file.name);
+                        im.onerror = () => setStatus("That file isn't a picture this browser can open.");
+                        im.src = URL.createObjectURL(file);
+                      }}
+                    />
+                  </label>
+                  {app && (
+                    <button style={{ ...button, fontSize: 11 }} onClick={() => setShowServerPicker('ref')}>
+                      From team files...
+                    </button>
+                  )}
+                  {matchRef && (
+                    <>
+                      <img src={matchRef.img.src} alt="" style={{ height: 40, border: '1px solid #808080' }} />
+                      <span>{matchRef.name}</span>
+                    </>
+                  )}
+                </div>
+                {matchRef ? (
+                  <div
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 6, alignItems: 'center' }}
+                  >
+                    {slider('Strength', 'match', 0, 1, 0.01, pct(params.match))}
+                    <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <input type="checkbox" checked={params.matchTone} onChange={(e) => setParam('matchTone', e.target.checked)} />
+                      Match brightness &amp; contrast too
+                    </label>
+                  </div>
+                ) : (
+                  <div style={{ color: '#444' }}>
+                    Pick a photo whose look you want: a reference edit, a still from a video, an album cover. Your photo takes on its
+                    colours (and, if you like, its light); Strength sets how far. Save to keep it, then keep editing on the other tabs.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Carousel ── */}
+            {activeTab === 'carousel' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {(
+                    [
+                      ['split', 'Split this photo'],
+                      ['photos', 'One photo per slide'],
+                    ] as const
+                  ).map(([m, label]) => (
+                    <button
+                      key={m}
+                      style={{
+                        ...button,
+                        fontSize: 11,
+                        fontWeight: carMode === m ? 700 : 400,
+                        background: carMode === m ? '#000080' : '#c0c0c0',
+                        color: carMode === m ? '#fff' : '#000',
+                      }}
+                      onClick={() => setCarMode(m)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  {carMode === 'split' ? (
+                    <label style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                      Slides
+                      <input
+                        type="range"
+                        min={2}
+                        max={10}
+                        value={carCount}
+                        onChange={(e) => setCarCount(+e.target.value)}
+                        style={{ width: 90 }}
+                      />
+                      {carCount} (swipes across one wide picture)
+                    </label>
+                  ) : (
+                    <>
+                      <label style={{ ...button, cursor: 'pointer', fontSize: 11 }}>
+                        Add photos...
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          hidden
+                          onChange={async (e) => {
+                            const files = Array.from(e.target.files || []);
+                            e.target.value = '';
+                            const imgs = await Promise.all(
+                              files.map(
+                                (f) =>
+                                  new Promise<HTMLImageElement | null>((ok) => {
+                                    const im = new Image();
+                                    im.onload = () => ok(im);
+                                    im.onerror = () => ok(null);
+                                    im.src = URL.createObjectURL(f);
+                                  }),
+                              ),
+                            );
+                            addSlides(imgs.filter((i): i is HTMLImageElement => !!i));
+                          }}
+                        />
+                      </label>
+                      {app && (
+                        <button style={{ ...button, fontSize: 11 }} onClick={() => setShowServerPicker('slides')}>
+                          From team files...
+                        </button>
+                      )}
+                      {saved && (
+                        <button
+                          style={{ ...button, fontSize: 11 }}
+                          onClick={() => addSlides([saved as HTMLImageElement])}
+                          title="The photo as it is now, with its saved edits"
+                        >
+                          Add this photo
+                        </button>
+                      )}
+                      <span>{slides.length}/10</span>
+                      {slides.length > 0 && (
+                        <button style={{ ...button, fontSize: 11 }} onClick={() => setSlides([])}>
+                          Clear
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <b>Look:</b>
+                  <select
+                    value={params.preset}
+                    onChange={(e) => setParam('preset', +e.target.value)}
+                    style={{ fontSize: 11 }}
+                    title="Applied to every slide (the captions too)"
+                  >
+                    {PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  {params.preset > 0 && strength}
+                  <b style={{ marginLeft: 8 }}>Captions:</b>
+                  <select value={carStyle} onChange={(e) => setCarStyle(e.target.value as TextStyle)} style={{ fontSize: 11 }}>
+                    {TEXT_STYLES.map(([st, label]) => (
+                      <option key={st} value={st}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {Array.from({ length: slideCount }, (_, i) => (
+                    <input
+                      key={i}
+                      placeholder={`Slide ${i + 1} text`}
+                      maxLength={120}
+                      value={carText[i] || ''}
+                      onChange={(e) => setCarText((prev) => Object.assign([...prev], { [i]: e.target.value }))}
+                      style={{ fontSize: 11, width: 110 }}
+                    />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <button style={{ ...button, fontWeight: 700 }} disabled={!carouselOut} onClick={() => exportSlides('device')}>
+                    {isTouch ? `Save ${slideCount} slides to Photos` : `Download ${slideCount} slides`}
+                  </button>
+                  {app && (
+                    <button style={button} disabled={!carouselOut} onClick={() => exportSlides('folder')}>
+                      Save slides to folder
+                    </button>
+                  )}
+                  <span style={{ color: '#444' }}>1080×1350 (Instagram 4:5), numbered in order.</span>
+                </div>
+              </div>
+            )}
+
             {/* ── Versions ── */}
             {activeTab === 'versions' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -2261,10 +2651,17 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       {/* ── Server File Picker Modal ── */}
       {showServerPicker && (
         <FilePicker
-          title="Open Image from Server"
+          title={
+            showServerPicker === 'ref'
+              ? 'Pick the reference photo'
+              : showServerPicker === 'slides'
+                ? 'Add a photo to the carousel'
+                : 'Open Image from Server'
+          }
           mode="file"
           accept={(n) => /\.(jpe?g|png|webp|avif|gif|tiff?|bmp|dng|raw)$/i.test(n)}
           onPick={async (ref: FileRef | null) => {
+            const purpose = showServerPicker;
             setShowServerPicker(false);
             if (!ref) return;
             setStatus('Loading photo from server...');
@@ -2276,6 +2673,8 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             const i = new Image();
             i.crossOrigin = 'anonymous';
             i.onload = () => {
+              if (purpose === 'ref') return pickReference(i, fileName);
+              if (purpose === 'slides') return addSlides([i]);
               startWith(i, fileName);
               setStatus(`Opened ${fileName} from server.`);
             };
