@@ -31,6 +31,7 @@ interface Release {
   story?: string | null;
   stores?: Record<string, string>; // where to listen / pre-save (https links), shown as buttons on the page
   pageUntil?: string | null; // a temporary page: gone after this day
+  videoId?: string | null; // its music video on YouTube, shown on the public page
   artist?: string; // who it's by (asked first when it's made)
   upc?: string; // the release's barcode
   writers?: Partial<BmiWriter>[]; // its usual songwriters: each song's BMI sheet starts from these
@@ -47,7 +48,7 @@ const STORES: [string, string][] = [
   ['bandcamp', 'Bandcamp'],
   ['audiomack', 'Audiomack'],
 ];
-type PageBody = { blurb: string; story: string | null; stores: Record<string, string>; pageUntil: string | null };
+type PageBody = { blurb: string; story: string | null; stores: Record<string, string>; pageUntil: string | null; video: string };
 interface Found {
   added: string[];
   bounces: string[];
@@ -1695,6 +1696,7 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
   const [story, setStory] = useState(release.story || '');
   const [stores, setStores] = useState<Record<string, string>>(release.stores || {});
   const [pageUntil, setPageUntil] = useState(release.pageUntil || '');
+  const [video, setVideo] = useState(release.videoId ? `https://youtu.be/${release.videoId}` : '');
   const [stories, setStories] = useState<{ slug: string; title: string }[]>([]);
   useEffect(() => {
     // Stories are listed publicly once published (and admins can pick drafts)
@@ -1759,6 +1761,16 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
               Before the release date the page counts down and shows only Pre-save; from release day it shows the rest.
             </div>
           </Section>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            Music video
+            <input
+              style={{ ...input, flex: 1, minWidth: 200 }}
+              placeholder="YouTube link (youtu.be/... or youtube.com/watch?v=...)"
+              value={video}
+              onChange={(e) => setVideo(e.target.value)}
+            />
+            <span style={{ color: '#555' }}>(played on the page; set by itself when you post a video from Files)</span>
+          </label>
           <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             Page ends on
             <input type="date" style={input} value={pageUntil} onChange={(e) => setPageUntil(e.target.value)} />
@@ -1770,7 +1782,7 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
             </button>
             <button
               style={{ ...button, fontWeight: 700 }}
-              onClick={() => onSave({ blurb, story: story || null, stores, pageUntil: pageUntil || null })}
+              onClick={() => onSave({ blurb, story: story || null, stores, pageUntil: pageUntil || null, video })}
             >
               Save
             </button>

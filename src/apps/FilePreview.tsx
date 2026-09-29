@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
-import { useApi } from '../utils/api';
+import { useApi, useMe } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
@@ -66,6 +66,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
   const [ver, setVer] = useState('');
   const [fresh, setFresh] = useState(0); // bumped after a restore so the browser fetches the file again
+  const { me } = useMe();
+  const isAdmin = !!me?.admin;
+  const [posting, setPosting] = useState(false);
   const index = siblings.indexOf(name);
   const kind = fileKind(name);
   const src = token
@@ -198,6 +201,11 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
             Open in new tab
           </button>
         )}
+        {kind === 'video' && isAdmin && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
+          <button style={button} onClick={() => setPosting(true)} title="Post this video to the Sanktuary YouTube channel">
+            Post to YouTube...
+          </button>
+        )}
         {EDITABLE_PHOTO.test(name) && (
           <button
             style={button}
@@ -242,6 +250,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
           {name}
         </span>
       </div>
+      {posting && <YouTubePost space={app} path={path} name={name} onClose={() => setPosting(false)} />}
       <div style={stage}>
         {!src ? null : kind === 'image' ? (
           <img
@@ -1166,6 +1175,110 @@ const stage: React.CSSProperties = {
   border: '2px inset #808080',
   margin: '0 2px',
   overflow: 'hidden',
+};
+
+/** Post this video to the Sanktuary YouTube channel (admins): title, description, who sees it, and its release. */
+const YouTubePost: React.FC<{ space: string; path: string; name: string; onClose: () => void }> = ({ space, path, name, onClose }) => {
+  const api = useApi();
+  const [yt, setYt] = useState<{ configured: boolean; connected: boolean; channel: { title: string } | null } | null>(null);
+  const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
+  const [form, setForm] = useState({ title: name.replace(/\.[^.]+$/, ''), description: '', privacy: 'unlisted', release: '' });
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    api('/api/youtube').then(setYt, (e) => setMsg(e.message));
+    api('/api/tracks').then(
+      (d) => setReleases(d.releases.filter((r: { deleted?: boolean }) => !r.deleted)),
+      () => {},
+    );
+  }, [api]);
+  const post = async () => {
+    try {
+      await api('/api/youtube/upload', { method: 'POST', body: JSON.stringify({ space, path, ...form, release: form.release || null }) });
+      setMsg("Uploading in the background. You'll get a notification with the link when it's on YouTube.");
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const field: React.CSSProperties = { fontFamily: 'inherit', fontSize: 12, padding: '2px 4px', border: '2px inset #808080' };
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 30,
+        background: 'rgba(0,0,0,0.25)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div style={{ width: 'min(460px, 96%)', background: '#c0c0c0', border: '2px outset #fff', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+          Post to YouTube
+        </div>
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {!yt ? (
+            <div>{msg || 'Checking the channel...'}</div>
+          ) : !yt.connected ? (
+            <div>
+              The YouTube channel isn't connected yet. An admin connects it once in <b>Admin Panel &gt; Front page</b>.
+            </div>
+          ) : (
+            <>
+              <div>
+                To <b>{yt.channel?.title || 'the channel'}</b>
+              </div>
+              <input
+                style={field}
+                maxLength={100}
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="Title"
+              />
+              <textarea
+                style={{ ...field, resize: 'vertical' }}
+                rows={4}
+                maxLength={4900}
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Description: credits, links, lyrics..."
+              />
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                Who can see it
+                <select style={field} value={form.privacy} onChange={(e) => setForm({ ...form, privacy: e.target.value })}>
+                  <option value="private">Private (only the channel)</option>
+                  <option value="unlisted">Unlisted (anyone with the link)</option>
+                  <option value="public">Public</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                Release page
+                <select style={field} value={form.release} onChange={(e) => setForm({ ...form, release: e.target.value })}>
+                  <option value="">(none)</option>
+                  {releases.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          {msg && yt && <div style={{ color: /^Uploading/.test(msg) ? '#006000' : '#a00000' }}>{msg}</div>}
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button style={button} onClick={onClose}>
+              Close
+            </button>
+            {yt?.connected && (
+              <button style={{ ...button, fontWeight: 700 }} disabled={!form.title.trim() || /^Uploading/.test(msg)} onClick={post}>
+                Post
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default FilePreview;

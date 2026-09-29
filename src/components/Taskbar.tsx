@@ -303,7 +303,7 @@ export const Taskbar: React.FC = () => {
             </li>
             <li className="hover:bg-[#000080] hover:text-white group">
               <button
-                onClick={() => launchApp('soundrec', 'Sound - Sound Recorder', 'soundrec', '/images/icons/speaker-16x16.png', 280, 160)}
+                onClick={() => launchApp('soundrec', 'Sound Recorder', 'soundrec', '/images/icons/speaker-16x16.png', 400, 360)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
                 <img src="/images/icons/speaker-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />

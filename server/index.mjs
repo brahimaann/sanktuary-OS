@@ -13,6 +13,7 @@ import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafe
 import { createReadStream, createWriteStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { appendFile, cp, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
+import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { verifyToken } from '@clerk/backend';
@@ -1599,6 +1600,10 @@ async function tracksApi(req, res, url) {
         r.stores = stores;
       }
       if (input.pageUntil !== undefined) r.pageUntil = dateOrNull(input.pageUntil);
+      if (input.video !== undefined)
+        r.videoId = input.video
+          ? youtubeId(input.video) || fail(400, 'Paste a YouTube link (youtube.com/watch?v=... or youtu.be/...)')
+          : null;
       if (input.story !== undefined) r.story = input.story ? String(input.story).slice(0, 80) : null; // a Story as its visual world
       if (input.members !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
@@ -4986,6 +4991,7 @@ async function releaseView(r) {
     artist: r.artist || '',
     blurb: r.blurb || '',
     stores: r.stores || {},
+    video: r.videoId || null, // a YouTube video id, embedded from youtube-nocookie.com
     cover: !!r.cover,
     story: st && st.public && !st.deleted ? { slug: st.slug, title: st.title } : null,
     tracks,
@@ -5070,7 +5076,7 @@ function htmlPage(file) {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-cache',
       'content-security-policy':
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'",
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https://www.youtube-nocookie.com",
     });
     return pipeline(createReadStream(file), res);
   };
@@ -6515,6 +6521,196 @@ async function comments(req, res, url) {
   fail(405, 'Not allowed');
 }
 
+// ── /api/youtube: post videos from the drives straight to the Sanktuary YouTube channel ──
+// An admin connects the channel once (Google's own consent screen); the server keeps only the refresh token, in
+// data/youtube.json, and never sends it to a browser. Uploads stream from the drive to YouTube in the background and
+// the admin gets a notification with the link; with a release, the video goes on its public page.
+// Needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (Google Cloud > YouTube Data API v3 > OAuth client, web app,
+// redirect URI https://sanktuary.studio/api/youtube/callback). The URLs can be pointed elsewhere for tests.
+const GOOGLE_AUTH = process.env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
+const YT_API = process.env.YOUTUBE_API_URL || 'https://www.googleapis.com/youtube/v3';
+const YT_UPLOAD = process.env.YOUTUBE_UPLOAD_URL || 'https://www.googleapis.com/upload/youtube/v3/videos';
+const ytReady = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+const ytStates = new Map(); // one-time state for the consent screen -> { user, exp }
+const ytJobs = new Map(); // upload id -> progress (kept until the server restarts)
+const YT_VIDEO = new Set(['.mp4', '.m4v', '.mov', '.webm']);
+
+/** The 11-character id from a YouTube link (or a bare id), else null. */
+function youtubeId(v) {
+  const s = String(v || '').trim();
+  const m =
+    s.match(/^[\w-]{11}$/) ||
+    s.match(/^https:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})(?:[?&#].*)?$/);
+  return m ? m[1] || m[0] : null;
+}
+
+async function ytToken() {
+  const saved = await readJson('youtube.json', null);
+  if (!saved?.refresh_token) fail(409, 'Connect the YouTube channel first (Admin Panel > Front page)');
+  const r = await fetch(GOOGLE_TOKEN, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      refresh_token: saved.refresh_token,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const t = await r.json().catch(() => ({}));
+  if (!r.ok || !t.access_token) fail(502, 'YouTube refused the saved connection: connect the channel again');
+  return t.access_token;
+}
+
+async function youtubeApi(req, res, url) {
+  const [, , , what] = url.pathname.split('/');
+  const cfg = await loadConfig();
+  if (what === 'callback') {
+    // Google sends the admin back here with a one-time code: swap it for a refresh token and remember the channel
+    const q = url.searchParams;
+    const st = ytStates.get(q.get('state') || '');
+    ytStates.delete(q.get('state') || '');
+    const user = await currentUser(req, url, cfg).catch(() => null);
+    const back = (ok) => (res.writeHead(303, { location: `/?youtube=${ok ? 'connected' : 'failed'}` }), res.end());
+    if (!st || st.exp < Date.now() || !user || user.username !== st.user || !user.admin || !q.get('code')) return back(false);
+    const r = await fetch(GOOGLE_TOKEN, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: q.get('code'),
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: `${siteOrigin(req)}/api/youtube/callback`,
+        grant_type: 'authorization_code',
+      }),
+    }).catch(() => null);
+    const t = r?.ok ? await r.json().catch(() => ({})) : {};
+    if (!t.refresh_token || !t.access_token) return back(false);
+    const ch = await fetch(`${YT_API}/channels?part=snippet&mine=true`, { headers: { authorization: `Bearer ${t.access_token}` } })
+      .then((x) => (x.ok ? x.json() : {}))
+      .catch(() => ({}));
+    const c = ch.items?.[0];
+    await saveJson('youtube.json', {
+      refresh_token: t.refresh_token,
+      channel: c ? { id: String(c.id).slice(0, 40), title: String(c.snippet?.title || '').slice(0, 100) } : null,
+      by: user.username,
+      at: new Date().toISOString(),
+    });
+    return back(true);
+  }
+  const user = await currentUser(req, url, cfg);
+  if (!user.admin) fail(403, 'Only admins post to the YouTube channel');
+  if (req.method === 'GET' && !what) {
+    const saved = await readJson('youtube.json', null);
+    return json(res, {
+      configured: ytReady(),
+      connected: !!saved?.refresh_token,
+      channel: saved?.channel || null,
+      jobs: [...ytJobs.values()]
+        .filter((j) => j.by === user.username)
+        .slice(-10)
+        .reverse(),
+    });
+  }
+  if (req.method === 'GET' && what === 'connect') {
+    if (!ytReady()) fail(503, 'YouTube isn’t set up on the server yet (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)');
+    const state = randomBytes(24).toString('base64url');
+    for (const [k, v] of ytStates) if (v.exp < Date.now()) ytStates.delete(k);
+    ytStates.set(state, { user: user.username, exp: Date.now() + 10 * 60_000 });
+    const to = new URL(GOOGLE_AUTH);
+    to.search = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: `${siteOrigin(req)}/api/youtube/callback`,
+      response_type: 'code',
+      scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+      access_type: 'offline',
+      prompt: 'consent',
+      state,
+    }).toString();
+    res.writeHead(302, { location: to.href });
+    return res.end();
+  }
+  if (req.method === 'DELETE' && !what) {
+    await rm(join(DATA, 'youtube.json'), { force: true });
+    return json(res, { ok: true });
+  }
+  if (req.method === 'POST' && what === 'upload') {
+    const input = await jsonBody(req);
+    const space = spacesFor(user, cfg, await loadStatus()).find((s) => s.id === String(input.space || '')) || fail(404, 'No such space');
+    if (!space.online) fail(503, 'Drive offline');
+    const { abs } = locateIn(space, input.path);
+    if (!YT_VIDEO.has(extname(abs).toLowerCase())) fail(400, 'Only videos (MP4, MOV, M4V, WebM) go to YouTube');
+    const s = (await stat(abs).catch(() => null)) || fail(404, 'That file is gone');
+    if (!s.isFile()) fail(400, 'Pick a video file');
+    const title =
+      String(input.title || basename(abs, extname(abs)))
+        .replace(/[<>]/g, '')
+        .trim()
+        .slice(0, 100) || fail(400, 'Give it a title');
+    const description = String(input.description || '')
+      .replace(/[<>]/g, '')
+      .slice(0, 4900);
+    const privacy = ['private', 'unlisted', 'public'].includes(input.privacy) ? input.privacy : 'unlisted';
+    const tdb = await loadTracks();
+    const rel = input.release ? own(tdb.releases, String(input.release)) : null;
+    if (input.release && (!rel || rel.deleted || !canSeeRelease(user, rel))) fail(404, 'No such release');
+    const access = await ytToken(); // fails now (not in the background) if the channel isn't connected
+    const job = {
+      id: randomUUID().slice(0, 10),
+      by: user.username,
+      file: basename(abs),
+      title,
+      status: 'Uploading',
+      pct: 0,
+      url: null,
+      error: null,
+    };
+    ytJobs.set(job.id, job);
+    // ponytail: one straight upload; a dropped connection means starting again (YouTube supports resuming if needed)
+    (async () => {
+      const init = await fetch(`${YT_UPLOAD}?uploadType=resumable&part=snippet,status`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${access}`,
+          'content-type': 'application/json; charset=UTF-8',
+          'x-upload-content-type': 'video/*',
+          'x-upload-content-length': String(s.size),
+        },
+        body: JSON.stringify({
+          snippet: { title, description, categoryId: '10' }, // Music
+          status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
+        }),
+      });
+      const where = init.headers.get('location');
+      if (!init.ok || !where) throw new Error(`YouTube refused the upload (${init.status})`);
+      const file = createReadStream(abs, BIG_BUFFER);
+      let sent = 0;
+      file.on('data', (c) => (job.pct = Math.floor(((sent += c.length) / s.size) * 100)));
+      const up = await fetch(where, {
+        method: 'PUT',
+        headers: { 'content-length': String(s.size), 'content-type': 'video/*' },
+        body: Readable.toWeb(file),
+        duplex: 'half',
+      });
+      const v = await up.json().catch(() => ({}));
+      if (!up.ok || !v.id) throw new Error(`YouTube didn't accept the video (${up.status})`);
+      Object.assign(job, { status: 'Done', pct: 100, url: `https://youtu.be/${v.id}` });
+      if (rel) {
+        rel.videoId = v.id;
+        saveTracks();
+      }
+      await notify(user.username, `On YouTube (${privacy}): "${title}" ${job.url}${rel ? ` · now on the ${rel.title} page` : ''}`, {});
+    })().catch(async (e) => {
+      Object.assign(job, { status: 'Failed', error: String(e.message).slice(0, 200) });
+      await notify(user.username, `YouTube upload of "${title}" failed: ${job.error}`, {}).catch(() => {});
+    });
+    res.writeHead(202, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify(job));
+  }
+  fail(404, 'Unknown YouTube action');
+}
+
 const routes = [
   ['/healthz', healthz],
   ['/api/files/', files],
@@ -6534,6 +6730,7 @@ const routes = [
   ['/api/timeline', timelineApi],
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
+  ['/api/youtube', youtubeApi],
   ['/api/business', businessApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],

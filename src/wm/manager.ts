@@ -157,8 +157,8 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
         computedWidth = 260;
         computedHeight = 260;
       } else if (spec.appType === 'soundrec') {
-        computedWidth = 280;
-        computedHeight = 160;
+        computedWidth = 400;
+        computedHeight = 360;
       } else if (spec.id === 'solitaire') {
         computedWidth = 585;
         computedHeight = 410;

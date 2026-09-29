@@ -333,6 +333,19 @@
           }
           hero.append(text);
           page.append(hero);
+          // The music video, from YouTube's no-cookie player (the id is checked on the server: 11 letters, digits, - or _)
+          if (/^[\w-]{11}$/.test(r.video || '')) {
+            const v = el('div', 'video');
+            v.style.cssText = 'position:relative;aspect-ratio:16/9;margin:24px 0;background:#000';
+            const f = document.createElement('iframe');
+            f.src = `https://www.youtube-nocookie.com/embed/${r.video}`;
+            f.title = `${r.title}: video`;
+            f.allow = 'encrypted-media; picture-in-picture; fullscreen';
+            f.referrerPolicy = 'strict-origin-when-cross-origin';
+            f.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0';
+            v.append(f);
+            page.append(v);
+          }
 
           if (!r.tracks.length) page.append(el('p', 'notice', 'The tracklist is coming soon.'));
           const list = el('ol');

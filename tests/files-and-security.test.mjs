@@ -127,6 +127,39 @@ const fakeRaw = http
   })
   .listen(3193);
 
+// A fake Google: consent codes, tokens, the channel, and a resumable YouTube upload
+const ytCalls = [];
+const fakeGoogle = http
+  .createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (d) => chunks.push(d));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks);
+      ytCalls.push({
+        method: req.method,
+        path: req.url,
+        auth: req.headers.authorization,
+        size: raw.length,
+        body: raw.toString().slice(0, 500),
+      });
+      const j = (code, o, h = {}) => res.writeHead(code, { 'content-type': 'application/json', ...h }).end(JSON.stringify(o));
+      if (req.url === '/token') {
+        const f = new URLSearchParams(raw.toString());
+        if (f.get('client_secret') !== 'gsecret') return j(401, {});
+        if (f.get('grant_type') === 'authorization_code' && f.get('code') === 'good')
+          return j(200, { access_token: 'at1', refresh_token: 'rt1' });
+        if (f.get('grant_type') === 'refresh_token' && f.get('refresh_token') === 'rt1') return j(200, { access_token: 'at2' });
+        return j(400, { error: 'invalid_grant' });
+      }
+      if (req.url.startsWith('/yt/channels')) return j(200, { items: [{ id: 'UC123', snippet: { title: 'Sanktuary TV' } }] });
+      if (req.url.startsWith('/upload?') && req.headers.authorization === 'Bearer at2')
+        return j(200, {}, { location: 'http://127.0.0.1:3192/upload-session/1' });
+      if (req.url === '/upload-session/1') return j(200, { id: 'abcdefghijk' });
+      j(404, {});
+    });
+  })
+  .listen(3192);
+
 const srv = spawn(process.execPath, [SERVER], {
   env: {
     ...process.env,
@@ -144,6 +177,12 @@ const srv = spawn(process.execPath, [SERVER], {
     RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
     RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
     AUTO_SCAN_MS: '400', // long enough for a test to set a bounce by hand right after uploading it
+    GOOGLE_CLIENT_ID: 'gid',
+    GOOGLE_CLIENT_SECRET: 'gsecret',
+    GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
+    GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
+    YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
+    YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
   },
 });
 let srvOut = '';
@@ -2425,11 +2464,96 @@ ${thisYear}-03;Comma Song;0,456`,
       400,
   );
   check('non-admin blocked from admin API', (await call('bob', '/api/admin/state')).status === 403);
+
+  // YouTube: admins connect the channel (Google's consent screen), then post videos from the drive in the background
+  const noFollow = (u, path) => fetch(B + path, { headers: { cookie: cookie(u) }, redirect: 'manual' });
+  check('only admins use YouTube', (await call('bob', '/api/youtube')).status === 403);
+  const yt0 = JSON.parse((await call('alice', '/api/youtube')).text);
+  check('YouTube shows as set up but not connected', yt0.configured === true && yt0.connected === false);
+  const consent = await noFollow('alice', '/api/youtube/connect');
+  const to = new URL(consent.headers.get('location'));
+  check(
+    'connecting goes to Google with an offline, upload-only request',
+    consent.status === 302 &&
+      to.origin === 'http://127.0.0.1:3192' &&
+      to.searchParams.get('access_type') === 'offline' &&
+      /youtube\.upload/.test(to.searchParams.get('scope')),
+  );
+  const state = to.searchParams.get('state');
+  check(
+    'a made-up state is refused',
+    /failed/.test((await noFollow('alice', `/api/youtube/callback?state=nope&code=good`)).headers.get('location')),
+  );
+  check(
+    'someone else cannot use your state',
+    /failed/.test((await noFollow('bob', `/api/youtube/callback?state=${state}&code=good`)).headers.get('location')),
+  );
+  const consent2 = new URL((await noFollow('alice', '/api/youtube/connect')).headers.get('location')).searchParams.get('state');
+  check(
+    'the channel connects',
+    /connected/.test((await noFollow('alice', `/api/youtube/callback?state=${consent2}&code=good`)).headers.get('location')),
+  );
+  check(
+    'a state works only once',
+    /failed/.test((await noFollow('alice', `/api/youtube/callback?state=${consent2}&code=good`)).headers.get('location')),
+  );
+  const yt1 = JSON.parse((await call('alice', '/api/youtube')).text);
+  check(
+    'the channel name shows, the token never does',
+    yt1.connected && yt1.channel?.title === 'Sanktuary TV' && !JSON.stringify(yt1).includes('rt1'),
+  );
+  writeFileSync(join(drive, 'team', 'promo.mp4'), Buffer.alloc(20000, 7));
+  writeFileSync(join(drive, 'team', 'notes.txt'), 'x');
+  check(
+    'only videos go to YouTube',
+    (await call('alice', '/api/youtube/upload', 'POST', { space: 'up', path: 'notes.txt' })).status === 400,
+  );
+  check(
+    'paths stay inside the space',
+    (await call('alice', '/api/youtube/upload', 'POST', { space: 'up', path: '../../x.mp4' })).status === 400,
+  );
+  const ytRel = JSON.parse((await call('alice', '/api/tracks/release', 'POST', { title: 'Video EP', kind: 'EP' })).text);
+  const ytJob = await call('alice', '/api/youtube/upload', 'POST', {
+    space: 'up',
+    path: 'promo.mp4',
+    title: 'Promo <b>',
+    privacy: 'unlisted',
+    release: ytRel.id,
+  });
+  check('an upload starts in the background', ytJob.status === 202);
+  for (let i = 0; i < 40 && JSON.parse((await call('alice', '/api/youtube')).text).jobs[0]?.status === 'Uploading'; i++)
+    await new Promise((r) => setTimeout(r, 100));
+  const done = JSON.parse((await call('alice', '/api/youtube')).text).jobs[0];
+  const put = ytCalls.find((c) => c.path === '/upload-session/1');
+  check(
+    'the whole file reaches YouTube',
+    done?.status === 'Done' && done.url === 'https://youtu.be/abcdefghijk' && put?.size === 20000,
+    JSON.stringify(done),
+  );
+  check('titles lose < and >', /"title":"Promo b"/.test(ytCalls.find((c) => c.path.startsWith('/upload?'))?.body || ''));
+  const relNow = JSON.parse((await call('alice', '/api/tracks')).text).releases.find((r) => r.id === ytRel.id);
+  check('the video goes on its release', relNow?.videoId === 'abcdefghijk');
+  check(
+    'release video links are checked',
+    (await call('alice', `/api/tracks/release/${ytRel.id}`, 'PATCH', { video: 'https://evil.example/watch?v=abcdefghijk' })).status ===
+      400 &&
+      JSON.parse((await call('alice', `/api/tracks/release/${ytRel.id}`, 'PATCH', { video: 'https://youtu.be/ZYXWVUTSRQP?t=3' })).text)
+        .videoId === 'ZYXWVUTSRQP',
+  );
+  check(
+    'the uploader is told',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /youtu\.be\/abcdefghijk/.test(n.text)),
+  );
+  check(
+    'disconnecting forgets the channel',
+    (await call('alice', '/api/youtube', 'DELETE')).status === 200 && !JSON.parse((await call('alice', '/api/youtube')).text).connected,
+  );
 } finally {
   srv.kill();
   clerk.close();
   fakeStripe.close();
   fakeRaw.close();
+  fakeGoogle.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
   console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
   rmSync(dir, { recursive: true, force: true });

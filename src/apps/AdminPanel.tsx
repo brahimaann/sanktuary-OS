@@ -1349,6 +1349,70 @@ type Booking = {
 };
 
 /** What visitors see in the Welcome window, and the "Join the Village" requests. */
+/** The YouTube channel videos are posted to (Files > a video > Post to YouTube...). */
+const YouTubeSettings: React.FC = () => {
+  const api = useApi();
+  const [yt, setYt] = useState<{
+    configured: boolean;
+    connected: boolean;
+    channel: { title: string } | null;
+    jobs: { id: string; title: string; status: string; pct: number; url: string | null; error: string | null }[];
+  } | null>(null);
+  const [msg, setMsg] = useState(() => (/youtube=failed/.test(location.search) ? "YouTube didn't connect. Try again." : ''));
+  const load = useCallback(() => api('/api/youtube').then(setYt, (e) => setMsg(e.message)), [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  return (
+    <fieldset style={fieldset}>
+      <legend>YouTube</legend>
+      {!yt ? (
+        <div>{msg || 'Loading...'}</div>
+      ) : !yt.configured ? (
+        <p style={hint}>
+          Not set up on the server yet. In Google Cloud, turn on the YouTube Data API v3, make an OAuth client (web application) with the
+          redirect URI <b>https://sanktuary.studio/api/youtube/callback</b>, and put its GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.
+        </p>
+      ) : yt.connected ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={row}>
+            Connected to <b>{yt.channel?.title || 'the channel'}</b>. Post videos from Files (open a video &gt; Post to YouTube).
+            <span style={{ flex: 1 }} />
+            <button
+              style={button}
+              onClick={async () =>
+                (await dialog.confirm('Disconnect the YouTube channel?')) && api('/api/youtube', { method: 'DELETE' }).then(load)
+              }
+            >
+              Disconnect
+            </button>
+          </div>
+          {yt.jobs.map((j) => (
+            <div key={j.id}>
+              {j.title}: {j.status === 'Uploading' ? `${j.pct}%` : j.status}{' '}
+              {j.url && (
+                <a href={j.url} target="_blank" rel="noopener noreferrer">
+                  {j.url}
+                </a>
+              )}
+              {j.error && <span style={{ color: '#a00000' }}> {j.error}</span>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={row}>
+          Not connected.
+          <a href="/api/youtube/connect" style={{ ...button, textDecoration: 'none', color: '#000' }}>
+            Connect YouTube channel...
+          </a>
+          <span style={{ color: '#555' }}>Google asks you to pick the channel and allow uploads.</span>
+        </div>
+      )}
+      {msg && yt && <div style={{ color: '#a00000' }}>{msg}</div>}
+    </fieldset>
+  );
+};
+
 const FrontTab: React.FC = () => {
   const api = useApi();
   const [d, setD] = useState<{ intro: string; portfolio: Record<string, string>; joins: Join[]; bookings: Booking[] } | null>(null);
@@ -1442,6 +1506,7 @@ const FrontTab: React.FC = () => {
           </div>
         ))}
       </fieldset>
+      <YouTubeSettings />
       <fieldset style={fieldset}>
         <legend>Booking requests ({d.bookings.filter((b) => b.status === 'New').length} new)</legend>
         <p style={hint}>
