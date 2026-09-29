@@ -53,6 +53,8 @@ export const PRESETS: FilterPreset[] = [
   // 2012 Instagram (Chicago drill era)
   { id: 19, name: '2012 Lux', category: 'swag', desc: '2012 Instagram: crunchy clarity, hot saturation, warm skin, dark corners' },
   { id: 20, name: 'Club Flash', category: 'swag', desc: 'Violet club shadows, glowing highlights, phone flash in the dark' },
+  { id: 22, name: 'Tungsten Cam', category: 'camera', desc: 'Dark, warm, soft camcorder under one bare bulb' },
+  { id: 23, name: 'Cold VHS', category: 'goth', desc: 'Blue-cyan tape, washed blacks, soft and cold' },
   { id: 21, name: 'Faded IG', category: 'swag', desc: 'Old Instagram fade: creamy lifted blacks, soft warm highlights' },
 ];
 
@@ -61,7 +63,7 @@ export type CollageGridPreset =
   'single' | 'split-v' | 'split-h' | '3-col' | '3-row' | '2x2' | 'banner-top' | 'banner-bottom' | 'hero-left' | 'hero-right';
 
 export type AspectRatioPreset = 'photo' | '1:1' | '4:3' | '16:9' | '3:4' | '9:16';
-type Fit = 'crop' | 'fit' | 'stretch';
+type Fit = 'crop' | 'fit' | 'stretch' | 'none'; // none: no photos, just the background and text
 
 export interface CollageSlotRect {
   x: number;
@@ -197,10 +199,73 @@ export const ASPECT_RATIOS: AspectRatioDefinition[] = [
 ];
 
 const FITS: [Fit, string, string][] = [
+  ['none', 'No photo', 'Just the background colour and the text (a text card)'],
   ['crop', 'Crop to fill', 'Fills each frame, trimming the edges that overflow (no distortion)'],
   ['fit', 'Whole photo', 'Shows the whole photo, with background around it'],
   ['stretch', 'Stretch', 'Stretches or squashes the photo to the frame'],
 ];
+
+/**
+ * How a caption is laid out (from lyric videos and 2012-era edits):
+ * plain: one line; grid: words spaced out in even columns, row by row; stacked: one huge word per line filling
+ * the width; soft: a small, slightly blurred line (white on black cards).
+ */
+export type TextStyle = 'plain' | 'grid' | 'stacked' | 'soft';
+export const TEXT_STYLES: [TextStyle, string][] = [
+  ['plain', 'Plain'],
+  ['grid', 'Word grid'],
+  ['stacked', 'Big stacked'],
+  ['soft', 'Soft'],
+];
+
+/** Draws one caption onto a W×H canvas (sizes are relative, so it looks the same at any resolution). */
+export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W: number, H: number) {
+  if (!txt.text.trim()) return;
+  const scale = Math.min(W, H) / 1000;
+  const size = Math.max(12, Math.round(txt.fontSize * scale));
+  const tx = (txt.xPercent / 100) * W;
+  const ty = (txt.yPercent / 100) * H;
+  const put = (t: string, x: number, y: number) => {
+    if (txt.shadow) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+      ctx.fillText(t, x + 3 * scale, y + 3 * scale);
+    }
+    ctx.fillStyle = txt.color;
+    ctx.fillText(t, x, y);
+  };
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  const style = txt.style || 'plain';
+  const words = txt.text.trim().split(/\s+/);
+  if (style === 'grid') {
+    // three even columns, words left-aligned in them, the block centred on the chosen height
+    const cols = 3;
+    const colW = (W * 0.84) / cols;
+    const lineH = size * 1.12;
+    const rows = Math.ceil(words.length / cols);
+    ctx.font = `${size}px "${txt.fontFamily}", Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    words.forEach((w, i) => put(w, W * 0.08 + (i % cols) * colW, ty + (Math.floor(i / cols) - (rows - 1) / 2) * lineH));
+  } else if (style === 'stacked') {
+    // one word per line, as big as the widest word allows across 90% of the width
+    ctx.font = `bold 100px "${txt.fontFamily}", Arial, sans-serif`;
+    const widest = Math.max(...words.map((w) => ctx.measureText(w).width));
+    const big = Math.min((100 * W * 0.9) / widest, (H * 0.9) / (words.length * 0.9));
+    ctx.font = `bold ${Math.round(big)}px "${txt.fontFamily}", Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    words.forEach((w, i) => put(w, W * 0.05, ty + (i - (words.length - 1) / 2) * big * 0.9));
+  } else {
+    ctx.font = `${style === 'soft' ? '' : 'bold '}${size}px "${txt.fontFamily}", sans-serif`;
+    ctx.textAlign = txt.align;
+    if (style === 'soft') {
+      // a glow in its own colour reads as the slightly out-of-focus type on black cards
+      ctx.shadowColor = txt.color;
+      ctx.shadowBlur = size / 5;
+    }
+    put(txt.text, tx, ty);
+  }
+  ctx.restore();
+}
 
 export interface TextOverlayItem {
   id: string;
@@ -212,6 +277,7 @@ export interface TextOverlayItem {
   xPercent: number;
   yPercent: number;
   shadow: boolean;
+  style?: TextStyle; // how the words are laid out (plain line if missing)
 }
 
 type Source = HTMLImageElement | HTMLCanvasElement;
@@ -611,6 +677,28 @@ vec3 faded_ig_grade(vec3 c) {
   return clamp(c, 0.0, 1.0);
 }
 
+// ── Preset 22: Tungsten Cam (underexposed, one warm bulb, soft lens, heavy falloff) ──
+vec3 tungsten_grade(vec3 c, vec2 st, float big) {
+  vec2 o = vec2(big / 500.0) / res;
+  vec3 soft = (texture2D(img, st + vec2(o.x, 0.0)).rgb + texture2D(img, st - vec2(o.x, 0.0)).rgb +
+               texture2D(img, st + vec2(0.0, o.y)).rgb + texture2D(img, st - vec2(0.0, o.y)).rgb) * 0.25;
+  c = mix(c, soft, 0.45);
+  float Y = luma(c);
+  c = mix(vec3(Y), c, 0.7) * vec3(1.25, 0.98, 0.62);
+  c = pow(max(c, 0.0), vec3(1.35)) * 0.95;
+  c *= mix(0.35, 1.0, 1.0 - smoothstep(0.25, 0.8, distance(st, vec2(0.5, 0.45))));
+  return clamp(c, 0.0, 1.0);
+}
+
+// ── Preset 23: Cold VHS (blue-cyan cast, lifted grey blacks, low contrast, soft) ──
+vec3 cold_vhs_grade(vec3 c, vec2 st, float big) {
+  vec2 o = vec2(big / 400.0, 0.0) / res;
+  c = (c * 2.0 + texture2D(img, st + o).rgb + texture2D(img, st - o).rgb) * 0.25;
+  float Y = luma(c);
+  c = mix(vec3(Y), c, 0.55) * vec3(0.78, 0.95, 1.18);
+  return clamp(c * 0.78 + vec3(0.10, 0.12, 0.16), 0.0, 1.0);
+}
+
 // ── Preset 18: Brainwash (Y2K Digicam CCD Bleed) ──
 vec3 brainwash_grade(vec3 c) {
   mat3 satMatrix = mat3(1.6, -0.3, -0.3, -0.3, 1.6, -0.3, -0.3, -0.3, 1.6);
@@ -687,6 +775,8 @@ void main() {
   else if (preset == 19) graded = lux2012_grade(c, st, big);
   else if (preset == 20) graded = club_grade(c, st, big);
   else if (preset == 21) graded = faded_ig_grade(c);
+  else if (preset == 22) graded = tungsten_grade(c, st, big);
+  else if (preset == 23) graded = cold_vhs_grade(c, st, big);
 
   c = mix(c, graded, amount);
 
@@ -980,6 +1070,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       const sw = Math.round(slot.w * innerW - (collageGap > 0 ? collageGap : 0));
       const sh = Math.round(slot.h * innerH - (collageGap > 0 ? collageGap : 0));
 
+      if (collageFit === 'none') return; // text on a plain background
       const img = collageSlots[idx];
       if (img) {
         drawImageIn(ctx, img, sx, sy, sw, sh, collageFit);
@@ -1003,25 +1094,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     });
 
     // 4. Render editable text typography overlays (proportional scaling so text never jumps)
-    textOverlays.forEach((txt) => {
-      if (!txt.text.trim()) return;
-      ctx.save();
-      const baseScale = Math.min(W, H) / 1000;
-      const scaledSize = Math.max(12, Math.round(txt.fontSize * baseScale));
-      ctx.font = `bold ${scaledSize}px "${txt.fontFamily}", sans-serif`;
-      ctx.textAlign = txt.align;
-      ctx.textBaseline = 'middle';
-      const tx = (txt.xPercent / 100) * W;
-      const ty = (txt.yPercent / 100) * H;
-
-      if (txt.shadow) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-        ctx.fillText(txt.text, tx + 3 * baseScale, ty + 3 * baseScale);
-      }
-      ctx.fillStyle = txt.color;
-      ctx.fillText(txt.text, tx, ty);
-      ctx.restore();
-    });
+    textOverlays.forEach((txt) => drawText(ctx, txt, W, H));
 
     setCollageOut(canvas);
   }, [
@@ -1039,7 +1112,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   ]);
 
   // One-tap layouts from 2012 Instagram / TikTok edits (each one is a starting point: every setting stays editable)
-  const quickLook = (look: 'stretch' | 'story' | 'grid' | 'ig') => {
+  const quickLook = (look: 'stretch' | 'story' | 'grid' | 'ig' | 'vertical' | 'lyrics' | 'stacked' | 'card') => {
     const photo = collageSlots[0] || saved;
     setIgPost(look === 'ig' ? (igPost ?? { user: 'sanktuary', likes: '6978', caption: '#PartyAtMyHouse' }) : null);
     if (look === 'stretch') {
@@ -1068,6 +1141,38 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
           xPercent: 50,
           yPercent: 50,
           shadow: true,
+        },
+      ]);
+    } else if (look === 'vertical') {
+      // a wide music-video frame squashed into a tall one
+      setCollageGrid('single');
+      setCollageSlots([photo]);
+      setCollageFit('stretch');
+      setCollageAspect('9:16');
+      setCollageGap(0);
+    } else if (look === 'lyrics' || look === 'stacked' || look === 'card') {
+      // lyric-video text: words spaced in a grid over the photo, huge stacked words over it in black & white, or
+      // one soft line on a black card
+      setCollageGrid('single');
+      setCollageSlots([photo]);
+      setCollageFit(look === 'card' ? 'none' : 'crop');
+      setCollageAspect('9:16');
+      setCollageGap(0);
+      setCollageBgColor('#000000');
+      if (look === 'stacked') setParam('preset', 10); // Silver B&W underneath
+      const text = look === 'lyrics' ? 'i done been a dope head i done been a' : look === 'stacked' ? 'PAIN PAIN PAIN' : 'hella funds';
+      setTextOverlays([
+        {
+          id: `txt-${Date.now()}`,
+          text,
+          fontSize: look === 'lyrics' ? 110 : 60, // card text stays small, like the reference; stacked sizes itself
+          color: '#ffffff',
+          fontFamily: 'Arial',
+          align: 'center',
+          xPercent: 50,
+          yPercent: 50,
+          shadow: look === 'lyrics',
+          style: look === 'lyrics' ? 'grid' : look === 'stacked' ? 'stacked' : 'soft',
         },
       ]);
     } else if (look === 'grid') {
@@ -1513,6 +1618,10 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         ['story', 'Story caption', 'Black bars and a caption in the middle (9:16)'],
                         ['grid', '2×2 grid', 'Four photos in a white 3:4 grid'],
                         ['ig', 'IG post 2012', 'The photo inside an old Instagram post: username, likes, caption'],
+                        ['vertical', 'Vertical stretch', 'A wide video frame squashed into 9:16'],
+                        ['lyrics', 'Lyric grid', 'Lyrics spaced out word by word in even columns over the photo'],
+                        ['stacked', 'Big stacked', 'Huge stacked words over the photo in black & white'],
+                        ['card', 'Black card', 'One soft line of white text on black'],
                       ] as const
                     ).map(([id, label, desc]) => (
                       <button
@@ -1912,6 +2021,22 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         }}
                         style={{ fontSize: 11, padding: '1px 4px', width: 140 }}
                       />
+                      <select
+                        value={item.style || 'plain'}
+                        title="How the words are laid out"
+                        onChange={(e) => {
+                          const val = e.target.value as TextStyle;
+                          setTextOverlays((prev) => prev.map((t) => (t.id === item.id ? { ...t, style: val } : t)));
+                          setIsCollageActive(true);
+                        }}
+                        style={{ fontSize: 11, padding: '1px' }}
+                      >
+                        {TEXT_STYLES.map(([id, label]) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
                       <select
                         value={item.fontFamily}
                         onChange={(e) => {
