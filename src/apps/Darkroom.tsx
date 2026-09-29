@@ -50,6 +50,10 @@ export const PRESETS: FilterPreset[] = [
   { id: 16, name: '1/4" Camcorder', category: 'camera', desc: 'Interlaced scanlines, chroma blur, warm tape gain' },
   { id: 17, name: 'iPhone 3GS', category: 'camera', desc: 'Plastic lens softness, blown highlights, early sensor curve' },
   { id: 18, name: '🧠🧼 Brainwash', category: 'camera', desc: 'Ultra-saturated Y2K direct-flash digicam look' },
+  // 2012 Instagram (Chicago drill era)
+  { id: 19, name: '2012 Lux', category: 'swag', desc: '2012 Instagram: crunchy clarity, hot saturation, warm skin, dark corners' },
+  { id: 20, name: 'Club Flash', category: 'swag', desc: 'Violet club shadows, glowing highlights, phone flash in the dark' },
+  { id: 21, name: 'Faded IG', category: 'swag', desc: 'Old Instagram fade: creamy lifted blacks, soft warm highlights' },
 ];
 
 // ── Collage Presets & Types ──
@@ -572,6 +576,41 @@ vec3 iphone3gs_grade(vec3 c, vec2 uvCoord, float big) {
   return clamp(out_c * vig, 0.0, 1.0);
 }
 
+// ── Preset 19: 2012 Lux (Instagram Lux + early HDR apps: big-radius "clarity", hot saturation, warm, vignette) ──
+vec3 lux2012_grade(vec3 c, vec2 st, float big) {
+  vec2 o = vec2(big / 120.0) / res;
+  vec3 wide = (texture2D(img, st + vec2(o.x, 0.0)).rgb + texture2D(img, st - vec2(o.x, 0.0)).rgb +
+               texture2D(img, st + vec2(0.0, o.y)).rgb + texture2D(img, st - vec2(0.0, o.y)).rgb) * 0.25;
+  c += (c - wide) * 1.4;
+  float Y = luma(c);
+  c = Y + (c - Y) * 1.55;
+  c *= vec3(1.10, 1.0, 0.84);
+  c = smoothstep(0.03, 0.97, c);
+  c *= mix(0.55, 1.0, 1.0 - smoothstep(0.35, 0.85, distance(st, vec2(0.5))));
+  return clamp(c, 0.0, 1.0);
+}
+
+// ── Preset 20: Club Flash (violet shadows, warm skin, highlights that glow) ──
+vec3 club_grade(vec3 c, vec2 st, float big) {
+  vec2 o = vec2(big / 60.0) / res;
+  vec3 glow = (texture2D(img, st + o).rgb + texture2D(img, st - o).rgb +
+               texture2D(img, st + vec2(o.x, -o.y)).rgb + texture2D(img, st + vec2(-o.x, o.y)).rgb) * 0.25;
+  vec3 tint = mix(vec3(0.25, 0.10, 0.45), vec3(1.0, 0.85, 0.75), smoothstep(0.1, 0.9, luma(c)));
+  c = mix(c, c * tint * 1.6, 0.55);
+  c += smoothstep(0.55, 1.0, luma(glow)) * glow * 0.45;
+  c = (c - 0.5) * 1.15 + 0.45;
+  return clamp(c, 0.0, 1.0);
+}
+
+// ── Preset 21: Faded IG (Valencia / Amaro era: creamy lifted blacks, warm, soft highlights) ──
+vec3 faded_ig_grade(vec3 c) {
+  c = c * 0.82 + vec3(0.14, 0.11, 0.09);
+  float Y = luma(c);
+  c = mix(vec3(Y), c, 1.15) * vec3(1.06, 1.0, 0.92);
+  c = mix(c, vec3(1.0, 0.94, 0.86), smoothstep(0.7, 1.0, Y) * 0.35);
+  return clamp(c, 0.0, 1.0);
+}
+
 // ── Preset 18: Brainwash (Y2K Digicam CCD Bleed) ──
 vec3 brainwash_grade(vec3 c) {
   mat3 satMatrix = mat3(1.6, -0.3, -0.3, -0.3, 1.6, -0.3, -0.3, -0.3, 1.6);
@@ -645,6 +684,9 @@ void main() {
   else if (preset == 16) graded = camcorder_grade(c, st, big);
   else if (preset == 17) graded = iphone3gs_grade(c, st, big);
   else if (preset == 18) graded = brainwash_grade(c);
+  else if (preset == 19) graded = lux2012_grade(c, st, big);
+  else if (preset == 20) graded = club_grade(c, st, big);
+  else if (preset == 21) graded = faded_ig_grade(c);
 
   c = mix(c, graded, amount);
 
@@ -750,6 +792,8 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const [collageBgImage, setCollageBgImage] = useState<HTMLImageElement | null>(null);
   const [collageGap, setCollageGap] = useState<number>(8);
   const [textOverlays, setTextOverlays] = useState<TextOverlayItem[]>([]);
+  // "IG post 2012": the photo inside an old Instagram post (username, likes, caption) instead of a grid
+  const [igPost, setIgPost] = useState<{ user: string; likes: string; caption: string } | null>(null);
   // The collage is only composed once it's been changed on the Collage tab, so just opening the tab changes nothing
   const [isCollageActive, setIsCollageActive] = useState<boolean>(false);
   const [collageOut, setCollageOut] = useState<HTMLCanvasElement | null>(null);
@@ -862,6 +906,44 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   // Compose the collage preview whenever collage settings change
   useEffect(() => {
     if (!isCollageActive || activeTab !== 'collage') return setCollageOut(null);
+    if (igPost) {
+      // An old (2012) Instagram post: header with the username, the photo square, likes and caption below
+      const c = document.createElement('canvas');
+      c.width = 1080;
+      c.height = 1350;
+      const x = c.getContext('2d');
+      if (!x) return;
+      x.fillStyle = '#fbfaf6';
+      x.fillRect(0, 0, 1080, 1350);
+      const photo = collageSlots[0];
+      if (photo) {
+        x.save(); // round avatar from the same photo
+        x.beginPath();
+        x.arc(70, 66, 40, 0, Math.PI * 2);
+        x.clip();
+        drawImageIn(x, photo, 30, 26, 80, 80, 'crop');
+        x.restore();
+        drawImageIn(x, photo, 0, 132, 1080, 1080, 'crop');
+      }
+      x.fillStyle = '#125688'; // 2012 Instagram's username blue
+      x.font = 'bold 38px "Helvetica Neue", Arial, sans-serif';
+      x.textBaseline = 'middle';
+      x.fillText(igPost.user || 'username', 130, 66);
+      x.fillStyle = '#b0b0b0';
+      x.font = '32px "Helvetica Neue", Arial, sans-serif';
+      x.textAlign = 'right';
+      x.fillText('◷ 6d', 1050, 66);
+      x.textAlign = 'left';
+      x.fillStyle = '#125688';
+      x.font = 'bold 34px "Helvetica Neue", Arial, sans-serif';
+      if (igPost.likes) x.fillText(`♥ ${igPost.likes} likes`, 30, 1252);
+      x.fillText(igPost.user || 'username', 30, 1306);
+      const w = x.measureText(`${igPost.user || 'username'} `).width;
+      x.fillStyle = '#262626';
+      x.font = '34px "Helvetica Neue", Arial, sans-serif';
+      x.fillText(igPost.caption, 30 + w, 1306);
+      return setCollageOut(c);
+    }
     const gridDef = COLLAGE_GRIDS.find((g) => g.id === collageGrid) || COLLAGE_GRIDS[0];
     const aspectDef = ASPECT_RATIOS.find((a) => a.id === collageAspect) || ASPECT_RATIOS[0];
     const canvas = document.createElement('canvas');
@@ -953,7 +1035,51 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     collageBgImage,
     collageGap,
     textOverlays,
+    igPost,
   ]);
+
+  // One-tap layouts from 2012 Instagram / TikTok edits (each one is a starting point: every setting stays editable)
+  const quickLook = (look: 'stretch' | 'story' | 'grid' | 'ig') => {
+    const photo = collageSlots[0] || saved;
+    setIgPost(look === 'ig' ? (igPost ?? { user: 'sanktuary', likes: '6978', caption: '#PartyAtMyHouse' }) : null);
+    if (look === 'stretch') {
+      // the "stretch picture": the same photo twice, squashed side by side in a tall frame
+      setCollageGrid('split-h');
+      setCollageSlots([photo, photo]);
+      setCollageFit('stretch');
+      setCollageAspect('9:16');
+      setCollageGap(0);
+    } else if (look === 'story') {
+      // black bars and a caption over the middle, like a TikTok slideshow
+      setCollageGrid('single');
+      setCollageSlots([photo]);
+      setCollageFit('fit');
+      setCollageAspect('9:16');
+      setCollageGap(0);
+      setCollageBgColor('#000000');
+      setTextOverlays([
+        {
+          id: `txt-${Date.now()}`,
+          text: '2012 ...',
+          fontSize: 52,
+          color: '#ffffff',
+          fontFamily: 'Arial',
+          align: 'center',
+          xPercent: 50,
+          yPercent: 50,
+          shadow: true,
+        },
+      ]);
+    } else if (look === 'grid') {
+      setCollageGrid('2x2');
+      setCollageSlots((prev) => [photo, prev[1] || null, prev[2] || null, prev[3] || null]);
+      setCollageFit('crop');
+      setCollageAspect('3:4');
+      setCollageGap(4);
+      setCollageBgColor('#ffffff');
+    }
+    setIsCollageActive(true);
+  };
 
   // Load team photo if provided
   useEffect(() => {
@@ -1377,6 +1503,47 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             {/* ── Collage Module ── */}
             {activeTab === 'collage' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* 0. Quick looks (2012 Instagram / TikTok edits) */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Quick looks:</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(
+                      [
+                        ['stretch', 'Stretch duo', 'The same photo twice, stretched side by side (9:16)'],
+                        ['story', 'Story caption', 'Black bars and a caption in the middle (9:16)'],
+                        ['grid', '2×2 grid', 'Four photos in a white 3:4 grid'],
+                        ['ig', 'IG post 2012', 'The photo inside an old Instagram post: username, likes, caption'],
+                      ] as const
+                    ).map(([id, label, desc]) => (
+                      <button
+                        key={id}
+                        title={desc}
+                        onClick={() => quickLook(id)}
+                        style={{ ...button, fontSize: 11, padding: '2px 8px', fontWeight: id === 'ig' && igPost ? 700 : 400 }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {igPost && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4, fontSize: 11, alignItems: 'center' }}>
+                      {(['user', 'likes', 'caption'] as const).map((k) => (
+                        <input
+                          key={k}
+                          value={igPost[k]}
+                          placeholder={k === 'user' ? 'username' : k === 'likes' ? 'likes' : 'caption'}
+                          maxLength={k === 'caption' ? 60 : 30}
+                          onChange={(e) => setIgPost({ ...igPost, [k]: e.target.value })}
+                          style={{ fontSize: 11, padding: '1px 4px', width: k === 'caption' ? 180 : 90 }}
+                        />
+                      ))}
+                      <button style={{ ...button, fontSize: 10, padding: '1px 6px' }} onClick={() => setIgPost(null)}>
+                        Back to grids
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* 1. Layout Grid Presets (10 options) */}
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 3 }}>Layout Grid Presets (10 options):</div>
