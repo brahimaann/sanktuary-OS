@@ -422,7 +422,17 @@ const TempoTab: React.FC<{
   })();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: '#dcdcdc', padding: 8, border: '2px groove #fff' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 12,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          background: '#dcdcdc',
+          padding: 8,
+          border: '2px groove #fff',
+        }}
+      >
         <SevenSegmentDisplay value={bpm.toFixed(1)} height={30} color="#00ff66" label="BPM" />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>

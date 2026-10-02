@@ -1,0 +1,23 @@
+# The same gate auto-deploy runs on the server PC (format, types, build, tests), but on every push and PR,
+# so a broken change shows up on GitHub before the PC ever pulls it.
+name: CI
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - run: sudo apt-get install -y libarchive-tools # bsdtar, the tool Windows ships as tar.exe (folder zips)
+      - run: npm ci
+      - run: npm ci
+        working-directory: server
+      - run: npm run format:check
+      - run: npm run build # type check + build; the tests serve the built page
+      - run: npm test

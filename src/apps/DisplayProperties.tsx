@@ -143,11 +143,7 @@ export const DisplayProperties: React.FC = () => {
             {/* CRT Scanline Toggle */}
             <div className="border border-t-gray-800 border-l-gray-800 border-r-white border-b-white p-2 bg-[#d4d0c8] mt-1">
               <label className="flex items-center gap-2 cursor-pointer font-bold">
-                <input
-                  type="checkbox"
-                  checked={selectedCrt}
-                  onChange={(e) => setSelectedCrt(e.target.checked)}
-                />
+                <input type="checkbox" checked={selectedCrt} onChange={(e) => setSelectedCrt(e.target.checked)} />
                 <span>CRT Scanlines & Retro Monitor Overlay</span>
               </label>
               <div className="text-[10px] text-gray-600 ml-5">

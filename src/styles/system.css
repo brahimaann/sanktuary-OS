@@ -106,7 +106,11 @@ html {
 }
 
 /* Allow photos, videos, and Darkroom canvas to bypass scanlines for clean viewing */
-.media-clean, video, .darkroom-loupe, .darkroom-canvas, .sk-photo-clean {
+.media-clean,
+video,
+.darkroom-loupe,
+.darkroom-canvas,
+.sk-photo-clean {
   position: relative;
   z-index: 999999 !important;
 }
@@ -246,7 +250,9 @@ input[type='range']::-webkit-slider-thumb,
   background: #c0c0c0;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
-  box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080;
+  box-shadow:
+    inset 1px 1px #dfdfdf,
+    inset -1px -1px #808080;
   cursor: pointer;
 }
 input[type='range']::-moz-range-thumb,
@@ -257,7 +263,9 @@ input[type='range']::-moz-range-thumb,
   background: #c0c0c0;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
-  box-shadow: inset 1px 1px #dfdfdf, inset -1px -1px #808080;
+  box-shadow:
+    inset 1px 1px #dfdfdf,
+    inset -1px -1px #808080;
   cursor: pointer;
 }
 input[type='range']:focus {

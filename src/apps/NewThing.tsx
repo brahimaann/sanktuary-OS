@@ -81,13 +81,23 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const [artistInput, setArtistInput] = useState('');
   const [artists, setArtists] = useState<string[]>(() => {
     const saved = remembered('sk_new_artist');
-    return saved ? saved.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    return saved
+      ? saved
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
   });
 
   const [writerInput, setWriterInput] = useState('');
   const [writersList, setWritersList] = useState<string[]>(() => {
     const saved = remembered('sk_new_writers');
-    return saved ? saved.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    return saved
+      ? saved
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
   });
 
   const [link, setLink] = useState('');
@@ -379,10 +389,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
                   }}
                 >
                   {a}
-                  <span
-                    onClick={() => removeArtist(i)}
-                    style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}
-                  >
+                  <span onClick={() => removeArtist(i)} style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}>
                     ×
                   </span>
                 </span>
@@ -452,10 +459,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
                   }}
                 >
                   {w}
-                  <span
-                    onClick={() => removeWriter(i)}
-                    style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}
-                  >
+                  <span onClick={() => removeWriter(i)} style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}>
                     ×
                   </span>
                 </span>
@@ -495,17 +499,11 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           {releaseKind !== 'Single' && (
             <div style={row}>
               <span style={cap}>Tracks</span>
-              <button
-                style={{ ...button, padding: '1px 6px', fontSize: 11 }}
-                onClick={() => setTrackCount((c) => Math.max(1, c - 1))}
-              >
+              <button style={{ ...button, padding: '1px 6px', fontSize: 11 }} onClick={() => setTrackCount((c) => Math.max(1, c - 1))}>
                 -
               </button>
               <b style={{ minWidth: 24, textAlign: 'center' }}>{trackCount}</b>
-              <button
-                style={{ ...button, padding: '1px 6px', fontSize: 11 }}
-                onClick={() => setTrackCount((c) => Math.min(30, c + 1))}
-              >
+              <button style={{ ...button, padding: '1px 6px', fontSize: 11 }} onClick={() => setTrackCount((c) => Math.min(30, c + 1))}>
                 +
               </button>
               <span style={{ fontSize: 10, color: '#666' }}>Will automatically create Track 1..{trackCount} in Tracks.</span>
@@ -544,11 +542,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           />
           <div style={{ display: 'flex', gap: 2 }}>
             {['today', 'tomorrow', 'fri 8pm', 'next week'].map((quick) => (
-              <button
-                key={quick}
-                style={{ ...button, fontSize: 10, padding: '1px 4px' }}
-                onClick={() => setWhen(quick)}
-              >
+              <button key={quick} style={{ ...button, fontSize: 10, padding: '1px 4px' }} onClick={() => setWhen(quick)}>
                 {quick}
               </button>
             ))}
@@ -575,11 +569,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           />
           <div style={{ display: 'flex', gap: 2 }}>
             {['Studio A', 'Vocal Booth B', 'Warehouse', 'Online'].map((loc) => (
-              <button
-                key={loc}
-                style={{ ...button, fontSize: 10, padding: '1px 4px' }}
-                onClick={() => setWhere(loc)}
-              >
+              <button key={loc} style={{ ...button, fontSize: 10, padding: '1px 4px' }} onClick={() => setWhere(loc)}>
                 {loc}
               </button>
             ))}

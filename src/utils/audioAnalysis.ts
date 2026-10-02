@@ -82,13 +82,15 @@ export function estimateTempo(x: Float32Array, sr: number, min = 60, max = 210):
     const mid = mag.slice(lowBin, midBin).map((m) => Math.log1p(100 * m));
     const high = mag.slice(midBin).map((m) => Math.log1p(100 * m));
 
-    let fluxLow = 0, fluxMid = 0, fluxHigh = 0;
+    let fluxLow = 0,
+      fluxMid = 0,
+      fluxHigh = 0;
     if (prevLow) for (let k = 1; k < low.length; k++) fluxLow += Math.max(0, low[k] - prevLow[k]);
     if (prevMid) for (let k = 1; k < mid.length; k++) fluxMid += Math.max(0, mid[k] - prevMid[k]);
     if (prevHigh) for (let k = 1; k < high.length; k++) fluxHigh += Math.max(0, high[k] - prevHigh[k]);
 
     // Weighted combination favoring mid/high transients (snare/hats) alongside bass kicks
-    env.push(0.35 * fluxLow + 0.45 * fluxMid + 0.20 * fluxHigh);
+    env.push(0.35 * fluxLow + 0.45 * fluxMid + 0.2 * fluxHigh);
     prevLow = low;
     prevMid = mid;
     prevHigh = high;
@@ -155,8 +157,8 @@ export function estimateTempo(x: Float32Array, sr: number, min = 60, max = 210):
 
 const NOTES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Albrecht & Shanahan (2013) empirical key profiles (high discrimination for modern music)
-const AS_MAJOR = [0.748, 0.060, 0.488, 0.082, 0.670, 0.460, 0.096, 0.715, 0.107, 0.433, 0.061, 0.340];
-const AS_MINOR = [0.712, 0.084, 0.474, 0.618, 0.049, 0.460, 0.105, 0.747, 0.404, 0.067, 0.133, 0.330];
+const AS_MAJOR = [0.748, 0.06, 0.488, 0.082, 0.67, 0.46, 0.096, 0.715, 0.107, 0.433, 0.061, 0.34];
+const AS_MINOR = [0.712, 0.084, 0.474, 0.618, 0.049, 0.46, 0.105, 0.747, 0.404, 0.067, 0.133, 0.33];
 
 // Circle of Fifths pitch class order: C, G, D, A, E, B, F#/Gb, C#/Db, Ab, Eb, Bb, F
 const FIFTHS_CYCLE = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5];

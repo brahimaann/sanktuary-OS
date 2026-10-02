@@ -15,21 +15,21 @@ const SEGMENTS: Record<string, number[]> = {
   '8': [1, 1, 1, 1, 1, 1, 1],
   '9': [1, 1, 1, 1, 0, 1, 1],
   '-': [0, 0, 0, 0, 0, 0, 1],
-  'A': [1, 1, 1, 0, 1, 1, 1],
-  'b': [0, 0, 1, 1, 1, 1, 1],
-  'C': [1, 0, 0, 1, 1, 1, 0],
-  'c': [0, 0, 0, 1, 1, 0, 1],
-  'd': [0, 1, 1, 1, 1, 0, 1],
-  'E': [1, 0, 0, 1, 1, 1, 1],
-  'F': [1, 0, 0, 0, 1, 1, 1],
-  'H': [0, 1, 1, 0, 1, 1, 1],
-  'h': [0, 0, 1, 0, 1, 1, 1],
-  'L': [0, 0, 0, 1, 1, 1, 0],
-  'o': [0, 0, 1, 1, 1, 0, 1],
-  'P': [1, 1, 0, 0, 1, 1, 1],
-  'r': [0, 0, 0, 0, 1, 0, 1],
-  'u': [0, 0, 1, 1, 1, 0, 0],
-  'U': [0, 1, 1, 1, 1, 1, 0],
+  A: [1, 1, 1, 0, 1, 1, 1],
+  b: [0, 0, 1, 1, 1, 1, 1],
+  C: [1, 0, 0, 1, 1, 1, 0],
+  c: [0, 0, 0, 1, 1, 0, 1],
+  d: [0, 1, 1, 1, 1, 0, 1],
+  E: [1, 0, 0, 1, 1, 1, 1],
+  F: [1, 0, 0, 0, 1, 1, 1],
+  H: [0, 1, 1, 0, 1, 1, 1],
+  h: [0, 0, 1, 0, 1, 1, 1],
+  L: [0, 0, 0, 1, 1, 1, 0],
+  o: [0, 0, 1, 1, 1, 0, 1],
+  P: [1, 1, 0, 0, 1, 1, 1],
+  r: [0, 0, 0, 0, 1, 0, 1],
+  u: [0, 0, 1, 1, 1, 0, 0],
+  U: [0, 1, 1, 1, 1, 1, 0],
   ' ': [0, 0, 0, 0, 0, 0, 0],
 };
 
@@ -70,47 +70,21 @@ export const SevenSegmentDigit: React.FC<DigitProps> = ({
 
       <g style={{ filter: `drop-shadow(0 0 3px ${color}88)` }}>
         {/* a - Top */}
-        <polygon
-          points="10,8  16,2  42,2  48,8  42,14 16,14"
-          fill={active[0] ? color : unlitColor}
-        />
+        <polygon points="10,8  16,2  42,2  48,8  42,14 16,14" fill={active[0] ? color : unlitColor} />
         {/* b - Top Right */}
-        <polygon
-          points="49,9  55,15 55,43 49,49 43,43 43,15"
-          fill={active[1] ? color : unlitColor}
-        />
+        <polygon points="49,9  55,15 55,43 49,49 43,43 43,15" fill={active[1] ? color : unlitColor} />
         {/* c - Bottom Right */}
-        <polygon
-          points="49,51 55,57 55,85 49,91 43,85 43,57"
-          fill={active[2] ? color : unlitColor}
-        />
+        <polygon points="49,51 55,57 55,85 49,91 43,85 43,57" fill={active[2] ? color : unlitColor} />
         {/* d - Bottom */}
-        <polygon
-          points="10,92 16,86 42,86 48,92 42,98 16,98"
-          fill={active[3] ? color : unlitColor}
-        />
+        <polygon points="10,92 16,86 42,86 48,92 42,98 16,98" fill={active[3] ? color : unlitColor} />
         {/* e - Bottom Left */}
-        <polygon
-          points="9,51  15,57 15,85 9,91  3,85  3,57"
-          fill={active[4] ? color : unlitColor}
-        />
+        <polygon points="9,51  15,57 15,85 9,91  3,85  3,57" fill={active[4] ? color : unlitColor} />
         {/* f - Top Left */}
-        <polygon
-          points="9,9   15,15 15,43 9,49  3,43  3,15"
-          fill={active[5] ? color : unlitColor}
-        />
+        <polygon points="9,9   15,15 15,43 9,49  3,43  3,15" fill={active[5] ? color : unlitColor} />
         {/* g - Middle */}
-        <polygon
-          points="10,50 16,44 42,44 48,50 42,56 16,56"
-          fill={active[6] ? color : unlitColor}
-        />
+        <polygon points="10,50 16,44 42,44 48,50 42,56 16,56" fill={active[6] ? color : unlitColor} />
         {/* dp - Decimal Point */}
-        <circle
-          cx="54"
-          cy="94"
-          r="4"
-          fill={hasDot ? color : unlitColor}
-        />
+        <circle cx="54" cy="94" r="4" fill={hasDot ? color : unlitColor} />
       </g>
     </svg>
   );
@@ -180,14 +154,7 @@ export const SevenSegmentDisplay: React.FC<SevenSegmentDisplayProps> = ({
     >
       <div style={{ display: 'flex', gap: Math.max(2, Math.round(height * 0.1)), alignItems: 'center' }}>
         {items.map((item, idx) => (
-          <SevenSegmentDigit
-            key={idx}
-            char={item.char}
-            hasDot={item.hasDot}
-            color={color}
-            unlitColor={unlitColor}
-            height={height}
-          />
+          <SevenSegmentDigit key={idx} char={item.char} hasDot={item.hasDot} color={color} unlitColor={unlitColor} height={height} />
         ))}
       </div>
       {label && (
