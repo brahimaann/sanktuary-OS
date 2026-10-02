@@ -205,10 +205,18 @@ try {
   check('public #general still visible to carol', (await chans('carol')).includes('general'));
   bobFeed.close();
   carolFeed.close();
+
+  // A store that can't be read (locked, or here a folder in its place) is an error, never an empty list that the
+  // next save would write over the real file
+  mkdirSync(join(dir, 'data', 'outreach.json'));
+  check('an unreadable store is an error, not empty', (await call('alice', '/api/outreach')).status === 500);
+  rmSync(join(dir, 'data', 'outreach.json'), { recursive: true });
+  check('a missing store starts empty', (await call('alice', '/api/outreach')).status === 200);
 } finally {
   srv.kill();
   clerk.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
   console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
+  if (failN) process.exitCode = 1; // a failed check fails npm test, so auto-deploy keeps the current site
   rmSync(dir, { recursive: true, force: true });
 }

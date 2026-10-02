@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
 import { statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
 
@@ -33,8 +33,9 @@ writeFileSync(join(drive, 'team', 'evil.svg'), '<svg xmlns="http://www.w3.org/20
 writeFileSync(join(drive, 'team', 'pic.png'), Buffer.from('89504e47', 'hex'));
 writeFileSync(join(drive, 'team', 'old.txt'), 'was on the drive before Sanktuary');
 writeFileSync(join(drive, 'team', 'loose.txt'), 'also already there');
-const letter = drive.slice(0, 2); // e.g. C:
-const rel = drive.slice(3).split('\\').join('/');
+// The server sees drives as letters (C:); off Windows, '/.' + '/' is the root, so the tests run on Linux CI too
+const letter = process.platform === 'win32' ? drive.slice(0, 2) : '/.';
+const rel = relative(parse(drive).root, drive).split(sep).join('/');
 writeFileSync(
   join(dir, 'data', 'config.json'),
   JSON.stringify({
@@ -2773,5 +2774,6 @@ ${thisYear}-03;Comma Song;0,456`,
   fakeResend.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
   console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
+  if (failN) process.exitCode = 1; // a failed check fails npm test, so auto-deploy keeps the current site
   rmSync(dir, { recursive: true, force: true });
 }

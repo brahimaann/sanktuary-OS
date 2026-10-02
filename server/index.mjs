@@ -110,8 +110,12 @@ const fail = (status, message) => {
 const own = (db, id) => (db && typeof id === 'string' && Object.hasOwn(db, id) ? db[id] : undefined);
 
 // ── Config & status files ──────────────────────────────────────────────
+// Only a missing file means "start empty": any other read error (a lock from antivirus or OneDrive) must not
+// load an empty store that the next save would write over the real data
 const readJson = async (file, fallback) =>
-  JSON.parse((await readFile(join(DATA, file), 'utf8').catch(() => 'null')).replace(/^﻿/, '')) ?? fallback; // PowerShell may write a BOM
+  JSON.parse(
+    (await readFile(join(DATA, file), 'utf8').catch((e) => (e.code === 'ENOENT' ? 'null' : Promise.reject(e)))).replace(/^﻿/, ''), // PowerShell may write a BOM
+  ) ?? fallback;
 const loadConfig = () => readJson('config.json', { admins: [], drives: {}, spaces: [], members: {}, backup: { drive: null, hour: 3 } });
 async function saveJson(file, value) {
   await writeFile(join(DATA, file + '.tmp'), JSON.stringify(value, null, 2));
@@ -316,7 +320,7 @@ async function folderSize(dir) {
 async function spaceInfo(s) {
   const info = { id: s.id, name: s.name, rights: s.rights, online: s.online, driveName: null, free: null, total: null };
   if (!s.online) return info;
-  const fs = await statfs(s.driveRoot).catch(() => null);
+  const fs = s.driveRoot && (await statfs(s.driveRoot).catch(() => null)); // a combined space has no single drive (statfs(null) aborts Node)
   if (fs) Object.assign(info, { free: fs.bavail * fs.bsize, total: fs.blocks * fs.bsize });
   if (s.id === 'me') {
     await mkdir(s.root, { recursive: true });
@@ -630,7 +634,8 @@ function logTransfer(req, user, action, space, path, bytes) {
 
 // A folder as one .zip (e.g. an Ableton project with its Samples), streamed by Windows' own tar so nothing
 // is staged on disk. Stored, not compressed: audio barely shrinks and this keeps it fast.
-const TAR = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+// Windows' tar.exe is bsdtar (libarchive); elsewhere (test CI) the same tool is installed as bsdtar
+const TAR = process.platform === 'win32' ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'bsdtar';
 async function zipFolder(res, dir, name, transfer) {
   if (!(await stat(dir).catch(() => null))?.isDirectory()) fail(404, 'Not a folder');
   const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
@@ -653,6 +658,7 @@ async function zipFolder(res, dir, name, transfer) {
     ...items.map((n) => `./${n}`),
   ]);
   tar.stderr.resume();
+  tar.on('error', (e) => res.destroy(e)); // tar missing: end this download, don't crash the whole server
   res.on('close', () => tar.kill());
   res.writeHead(200, {
     'content-type': 'application/zip',
@@ -4410,7 +4416,7 @@ async function rawApi(req, res, url) {
       )
       .sort((a, b) => b[0].length - a[0].length || used.has(b[2]) - used.has(a[2]));
   const toSk = (v) => {
-    if (typeof v === 'string' && /^[a-z]:[\\/]/i.test(v)) {
+    if (typeof v === 'string' && (process.platform === 'win32' ? /^[a-z]:[\\/]/i : /^\//).test(v)) {
       const l = v.toLowerCase();
       // whole folders only: D:\team must not claim D:\teamx
       const hit = roots().find(([r]) => l.startsWith(r) && (l.length === r.length || /[\\/]$/.test(r) || /[\\/]/.test(l[r.length])));
