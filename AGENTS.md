@@ -22,3 +22,8 @@ Bug fix = root cause, not symptom: a report names a symptom. Grep every caller o
 - No boilerplate nobody asked for.
 - Deletion over addition. Boring over clever. Fewest files possible.
 - Shortest working diff wins, but only once you understand the problem.
+
+## Engineering skills
+[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) is installed for its workflows (debugging, code review, security, testing, shipping). These rules win over its process: skip a spec, plan or ADR the task doesn't need.
+- Done means `npm run format:check`, `npm run build` and `npm test` pass (CI runs the same).
+- A bug fix comes with a check in `tests/` that fails without it.

@@ -47,6 +47,16 @@ npm run format:check
 npx tsc --noEmit      # type check
 ```
 
+Every push and pull request also runs this gate on GitHub (`.github/workflows/ci.yml`): format, type check, build, tests.
+The tests run on Linux too (they need `bsdtar` for folder zips: `apt install libarchive-tools`).
+
+**AI coding agents:** `AGENTS.md` sets the house rules (Ponytail). Claude Code also loads
+[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) from `.claude/settings.json` (trust the folder when asked);
+other agents can add it with `npx skills add addyosmani/agent-skills`. When the two disagree, `AGENTS.md` wins.
+
+`docs/notes/` holds older design and research notes (from when this was "HQ OS"); `docs/brand/` holds artwork that isn't
+used by the site yet.
+
 ## Updating (auto-deploy)
 
 Push to `main` on GitHub. Within ~2 minutes the server PC runs `ops/deploy.ps1` (scheduled task
