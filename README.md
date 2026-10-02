@@ -54,8 +54,8 @@ The tests run on Linux too (they need `bsdtar` for folder zips: `apt install lib
 [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) from `.claude/settings.json` (trust the folder when asked);
 other agents can add it with `npx skills add addyosmani/agent-skills`. When the two disagree, `AGENTS.md` wins.
 
-`docs/notes/` holds older design and research notes (from when this was "HQ OS"); `docs/brand/` holds artwork that isn't
-used by the site yet.
+`docs/notes/` holds older design and research notes (from when this was "HQ OS"); `docs/brand/` holds full-quality
+originals (the site serves the compressed copies).
 
 ## Updating (auto-deploy)
 

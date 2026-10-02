@@ -286,7 +286,7 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
     }),
 
   setStartMenuOpen: (open) => set({ startMenuOpen: open }),
-  wallpaper: '/images/custom-wallpaper.png',
+  wallpaper: '/images/custom-wallpaper.webp',
   bgColor: '#008080',
   setWallpaper: (wp) => set({ wallpaper: wp }),
   setBgColor: (color) => set({ bgColor: color }),
