@@ -334,7 +334,17 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
 };
 
 const JoinForm: React.FC<{ onDone: () => void }> = ({ onDone }) => {
-  const [v, setV] = useState({ name: '', email: '', role: '', links: '', message: '', website: '' });
+  const [v, setV] = useState({
+    name: '',
+    email: '',
+    role: '',
+    links: '',
+    artwork: '',
+    needs: '',
+    availability: '',
+    message: '',
+    website: '',
+  });
   const [msg, setMsg] = useState('');
   const [sent, setSent] = useState(false);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -369,6 +379,18 @@ const JoinForm: React.FC<{ onDone: () => void }> = ({ onDone }) => {
       </select>
       Links
       <input style={field} value={v.links} onChange={set('links')} placeholder="Instagram, SoundCloud, portfolio..." />
+      <span style={{ alignSelf: 'start' }}>Your work</span>
+      <textarea
+        style={{ ...field, resize: 'vertical' }}
+        rows={2}
+        value={v.artwork}
+        onChange={set('artwork')}
+        placeholder="What you'd show or perform: pieces, sizes, medium, set length..."
+      />
+      Needs
+      <input style={field} value={v.needs} onChange={set('needs')} placeholder="Wall space, table, power, sound, projector..." />
+      Availability
+      <input style={field} value={v.availability} onChange={set('availability')} placeholder="Dates or days you're free" />
       <span style={{ alignSelf: 'start' }}>Message</span>
       <textarea style={{ ...field, resize: 'vertical' }} rows={3} value={v.message} onChange={set('message')} />
       {/* Hidden from people; bots fill it in and get ignored */}

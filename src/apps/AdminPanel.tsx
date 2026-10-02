@@ -1347,7 +1347,22 @@ const ShopTab: React.FC = () => {
   );
 };
 
-type Join = { id: string; name: string; email: string; role: string; links: string; message: string; at: string; status: string };
+type Join = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  links: string;
+  message: string;
+  artwork?: string;
+  needs?: string;
+  availability?: string;
+  event?: string;
+  eventDate?: string;
+  welcomed?: string;
+  at: string;
+  status: string;
+};
 type Booking = {
   id: string;
   artist: string;
@@ -1658,15 +1673,26 @@ const YouTubeSettings: React.FC = () => {
 
 const FrontTab: React.FC = () => {
   const api = useApi();
-  const [d, setD] = useState<{ intro: string; portfolio: Record<string, string>; joins: Join[]; bookings: Booking[] } | null>(null);
+  const [d, setD] = useState<{
+    intro: string;
+    portfolio: Record<string, string>;
+    welcome: { subject: string; body: string };
+    mail: boolean;
+    joins: Join[];
+    bookings: Booking[];
+  } | null>(null);
   const [msg, setMsg] = useState('');
   const load = useCallback(() => api('/api/public/admin').then(setD, (e) => setMsg(e.message)), [api]);
   useEffect(() => {
     load();
   }, [load]);
   const save = (body: object) =>
-    api('/api/public/admin', { method: 'PATCH', body: JSON.stringify(body) }).then(load, (e) => setMsg(e.message));
+    api('/api/public/admin', { method: 'PATCH', body: JSON.stringify(body) }).then(
+      (r) => (r.welcome && setMsg(r.welcome === 'sent' ? 'Welcome email sent.' : r.welcome), load()),
+      (e) => setMsg(e.message),
+    );
   if (!d) return <div>{msg || 'Loading...'}</div>;
+  const daysTo = (day: string) => Math.round((Date.parse(day) - Date.parse(new Date().toLocaleDateString('en-CA'))) / 864e5);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={hint}>
@@ -1725,7 +1751,33 @@ const FrontTab: React.FC = () => {
         ))}
       </fieldset>
       <fieldset style={fieldset}>
-        <legend>Join requests ({d.joins.filter((j) => j.status === 'New').length} new)</legend>
+        <legend>Artist welcome email</legend>
+        <p style={hint}>
+          Goes out once, automatically, when you move an artist to <b>Signed</b>. Use {'{name}'}, {'{event}'} and {'{date}'}; spell out
+          load-in, set times, what to bring and who to call.{' '}
+          {!d.mail && <b>Email isn’t set up on the server yet (RESEND_API_KEY / MAIL_FROM).</b>}
+        </p>
+        <input
+          key={`s${d.welcome.subject}`}
+          style={{ ...input, width: '100%', marginBottom: 6 }}
+          placeholder="Subject: Welcome to {event}, {name}"
+          defaultValue={d.welcome.subject}
+          onBlur={(e) => e.target.value !== d.welcome.subject && save({ welcome: { ...d.welcome, subject: e.target.value } })}
+        />
+        <textarea
+          key={`b${d.welcome.body}`}
+          rows={8}
+          style={{ ...input, width: '100%', resize: 'vertical' }}
+          placeholder={
+            'Hi {name},\n\nYou’re confirmed for {event} on {date}.\n\nLoad-in: ...\nSet times: ...\nWhat we provide / what to bring: ...\nContact on the day: ...'
+          }
+          defaultValue={d.welcome.body}
+          onBlur={(e) => e.target.value !== d.welcome.body && save({ welcome: { ...d.welcome, body: e.target.value } })}
+        />
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Artists &amp; join requests ({d.joins.filter((j) => j.status === 'New').length} new)</legend>
+        <p style={hint}>New → Contacted → Agreement sent → Signed (welcome email) → Event done.</p>
         {!d.joins.length && <div style={{ color: '#555' }}>None yet.</div>}
         {d.joins.map((j) => (
           <div
@@ -1739,12 +1791,46 @@ const FrontTab: React.FC = () => {
               <span style={{ color: '#555' }}>· {new Date(j.at).toLocaleDateString()}</span>
               <span style={{ flex: 1 }} />
               <select style={input} value={j.status} onChange={(e) => save({ join: { id: j.id, status: e.target.value } })}>
-                {['New', 'Contacted', 'Joined', 'Archived'].map((s) => (
+                {['New', 'Contacted', 'Agreement sent', 'Signed', 'Event done', 'Joined', 'Archived'].map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </select>
             </div>
+            <div style={{ ...row, marginTop: 4 }}>
+              <input
+                key={`e${j.event || ''}`}
+                style={{ ...input, flex: 1, minWidth: 120 }}
+                placeholder="Event"
+                defaultValue={j.event || ''}
+                onBlur={(e) => e.target.value !== (j.event || '') && save({ join: { id: j.id, event: e.target.value } })}
+              />
+              <input
+                type="date"
+                style={input}
+                value={j.eventDate || ''}
+                onChange={(e) => save({ join: { id: j.id, eventDate: e.target.value } })}
+              />
+              {j.eventDate && j.status !== 'Event done' && j.status !== 'Archived' && (
+                <span>{daysTo(j.eventDate) >= 0 ? `${daysTo(j.eventDate)} days to go` : 'event passed'}</span>
+              )}
+              {j.welcomed && <span style={{ color: '#006000' }}>✓ welcomed {new Date(j.welcomed).toLocaleDateString()}</span>}
+            </div>
             {j.links && <div style={{ wordBreak: 'break-all' }}>{j.links}</div>}
+            {j.artwork && (
+              <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                <b>Work:</b> {j.artwork}
+              </div>
+            )}
+            {j.needs && (
+              <div>
+                <b>Needs:</b> {j.needs}
+              </div>
+            )}
+            {j.availability && (
+              <div>
+                <b>Available:</b> {j.availability}
+              </div>
+            )}
             {j.message && <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{j.message}</div>}
           </div>
         ))}

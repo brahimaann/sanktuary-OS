@@ -3513,6 +3513,7 @@ const loadFront = async () =>
   }));
 const saveFront = () => (frontSaved = frontSaved.then(() => saveJson('front.json', frontDb)).catch(console.error));
 const joinTries = new Map(); // ip -> { n, since }
+const JOIN_STATUSES = ['New', 'Contacted', 'Agreement sent', 'Signed', 'Event done', 'Joined', 'Archived'];
 
 async function latestPosts(n) {
   const blog = await loadBlog();
@@ -3739,6 +3740,9 @@ async function publicApi(req, res, url) {
       role: String(input.role || '').slice(0, 60),
       links: String(input.links || '').slice(0, 300),
       message: String(input.message || '').slice(0, 2000),
+      artwork: String(input.artwork || '').slice(0, 2000),
+      needs: String(input.needs || '').slice(0, 1000),
+      availability: String(input.availability || '').slice(0, 500),
       at: new Date().toISOString(),
       status: 'New',
     };
@@ -3757,6 +3761,8 @@ async function publicApi(req, res, url) {
     return json(res, {
       intro: front.intro,
       portfolio: front.portfolio || {},
+      welcome: front.welcome || { subject: '', body: '' },
+      mail: mailReady(),
       joins: Object.values(front.joins).sort((a, b) => b.at.localeCompare(a.at)),
       bookings: Object.values(front.bookings || {}).sort((a, b) => b.at.localeCompare(a.at)),
     });
@@ -3769,13 +3775,37 @@ async function publicApi(req, res, url) {
         Object.entries(limits).map(([k, max]) => [k, String(input.portfolio[k] ?? front.portfolio?.[k] ?? '').slice(0, max)]),
       );
     }
-    if (input.join && own(front.joins, input.join.id) && ['New', 'Contacted', 'Joined', 'Archived'].includes(input.join.status))
-      front.joins[input.join.id].status = input.join.status;
+    if (input.welcome && typeof input.welcome === 'object')
+      front.welcome = { subject: String(input.welcome.subject ?? '').slice(0, 150), body: String(input.welcome.body ?? '').slice(0, 6000) };
+    // Artist onboarding: hello -> agreement -> signed (the welcome email goes out once) -> event day
+    const j = input.join && own(front.joins, input.join.id) && front.joins[input.join.id];
+    if (j && input.join.event !== undefined) j.event = String(input.join.event).slice(0, 200);
+    if (j && input.join.eventDate !== undefined) j.eventDate = /^\d{4}-\d{2}-\d{2}$/.test(input.join.eventDate) ? input.join.eventDate : '';
+    if (j && JOIN_STATUSES.includes(input.join.status)) j.status = input.join.status;
+    let welcome = null;
+    if (j && j.status === 'Signed' && !j.welcomed && front.welcome?.body?.trim()) {
+      const fill = (t) =>
+        t
+          .replace(/\{event\}/g, j.event || 'the event')
+          .replace(/\{date\}/g, j.eventDate || 'the date we agreed')
+          .replace(/\{name\}/g, j.name.split(' ')[0]);
+      j.welcomed = new Date().toISOString(); // before the send, so a double click never mails twice
+      welcome = mailReady()
+        ? await sendMail(
+            { email: j.email, name: j.name.split(' ')[0] },
+            fill(front.welcome.subject || 'Welcome to Sanktuary'),
+            fill(front.welcome.body),
+            siteOrigin(req),
+          )
+            .then(() => 'sent')
+            .catch((e) => (delete j.welcomed, e.message))
+        : (delete j.welcomed, 'Email isn’t set up on the server yet (RESEND_API_KEY / MAIL_FROM)');
+    }
     const booking = input.booking && own(front.bookings, input.booking.id);
     if (booking && ['New', 'Contacted', 'Confirmed', 'Declined', 'Archived'].includes(input.booking.status))
       booking.status = input.booking.status;
     saveFront();
-    return json(res, { ok: true });
+    return json(res, { ok: true, welcome });
   }
   fail(404, 'Not found');
 }
@@ -6717,13 +6747,17 @@ function mailPage(res, title, body) {
 /** One email through Resend: plain text plus a simple HTML copy, with the unsubscribe link and the postal address. */
 async function sendMail(sub, subject, text, origin) {
   const settings = (await loadMail()).settings;
-  const unsub = `${origin}/api/mail/unsubscribe?id=${sub.id}&sig=${unsubSig(sub.id)}`;
+  // No subscriber id = a one-to-one email (an artist's welcome), not list mail: no unsubscribe footer
+  const unsub = sub.id && `${origin}/api/mail/unsubscribe?id=${sub.id}&sig=${unsubSig(sub.id)}`;
   const body = String(text).replace(/\{name\}/g, sub.name || 'there');
-  const foot = `\n\n—\nYou get this because you signed up at ${origin}.\nUnsubscribe: ${unsub}\n${settings.address}`;
+  const foot = unsub ? `\n\n—\nYou get this because you signed up at ${origin}.\nUnsubscribe: ${unsub}\n${settings.address}` : '';
   const html =
     `<div style="font:15px/1.55 Arial,sans-serif;color:#111;max-width:560px">${mailEsc(body).replace(/\n/g, '<br>')}` +
-    `<p style="color:#777;font-size:12px;margin-top:28px">You get this because you signed up at ${mailEsc(origin)}.<br>` +
-    `<a href="${mailEsc(unsub)}">Unsubscribe</a> · ${mailEsc(settings.address)}</p></div>`;
+    (unsub
+      ? `<p style="color:#777;font-size:12px;margin-top:28px">You get this because you signed up at ${mailEsc(origin)}.<br>` +
+        `<a href="${mailEsc(unsub)}">Unsubscribe</a> · ${mailEsc(settings.address)}</p>`
+      : '') +
+    `</div>`;
   const r = await fetch(`${RESEND}/emails`, {
     method: 'POST',
     headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
@@ -6735,7 +6769,7 @@ async function sendMail(sub, subject, text, origin) {
         .slice(0, 150),
       text: body + foot,
       html,
-      headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+      headers: unsub ? { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {},
     }),
   });
   if (!r.ok) throw new Error(`Resend refused the email (${r.status})`);

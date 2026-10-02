@@ -1826,6 +1826,41 @@ try {
     joins.some((j) => j.name === 'Amara' && j.status === 'New'),
   );
   check('bots filling the hidden field are dropped', !joins.some((j) => j.name === 'Bot'));
+
+  // Artist onboarding: intake fields, event + date, and one automatic welcome email when moved to Signed
+  await fetch(B + '/api/public/join', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'Kofi Art',
+      email: 'kofi@example.com',
+      artwork: '3 paintings, 90x120',
+      needs: 'wall',
+      availability: 'Fridays',
+    }),
+  });
+  const kofi = JSON.parse((await call('alice', '/api/public/admin')).text).joins.find((j) => j.name === 'Kofi Art');
+  check(
+    'intake keeps artwork, needs and availability',
+    kofi?.artwork === '3 paintings, 90x120' && kofi.needs === 'wall' && kofi.availability === 'Fridays',
+  );
+  await call('alice', '/api/public/admin', 'PATCH', {
+    welcome: { subject: 'Welcome to {event}', body: 'Hi {name}, see you {date}. Load-in 5pm.' },
+  });
+  await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, event: 'Spring Show', eventDate: '2027-04-10' } });
+  const mailsBefore = mails.length;
+  const signed = JSON.parse((await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, status: 'Signed' } })).text);
+  const wm = mails[mailsBefore];
+  check(
+    'moving an artist to Signed sends the filled-in welcome email, without list unsubscribe',
+    signed.welcome === 'sent' &&
+      wm?.to[0] === 'kofi@example.com' &&
+      wm.subject === 'Welcome to Spring Show' &&
+      wm.text === 'Hi Kofi, see you 2027-04-10. Load-in 5pm.' &&
+      !wm.headers['List-Unsubscribe'],
+  );
+  await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, status: 'Agreement sent' } });
+  await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, status: 'Signed' } });
+  check('the welcome email goes out only once', mails.length === mailsBefore + 1);
   check(
     'admins are notified of join requests',
     JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /Amara wants to join/.test(n.text)),
