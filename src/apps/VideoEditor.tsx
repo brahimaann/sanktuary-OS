@@ -82,6 +82,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [clipLength, setClipLength] = useState(0);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [proxy, setProxy] = useState(false); // the server's H.264 copy, for clips the browser can't decode (HEVC / ProRes)
   const [jobs, setJobs] = useState<{ id: string; name: string; status: string; pct: number; error: string | null }[]>([]);
   const [name, setName] = useState('');
   const [msg, setMsg] = useState('');
@@ -336,11 +337,17 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
           {clip && token && (
             <video
               ref={video}
-              src={src(clip)}
+              src={src(clip) + (proxy ? '&preview' : '')}
               playsInline
               preload="auto"
               crossOrigin="anonymous"
+              onError={() => {
+                if (proxy) return setMsg("This clip can't be previewed here (the render may still work).");
+                setProxy(true);
+                setMsg('This clip does not play in the browser: making a preview copy (the render uses the original)...');
+              }}
               onLoadedMetadata={(e) => {
+                if (proxy) setMsg('');
                 setClipLength(e.currentTarget.duration || 0);
                 e.currentTarget.currentTime = start;
               }}
@@ -541,6 +548,8 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             if (picking === 'clip') {
               setClip(r);
               setStart(0);
+              setProxy(false);
+              setPlaying(false); // the new clip loads paused
             } else setSong(r);
           }}
         />

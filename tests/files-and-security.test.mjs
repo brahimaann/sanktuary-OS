@@ -2678,6 +2678,22 @@ ${thisYear}-03;Comma Song;0,456`,
     join(drive, 'team', 'clip.mp4'),
   ]);
   spawnSync(ffmpegBin, ['-f', 'lavfi', '-i', 'sine=frequency=220:duration=3', '-y', join(drive, 'team', 'beat.wav')]);
+  // A clip the browser can't decode (an iPhone HEVC .mov) gets an H.264 MP4 preview copy for the editor
+  spawnSync(ffmpegBin, [
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:duration=1',
+    '-c:v',
+    'libx265',
+    '-tag:v',
+    'hvc1',
+    '-y',
+    join(drive, 'team', 'phone.mov'),
+  ]);
+  const proxy = await getBin('alice', '/api/files/view/phone.mov?preview');
+  const proxyInfo = spawnSync(ffmpegBin, ['-hide_banner', '-i', 'pipe:0'], { input: proxy.bytes }).stderr.toString();
+  check('HEVC .mov preview is an H.264 MP4', proxy.type === 'video/mp4' && /Video: h264/.test(proxyInfo), `${proxy.status} ${proxy.type}`);
   const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   const renderJob = (u, over = {}) =>
     call(u, '/api/video/render', 'POST', {

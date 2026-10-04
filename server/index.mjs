@@ -405,8 +405,8 @@ async function files(req, res, url) {
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
     if (q.has('thumb')) return thumb(res, file);
     if (q.has('audioinfo')) return json(res, await audioInfo(file));
-    if (q.has('preview') && AUDIO_PREVIEW[extname(file).toLowerCase()])
-      return stream(req, res, new URLSearchParams(), await audioPreviewFile(file));
+    if (q.has('preview') && (AUDIO_PREVIEW[extname(file).toLowerCase()] || VIDEO_PREVIEW[extname(file).toLowerCase()]))
+      return stream(req, res, new URLSearchParams(), await previewFile(file));
     if (q.has('preview')) return thumb(res, file, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
     if (file !== target) return stream(req, res, q, file, transfer);
     if (q.has('zip')) return zipFolder(res, target, target === root ? space.name : basename(target), transfer);
@@ -1327,7 +1327,7 @@ async function publicShare(req, res, url) {
   }
   if (action === 'thumb') return thumb(res, target);
   if (action === 'preview' && AUDIO_PREVIEW[extname(target).toLowerCase()])
-    return stream(req, res, new URLSearchParams(), await audioPreviewFile(target));
+    return stream(req, res, new URLSearchParams(), await previewFile(target));
   if (action === 'preview') return thumb(res, target, 2400); // lighter images, and PSD / TIFF which browsers can't show
   if (action === 'zip') {
     if (!l.download || !l.isDir) fail(403, 'Downloads are turned off for this link');
@@ -5192,28 +5192,33 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
 }
 
 // ── Light audio previews: a 256 kbps MP3 of each WAV/AIFF/FLAC (~1/5 the size), made once and cached ──
+// Video the browser can't decode (HEVC / ProRes .mov) gets a 720p H.264 MP4 the same way, for the Video Editor.
 // The input format is forced from the extension and only local files are allowed, so a crafted file can't
 // make ffmpeg probe it as something else (e.g. a playlist that reads other files). At most 2 run at once.
 const AUDIO_PREVIEW = { '.wav': 'wav', '.aif': 'aiff', '.aiff': 'aiff', '.flac': 'flac' };
+const VIDEO_PREVIEW = { '.mov': 'mov', '.mp4': 'mov', '.m4v': 'mov', '.webm': 'matroska' };
 const previewJobs = new Map(); // cache file -> Promise
 let transcoding = 0;
 const transcodeQueue = [];
 
-async function audioPreviewFile(file) {
-  const format = AUDIO_PREVIEW[extname(file).toLowerCase()] || fail(415, 'No audio preview for this type');
+async function previewFile(file) {
+  const ext = extname(file).toLowerCase();
+  const video = !!VIDEO_PREVIEW[ext];
+  const format = AUDIO_PREVIEW[ext] || VIDEO_PREVIEW[ext] || fail(415, 'No preview for this type');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
-  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|mp3`).digest('hex') + '.mp3');
+  const kind = video ? 'mp4' : 'mp3';
+  const out = join(await cacheDir(), createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|${kind}`).digest('hex') + '.' + kind);
   if (existsSync(out)) return out;
   if (!previewJobs.has(out))
     previewJobs.set(
       out,
-      transcode(file, format, out).finally(() => previewJobs.delete(out)),
+      transcode(file, format, out, null, video).finally(() => previewJobs.delete(out)),
     );
   await previewJobs.get(out);
   return out;
 }
 
-async function transcode(file, format, out, clip = null) {
+async function transcode(file, format, out, clip = null, video = false) {
   if (transcoding >= 2) await new Promise((r) => transcodeQueue.push(r));
   transcoding++;
   try {
@@ -5224,7 +5229,14 @@ async function transcode(file, format, out, clip = null) {
     // A public preview: 30 s, faded in and out, lighter bitrate
     const cut = clip ? ['-t', '30', '-af', 'afade=t=in:d=0.5,afade=t=out:st=28.5:d=1.5'] : [];
     const code = await new Promise((resolve) => {
-      const ff = spawn(ffmpegPath, [...args, '-vn', ...cut, '-c:a', 'libmp3lame', '-b:a', clip ? '160k' : '256k', '-f', 'mp3', '-y', tmp], {
+      const enc = video
+        ? [
+            '-vf',
+            "scale=-2:'min(720,ih)'",
+            ...'-c:v libx264 -preset veryfast -crf 26 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart -f mp4'.split(' '),
+          ]
+        : ['-vn', ...cut, '-c:a', 'libmp3lame', '-b:a', clip ? '160k' : '256k', '-f', 'mp3'];
+      const ff = spawn(ffmpegPath, [...args, ...enc, '-y', tmp], {
         windowsHide: true,
       });
       const timer = setTimeout(() => ff.kill(), 10 * 60_000);
@@ -5237,7 +5249,7 @@ async function transcode(file, format, out, clip = null) {
     });
     if (code !== 0) {
       await rm(tmp, { force: true });
-      fail(415, "Couldn't make a preview of this audio — use Download");
+      fail(415, "Couldn't make a preview of this file — use Download");
     }
     await rename(tmp, out);
     pruneCache(dirname(out));
@@ -5402,7 +5414,7 @@ async function audioClipFile(file, at) {
 }
 
 /** Makes the audio preview in the background right after an upload, so it's ready before anyone presses play. */
-const warmAudioPreview = (file) => AUDIO_PREVIEW[extname(file).toLowerCase()] && audioPreviewFile(file).catch(() => {});
+const warmAudioPreview = (file) => AUDIO_PREVIEW[extname(file).toLowerCase()] && previewFile(file).catch(() => {});
 
 /**
  * Where previews and thumbnails are cached: a hidden .sanktuary-cache folder on the drive picked in
