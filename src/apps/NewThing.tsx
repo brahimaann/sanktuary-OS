@@ -292,7 +292,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           title: name,
           body: articleBody.trim() || sessionNotes.trim(),
         });
-        setMsg(`Draft article "${p.title}" created. You can review and publish it in Admin Panel > Blog.`);
+        setMsg(`Draft article "${p.title}" created. Finish it on /write (Write for CITIES); an admin publishes it from Admin Panel > CITIES.`);
       } else if (isTimeline) {
         if (!parsed) return setMsg('When is it? e.g. "fri", "next sat 8pm", "oct 12".');
         setBusy('Adding it to the timeline...');

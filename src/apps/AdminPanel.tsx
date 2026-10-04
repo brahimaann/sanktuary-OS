@@ -76,7 +76,7 @@ const TABS = [
   'Backups',
   'Front page',
   'Mailing list',
-  'Blog',
+  'CITIES',
   'Stories',
   'Shop & pool',
   'Log',
@@ -255,7 +255,7 @@ const AdminPanel: React.FC = () => {
         {tab === 'Spaces' && <SpacesTab draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} usernames={usernames} />}
 
         {tab === 'Log' && <LogTab />}
-        {tab === 'Blog' && <BlogTab />}
+        {tab === 'CITIES' && <BlogTab />}
         {tab === 'Front page' && <FrontTab />}
         {tab === 'Mailing list' && <MailTab />}
         {tab === 'Usage' && <UsageTab />}
@@ -1791,19 +1791,37 @@ type BlogPost = {
   image: string | null;
   published: string | null;
   created: string;
+  line?: 'heart' | 'essays' | 'field-notes';
+  kind?: string | null;
+  preface?: string;
+  release?: string | null;
+  owner?: string;
+  submitted?: string;
 };
 type Feed = { url: string; name: string; posts: number; error: string | null };
+type Channel = { id: string; name: string; videos: number; error: string | null };
+const LINES = { heart: 'Heart of the Cities', essays: 'Essays', 'field-notes': 'Field Notes' };
+const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spotlight' };
 
-/** Substack writers pulled onto sanktuary.studio/blog, and our own posts (plain text; blank line = new paragraph). */
+/** CITIES (sanktuary.studio/cities): our posts and members' drafts (plain text; blank line = new paragraph),
+ *  the Substack writers under Essays and the YouTube channels under Videos. */
 const BlogTab: React.FC = () => {
   const api = useApi();
-  const [data, setData] = useState<{ feeds: Feed[]; posts: BlogPost[] } | null>(null);
+  const [data, setData] = useState<{ feeds: Feed[]; channels: Channel[]; posts: BlogPost[] } | null>(null);
+  const [releases, setReleases] = useState<{ slug: string | null; title: string }[]>([]);
   const [feed, setFeed] = useState('');
+  const [channel, setChannel] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const load = useCallback(() => api('/api/blog/admin').then(setData, (e) => setMsg(e.message)), [api]);
   useEffect(() => {
     load();
+    fetch('/api/public/directory')
+      .then((r) => r.json())
+      .then(
+        (d) => setReleases(d.releases.filter((r: { slug: string | null }) => r.slug)),
+        () => {},
+      );
   }, [load]);
   const run = (p: Promise<unknown>) => p.then(load, (e) => setMsg(e.message));
   const post = data?.posts.find((p) => p.id === openId);
@@ -1821,12 +1839,15 @@ const BlogTab: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <p style={hint}>
-        Everything here shows on{' '}
-        <a href="/blog" target="_blank" rel="noopener noreferrer">
-          sanktuary.studio/blog
+        Everything published here shows on{' '}
+        <a href="/cities" target="_blank" rel="noopener noreferrer">
+          sanktuary.studio/cities
         </a>{' '}
-        (public, no account needed) and in the Blog icon on the desktop. Substack posts refresh every 10 minutes and link back to Substack
-        for the full piece.
+        (public, no account needed) and in the CITIES icon on the desktop. Members write drafts on{' '}
+        <a href="/write" target="_blank" rel="noopener noreferrer">
+          /write
+        </a>{' '}
+        and send them here to publish. Substack posts and YouTube videos refresh every 10 minutes.
       </p>
       <fieldset style={fieldset}>
         <legend>Substack writers</legend>
@@ -1861,6 +1882,40 @@ const BlogTab: React.FC = () => {
         </div>
       </fieldset>
       <fieldset style={fieldset}>
+        <legend>YouTube channels (Videos)</legend>
+        {data.channels.map((c) => (
+          <div key={c.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+            <Dot ok={!c.error} /> <b>{c.name}</b>
+            <span style={{ color: '#555', flex: 1 }}>{c.error ? `can't read it right now (${c.error})` : `${c.videos} recent videos`}</span>
+            <button style={button} onClick={() => run(api(`/api/blog/channels?id=${encodeURIComponent(c.id)}`, { method: 'DELETE' }))}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div style={row}>
+          <input
+            style={{ ...input, flex: 1, minWidth: 200 }}
+            placeholder="Channel link or @handle of a Twin Cities creator"
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+          />
+          <button
+            style={button}
+            disabled={!channel.trim()}
+            onClick={() => {
+              setMsg('Finding the channel...');
+              run(
+                api('/api/blog/channels', { method: 'POST', body: JSON.stringify({ url: channel }) }).then(
+                  () => (setChannel(''), setMsg('')),
+                ),
+              );
+            }}
+          >
+            Add channel
+          </button>
+        </div>
+      </fieldset>
+      <fieldset style={fieldset}>
         <legend>Our posts</legend>
         <div style={{ marginBottom: 6 }}>
           <button
@@ -1890,7 +1945,12 @@ const BlogTab: React.FC = () => {
               borderBottom: '1px solid #eee',
             }}
           >
-            <b>{p.title}</b> · {p.author} · {p.published ? `published ${new Date(p.published).toLocaleDateString()}` : 'draft'}
+            <b>{p.title}</b> · {LINES[p.line || 'heart']} · {p.author} ·{' '}
+            {p.published
+              ? `published ${new Date(p.published).toLocaleDateString()}`
+              : p.submitted
+                ? `sent in by ${p.owner} ${new Date(p.submitted).toLocaleDateString()}`
+                : 'draft'}
           </div>
         ))}
         {!data.posts.length && <div style={{ color: '#555' }}>No posts yet.</div>}
@@ -1899,12 +1959,49 @@ const BlogTab: React.FC = () => {
         <fieldset key={post.id} style={fieldset}>
           <legend>Editing: {post.title}</legend>
           <label style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+            Section
+            <span style={row}>
+              <select style={input} value={post.line || 'heart'} onChange={(e) => patch({ line: e.target.value })}>
+                {Object.entries(LINES).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              {(post.line || 'heart') === 'heart' && (
+                <select style={input} value={post.kind || ''} onChange={(e) => patch({ kind: e.target.value || null })}>
+                  <option value="">Kind of story...</option>
+                  {Object.entries(KINDS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
             Title
             <input
               style={input}
               defaultValue={post.title}
               onBlur={(e) => e.target.value !== post.title && patch({ title: e.target.value })}
             />
+            Preface
+            <input
+              style={input}
+              maxLength={300}
+              placeholder="One engaging line under the title; shared links show it"
+              defaultValue={post.preface || ''}
+              onBlur={(e) => e.target.value !== (post.preface || '') && patch({ preface: e.target.value })}
+            />
+            Listen
+            <select style={input} value={post.release || ''} onChange={(e) => patch({ release: e.target.value || null })}>
+              <option value="">No music</option>
+              {releases.map((r) => (
+                <option key={r.slug} value={r.slug!}>
+                  {r.title}
+                </option>
+              ))}
+            </select>
             Author
             <input
               style={input}
@@ -1936,7 +2033,7 @@ const BlogTab: React.FC = () => {
               lineHeight: 1.5,
             }}
             defaultValue={post.body}
-            placeholder="Write here. Leave a blank line between paragraphs. https:// links become clickable."
+            placeholder="Write here. Leave a blank line between paragraphs. https:// links become clickable; a line that is just an uploaded photo's address shows the photo."
             onBlur={(e) => e.target.value !== post.body && patch({ body: e.target.value })}
           />
           <div style={{ ...row, marginTop: 6 }}>
@@ -1945,12 +2042,12 @@ const BlogTab: React.FC = () => {
             </button>
             {post.published && (
               <a
-                href={`/blog/${post.id}`}
+                href={`/cities/${post.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ ...button, textDecoration: 'none', color: '#000' }}
               >
-                View on the blog
+                View on CITIES
               </a>
             )}
             <span style={{ flex: 1 }} />

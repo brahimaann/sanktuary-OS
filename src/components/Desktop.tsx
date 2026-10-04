@@ -25,6 +25,16 @@ interface DesktopIconDef {
 // Studio apps: members only, so visitors aren't shown doors they can't open. First column when logged on.
 const STUDIO_ICONS: DesktopIconDef[] = [
   { id: 'new', title: 'New...', icon: '/images/icons/file-32x32.png', appType: 'new', width: 460, height: 420 },
+  // Drafts for CITIES, the public journal; admins publish them in Admin Panel > CITIES
+  {
+    id: 'write',
+    title: 'Write for CITIES',
+    icon: '/images/icons/notepad-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/write' },
+    width: 760,
+    height: 600,
+  },
   { id: 'sanktuary-network', title: 'Team Files', icon: '/images/icons/network-32x32.png', appType: 'network', width: 560, height: 420 },
   // Studio: songs (Tracks), calendar (Timeline) and to-do boards (Planner) in one window
   {
@@ -91,10 +101,10 @@ const PUBLIC_ICONS: DesktopIconDef[] = [
   },
   {
     id: 'blog',
-    title: 'Blog',
+    title: 'CITIES',
     icon: '/images/icons/news-32x32.png',
     appType: 'iframe',
-    appProps: { src: '/blog' },
+    appProps: { src: '/cities' },
     width: 760,
     height: 560,
   },

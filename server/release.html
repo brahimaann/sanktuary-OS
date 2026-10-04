@@ -250,7 +250,19 @@
           return e;
         };
         const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
-        const LINK_NAMES = { bandlab: 'BandLab', untitled: 'Untitled', soundcloud: 'SoundCloud', other: 'Listen' };
+        const LINK_NAMES = {
+          bandlab: 'BandLab',
+          untitled: 'Untitled',
+          soundcloud: 'SoundCloud',
+          other: 'Listen',
+          spotify: 'Spotify',
+          appleMusic: 'Apple Music',
+          youtubeMusic: 'YouTube Music',
+          tidal: 'Tidal',
+          amazonMusic: 'Amazon Music',
+          deezer: 'Deezer',
+          audiomack: 'Audiomack',
+        };
 
         fetch(api)
           .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))

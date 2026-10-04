@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Write for CITIES</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      /* Members start drafts for CITIES here; admins read them in Admin Panel > CITIES and publish them */
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #008080;
+        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+        font-size: 13px;
+        display: flex;
+        justify-content: center;
+        padding: 24px 12px;
+      }
+      .wrap {
+        width: min(820px, 100%);
+      }
+      .win {
+        background: #c0c0c0;
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: 1px 1px 0 #000;
+      }
+      .title {
+        background: linear-gradient(90deg, #000080, #1084d0);
+        color: #fff;
+        font-weight: 700;
+        padding: 4px 6px;
+      }
+      .title a {
+        color: #fff;
+      }
+      .body {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .btn {
+        font: inherit;
+        padding: 4px 12px;
+        min-height: 28px;
+        background: #c0c0c0;
+        color: #000;
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset -1px -1px #808080;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+      }
+      .btn:disabled {
+        color: #808080;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      input,
+      select,
+      textarea {
+        font: inherit;
+        padding: 4px;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        background: #fff;
+      }
+      textarea {
+        width: 100%;
+        min-height: 320px;
+        resize: vertical;
+        font:
+          15px/1.5 Georgia,
+          serif;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 90px 1fr;
+        gap: 6px;
+        align-items: center;
+      }
+      .list div {
+        background: #fff;
+        padding: 4px 6px;
+        border-bottom: 1px solid #ddd;
+        cursor: pointer;
+      }
+      .list div.on {
+        background: #000080;
+        color: #fff;
+      }
+      .hint {
+        color: #444;
+      }
+      .msg {
+        color: #a00000;
+      }
+      fieldset {
+        border: 2px groove #fff;
+      }
+      img.cover {
+        height: 56px;
+        border: 1px solid #808080;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="win">
+        <div class="title">Write for <a href="/cities">CITIES</a></div>
+        <div class="body" id="app">Loading...</div>
+      </div>
+    </div>
+    <script>
+      const app = document.getElementById('app');
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+      const LINES = { heart: 'Heart of the Cities', essays: 'Essays', 'field-notes': 'Field Notes' };
+      const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spotlight' };
+      // The questions on the Heart of the Cities profile posters
+      const PROFILE = [
+        'What is your name and where are you from?',
+        'What do you do and why?',
+        'How do you want your work to influence the Cities?',
+      ];
+      let drafts = [];
+      let releases = [];
+      let openId = null;
+      let msg = '';
+
+      const api = async (path, opts = {}) => {
+        const r = await fetch(path, { credentials: 'same-origin', ...opts });
+        if (!r.ok) throw Object.assign(new Error((await r.text()) || `Error ${r.status}`), { status: r.status });
+        return r.json();
+      };
+      const status = (p) => (p.published ? 'published' : p.submitted ? 'sent to the editors' : 'draft');
+
+      async function load() {
+        try {
+          drafts = await api('/api/blog/mine');
+        } catch (e) {
+          app.innerHTML =
+            e.status === 401
+              ? '<p>This page is for Sanktuary members. Sign in on <a href="/">sanktuary.studio</a> first, then come back here.</p>'
+              : `<p class="msg">${esc(e.message)}</p>`;
+          return;
+        }
+        releases = await api('/api/public/directory')
+          .then((d) => d.releases.filter((r) => r.slug))
+          .catch(() => []);
+        render();
+      }
+
+      function render() {
+        const p = drafts.find((d) => d.id === openId);
+        app.innerHTML = `
+          <div class="hint">Start a story for CITIES. Drafts stay private; when it's ready, send it to the editors and an admin publishes it.</div>
+          <div class="row">
+            <select id="newLine">${Object.entries(LINES)
+              .map(([k, v]) => `<option value="${k}">${v}</option>`)
+              .join('')}</select>
+            <button class="btn" id="new">New draft</button>
+          </div>
+          <div class="list">${
+            drafts
+              .map(
+                (d) =>
+                  `<div data-id="${d.id}" class="${d.id === openId ? 'on' : ''}"><b>${esc(d.title)}</b> · ${LINES[d.line] || LINES.heart} · ${status(d)}</div>`,
+              )
+              .join('') || '<div>No drafts yet.</div>'
+          }</div>
+          ${p ? editor(p) : ''}
+          ${msg ? `<div class="msg">${esc(msg)}</div>` : ''}`;
+        app.querySelector('#new').onclick = async () => {
+          const d = await api('/api/blog/posts', {
+            method: 'POST',
+            body: JSON.stringify({ title: 'Untitled', line: app.querySelector('#newLine').value }),
+          });
+          drafts.unshift(d);
+          openId = d.id;
+          render();
+        };
+        app
+          .querySelectorAll('[data-id]')
+          .forEach((el) => (el.onclick = () => ((openId = el.dataset.id === openId ? null : el.dataset.id), render())));
+        if (p) wire(p);
+      }
+
+      function editor(p) {
+        const locked = !!p.published;
+        const dis = locked ? 'disabled' : '';
+        return `<fieldset><legend>${locked ? 'Published' : 'Editing'}: ${esc(p.title)}</legend>
+          ${locked ? `<p>This one is live: <a href="/cities/${esc(p.slug || p.id)}" target="_blank">read it on CITIES</a>. Ask an admin for changes.</p>` : ''}
+          <div class="grid">
+            Section <span class="row"><select id="line" ${dis}>${Object.entries(LINES)
+              .map(([k, v]) => `<option value="${k}" ${p.line === k ? 'selected' : ''}>${v}</option>`)
+              .join('')}</select>
+              ${
+                (p.line || 'heart') === 'heart'
+                  ? `<select id="kind" ${dis}><option value="">Kind of story...</option>${Object.entries(KINDS)
+                      .map(([k, v]) => `<option value="${k}" ${p.kind === k ? 'selected' : ''}>${v}</option>`)
+                      .join('')}</select>`
+                  : ''
+              }</span>
+            Title <input id="title" value="${esc(p.title)}" ${dis} />
+            Preface <input id="preface" value="${esc(p.preface || '')}" maxlength="300" placeholder="One line that makes people want to read it. Shared links show this." ${dis} />
+            Byline <input id="author" value="${esc(p.author)}" ${dis} />
+            Cover <span class="row">${p.image ? `<img class="cover" src="${esc(p.image)}" alt="">` : 'none'}
+              <label class="btn">Choose picture...<input id="cover" type="file" accept="image/*" hidden ${dis} /></label></span>
+            Listen <select id="release" ${dis}><option value="">No music</option>${releases
+              .map(
+                (r) => `<option value="${esc(r.slug)}" ${p.release === r.slug ? 'selected' : ''}>${esc(r.title)} (${esc(r.kind)})</option>`,
+              )
+              .join('')}</select>
+          </div>
+          <div class="row" style="margin:8px 0">
+            <label class="btn">Add photo...<input id="photo" type="file" accept="image/*" multiple hidden ${dis} /></label>
+            ${p.kind === 'profile' ? `<button class="btn" id="questions" ${dis}>Add the profile questions</button>` : ''}
+            <span class="hint">Leave a blank line between paragraphs. Photos go where the cursor is.</span>
+          </div>
+          <textarea id="body" ${dis} placeholder="Write here.">${esc(p.body)}</textarea>
+          ${
+            locked
+              ? ''
+              : `<div class="row" style="margin-top:6px"><button class="btn" id="save"><b>Save</b></button>
+                 <button class="btn" id="send" ${p.submitted ? 'disabled' : ''}>${p.submitted ? 'Sent to the editors' : 'Send to the editors'}</button>
+                 <span style="flex:1"></span><button class="btn" id="remove">Delete draft</button></div>`
+          }</fieldset>`;
+      }
+
+      function wire(p) {
+        if (p.published) return;
+        const $ = (id) => app.querySelector('#' + id);
+        const run = async (fn) => {
+          try {
+            msg = '';
+            await fn();
+          } catch (e) {
+            msg = e.message;
+          }
+          render();
+        };
+        const fields = () => ({
+          title: $('title').value,
+          preface: $('preface').value,
+          author: $('author').value,
+          body: $('body').value,
+          line: $('line').value,
+          kind: $('kind') ? $('kind').value : null,
+          release: $('release').value || null,
+        });
+        const patch = async (extra = {}) => {
+          const d = await api(`/api/blog/posts/${p.id}`, { method: 'PATCH', body: JSON.stringify({ ...fields(), ...extra }) });
+          drafts = drafts.map((x) => (x.id === d.id ? d : x));
+        };
+        const upload = (file) =>
+          api(`/api/blog/images?name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file }).then((r) => r.url);
+        $('save').onclick = () => run(patch);
+        $('line').onchange = () => run(patch);
+        if ($('kind')) $('kind').onchange = () => run(patch);
+        $('send').onclick = () => run(() => patch({ submitted: true }));
+        $('remove').onclick = () =>
+          confirm(`Delete "${p.title}"?`) &&
+          run(async () => {
+            await api(`/api/blog/posts/${p.id}`, { method: 'DELETE' });
+            drafts = drafts.filter((x) => x.id !== p.id);
+            openId = null;
+          });
+        $('cover').onchange = (e) => e.target.files[0] && run(async () => patch({ image: await upload(e.target.files[0]) }));
+        $('photo').onchange = (e) =>
+          run(async () => {
+            const box = $('body');
+            const at = box.selectionStart ?? box.value.length;
+            const urls = [];
+            for (const f of e.target.files) urls.push(await upload(f));
+            box.value = `${box.value.slice(0, at).trimEnd()}\n\n${urls.join('\n\n')}\n\n${box.value.slice(at).trimStart()}`.trim();
+            await patch();
+          });
+        if ($('questions'))
+          $('questions').onclick = () =>
+            run(async () => {
+              $('body').value = `${$('body').value.trim()}\n\n${PROFILE.map((q) => `${q}\n\n...`).join('\n\n')}`.trim();
+              await patch();
+            });
+      }
+      load();
+    </script>
+  </body>
+</html>

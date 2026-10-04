@@ -3,8 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sanktuary Blog</title>
-    <meta name="description" content="Writing from the Sanktuary world: our own posts and the Substack writers we follow." />
+    <!--meta-->
     <link rel="icon" href="/favicon.ico" />
     <style>
       :root {
@@ -296,6 +295,102 @@
         min-height: 24px;
         padding: 2px 8px;
       }
+      /* CITIES: section tabs, the preface, field-note photos, the Listen card and the video wall */
+      .tabs {
+        display: flex;
+        gap: 4px;
+        padding: 6px 6px 0;
+        flex-wrap: wrap;
+      }
+      .tabs .btn {
+        font-weight: 700;
+      }
+      .preface {
+        font:
+          italic 18px/1.45 Georgia,
+          serif;
+        color: #333;
+        margin: 0 0 10px;
+      }
+      .reader img.photo {
+        width: 100%;
+        margin: 6px 0 14px;
+        border: 1px solid #808080;
+      }
+      .listen {
+        margin-top: 22px;
+        padding: 12px;
+        background: #f4f4f4;
+        border: 2px solid;
+        border-color: #fff #808080 #808080 #fff;
+        font:
+          13px Tahoma,
+          Arial,
+          sans-serif;
+      }
+      .listen .head {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .listen .head img {
+        width: 72px;
+        height: 72px;
+        object-fit: cover;
+        border: 1px solid #808080;
+      }
+      .listen .stores {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      .listen ol {
+        margin: 0;
+        padding-left: 22px;
+      }
+      .listen li {
+        padding: 3px 0;
+      }
+      .listen li a {
+        color: var(--navy);
+        margin-left: 8px;
+        font-size: 12px;
+      }
+      .videos {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 10px;
+      }
+      .video {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        cursor: pointer;
+      }
+      .video img {
+        width: 100%;
+        aspect-ratio: 16/9;
+        object-fit: cover;
+        display: block;
+      }
+      .video div {
+        padding: 6px 8px;
+      }
+      .player {
+        position: relative;
+        aspect-ratio: 16/9;
+        background: #000;
+        margin-bottom: 10px;
+      }
+      .player iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
       @media (max-width: 520px) {
         .post {
           flex-direction: column;
@@ -310,90 +405,176 @@
   <body>
     <div class="wrap">
       <div class="win">
-        <div class="title"><img src="/images/icons/news-32x32.png" alt="" /><a href="/blog">Sanktuary Blog</a></div>
+        <div class="title"><img src="/images/icons/news-32x32.png" alt="" /><a href="/cities" data-nav>CITIES</a></div>
+        <div class="tabs" id="tabs"></div>
         <div class="bar" id="bar"></div>
         <div class="body" id="app">Loading...</div>
       </div>
-      <div class="foot"><a href="/">Enter Sanktuary</a> · sanktuary.studio</div>
+      <div class="foot"><a href="/">Enter Sanktuary</a> · <a href="/write">Write for CITIES</a> (members) · sanktuary.studio</div>
     </div>
     <script>
       const app = document.getElementById('app');
       const bar = document.getElementById('bar');
       const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
       const when = (d) => new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-      // Our own posts are plain text: paragraphs, and https links made clickable. Nothing else is interpreted.
-      const paragraphs = (t) =>
-        String(t || '')
-          .split(/\n{2,}/)
-          .map(
-            (p) =>
-              `<p>${esc(p).replace(/https:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`)}</p>`,
-          )
-          .join('');
       let all = [];
       let filter = '';
+      const tabsEl = document.getElementById('tabs');
+      // The sections of CITIES: Heart of the Cities is the main one and the front page
+      const SECTIONS = [
+        ['heart', 'Heart of the Cities'],
+        ['essays', 'Essays'],
+        ['field-notes', 'Field Notes'],
+        ['videos', 'Videos'],
+      ];
+      const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spotlight' };
+      const LINE_CHIP = { heart: ['#b00020', 'Heart'], essays: ['#000080', 'Essay'], 'field-notes': ['#2e7d32', 'Field note'] };
+      const go = (href) => (history.pushState(null, '', href), route());
+      function sectionTabs(on) {
+        tabsEl.innerHTML = SECTIONS.map(
+          ([k, name]) => `<a class="btn ${on === k ? 'on' : ''}" href="${k === 'heart' ? '/cities' : '/cities/' + k}" data-nav>${name}</a>`,
+        ).join('');
+      }
+      const chip = (p) => {
+        const [bg, label] = p.source === 'substack' ? ['#ff6719', 'Substack'] : LINE_CHIP[p.line] || LINE_CHIP.heart;
+        return `<span class="chip" style="background:${bg}">${p.kind && KINDS[p.kind] ? KINDS[p.kind] : label}</span>`;
+      };
 
-      function list() {
-        const writers = [...new Set(all.map((p) => p.publication))];
-        bar.innerHTML =
-          tabs('posts') +
-          `<button class="btn ${filter ? '' : 'on'}" data-f="">All</button>` +
-          writers.map((w) => `<button class="btn ${filter === w ? 'on' : ''}" data-f="${esc(w)}">${esc(w)}</button>`).join('');
-        bar.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => ((filter = b.dataset.f), list())));
-        const shown = all.filter((p) => !filter || p.publication === filter);
+      function list(section) {
+        sectionTabs(section);
+        const inSection = all.filter((p) => (p.line || 'heart') === section);
+        if (section === 'essays') {
+          const writers = [...new Set(inSection.map((p) => p.publication))];
+          bar.innerHTML =
+            subTabs('posts') +
+            (writers.length > 1
+              ? `<button class="btn ${filter ? '' : 'on'}" data-f="">All</button>` +
+                writers.map((w) => `<button class="btn ${filter === w ? 'on' : ''}" data-f="${esc(w)}">${esc(w)}</button>`).join('')
+              : '');
+          bar.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => ((filter = b.dataset.f), list(section))));
+        } else
+          bar.innerHTML = `<span>${{ heart: 'Profiles, case studies and spotlights from the Twin Cities arts scene.', 'field-notes': 'Straight from the field: shoots, sessions and shows.' }[section]}</span>`;
+        const shown = inSection.filter((p) => section !== 'essays' || !filter || p.publication === filter);
         app.innerHTML =
           shown
             .map(
-              (p) => `<a class="post" href="${esc(p.url)}" data-open>
+              (p) => `<a class="post" href="${esc(p.url)}" data-nav>
                     ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
                     <div style="min-width:0">
-                      <div class="meta"><span class="chip" style="background:${p.source === 'sanktuary' ? '#000080' : '#ff6719'}">${p.source === 'sanktuary' ? 'Sanktuary' : 'Substack'}</span>${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
+                      <div class="meta">${chip(p)}${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
                       <h2>${esc(p.title)}</h2>
                       <div class="excerpt">${esc(p.excerpt)}</div>
                     </div></a>`,
             )
-            .join('') || '<div class="empty">No posts yet. Check back soon.</div>';
-        app.querySelectorAll('[data-open]').forEach(
-          (a) =>
-            (a.onclick = (e) => {
-              e.preventDefault();
-              history.pushState(null, '', a.getAttribute('href'));
-              route();
-            }),
-        );
+            .join('') || '<div class="empty">Nothing here yet. Check back soon.</div>';
+      }
+
+      // Our own posts are plain text: paragraphs, https links made clickable, and a line that is just one of our
+      // uploaded pictures (/api/blog/images/...) shown as a photo. Nothing else is interpreted.
+      const body = (t) =>
+        String(t || '')
+          .split(/\n{2,}/)
+          .map((para) =>
+            /^\/api\/blog\/images\/[\w-]+\.webp$/.test(para.trim())
+              ? `<img class="photo" src="${esc(para.trim())}" alt="" loading="lazy">`
+              : `<p>${esc(para).replace(/https:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`)}</p>`,
+          )
+          .join('');
+
+      // A release's streaming links, the album's and each song's, so readers go and listen where they already do
+      const STORE_NAMES = {
+        spotify: 'Spotify',
+        appleMusic: 'Apple Music',
+        youtubeMusic: 'YouTube Music',
+        tidal: 'Tidal',
+        amazonMusic: 'Amazon Music',
+        deezer: 'Deezer',
+        soundcloud: 'SoundCloud',
+        bandcamp: 'Bandcamp',
+        audiomack: 'Audiomack',
+      };
+      const outLink = (href, text, cls = '') =>
+        `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+      async function listen(slug) {
+        const r = await fetch(`/api/public/release/${encodeURIComponent(slug)}`).catch(() => null);
+        if (!r?.ok) return '';
+        const rel = await r.json();
+        const upcoming = rel.date && rel.date > new Date().toLocaleDateString('en-CA');
+        const stores = Object.entries(rel.stores || {}).filter(([k]) => (upcoming ? k === 'presave' : k in STORE_NAMES));
+        const songs = rel.tracks
+          .map((t) => {
+            const links = Object.entries(t.links || {}).filter(([k]) => k in STORE_NAMES);
+            return `<li><b>${esc(t.title)}</b>${links.map(([k, u]) => outLink(u, STORE_NAMES[k])).join('')}</li>`;
+          })
+          .join('');
+        return `<div class="listen"><div class="head">${rel.cover ? `<img src="/api/public/release/${esc(rel.slug)}/cover?w=400" alt="">` : ''}<div><div class="meta">Listen</div><b style="font-size:15px">${esc(rel.title)}</b>${rel.artist ? ` · ${esc(rel.artist)}` : ''}<div><a href="/release/${esc(rel.slug)}" target="_blank">Open the release page</a></div></div></div>
+          ${stores.length ? `<div class="stores">${stores.map(([k, u]) => outLink(u, k === 'presave' ? 'Pre-save' : STORE_NAMES[k], 'btn')).join('')}</div>` : ''}
+          ${songs ? `<ol>${songs}</ol>` : ''}</div>`;
       }
 
       async function read(id) {
-        bar.innerHTML = '<a class="btn" href="/blog" id="back">&larr; All posts</a>';
-        document.getElementById('back').onclick = (e) => {
-          e.preventDefault();
-          history.pushState(null, '', '/blog');
-          route();
-        };
+        const back = id.includes('/') ? '/cities/essays' : '/cities';
+        bar.innerHTML = `<a class="btn" href="${back}" data-nav>&larr; Back</a>`;
         app.textContent = 'Loading...';
         const r = await fetch(`/api/blog/post/${id.split('/').map(encodeURIComponent).join('/')}`);
-        if (!r.ok) return (app.innerHTML = '<div class="empty">This post is not available.</div>');
+        if (!r.ok) return (sectionTabs(''), (app.innerHTML = '<div class="empty">This post is not available.</div>'));
         const p = await r.json();
-        document.title = `${p.title} · Sanktuary Blog`;
+        sectionTabs(p.line || 'heart');
+        if ((p.line || 'heart') !== 'heart') bar.innerHTML = `<a class="btn" href="/cities/${p.line}" data-nav>&larr; Back</a>`;
+        document.title = `${p.title} · CITIES`;
         // Substack posts arrive already cleaned by the server (plain formatting only); ours are plain text
         const credit = p.external
           ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
           : '';
-        app.innerHTML = `<article class="reader"><h1>${esc(p.title)}</h1><div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : paragraphs(p.body)}${credit}</article>`;
+        app.innerHTML = `<article class="reader"><div class="meta">${chip(p)}</div><h1>${esc(p.title)}</h1>${p.preface ? `<p class="preface">${esc(p.preface)}</p>` : ''}<div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
+                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}<div id="listen"></div>${credit}</article>`;
         scrollTo(0, 0);
+        if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
       }
 
-      // Posts | Notes switch, on both list pages
-      function tabs(on) {
-        return `<a class="btn ${on === 'posts' ? 'on' : ''}" href="/blog" data-nav><b>Posts</b></a><a class="btn ${on === 'notes' ? 'on' : ''}" href="/blog/notes" data-nav><b>Notes</b></a><span style="width:10px"></span>`;
+      let allVideos = null;
+      async function videos() {
+        sectionTabs('videos');
+        document.title = 'Videos · CITIES';
+        bar.innerHTML = '<span>New videos from Twin Cities creators, as they post them.</span>';
+        if (!allVideos) {
+          app.textContent = 'Loading...';
+          allVideos = await fetch('/api/blog/videos')
+            .then((r) => r.json())
+            .then((d) => d.videos)
+            .catch(() => null);
+          if (!allVideos) return (app.innerHTML = '<div class="empty">Videos could not load. Try again in a minute.</div>');
+        }
+        app.innerHTML =
+          (allVideos.length ? '<div class="player" id="player" hidden></div><div class="videos">' : '') +
+            allVideos
+              .map(
+                (v, i) =>
+                  `<div class="video" data-v="${i}"><img src="https://i.ytimg.com/vi/${esc(v.id)}/hqdefault.jpg" alt="" loading="lazy"><div><b>${esc(v.title)}</b><div class="meta">${esc(v.channel)} · ${when(v.date)}</div></div></div>`,
+              )
+              .join('') +
+            (allVideos.length ? '</div>' : '') || '<div class="empty">No videos yet. Check back soon.</div>';
+        app.querySelectorAll('[data-v]').forEach(
+          (el) =>
+            (el.onclick = () => {
+              const v = allVideos[el.dataset.v];
+              const player = document.getElementById('player');
+              player.hidden = false;
+              player.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${esc(v.id)}?autoplay=1" title="${esc(v.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+              player.scrollIntoView({ block: 'start' });
+            }),
+        );
+      }
+
+      // Posts | Notes switch inside Essays
+      function subTabs(on) {
+        return `<a class="btn ${on === 'posts' ? 'on' : ''}" href="/cities/essays" data-nav><b>Posts</b></a><a class="btn ${on === 'notes' ? 'on' : ''}" href="/cities/notes" data-nav><b>Notes</b></a><span style="width:10px"></span>`;
       }
       addEventListener('click', (e) => {
         const a = e.target.closest('[data-nav]');
-        if (!a) return;
+        if (!a || e.metaKey || e.ctrlKey) return;
         e.preventDefault();
-        history.pushState(null, '', a.getAttribute('href'));
-        route();
+        go(a.getAttribute('href'));
       });
       const ago = (d) => {
         const m = Math.round((Date.now() - new Date(d)) / 60000);
@@ -409,7 +590,8 @@
       let noteFilter = '';
 
       async function notes() {
-        document.title = 'Notes · Sanktuary Blog';
+        sectionTabs('essays');
+        document.title = 'Notes · CITIES';
         if (!allNotes) {
           app.textContent = 'Loading...';
           try {
@@ -421,7 +603,7 @@
         }
         const writers = [...new Set(allNotes.map((n) => n.author))];
         bar.innerHTML =
-          tabs('notes') +
+          subTabs('notes') +
           (writers.length > 1
             ? `<button class="btn ${noteFilter ? '' : 'on'}" data-w="">Everyone</button>` +
               writers.map((w) => `<button class="btn ${noteFilter === w ? 'on' : ''}" data-w="${esc(w)}">${esc(w)}</button>`).join('')
@@ -455,17 +637,19 @@
       async function route() {
         const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
         if (path === 'notes') return notes();
-        if (path) return read(path);
-        document.title = 'Sanktuary Blog';
+        if (path === 'videos') return videos();
+        const section = path === '' ? 'heart' : ['heart', 'essays', 'field-notes'].includes(path) ? path : null;
+        if (!section) return read(path);
+        document.title = section === 'heart' ? 'CITIES' : `${SECTIONS.find(([k]) => k === section)[1]} · CITIES`;
         if (!all.length) {
           try {
             all = (await (await fetch('/api/blog')).json()).posts;
           } catch {
-            app.innerHTML = '<div class="empty">The blog could not load. Try again in a minute.</div>';
+            app.innerHTML = '<div class="empty">CITIES could not load. Try again in a minute.</div>';
             return;
           }
         }
-        list();
+        list(section);
       }
       addEventListener('popstate', route);
       route();
@@ -473,7 +657,8 @@
         // live: new posts show up while the page is open
         try {
           all = (await (await fetch('/api/blog')).json()).posts;
-          if (!location.pathname.split('/').slice(2).filter(Boolean).length) list();
+          const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
+          if (['', 'heart', 'essays', 'field-notes'].includes(path)) list(path || 'heart');
         } catch {}
       }, 5 * 60_000);
     </script>
