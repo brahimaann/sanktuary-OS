@@ -316,7 +316,7 @@ async function folderSize(dir) {
 async function spaceInfo(s) {
   const info = { id: s.id, name: s.name, rights: s.rights, online: s.online, driveName: null, free: null, total: null };
   if (!s.online) return info;
-  const fs = await statfs(s.driveRoot).catch(() => null);
+  const fs = s.driveRoot && (await statfs(s.driveRoot).catch(() => null)); // combined spaces have no one drive
   if (fs) Object.assign(info, { free: fs.bavail * fs.bsize, total: fs.blocks * fs.bsize });
   if (s.id === 'me') {
     await mkdir(s.root, { recursive: true });

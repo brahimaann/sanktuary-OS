@@ -33,8 +33,11 @@ writeFileSync(join(drive, 'team', 'evil.svg'), '<svg xmlns="http://www.w3.org/20
 writeFileSync(join(drive, 'team', 'pic.png'), Buffer.from('89504e47', 'hex'));
 writeFileSync(join(drive, 'team', 'old.txt'), 'was on the drive before Sanktuary');
 writeFileSync(join(drive, 'team', 'loose.txt'), 'also already there');
-const letter = drive.slice(0, 2); // e.g. C:
-const rel = drive.slice(3).split('\\').join('/');
+// The server finds a drive by its letter (e.g. C:); off Windows, the first folder of the path stands in for it
+const [letter, rel] =
+  process.platform === 'win32'
+    ? [drive.slice(0, 2), drive.slice(3).split('\\').join('/')]
+    : ['/' + drive.split('/')[1], drive.split('/').slice(2).join('/')];
 writeFileSync(
   join(dir, 'data', 'config.json'),
   JSON.stringify({
