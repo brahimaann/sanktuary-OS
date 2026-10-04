@@ -3,6 +3,9 @@ import { useAuth } from '@clerk/react';
 import { useApi } from '../utils/api';
 import { drawText, TEXT_STYLES, TextOverlayItem, TextStyle } from '../utils/captions';
 import FilePicker, { FileRef } from '../components/FilePicker';
+import { sharedAudio } from '../utils/sound';
+import { waveformPeaks } from '../utils/audioAnalysis';
+import { lightAudio } from './fileTypes';
 import { fileUrl, LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 
 /**
@@ -86,11 +89,14 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [jobs, setJobs] = useState<{ id: string; name: string; status: string; pct: number; error: string | null }[]>([]);
   const [name, setName] = useState('');
   const [msg, setMsg] = useState('');
+  const [songPeaks, setSongPeaks] = useState<number[] | null>(null);
+  const [songLength, setSongLength] = useState(0);
 
   const video = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const frameCv = useRef<HTMLCanvasElement>(null);
   const capCv = useRef<HTMLCanvasElement>(null);
+  const songCv = useRef<HTMLCanvasElement>(null);
   const shown = useRef(0);
   const [W, H] = SIZES[format];
   const src = (r: FileRef) => {
@@ -101,15 +107,79 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   useEffect(() => {
     getToken().then((x) => setToken(x || ''));
   }, [getToken, clip, song]);
+  // A draft per clip in this browser, so closing the window doesn't lose the captions and settings
+  const draftKey = clip && `sk_video_${clip.space}/${clip.path}`;
   useEffect(() => {
-    if (clip)
-      setName(
-        `${clip.path
-          .split('/')
-          .pop()!
-          .replace(/\.[^.]+$/, '')} edit`,
-      );
-  }, [clip]);
+    if (!clip) return;
+    setName(
+      `${clip.path
+        .split('/')
+        .pop()!
+        .replace(/\.[^.]+$/, '')} edit`,
+    );
+    try {
+      const d = JSON.parse(localStorage.getItem(draftKey!) || 'null');
+      if (!d) return;
+      setSong(d.song);
+      setSongAt(d.songAt);
+      setStart(d.start);
+      setDuration(d.duration);
+      setFormat(d.format);
+      setFit(d.fit);
+      setLook(d.look);
+      setCaps(d.caps);
+      setLyrics(d.lyrics);
+      setCapStyle(d.capStyle);
+      setName(d.name);
+    } catch {
+      // no draft or storage blocked: start fresh
+    }
+  }, [clip]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    try {
+      if (draftKey)
+        localStorage.setItem(draftKey, JSON.stringify({ song, songAt, start, duration, format, fit, look, caps, lyrics, capStyle, name }));
+    } catch {
+      // storage full or blocked: the draft just isn't kept
+    }
+  }, [draftKey, song, songAt, start, duration, format, fit, look, caps, lyrics, capStyle, name]);
+
+  // The song's waveform, to pick where it starts (the light MP3 copy for WAV / AIFF / FLAC)
+  useEffect(() => {
+    setSongPeaks(null);
+    if (!song || !token) return;
+    const abort = new AbortController();
+    fetch(src(song) + (lightAudio(song.path) ? '&preview' : ''), { signal: abort.signal })
+      .then((r) => r.arrayBuffer())
+      .then((b) => sharedAudio()!.decodeAudioData(b))
+      .then((a) => {
+        if (abort.signal.aborted) return;
+        setSongPeaks(waveformPeaks(a.getChannelData(0)));
+        setSongLength(a.duration);
+      })
+      .catch(() => {});
+    return () => abort.abort();
+  }, [song, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const g = songCv.current?.getContext('2d');
+    if (!g || !songPeaks || !songLength) return;
+    const [w, h] = [g.canvas.width, g.canvas.height];
+    const x = (s: number) => (s / songLength) * w;
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = '#ffffe1';
+    g.fillRect(x(songAt), 0, x(duration), h); // the part that plays under the clip
+    const top = Math.max(...songPeaks) || 1;
+    const bar = w / songPeaks.length;
+    songPeaks.forEach((p, i) => {
+      const bh = (p / top) * h;
+      const s = (i / songPeaks.length) * songLength;
+      g.fillStyle = s >= songAt && s < songAt + duration ? '#000080' : '#a0a0a0';
+      g.fillRect(i * bar, (h - bh) / 2, Math.max(1, bar - 0.5), bh);
+    });
+    g.fillStyle = '#c00000';
+    g.fillRect(x(songAt + t), 0, 1, h);
+  }, [songPeaks, songLength, songAt, duration, t]);
 
   // The live preview: the clip drawn into the frame the way the render will (the look as a CSS filter on this
   // layer), captions on a second layer on top, exactly as they'll be burned in
@@ -138,6 +208,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             fc.drawImage(v, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s);
           }
         }
+        // Two players drift apart: keep the song on the video's clock
+        const a = audio.current;
+        if (playing && a && !a.paused && !a.seeking && Math.abs(a.currentTime - songAt - now) > 0.1) a.currentTime = songAt + now;
         cc.clearRect(0, 0, W, H);
         for (const c of caps) if (now >= c.start && now < c.end) drawText(cc, asItem(c), W, H);
         if (Math.abs(now - shown.current) > 0.04) setT((shown.current = now)); // the time readout, not every frame
@@ -264,7 +337,20 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const num = (v: string, min: number, max: number) => Math.min(max, Math.max(min, Number(v) || 0));
   const scale = Math.min(360 / W, 520 / H);
   return (
-    <div style={shell}>
+    <div
+      style={shell}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (!clip || ['TEXTAREA', 'INPUT', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
+        const step = e.shiftKey ? 1 : 1 / 30; // a frame, or a second with Shift
+        const now = video.current ? video.current.currentTime - start : t; // t is rounded for the readout
+        if (e.key === ' ') play();
+        else if (e.key === 'ArrowLeft') seek(Math.max(0, now - step));
+        else if (e.key === 'ArrowRight') seek(Math.min(duration, now + step));
+        else return;
+        e.preventDefault(); // and a focused button doesn't also get the space
+      }}
+    >
       <div style={{ ...toolbar, flexWrap: 'wrap' }}>
         <button style={{ ...button, fontWeight: 700 }} onClick={() => setPicking('clip')}>
           {clip ? 'Change clip...' : 'Pick a clip...'}
@@ -424,6 +510,21 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
                 s (the song replaces the clip's sound)
               </label>
             )}
+            {song && songPeaks && (
+              <canvas
+                ref={songCv}
+                width={600}
+                height={40}
+                title="Click where the song should start"
+                style={{ width: '100%', height: 40, border: '2px inset #808080', cursor: 'pointer' }}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const at = Math.round(((e.clientX - r.left) / r.width) * songLength * 10) / 10;
+                  setSongAt(at);
+                  if (audio.current) audio.current.currentTime = at + t;
+                }}
+              />
+            )}
           </fieldset>
           <fieldset style={fs}>
             <legend>Captions</legend>
@@ -536,7 +637,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
           </fieldset>
         </div>
       </div>
-      <div style={statusBar}>{msg || 'The preview is close to the final look; captions are exact.'}</div>
+      <div style={statusBar}>
+        {msg || 'The preview is close to the final look; captions are exact. Space play/pause · ←/→ a frame (Shift: 1 s)'}
+      </div>
       {picking && (
         <FilePicker
           title={picking === 'clip' ? 'Pick a video clip' : 'Pick a song'}
