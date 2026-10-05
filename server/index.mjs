@@ -1490,7 +1490,115 @@ async function releaseReadiness(db, r) {
 }
 
 const TRACK_TEXT = { title: 80, bpm: 10, key: 20, credits: 2000, notes: 4000 };
-const TRACK_LINKS = ['bandlab', 'untitled', 'soundcloud', 'other'];
+// Work-in-progress links, then where the finished song streams (filled by "Find streaming links", shown publicly)
+const TRACK_LINKS = [
+  'bandlab',
+  'untitled',
+  'soundcloud',
+  'other',
+  'spotify',
+  'appleMusic',
+  'youtubeMusic',
+  'tidal',
+  'amazonMusic',
+  'deezer',
+  'audiomack',
+];
+
+// "Find streaming links": one link to the album or single on any platform -> the release's links everywhere, and
+// each song's. song.link (Odesli) maps a link across platforms; Spotify's album page lists the songs in order.
+// Without a key Odesli allows about 10 lookups a minute, so songs are looked up one at a time in the background
+// and whoever asked is told when it's done. Links already typed in are kept when a platform isn't found. The
+// member the release is by also gets their artist pages added to their profile, where it has none yet.
+const ODESLI = process.env.ODESLI_API_URL || 'https://api.song.link/v1-alpha.1/links';
+const ODESLI_PLATFORMS = ['spotify', 'appleMusic', 'youtubeMusic', 'tidal', 'amazonMusic', 'deezer', 'soundcloud', 'audiomack'];
+async function odesli(link) {
+  const r = await fetch(`${ODESLI}?url=${encodeURIComponent(link)}&userCountry=US`, { signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) throw new Error(r.status === 400 || r.status === 404 ? "song.link doesn't know that link" : `song.link answered ${r.status}`);
+  const d = await r.json();
+  const links = Object.fromEntries(
+    ODESLI_PLATFORMS.map((k) => [k, d.linksByPlatform?.[k]?.url]).filter(([, v]) => /^https:\/\/[^\s"<>]{3,500}$/.test(v || '')),
+  );
+  const entity = d.entitiesByUniqueId?.[d.entityUniqueId] || {};
+  return { links, title: String(entity.title || ''), artist: String(entity.artistName || ''), type: entity.type };
+}
+const pageText = (u) =>
+  fetch(u, { headers: { 'user-agent': 'Mozilla/5.0 (Sanktuary)' }, signal: AbortSignal.timeout(15_000) })
+    .then((r) => (r.ok ? r.text() : ''))
+    .catch(() => '');
+/** The songs on a Spotify album, in order, and the artist's page, from the page's music:song / music:musician tags. */
+async function spotifyPage(url) {
+  const html = await pageText(url);
+  return {
+    songs: [...new Set([...html.matchAll(/music:song"\s+content="(https:\/\/open\.spotify\.com\/track\/\w+)"/g)].map((m) => m[1]))].slice(
+      0,
+      40,
+    ),
+    artist: html.match(/music:musician"\s+content="(https:\/\/open\.spotify\.com\/artist\/\w+)"/)?.[1] || null,
+  };
+}
+/** The main artist's page on the platforms member profiles have: Spotify, Apple Music, SoundCloud, Audiomack. */
+async function artistPages(links, spotifyArtist) {
+  const pages = { spotify: spotifyArtist };
+  pages.soundcloud = links.soundcloud?.match(/^https:\/\/soundcloud\.com\/[\w-]+/)?.[0];
+  pages.audiomack = links.audiomack?.match(/^https:\/\/audiomack\.com\/[\w-]+(?=\/(song|album))/)?.[0];
+  if (links.appleMusic)
+    pages.appleMusic = (await pageText(links.appleMusic)).match(/https:\/\/music\.apple\.com\/\w{2}\/artist\/[\w%.-]+\/\d+/)?.[0];
+  return Object.fromEntries(Object.entries(pages).filter(([, v]) => v));
+}
+/** The member a release is by: its artist (or song.link's) name, first credited, matched to a name or username. */
+async function releaseMember(name) {
+  const want = slugify(String(name || '').split(/\s*(?:,|&|\+|\bx\b|\band\b|\bfeat\.?|\bft\.?|\bwith\b)\s*/i)[0]);
+  if (!want) return null;
+  for (const username of await currentMembers()) {
+    const p = await readJson(`profiles/${username}.json`, {});
+    if (slugify(username) === want || slugify(p.displayName) === want) return username;
+  }
+  return null;
+}
+/** Fills the member's empty profile links (Spotify, Apple Music, ...) with their artist pages; their own stay. */
+async function linkArtistProfile(r, found, spotifyArtist) {
+  const username = await releaseMember(r.artist || found.artist);
+  if (!username) return null;
+  const pages = await artistPages(found.links, spotifyArtist);
+  const profile = await readJson(`profiles/${username}.json`, {});
+  const added = Object.keys(pages).filter((k) => !profile[k]);
+  if (!added.length) return null;
+  for (const k of added) profile[k] = pages[k];
+  profile.updated = new Date().toISOString();
+  await mkdir(join(DATA, 'profiles'), { recursive: true });
+  await saveJson(`profiles/${username}.json`, profile);
+  emit('profile', { username, ...profile });
+  return { username, added };
+}
+async function findStreamingLinks(db, r, link, done) {
+  const found = await odesli(link);
+  r.stores = { ...found.links, ...Object.fromEntries(Object.entries(r.stores || {}).filter(([k]) => k === 'presave' || !found.links[k])) };
+  const tracks = Object.values(db.tracks)
+    .filter((t) => t.release === r.id && !t.deleted)
+    .sort((a, b) => a.n - b.n);
+  const setLinks = (t, links) => (t.links = { ...t.links, ...links });
+  const page = found.links.spotify ? await spotifyPage(found.links.spotify) : { songs: [], artist: null };
+  const profile = await linkArtistProfile(r, found, page.artist).catch(() => null);
+  if (found.type === 'song') {
+    if (tracks.length === 1) setLinks(tracks[0], found.links);
+    return { songs: tracks.length === 1 ? 1 : 0, profile, later: Promise.resolve() };
+  }
+  const songs = page.songs;
+  const later = (async () => {
+    let matched = 0;
+    for (const [i, url] of songs.entries()) {
+      await new Promise((ok) => setTimeout(ok, i ? 7000 : 0)); // stay under song.link's free limit
+      const song = await odesli(url).catch(() => null);
+      if (!song) continue;
+      const name = slugify(song.title.replace(/\s*[([](feat|ft|with|prod)\.?[^)\]]*[)\]]/gi, ''));
+      const t = tracks.find((x) => slugify(x.title) === name) || (songs.length === tracks.length ? tracks[i] : null);
+      if (t) (setLinks(t, song.links), matched++);
+    }
+    await done(matched, songs.length);
+  })();
+  return { songs: songs.length, profile, later };
+}
 let tracksDb = null;
 let tracksSaved = Promise.resolve();
 const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { releases: {}, tracks: {} }));
@@ -1568,6 +1676,17 @@ async function tracksApi(req, res, url) {
       const found = await scanRelease(r, me);
       changed(r);
       return json(res, found);
+    }
+    if (req.method === 'POST' && url.searchParams.has('links')) {
+      const link = String((await jsonBody(req)).url || '').trim();
+      if (!/^https:\/\/[^\s"<>]{3,500}$/.test(link)) fail(400, 'Paste the https:// link to the album or single on any platform');
+      const { songs, profile, later } = await findStreamingLinks(db, r, link, async (matched, total) => {
+        changed(r);
+        await notify(me, `Streaming links found for ${matched} of ${total} songs on "${r.title}"`, {});
+      }).catch((e) => fail(400, e.message));
+      later.catch(console.error);
+      changed(r);
+      return json(res, { stores: r.stores, songs, profile });
     }
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);
@@ -3123,8 +3242,10 @@ async function businessDocs(req, res, url, user, db, id, sub) {
   fail(405, 'Not allowed');
 }
 
-// ── /api/blog: public blog — Substack writers pulled in live, plus our own posts — data/blog.json ──
-// Anyone can read it (no account). Admins manage the writers and posts from the Admin Panel.
+// ── /api/blog: CITIES, the public journal — our own posts, Substack writers and YouTube channels — data/blog.json ──
+// Anyone can read it (no account). Members write drafts on /write; admins publish them and manage the writers and
+// channels from the Admin Panel. Our posts sit in one of three lines: Heart of the Cities (profiles, case
+// studies, spotlights), Essays (with the Substack writers) and Field Notes (in-the-field capture).
 // Substack posts show title, picture and opening lines and link out for the full piece, so no outside HTML
 // ever runs on sanktuary.studio. Feeds refresh every 10 minutes.
 let blogDb = null;
@@ -3137,6 +3258,10 @@ const loadBlog = async () =>
   }));
 const saveBlog = () => (blogSaved = blogSaved.then(() => saveJson('blog.json', blogDb)).catch(console.error));
 const feedCache = new Map(); // feed url -> { at, items, error }
+const BLOG_LINES = ['heart', 'essays', 'field-notes'];
+const HEART_KINDS = ['profile', 'case-study', 'spotlight'];
+// Section pages (/cities/heart ...) and the writing page: no post may take these addresses
+const BLOG_RESERVED = ['notes', 'videos', 'write', ...BLOG_LINES];
 const FEED_MINUTES = 10;
 
 /** "hima", "hima.substack.com" or any Substack / RSS URL -> the feed URL. */
@@ -3245,7 +3370,7 @@ async function readFeed(feed) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const xml = (await r.text()).slice(0, 5_000_000);
     const publication = plainText(tag(tag(xml, 'channel').split('<item')[0], 'title')) || feed.name;
-    // On-site address: /blog/<publication>/<post slug>, e.g. /blog/boroma/what-does-change-look-like
+    // On-site address: /cities/<publication>/<post slug>, e.g. /cities/boroma/what-does-change-look-like
     const pubSlug = slugify(new URL(feed.url).hostname.replace(/\.substack\.com$/i, '').replace(/^www\./, '')) || slugify(publication);
     const raw = [...xml.matchAll(/<item[\s>][\s\S]*?<\/item>/gi)].slice(0, 20).map(([item]) => {
       const content = decodeXml(tag(item, 'content:encoded') || tag(item, 'description'));
@@ -3274,7 +3399,8 @@ async function readFeed(feed) {
         title: plainText(tag(item, 'title')).slice(0, 200),
         excerpt: (plainText(tag(item, 'description')) || plainText(content)).slice(0, 400),
         image: (cover && seen.get(cover) === 1 ? cover : null) || firstImage || null,
-        url: `/blog/${pubSlug}/${slug}`,
+        url: `/cities/${pubSlug}/${slug}`,
+        line: 'essays',
         external: link,
         html: cleanHtml(content),
         author: plainText(tag(item, 'dc:creator')) || publication,
@@ -3353,15 +3479,71 @@ async function readNotes(feed) {
   }
 }
 
+// YouTube channels from Twin Cities creators: each channel's public feed (no API key), newest videos first.
+// A channel is stored by its id (UC...), the only thing the feed accepts; links and @handles are looked up once.
+async function youtubeChannelId(input) {
+  const v = String(input || '').trim();
+  const id = v.match(/\b(UC[\w-]{22})\b/)?.[1];
+  if (id) return id;
+  const handle = v.match(/youtube\.com\/@([\w.-]{3,40})/i)?.[1] || v.match(/^@?([\w.-]{3,40})$/)?.[1];
+  if (!handle) fail(400, 'Paste a YouTube channel link or @handle');
+  const html = await fetch(`https://www.youtube.com/@${handle}`, {
+    headers: { 'user-agent': 'Mozilla/5.0 (Sanktuary CITIES reader)', 'accept-language': 'en' },
+    signal: AbortSignal.timeout(10_000),
+  })
+    .then((r) => (r.ok ? r.text() : ''))
+    .catch(() => '');
+  return (
+    html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{22})"/)?.[1] ||
+    html.match(/"externalId":"(UC[\w-]{22})"/)?.[1] ||
+    fail(400, `Couldn't find the channel @${handle}`)
+  );
+}
+
+async function readChannel(ch) {
+  const u = `https://www.youtube.com/feeds/videos.xml?channel_id=${ch.id}`;
+  const hit = feedCache.get(u);
+  if (hit && Date.now() - hit.at < FEED_MINUTES * 60_000) return hit;
+  try {
+    const r = await fetch(u, {
+      headers: { 'user-agent': 'Sanktuary CITIES reader (sanktuary.studio)' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const xml = (await r.text()).slice(0, 2_000_000);
+    const items = [...xml.matchAll(/<entry>[\s\S]*?<\/entry>/gi)]
+      .slice(0, 15)
+      .map(([e]) => ({
+        id: plainText(tag(e, 'yt:videoId')),
+        title: plainText(tag(e, 'title')).slice(0, 200),
+        channel: plainText(tag(e, 'name')) || ch.name,
+        excerpt: plainText(tag(e, 'media:description')).slice(0, 300),
+        date: new Date(plainText(tag(e, 'published')) || Date.now()).toISOString(),
+      }))
+      .filter((v) => /^[\w-]{11}$/.test(v.id) && v.title); // the id goes into youtube-nocookie.com embed links
+    const fresh = { at: Date.now(), items, error: null };
+    feedCache.set(u, fresh);
+    return fresh;
+  } catch (err) {
+    const stale = { at: Date.now(), items: hit?.items || [], error: err.message };
+    feedCache.set(u, stale);
+    return stale;
+  }
+}
+
 const ownPostView = (p, full) => ({
   id: p.id,
   source: 'sanktuary',
+  line: p.line || 'heart',
+  kind: p.kind || null,
   title: p.title,
-  excerpt: p.body.replace(/\s+/g, ' ').slice(0, 400),
+  preface: p.preface || '',
+  excerpt: (p.preface || p.body.replace(/\s+/g, ' ')).slice(0, 400),
   image: p.image || null,
-  url: `/blog/${p.slug || p.id}`,
+  url: `/cities/${p.slug || p.id}`,
   author: p.author,
-  publication: 'Sanktuary',
+  publication: 'CITIES',
+  release: p.release || null,
   date: p.published || p.created,
   ...(full ? { body: p.body } : {}),
 });
@@ -3380,6 +3562,11 @@ async function blogApi(req, res, url) {
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, { posts, writers: db.feeds.map((f) => f.name) });
   }
+  if (req.method === 'GET' && what === 'videos') {
+    const videos = (await Promise.all((db.channels || []).map(readChannel))).flatMap((c) => c.items);
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, { videos: videos.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) });
+  }
   if (req.method === 'GET' && what === 'notes') {
     const byId = new Map((await Promise.all(db.feeds.map(readNotes))).flat().map((n) => [n.id, n])); // a writer on two feeds shows once
     const notes = [...byId.values()].sort((a, b) => b.date.localeCompare(a.date));
@@ -3390,7 +3577,7 @@ async function blogApi(req, res, url) {
     // /api/blog/post/<our slug or id>  or  /api/blog/post/<substack publication>/<post slug>
     const second = url.pathname.split('/')[5];
     if (second) {
-      const want = `/blog/${id}/${second}`;
+      const want = `/cities/${id}/${second}`;
       const hit = (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === want);
       return hit ? json(res, hit) : fail(404, 'No such post');
     }
@@ -3399,16 +3586,27 @@ async function blogApi(req, res, url) {
   }
   if (req.method === 'GET' && what === 'images') return stream(req, res, url.searchParams, join(DATA, 'blog', 'images', safeName(id)));
 
-  // Managing: admins only
+  // Writing: any member starts drafts (the /write page) and sends them in; admins publish and manage the rest
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
-  if (!user.admin) fail(403, 'Only admins can manage the blog');
+  if (req.method === 'GET' && what === 'mine')
+    return json(
+      res,
+      Object.values(db.posts)
+        .filter((p) => !p.deleted && p.owner === user.username)
+        .sort((a, b) => b.created.localeCompare(a.created)),
+    );
+  if (!user.admin && what !== 'posts' && !(what === 'images' && req.method === 'PUT')) fail(403, 'Only admins can manage CITIES');
   if (req.method === 'GET' && what === 'admin') {
     const feeds = await Promise.all(
       db.feeds.map(async (f) => ({ ...f, ...(({ error, items }) => ({ error, posts: items.length }))(await readFeed(f)) })),
     );
+    const channels = await Promise.all(
+      (db.channels || []).map(async (c) => ({ ...c, ...(({ error, items }) => ({ error, videos: items.length }))(await readChannel(c)) })),
+    );
     return json(res, {
       feeds,
+      channels,
       posts: Object.values(db.posts)
         .filter((p) => !p.deleted)
         .sort((a, b) => b.created.localeCompare(a.created)),
@@ -3439,6 +3637,29 @@ async function blogApi(req, res, url) {
     saveBlog();
     return json(res, { ok: true });
   }
+  if (what === 'channels' && req.method === 'POST') {
+    const input = await jsonBody(req);
+    const id = await youtubeChannelId(input.url);
+    db.channels ??= [];
+    if (db.channels.some((c) => c.id === id)) fail(409, 'Already added');
+    const ch = { id, name: '', added: new Date().toISOString() };
+    const check = await readChannel(ch);
+    if (check.error && !check.items.length) fail(400, `Couldn't read that channel's videos (${check.error})`);
+    ch.name =
+      String(input.name || '')
+        .trim()
+        .slice(0, 80) ||
+      check.items[0]?.channel ||
+      id;
+    db.channels.push(ch);
+    saveBlog();
+    return json(res, { ...ch, videos: check.items.length });
+  }
+  if (what === 'channels' && req.method === 'DELETE') {
+    db.channels = (db.channels || []).filter((c) => c.id !== url.searchParams.get('id'));
+    saveBlog();
+    return json(res, { ok: true });
+  }
   if (what === 'images' && req.method === 'PUT') {
     const name = safeName(url.searchParams.get('name'));
     if (!THUMBABLE.has(extname(name).toLowerCase())) fail(400, 'Cover images must be pictures');
@@ -3461,11 +3682,20 @@ async function blogApi(req, res, url) {
       if (input.body !== undefined) p.body = String(input.body).slice(0, 100_000);
       if (input.author !== undefined) p.author = String(input.author).trim().slice(0, 80) || p.author;
       if (input.image !== undefined) p.image = input.image && /^\/api\/blog\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
-      if (input.published !== undefined) p.published = input.published ? p.published || new Date().toISOString() : null;
-      // A readable address, fixed once published so shared links keep working: /blog/why-culture-matters
+      if (input.line !== undefined) p.line = BLOG_LINES.includes(input.line) ? input.line : 'heart';
+      if (input.kind !== undefined) p.kind = HEART_KINDS.includes(input.kind) ? input.kind : null;
+      // The preface: one engaging line under the title, and what a shared link shows
+      if (input.preface !== undefined)
+        p.preface = String(input.preface ?? '')
+          .trim()
+          .slice(0, 300);
+      // A public release's streaming links, shown as a "Listen" card under the post
+      if (input.release !== undefined) p.release = /^[\w-]{1,80}$/.test(input.release || '') ? input.release : null;
+      if (input.published !== undefined && user.admin) p.published = input.published ? p.published || new Date().toISOString() : null;
+      // A readable address, fixed once published so shared links keep working: /cities/why-culture-matters
       if (p.published && !p.slug) {
         const base = slugify(p.title) || p.id;
-        const taken = new Set([...Object.values(db.posts).map((x) => x.slug), 'notes']); // /blog/notes is the notes wall
+        const taken = new Set([...Object.values(db.posts).map((x) => x.slug), ...BLOG_RESERVED]);
         p.slug = taken.has(base) ? `${base}-${p.id.slice(0, 4)}` : base;
       }
       p.updated = new Date().toISOString();
@@ -3476,6 +3706,8 @@ async function blogApi(req, res, url) {
         title: 'Untitled',
         body: '',
         author: user.username,
+        owner: user.username,
+        line: 'heart',
         image: null,
         published: null,
         created: new Date().toISOString(),
@@ -3486,8 +3718,14 @@ async function blogApi(req, res, url) {
       return json(res, p);
     }
     const p = (own(db.posts, id) && !db.posts[id].deleted && db.posts[id]) || fail(404, 'No such post');
+    if (!user.admin && (p.owner !== user.username || p.published)) fail(403, 'You can change your own drafts until they are published');
     if (req.method === 'PATCH') {
       apply(p);
+      if (input.submitted && !p.submitted) {
+        // "Send to the editors": every admin hears about it; they publish from Admin Panel > CITIES
+        p.submitted = new Date().toISOString();
+        for (const a of cfg.admins) if (a !== user.username) await notify(a, `${user.username} sent a draft for CITIES: "${p.title}"`, {});
+      }
       saveBlog();
       return json(res, p);
     }
@@ -4732,16 +4970,73 @@ const statSyncSafe = (f) => {
   }
 };
 
-// The public blog page: sanktuary.studio/blog (and /blog/<post>), no account needed
+// CITIES, the public journal: sanktuary.studio/cities (and /cities/<section or post>), no account needed. The old
+// /blog addresses forward here so links already shared keep working. Each address gets its own title, preface and
+// picture in the page's meta tags, so a shared link shows the story (link previews don't run the page's script).
 const BLOG_PAGE = new URL('./blog.html', import.meta.url);
-function blogPage(req, res, url) {
-  if (!/^\/blog(\/[\w-]+){0,2}\/?$/.test(url.pathname)) return staticFile(req, res, url);
+const BLOG_SECTIONS = {
+  heart: ['Heart of the Cities', 'Profiles, case studies and spotlights: the people building the Twin Cities arts scene.'],
+  essays: ['Essays', 'Essays and manifestos from CITIES and the writers we follow.'],
+  notes: ['Notes', 'Short notes from the writers we follow.'],
+  'field-notes': ['Field Notes', 'Straight from the field: shoots, sessions and shows around the Twin Cities.'],
+  videos: ['Videos', 'New videos from Twin Cities creators.'],
+};
+const metaTags = ({ title, text, image, link }) =>
+  [
+    `<title>${escAttr(title)}</title>`,
+    `<meta name="description" content="${escAttr(text)}" />`,
+    `<meta property="og:site_name" content="CITIES · Sanktuary" />`,
+    `<meta property="og:type" content="article" />`,
+    `<meta property="og:title" content="${escAttr(title)}" />`,
+    `<meta property="og:description" content="${escAttr(text)}" />`,
+    `<meta property="og:url" content="${escAttr(link)}" />`,
+    image ? `<meta property="og:image" content="${escAttr(image)}" />` : '',
+    `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
+  ].join('\n    ');
+
+async function blogPage(req, res, url) {
+  if (/^\/blog(\/|$)/.test(url.pathname)) {
+    res.writeHead(301, { location: url.pathname.replace(/^\/blog/, '/cities') + url.search });
+    return res.end();
+  }
+  if (!/^\/cities(\/[\w-]+){0,2}\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  const origin = siteOrigin(req);
+  const [, , a, b] = url.pathname.split('/');
+  let meta = {
+    title: 'CITIES',
+    text: 'Stories from the Twin Cities arts scene, told by the people in it. A Sanktuary journal.',
+    image: null,
+  };
+  if (a && !b && BLOG_SECTIONS[a]) meta = { title: `${BLOG_SECTIONS[a][0]} · CITIES`, text: BLOG_SECTIONS[a][1], image: null };
+  else if (a) {
+    const db = await loadBlog();
+    const own = !b && Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === a || x.id === a));
+    const post = own
+      ? ownPostView(own)
+      : b && (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === `/cities/${a}/${b}`);
+    if (post) meta = { title: `${post.title} · CITIES`, text: post.excerpt.slice(0, 200), image: post.image };
+  }
+  if (meta.image?.startsWith('/')) meta.image = origin + meta.image;
+  const html = (await readFile(BLOG_PAGE, 'utf8')).replace('<!--meta-->', metaTags({ ...meta, link: origin + url.pathname }));
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
-    'content-security-policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:",
+    'content-security-policy':
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:; frame-src https://www.youtube-nocookie.com",
   });
-  return pipeline(createReadStream(BLOG_PAGE), res);
+  res.end(html);
+}
+
+// /write: where members start drafts for CITIES (signed in, never public); admins publish in Admin Panel > CITIES
+const WRITE_PAGE = new URL('./write.html', import.meta.url);
+function writePage(req, res, url) {
+  if (!/^\/write\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'content-security-policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
+  });
+  return pipeline(createReadStream(WRITE_PAGE), res);
 }
 
 // ── Stories: a folder of photos and videos told as a full-screen guided story at /story/<slug> ──
@@ -7160,7 +7455,9 @@ const routes = [
   ['/api/stripe/webhook', stripeWebhook],
   ['/pool/', storePage],
   ['/shop', storePage],
+  ['/cities', blogPage],
   ['/blog', blogPage],
+  ['/write', writePage],
   ['/story/', storyPage],
   ['/release/', htmlPage(RELEASE_PAGE)],
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],

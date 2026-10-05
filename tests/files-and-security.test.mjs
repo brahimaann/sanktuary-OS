@@ -151,6 +151,16 @@ const fakeGoogle = http
         if (f.get('grant_type') === 'refresh_token' && f.get('refresh_token') === 'rt1') return j(200, { access_token: 'at2' });
         return j(400, { error: 'invalid_grant' });
       }
+      // A fake song.link: a single by bob, on SoundCloud and Audiomack
+      if (req.url.startsWith('/odesli?'))
+        return j(200, {
+          entityUniqueId: 'S1',
+          entitiesByUniqueId: { S1: { type: 'song', title: 'Open', artistName: 'bob & carol' } },
+          linksByPlatform: {
+            soundcloud: { url: 'https://soundcloud.com/bob-music/open' },
+            audiomack: { url: 'https://audiomack.com/bob-music/song/open' },
+          },
+        });
       if (req.url.startsWith('/yt/channels')) return j(200, { items: [{ id: 'UC123', snippet: { title: 'Sanktuary TV' } }] });
       if (req.url.startsWith('/upload?') && req.headers.authorization === 'Bearer at2')
         return j(200, {}, { location: 'http://127.0.0.1:3192/upload-session/1' });
@@ -199,6 +209,7 @@ const srv = spawn(process.execPath, [SERVER], {
     GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
     GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
     YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
+    ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
     YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
   },
 });
@@ -1200,10 +1211,65 @@ try {
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
 
-  // Blog: public reading, admin-only writing, drafts hidden, feeds limited to public websites
+  // CITIES (the blog): public reading, members' drafts, admin publishing, drafts hidden, feeds limited to public websites
   check('blog reads without an account', (await fetch(B + '/api/blog')).status === 200);
-  check('blog page is public', (await fetch(B + '/blog')).status === 200 && (await fetch(B + '/blog/abc123')).status === 200);
-  check('members cannot write posts', (await call('bob', '/api/blog/posts', 'POST', { title: 'x' })).status === 403);
+  check('CITIES page is public', (await fetch(B + '/cities')).status === 200 && (await fetch(B + '/cities/abc123')).status === 200);
+  const oldLink = await fetch(B + '/blog/abc123?x=1', { redirect: 'manual' });
+  check('old /blog links forward to /cities', oldLink.status === 301 && oldLink.headers.get('location') === '/cities/abc123?x=1');
+  check('the writing page needs no account to load', (await fetch(B + '/write')).status === 200);
+  check('but drafts need a sign-in', (await call(null, '/api/blog/mine')).status === 401);
+  const bobDraft = JSON.parse((await call('bob', '/api/blog/posts', 'POST', { title: 'Lyric', line: 'heart', kind: 'profile' })).text);
+  check('members can start a draft', bobDraft.owner === 'bob' && bobDraft.kind === 'profile' && !bobDraft.published);
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { published: true, preface: 'Singing since she was two.', line: 'nope' });
+  const bobMine = JSON.parse((await call('bob', '/api/blog/mine')).text);
+  check(
+    'members cannot publish, and a bad section falls back to Heart',
+    bobMine.length === 1 && !bobMine[0].published && bobMine[0].line === 'heart' && bobMine[0].preface === 'Singing since she was two.',
+  );
+  check('others only see their own drafts', JSON.parse((await call('carol', '/api/blog/mine')).text).length === 0);
+  check(
+    "members cannot touch someone else's draft",
+    (await call('carol', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { title: 'x' })).status === 403,
+  );
+  check('members cannot manage writers', (await call('bob', '/api/blog/feeds', 'POST', { url: 'boroma' })).status === 403);
+  check('members cannot read the admin list', (await call('bob', '/api/blog/admin')).status === 403);
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { submitted: true });
+  check(
+    'sending a draft in tells the admins',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /bob sent a draft for CITIES: "Lyric"/.test(n.text)),
+  );
+  await call('alice', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { published: true });
+  check(
+    "admins publish members' drafts",
+    (await (await fetch(B + '/api/blog')).json()).posts.some((p) => p.id === bobDraft.id),
+  );
+  check(
+    'a published post is locked for its writer',
+    (await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { title: 'x' })).status === 403,
+  );
+  const shared = await (await fetch(B + '/cities/lyric')).text();
+  check(
+    'a shared post link shows its title and preface',
+    shared.includes('<meta property="og:title" content="Lyric · CITIES" />') &&
+      shared.includes('<meta property="og:description" content="Singing since she was two." />'),
+  );
+  check(
+    'section pages have their own title',
+    (await (await fetch(B + '/cities/heart')).text()).includes('<title>Heart of the Cities · CITIES</title>'),
+  );
+  const heartTitled = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Heart' })).text);
+  await call('alice', `/api/blog/posts/${heartTitled.id}`, 'PATCH', { published: true });
+  check(
+    'a post called "Heart" does not take over /cities/heart',
+    JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === heartTitled.id).slug !== 'heart',
+  );
+  await call('alice', `/api/blog/posts/${heartTitled.id}`, 'DELETE');
+  const vids = await fetch(B + '/api/blog/videos');
+  check('videos read without an account', vids.status === 200 && Array.isArray((await vids.json()).videos));
+  check(
+    'a channel needs a channel link or handle',
+    (await call('alice', '/api/blog/channels', 'POST', { url: 'not a channel!' })).status === 400,
+  );
   const draft = JSON.parse(
     (await call('alice', '/api/blog/posts', 'POST', { title: 'Why culture', body: 'First line.\n\nSecond https://example.com' })).text,
   );
@@ -1213,16 +1279,16 @@ try {
   const publicPosts = (await (await fetch(B + '/api/blog')).json()).posts;
   check(
     'published post gets a readable address',
-    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === '/blog/why-culture'),
+    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === '/cities/why-culture'),
   );
   check('post readable by its address', (await (await fetch(B + '/api/blog/post/why-culture')).json()).title === 'Why culture');
-  check('two-part blog addresses load the page', (await fetch(B + '/blog/boroma/what-does-change-look-like')).status === 200);
+  check('two-part blog addresses load the page', (await fetch(B + '/cities/boroma/what-does-change-look-like')).status === 200);
   const notesWall = await fetch(B + '/api/blog/notes');
   check('notes wall reads without an account', notesWall.status === 200 && Array.isArray((await notesWall.json()).notes));
   const titledNotes = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Notes', body: 'x' })).text);
   await call('alice', `/api/blog/posts/${titledNotes.id}`, 'PATCH', { published: true });
   check(
-    'a post called "Notes" does not take over /blog/notes',
+    'a post called "Notes" does not take over /cities/notes',
     JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === titledNotes.id).slug !== 'notes',
   );
   await call('alice', `/api/blog/posts/${titledNotes.id}`, 'DELETE');
@@ -1254,6 +1320,25 @@ try {
   const secret = JSON.parse((await call('bob', '/api/timeline', 'POST', { title: 'Secret shoot', kind: 'Shoot', start: day(10) })).text);
   await call('bob', `/api/timeline/${gig.id}`, 'PATCH', { public: true });
   const ep = JSON.parse((await call('alice', '/api/tracks/release', 'POST', { title: 'Open EP', kind: 'EP', date: day(30) })).text);
+  check(
+    'finding streaming links needs an https link',
+    (await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'http://example.com/album' })).status === 400,
+  );
+  const found = JSON.parse(
+    (await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'https://soundcloud.com/bob-music/open' })).text,
+  );
+  check(
+    "streaming links fill the release and its artist's empty profile links",
+    found.stores.soundcloud === 'https://soundcloud.com/bob-music/open' &&
+      found.profile?.username === 'bob' &&
+      JSON.parse((await call('bob', '/api/profiles')).text).find((u) => u.username === 'bob').audiomack ===
+        'https://audiomack.com/bob-music',
+  );
+  check(
+    'profile links already there are kept',
+    JSON.parse((await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'https://soundcloud.com/bob-music/open' })).text)
+      .profile === null,
+  );
   // New releases ask who it's by and who wrote it first; songs' BMI sheets start from these
   const credited = JSON.parse(
     (
