@@ -1508,7 +1508,8 @@ const TRACK_LINKS = [
 // "Find streaming links": one link to the album or single on any platform -> the release's links everywhere, and
 // each song's. song.link (Odesli) maps a link across platforms; Spotify's album page lists the songs in order.
 // Without a key Odesli allows about 10 lookups a minute, so songs are looked up one at a time in the background
-// and whoever asked is told when it's done. Links already typed in are kept when a platform isn't found.
+// and whoever asked is told when it's done. Links already typed in are kept when a platform isn't found. The
+// member the release is by also gets their artist pages added to their profile, where it has none yet.
 const ODESLI = process.env.ODESLI_API_URL || 'https://api.song.link/v1-alpha.1/links';
 const ODESLI_PLATFORMS = ['spotify', 'appleMusic', 'youtubeMusic', 'tidal', 'amazonMusic', 'deezer', 'soundcloud', 'audiomack'];
 async function odesli(link) {
@@ -1518,21 +1519,57 @@ async function odesli(link) {
   const links = Object.fromEntries(
     ODESLI_PLATFORMS.map((k) => [k, d.linksByPlatform?.[k]?.url]).filter(([, v]) => /^https:\/\/[^\s"<>]{3,500}$/.test(v || '')),
   );
-  return {
-    links,
-    title: String(d.entitiesByUniqueId?.[d.entityUniqueId]?.title || ''),
-    type: d.entitiesByUniqueId?.[d.entityUniqueId]?.type,
-  };
+  const entity = d.entitiesByUniqueId?.[d.entityUniqueId] || {};
+  return { links, title: String(entity.title || ''), artist: String(entity.artistName || ''), type: entity.type };
 }
-/** The songs on a Spotify album, in order, from the album page's music:song tags. */
-async function spotifyAlbumSongs(albumUrl) {
-  const html = await fetch(albumUrl, { headers: { 'user-agent': 'Mozilla/5.0 (Sanktuary)' }, signal: AbortSignal.timeout(15_000) })
+const pageText = (u) =>
+  fetch(u, { headers: { 'user-agent': 'Mozilla/5.0 (Sanktuary)' }, signal: AbortSignal.timeout(15_000) })
     .then((r) => (r.ok ? r.text() : ''))
     .catch(() => '');
-  return [...new Set([...html.matchAll(/music:song"\s+content="(https:\/\/open\.spotify\.com\/track\/\w+)"/g)].map((m) => m[1]))].slice(
-    0,
-    40,
-  );
+/** The songs on a Spotify album, in order, and the artist's page, from the page's music:song / music:musician tags. */
+async function spotifyPage(url) {
+  const html = await pageText(url);
+  return {
+    songs: [...new Set([...html.matchAll(/music:song"\s+content="(https:\/\/open\.spotify\.com\/track\/\w+)"/g)].map((m) => m[1]))].slice(
+      0,
+      40,
+    ),
+    artist: html.match(/music:musician"\s+content="(https:\/\/open\.spotify\.com\/artist\/\w+)"/)?.[1] || null,
+  };
+}
+/** The main artist's page on the platforms member profiles have: Spotify, Apple Music, SoundCloud, Audiomack. */
+async function artistPages(links, spotifyArtist) {
+  const pages = { spotify: spotifyArtist };
+  pages.soundcloud = links.soundcloud?.match(/^https:\/\/soundcloud\.com\/[\w-]+/)?.[0];
+  pages.audiomack = links.audiomack?.match(/^https:\/\/audiomack\.com\/[\w-]+(?=\/(song|album))/)?.[0];
+  if (links.appleMusic)
+    pages.appleMusic = (await pageText(links.appleMusic)).match(/https:\/\/music\.apple\.com\/\w{2}\/artist\/[\w%.-]+\/\d+/)?.[0];
+  return Object.fromEntries(Object.entries(pages).filter(([, v]) => v));
+}
+/** The member a release is by: its artist (or song.link's) name, first credited, matched to a name or username. */
+async function releaseMember(name) {
+  const want = slugify(String(name || '').split(/\s*(?:,|&|\+|\bx\b|\band\b|\bfeat\.?|\bft\.?|\bwith\b)\s*/i)[0]);
+  if (!want) return null;
+  for (const username of await currentMembers()) {
+    const p = await readJson(`profiles/${username}.json`, {});
+    if (slugify(username) === want || slugify(p.displayName) === want) return username;
+  }
+  return null;
+}
+/** Fills the member's empty profile links (Spotify, Apple Music, ...) with their artist pages; their own stay. */
+async function linkArtistProfile(r, found, spotifyArtist) {
+  const username = await releaseMember(r.artist || found.artist);
+  if (!username) return null;
+  const pages = await artistPages(found.links, spotifyArtist);
+  const profile = await readJson(`profiles/${username}.json`, {});
+  const added = Object.keys(pages).filter((k) => !profile[k]);
+  if (!added.length) return null;
+  for (const k of added) profile[k] = pages[k];
+  profile.updated = new Date().toISOString();
+  await mkdir(join(DATA, 'profiles'), { recursive: true });
+  await saveJson(`profiles/${username}.json`, profile);
+  emit('profile', { username, ...profile });
+  return { username, added };
 }
 async function findStreamingLinks(db, r, link, done) {
   const found = await odesli(link);
@@ -1541,11 +1578,13 @@ async function findStreamingLinks(db, r, link, done) {
     .filter((t) => t.release === r.id && !t.deleted)
     .sort((a, b) => a.n - b.n);
   const setLinks = (t, links) => (t.links = { ...t.links, ...links });
+  const page = found.links.spotify ? await spotifyPage(found.links.spotify) : { songs: [], artist: null };
+  const profile = await linkArtistProfile(r, found, page.artist).catch(() => null);
   if (found.type === 'song') {
     if (tracks.length === 1) setLinks(tracks[0], found.links);
-    return { songs: tracks.length === 1 ? 1 : 0, later: Promise.resolve() };
+    return { songs: tracks.length === 1 ? 1 : 0, profile, later: Promise.resolve() };
   }
-  const songs = found.links.spotify ? await spotifyAlbumSongs(found.links.spotify) : [];
+  const songs = page.songs;
   const later = (async () => {
     let matched = 0;
     for (const [i, url] of songs.entries()) {
@@ -1558,7 +1597,7 @@ async function findStreamingLinks(db, r, link, done) {
     }
     await done(matched, songs.length);
   })();
-  return { songs: songs.length, later };
+  return { songs: songs.length, profile, later };
 }
 let tracksDb = null;
 let tracksSaved = Promise.resolve();
@@ -1641,13 +1680,13 @@ async function tracksApi(req, res, url) {
     if (req.method === 'POST' && url.searchParams.has('links')) {
       const link = String((await jsonBody(req)).url || '').trim();
       if (!/^https:\/\/[^\s"<>]{3,500}$/.test(link)) fail(400, 'Paste the https:// link to the album or single on any platform');
-      const { songs, later } = await findStreamingLinks(db, r, link, async (matched, total) => {
+      const { songs, profile, later } = await findStreamingLinks(db, r, link, async (matched, total) => {
         changed(r);
         await notify(me, `Streaming links found for ${matched} of ${total} songs on "${r.title}"`, {});
       }).catch((e) => fail(400, e.message));
       later.catch(console.error);
       changed(r);
-      return json(res, { stores: r.stores, songs });
+      return json(res, { stores: r.stores, songs, profile });
     }
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);

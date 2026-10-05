@@ -1765,12 +1765,13 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
                 onClick={() => {
                   setFinding('Looking it up...');
                   api(`/api/tracks/release/${release.id}?links`, { method: 'POST', body: JSON.stringify({ url: findUrl.trim() }) }).then(
-                    (d: { stores: Record<string, string>; songs: number }) => {
+                    (d: { stores: Record<string, string>; songs: number; profile: { username: string; added: string[] } | null }) => {
                       setStores((s) => ({ ...s, ...d.stores }));
+                      const names = d.profile?.added.map((k) => STORES.find(([s]) => s === k)?.[1] || k).join(', ');
                       setFinding(
-                        d.songs > 1
+                        (d.songs > 1
                           ? `Found the album. Each song's links are being filled in; you'll get a notification when it's done.`
-                          : 'Found it.',
+                          : 'Found it.') + (d.profile ? ` Added ${names} to ${d.profile.username}'s profile.` : ''),
                       );
                     },
                     (e) => setFinding((e as Error).message),

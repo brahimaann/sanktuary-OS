@@ -151,6 +151,16 @@ const fakeGoogle = http
         if (f.get('grant_type') === 'refresh_token' && f.get('refresh_token') === 'rt1') return j(200, { access_token: 'at2' });
         return j(400, { error: 'invalid_grant' });
       }
+      // A fake song.link: a single by bob, on SoundCloud and Audiomack
+      if (req.url.startsWith('/odesli?'))
+        return j(200, {
+          entityUniqueId: 'S1',
+          entitiesByUniqueId: { S1: { type: 'song', title: 'Open', artistName: 'bob & carol' } },
+          linksByPlatform: {
+            soundcloud: { url: 'https://soundcloud.com/bob-music/open' },
+            audiomack: { url: 'https://audiomack.com/bob-music/song/open' },
+          },
+        });
       if (req.url.startsWith('/yt/channels')) return j(200, { items: [{ id: 'UC123', snippet: { title: 'Sanktuary TV' } }] });
       if (req.url.startsWith('/upload?') && req.headers.authorization === 'Bearer at2')
         return j(200, {}, { location: 'http://127.0.0.1:3192/upload-session/1' });
@@ -199,6 +209,7 @@ const srv = spawn(process.execPath, [SERVER], {
     GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
     GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
     YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
+    ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
     YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
   },
 });
@@ -1312,6 +1323,21 @@ try {
   check(
     'finding streaming links needs an https link',
     (await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'http://example.com/album' })).status === 400,
+  );
+  const found = JSON.parse(
+    (await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'https://soundcloud.com/bob-music/open' })).text,
+  );
+  check(
+    "streaming links fill the release and its artist's empty profile links",
+    found.stores.soundcloud === 'https://soundcloud.com/bob-music/open' &&
+      found.profile?.username === 'bob' &&
+      JSON.parse((await call('bob', '/api/profiles')).text).find((u) => u.username === 'bob').audiomack ===
+        'https://audiomack.com/bob-music',
+  );
+  check(
+    'profile links already there are kept',
+    JSON.parse((await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'https://soundcloud.com/bob-music/open' })).text)
+      .profile === null,
   );
   // New releases ask who it's by and who wrote it first; songs' BMI sheets start from these
   const credited = JSON.parse(
