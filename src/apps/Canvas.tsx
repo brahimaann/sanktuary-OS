@@ -66,13 +66,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
   const { items, peers, status, setStatus, me, queue, flush, sendCursor, undo, redo, remember, snapshot, canUndo, canRedo } =
     useBoard<Item>(boardId);
   const [linking, setLinking] = useState<{ from: string; x: number; y: number } | null>(null);
-  const [view, setView] = useState<View>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(`sk_board_view_${boardId}`) || '') as View;
-    } catch {
-      return { x: 0, y: 0, z: 1 };
-    }
-  });
+  const [view, setView] = useState<View>({ x: 0, y: 0, z: 1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
@@ -82,12 +76,6 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
   viewRef.current = view;
   const port = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(`sk_board_view_${boardId}`, JSON.stringify(view));
-    } catch {}
-  }, [boardId, view]);
 
   // ── Coordinates ──
   const toWorld = (clientX: number, clientY: number) => {
@@ -390,9 +378,17 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
       minY = Math.min(...list.map((i) => i.y));
     const maxX = Math.max(...list.map((i) => i.x + i.w)),
       maxY = Math.max(...list.map((i) => i.y + i.h));
-    const z = Math.min(2, Math.max(0.1, Math.min((r.width - 80) / (maxX - minX || 1), (r.height - 80) / (maxY - minY || 1))));
+    const z = Math.min(1, Math.max(0.1, Math.min((r.width - 80) / (maxX - minX || 1), (r.height - 80) / (maxY - minY || 1))));
     setView({ z, x: (r.width - (maxX - minX) * z) / 2 - minX * z, y: (r.height - (maxY - minY) * z) / 2 - minY * z });
   };
+
+  // Every device opens the board fitted to its content, so nobody lands on empty space
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (status || fitted.current) return;
+    fitted.current = true;
+    fit();
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const zoomBy = (f: number) => {
     const r = port.current!.getBoundingClientRect();
