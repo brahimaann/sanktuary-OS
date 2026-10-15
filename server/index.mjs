@@ -3980,11 +3980,22 @@ async function publicApi(req, res, url) {
       at: new Date().toISOString(),
       status: 'New',
     };
+    // Asked from a shared board: name the board, and its owner hears about it too
+    const shared = input.board ? await sharedBoard(String(input.board)).catch(() => null) : null;
+    if (shared) Object.assign(j, { board: shared.l.board, boardName: shared.b.meta.name });
     front.joins[j.id] = j;
     saveFront();
     const cfg = await loadConfig();
-    for (const a of cfg.admins)
-      await notify(a, `${name} wants to join the Village${j.role ? ` (${j.role})` : ''}. See Admin Panel > Front page.`, {});
+    if (shared)
+      for (const a of new Set([...cfg.admins, shared.b.meta.owner]))
+        await notify(
+          a,
+          `${name} (${email}) asked for an account and access to the board "${j.boardName}". Admins make the account in Admin Panel; the board's owner adds them to it.`,
+          {},
+        );
+    else
+      for (const a of cfg.admins)
+        await notify(a, `${name} wants to join the Village${j.role ? ` (${j.role})` : ''}. See Admin Panel > Front page.`, {});
     return json(res, { ok: true });
   }
   // Admins: edit the intro, read and answer join requests
@@ -6009,7 +6020,7 @@ async function boardsApi(req, res, url) {
       // Anyone who just lost access is disconnected from the board
       const cfg = await loadConfig();
       for (const [conn, c] of b.clients) {
-        if (!canSeeBoard({ username: c.user.username, admin: cfg.admins.includes(c.user.username) }, b.meta)) {
+        if (!c.user.guest && !canSeeBoard({ username: c.user.username, admin: cfg.admins.includes(c.user.username) }, b.meta)) {
           c.res.write('event: deleted\ndata: {}\n\n');
           c.res.end();
           b.clients.delete(conn);
@@ -6128,7 +6139,172 @@ async function boardsApi(req, res, url) {
       return thumb(res, asset, 1600);
     return stream(req, res, url.searchParams, asset);
   }
+  if (sub === 'shares') {
+    if (b.meta.owner !== user.username && !user.admin) fail(403, 'Only the creator or an admin can share a board outside the team');
+    const all = await loadBoardLinks();
+    if (req.method === 'GET')
+      return json(
+        res,
+        Object.entries(all)
+          .filter(([, l]) => l.board === id)
+          .map(([t, l]) => boardLinkView(t, l))
+          .reverse(),
+      );
+    if (req.method === 'POST') {
+      const q = await jsonBody(req);
+      const days = LINK_DAYS.includes(Number(q.days)) ? Number(q.days) : fail(400, 'Bad expiry');
+      const password = String(q.password || '');
+      if (password && password.length < 4) fail(400, 'Use a password of at least 4 characters');
+      const t = randomBytes(24).toString('base64url');
+      all[t] = {
+        board: id,
+        level: q.level === 'comment' ? 'comment' : 'view',
+        createdBy: user.username,
+        created: new Date().toISOString(),
+        expires: days ? new Date(Date.now() + days * 864e5).toISOString() : null,
+        password: password ? hashPassword(password) : null,
+        views: 0,
+      };
+      saveBoardLinks();
+      return json(res, boardLinkView(t, all[t]));
+    }
+    if (req.method === 'DELETE') {
+      const l = own(all, file);
+      if (l?.board !== id) fail(404, 'No such link');
+      l.revoked = true;
+      saveBoardLinks();
+      for (const [conn, c] of b.clients) if (c.link === file) (c.res.end(), b.clients.delete(conn)); // guests on it leave now
+      return json(res, boardLinkView(file, l));
+    }
+  }
   fail(404, 'Unknown board action');
+}
+
+// ── /b/<token>: a board shown to anyone with the link, no account needed (phone or computer) ──
+// Links live in data/board-links.json, never in the board's meta (which every member's window receives).
+// Levels: "view", or "comment" (a guest pins a signed note). Editing stays with members. A guest can also ask for
+// an account and access: that lands in Admin Panel > Front page as a join request naming the board, and notifies
+// the board's owner and the admins (admins make the account, the owner adds them to the board).
+let boardLinks = null;
+let boardLinksSaved = Promise.resolve();
+const loadBoardLinks = async () => (boardLinks ??= await readJson('board-links.json', {}));
+const saveBoardLinks = () => (boardLinksSaved = boardLinksSaved.then(() => saveJson('board-links.json', boardLinks)).catch(console.error));
+const boardLinkView = (token, l) => ({
+  token,
+  url: `/b/${token}`,
+  level: l.level,
+  createdBy: l.createdBy,
+  created: l.created,
+  expires: l.expires,
+  password: !!l.password,
+  revoked: !!l.revoked,
+  views: l.views,
+});
+/** The board behind a live share link, or a 404/410 that says why not. */
+async function sharedBoard(token) {
+  const l = (/^[\w-]{32}$/.test(token) && own(await loadBoardLinks(), token)) || fail(404, 'This link does not exist');
+  if (l.revoked) fail(410, 'This link has been turned off');
+  if (l.expires && Date.parse(l.expires) < Date.now()) fail(410, 'This link has expired');
+  return { l, b: await loadBoard(l.board) };
+}
+const BOARD_PAGE = new URL('./board.html', import.meta.url);
+const guestNotes = new Map(); // "<token>|<ip>" -> { n, since }
+async function publicBoard(req, res, url) {
+  res.setHeader('x-robots-tag', 'noindex, nofollow');
+  res.setHeader('referrer-policy', 'no-referrer'); // the token is in the URL
+  const [, , token = '', action = '', file = ''] = url.pathname.split('/'); // /b/<token>/<info|unlock|live|asset|note>
+  if (!action) {
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-security-policy':
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'",
+    });
+    return pipeline(createReadStream(BOARD_PAGE), res);
+  }
+  const { l, b } = await sharedBoard(token);
+  const id = l.board;
+  const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+  const cookieName = `sk_board_${token.slice(0, 10)}`;
+  const pass = l.password ? createHmac('sha256', process.env.CLERK_SECRET_KEY).update(`${token}:${l.password}`).digest('base64url') : null;
+  const unlocked = !l.password || (req.headers.cookie || '').split(/;\s*/).includes(`${cookieName}=${pass}`);
+
+  if (action === 'unlock' && req.method === 'POST') {
+    const k = `b${token}|${ip}`;
+    const t = unlockTries.get(k);
+    const tries = t && Date.now() - t.since < 15 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 10) fail(429, 'Too many wrong passwords. Try again in 15 minutes.');
+    if (!l.password || !passwordOk((await jsonBody(req)).password || '', l.password)) {
+      unlockTries.set(k, { ...tries, n: tries.n + 1 });
+      fail(403, 'Wrong password');
+    }
+    unlockTries.delete(k);
+    const secure = /https/.test(req.headers['cf-visitor'] || '') ? '; Secure' : '';
+    res.setHeader('set-cookie', `${cookieName}=${pass}; Path=/b/${token}; HttpOnly; SameSite=Lax; Max-Age=${12 * 3600}${secure}`);
+    return json(res, { ok: true });
+  }
+  if (action === 'info') {
+    if (!unlocked) return json(res, { name: 'Protected board', locked: true });
+    l.views++;
+    saveBoardLinks();
+    count('linkOpens');
+    return json(res, { name: b.meta.name, level: l.level, locked: false, sharedBy: l.createdBy });
+  }
+  if (!unlocked) fail(401, 'This link needs a password');
+
+  if (action === 'live' && req.method === 'GET') {
+    const conn = randomUUID();
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
+    res.write(`event: init\ndata: ${JSON.stringify({ items: [...b.items.values()] })}\n\n`);
+    // Guests get item changes only: no cursors, and not the meta (it names the board's members)
+    const guest = { write: (m) => /^event: (ops|deleted)\n/.test(m) && res.write(m), end: () => res.end() };
+    b.clients.set(conn, { res: guest, user: { username: 'Guest', guest: true }, color: '#808080', link: token });
+    const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+    req.on('close', () => (clearInterval(ping), b.clients.delete(conn)));
+    return;
+  }
+  if (action === 'asset' && req.method === 'GET') {
+    const asset = join(DATA, 'boards', id, 'assets', safeName(file));
+    if (url.searchParams.has('view') && THUMBABLE.has(extname(asset).toLowerCase()) && !asset.endsWith('.gif'))
+      return thumb(res, asset, 1600);
+    return stream(req, res, url.searchParams, asset);
+  }
+  if (action === 'note' && req.method === 'POST') {
+    if (l.level !== 'comment') fail(403, 'This link is view only');
+    const k = `${token}|${ip}`;
+    const t = guestNotes.get(k);
+    const tries = t && Date.now() - t.since < 60 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 20) fail(429, 'That is a lot of comments. Try again in a while.');
+    guestNotes.set(k, { ...tries, n: tries.n + 1 });
+    const q = await jsonBody(req);
+    const name =
+      String(q.name || '')
+        .trim()
+        .slice(0, 60) || fail(400, 'Add your name');
+    const text =
+      String(q.text || '')
+        .trim()
+        .slice(0, 1000) || fail(400, 'Write a comment');
+    const at = (v) => (Number.isFinite(v) ? Math.max(-1e6, Math.min(1e6, v)) : 0);
+    const note = {
+      id: randomUUID().slice(0, 12),
+      type: 'note',
+      x: at(q.x),
+      y: at(q.y),
+      w: 220,
+      h: 120,
+      z: Math.max(0, ...[...b.items.values()].map((i) => i.z || 0)) + 1,
+      color: '#ffffff',
+      text: `💬 ${name}: ${text}`,
+    };
+    b.items.set(note.id, note);
+    Object.assign(b.meta, { updated: new Date().toISOString(), updatedBy: `${name} (guest)` });
+    saveBoardSoon(id, b);
+    broadcast(b, 'ops', { conn: null, ops: [{ put: note }] });
+    await notify(b.meta.owner, `${name} commented on the board "${b.meta.name}" from a share link.`, {});
+    return json(res, note);
+  }
+  fail(404, 'Not found');
 }
 
 // ── /api/admin/*: admin panel ──────────────────────────────────────────
@@ -7463,6 +7639,7 @@ const routes = [
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
+  ['/b/', publicBoard],
   // Normally the service worker answers the phone's "Share to Sanktuary"; if it wasn't running, say so instead of 404
   ['/share-target', (req, res) => (req.resume(), res.writeHead(303, { location: '/?share=missed' }).end())],
 ];

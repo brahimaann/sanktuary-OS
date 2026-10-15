@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Board shared from Sanktuary</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #008080;
+        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+        font-size: 13px;
+        color: #000;
+      }
+      .win {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        background: #c0c0c0;
+      }
+      .title {
+        background: linear-gradient(90deg, #000080, #1084d0);
+        color: #fff;
+        font-weight: 700;
+        padding: 4px 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 4px;
+        align-items: center;
+        border-bottom: 1px solid #808080;
+      }
+      button {
+        font: inherit;
+        padding: 4px 10px;
+        min-height: 30px;
+        background: #c0c0c0;
+        color: #000;
+        border: 1px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: inset -1px -1px #808080;
+        cursor: pointer;
+      }
+      button:active,
+      button.on {
+        border-color: #000 #fff #fff #000;
+        box-shadow: inset 1px 1px #808080;
+      }
+      .grow {
+        flex: 1;
+      }
+      #port {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+        touch-action: none;
+        cursor: grab;
+        background-color: #fafafa;
+        background-image: radial-gradient(#d0d0d0 1px, transparent 1px);
+      }
+      #port.placing {
+        cursor: crosshair;
+      }
+      #world {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform-origin: 0 0;
+      }
+      #world svg {
+        position: absolute;
+        overflow: visible;
+        left: 0;
+        top: 0;
+      }
+      .item {
+        position: absolute;
+        overflow: hidden;
+        word-wrap: break-word;
+      }
+      .note {
+        padding: 10px;
+        box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.25);
+        white-space: pre-wrap;
+        font-size: 14px;
+      }
+      .text {
+        font-size: 28px;
+        font-weight: 700;
+        white-space: pre-wrap;
+      }
+      .item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        pointer-events: none;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #808080;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .card a {
+        color: #000080;
+        word-break: break-all;
+      }
+      .status {
+        padding: 2px 6px;
+        border-top: 1px solid #fff;
+        color: #333;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.25);
+        z-index: 10;
+      }
+      .modal.open {
+        display: flex;
+      }
+      .dlg {
+        width: min(380px, 100%);
+        background: #c0c0c0;
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        box-shadow: 1px 1px 0 #000;
+      }
+      .dlg form {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .dlg input,
+      .dlg textarea {
+        font: inherit;
+        font-size: 16px; /* no zoom-on-focus on phones */
+        width: 100%;
+        padding: 4px;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        background: #fff;
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+      .hp {
+        position: absolute;
+        left: -9999px;
+      }
+      .err {
+        color: #a00000;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="win">
+      <div class="title" id="title">Sanktuary board</div>
+      <div class="bar">
+        <button id="fit">Fit</button>
+        <button id="out" aria-label="Zoom out">−</button>
+        <button id="in" aria-label="Zoom in">+</button>
+        <button id="comment" hidden>Add comment</button>
+        <span class="grow"></span>
+        <button id="ask">Request access</button>
+      </div>
+      <div id="port"><div id="world"></div></div>
+      <div class="status" id="status">Loading...</div>
+    </div>
+
+    <div class="modal" id="lock">
+      <div class="dlg">
+        <div class="title">Protected board</div>
+        <form id="unlock">
+          This board needs a password.
+          <input type="password" id="pw" autocomplete="off" required />
+          <div class="err" id="lockErr"></div>
+          <div class="row"><button>Open</button></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="note">
+      <div class="dlg">
+        <div class="title">Add a comment</div>
+        <form id="noteForm">
+          <input id="noteName" placeholder="Your name" maxlength="60" required />
+          <textarea id="noteText" rows="4" placeholder="Your comment" maxlength="1000" required></textarea>
+          <div class="err" id="noteErr"></div>
+          <div class="row">
+            <button type="button" data-close>Cancel</button>
+            <button>Pin it</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal" id="req">
+      <div class="dlg">
+        <div class="title">Request access</div>
+        <form id="reqForm">
+          Ask for a Sanktuary account and access to this board. The board's owner and our admins will get back to you.
+          <input id="reqName" placeholder="Your name" maxlength="100" required />
+          <input id="reqEmail" type="email" placeholder="Email" maxlength="200" required />
+          <textarea id="reqMsg" rows="3" placeholder="Why do you need access? (optional)" maxlength="2000"></textarea>
+          <input class="hp" id="reqSite" tabindex="-1" autocomplete="off" aria-hidden="true" />
+          <div class="err" id="reqErr"></div>
+          <div class="row">
+            <button type="button" data-close>Cancel</button>
+            <button>Send</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const token = location.pathname.split('/')[2] || '';
+      const base = `/b/${token}`;
+      const $ = (id) => document.getElementById(id);
+      const port = $('port');
+      const world = $('world');
+      let items = {};
+      let view = { x: 0, y: 0, z: 1 };
+      let placing = false;
+      let at = null;
+
+      const say = (t) => ($('status').textContent = t);
+      const post = async (url, body) => {
+        const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error((await r.text()) || r.statusText);
+        return r.json();
+      };
+      const open = (id) => $(id).classList.add('open');
+      const close = (id) => $(id).classList.remove('open');
+      document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => b.closest('.modal').classList.remove('open')));
+
+      // ── Drawing ──
+      const asset = (src) => {
+        const m = /^\/api\/boards\/[\w-]+\/assets\/([^?]+)/.exec(src || '');
+        if (!m) return null;
+        return `${base}/asset/${m[1]}${/\.(gif|webp)$/i.test(m[1]) ? '' : '?view'}`;
+      };
+      const isPicture = (s) => /\.(png|jpe?g|gif|webp|avif|bmp)(\?|$)/i.test(s || '');
+      function draw() {
+        world.textContent = '';
+        const all = Object.values(items).sort((a, b) => (a.z || 0) - (b.z || 0));
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        for (const e of all.filter((i) => i.type === 'edge')) {
+          const a = items[e.from],
+            b = items[e.to];
+          if (!a || !b) continue;
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', a.x + a.w / 2);
+          line.setAttribute('y1', a.y + a.h / 2);
+          line.setAttribute('x2', b.x + b.w / 2);
+          line.setAttribute('y2', b.y + b.h / 2);
+          line.setAttribute('stroke', '#555');
+          line.setAttribute('stroke-width', '2');
+          svg.appendChild(line);
+        }
+        world.appendChild(svg);
+        for (const i of all) {
+          if (i.type === 'edge') continue;
+          const el = document.createElement('div');
+          el.className = 'item';
+          Object.assign(el.style, { left: `${i.x}px`, top: `${i.y}px`, width: `${i.w}px`, height: `${i.h}px` });
+          const src = asset(i.src);
+          if (i.type === 'note') {
+            el.classList.add('note');
+            el.style.background = i.color || '#fff59d';
+            el.textContent = i.text || '';
+          } else if (i.type === 'text') {
+            el.classList.add('text');
+            el.textContent = i.text || '';
+          } else if ((i.type === 'image' || i.type === 'file') && src && isPicture(i.src)) {
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = i.name || '';
+            img.loading = 'lazy';
+            el.appendChild(img);
+          } else {
+            el.classList.add('card');
+            const link = i.url || (src && `${src.split('?')[0]}`);
+            const name = document.createElement(link ? 'a' : 'b');
+            name.textContent = i.name || i.text || i.url || 'File';
+            if (link) Object.assign(name, { href: link, target: '_blank', rel: 'noopener noreferrer' });
+            el.appendChild(name);
+          }
+          world.appendChild(el);
+        }
+        place();
+      }
+      const place = () => {
+        world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.z})`;
+        port.style.backgroundSize = `${24 * view.z}px ${24 * view.z}px`;
+        port.style.backgroundPosition = `${view.x}px ${view.y}px`;
+      };
+      function fit() {
+        const list = Object.values(items).filter((i) => i.type !== 'edge');
+        const r = port.getBoundingClientRect();
+        if (!list.length) return ((view = { x: r.width / 2, y: r.height / 2, z: 1 }), place());
+        const minX = Math.min(...list.map((i) => i.x)),
+          minY = Math.min(...list.map((i) => i.y)),
+          maxX = Math.max(...list.map((i) => i.x + i.w)),
+          maxY = Math.max(...list.map((i) => i.y + i.h));
+        const z = Math.min(1, Math.max(0.05, Math.min((r.width - 40) / (maxX - minX || 1), (r.height - 40) / (maxY - minY || 1))));
+        view = { z, x: (r.width - (maxX - minX) * z) / 2 - minX * z, y: (r.height - (maxY - minY) * z) / 2 - minY * z };
+        place();
+      }
+      const zoomAt = (f, sx, sy) => {
+        const z = Math.min(4, Math.max(0.05, view.z * f));
+        view = { z, x: sx - ((sx - view.x) * z) / view.z, y: sy - ((sy - view.y) * z) / view.z };
+        place();
+      };
+      const middle = () => {
+        const r = port.getBoundingClientRect();
+        return [r.width / 2, r.height / 2];
+      };
+      $('fit').onclick = fit;
+      $('in').onclick = () => zoomAt(1.25, ...middle());
+      $('out').onclick = () => zoomAt(1 / 1.25, ...middle());
+
+      // ── Pan (drag, scroll), zoom (pinch, Ctrl + scroll) ──
+      const pointers = new Map();
+      let last = null;
+      port.addEventListener(
+        'wheel',
+        (e) => {
+          e.preventDefault();
+          const r = port.getBoundingClientRect();
+          if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
+          else ((view = { ...view, x: view.x - e.deltaX, y: view.y - e.deltaY }), place());
+        },
+        { passive: false },
+      );
+      port.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('a')) return;
+        port.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: 0 });
+        last = null;
+      });
+      port.addEventListener('pointermove', (e) => {
+        const p = pointers.get(e.pointerId);
+        if (!p) return;
+        const r = port.getBoundingClientRect();
+        if (pointers.size === 2) {
+          const [a, b] = [...pointers.values()];
+          const before = Math.hypot(a.x - b.x, a.y - b.y);
+          Object.assign(p, { x: e.clientX, y: e.clientY });
+          const after = Math.hypot(a.x - b.x, a.y - b.y);
+          if (before) zoomAt(after / before, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+          p.moved += 10;
+          return;
+        }
+        p.moved += Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y);
+        view = { ...view, x: view.x + e.clientX - p.x, y: view.y + e.clientY - p.y };
+        Object.assign(p, { x: e.clientX, y: e.clientY });
+        place();
+      });
+      const up = (e) => {
+        const p = pointers.get(e.pointerId);
+        pointers.delete(e.pointerId);
+        if (!p || p.moved > 6 || !placing) return;
+        // A tap while placing pins the comment there
+        const r = port.getBoundingClientRect();
+        at = { x: (e.clientX - r.left - view.x) / view.z, y: (e.clientY - r.top - view.y) / view.z };
+        setPlacing(false);
+        $('noteErr').textContent = '';
+        open('note');
+        ($('noteName').value ? $('noteText') : $('noteName')).focus();
+      };
+      port.addEventListener('pointerup', up);
+      port.addEventListener('pointercancel', (e) => pointers.delete(e.pointerId));
+      addEventListener('resize', place);
+
+      // ── Comments (comment links only) ──
+      const setPlacing = (on) => {
+        placing = on;
+        port.classList.toggle('placing', on);
+        $('comment').classList.toggle('on', on);
+        say(on ? 'Tap the board where your comment should go.' : '');
+      };
+      $('comment').onclick = () => setPlacing(!placing);
+      try {
+        $('noteName').value = localStorage.getItem('sk_guest_name') || '';
+      } catch {}
+      $('noteForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          const name = $('noteName').value.trim();
+          const note = await post(`${base}/note`, { name, text: $('noteText').value, ...at });
+          try {
+            localStorage.setItem('sk_guest_name', name);
+          } catch {}
+          items[note.id] = note;
+          draw();
+          $('noteText').value = '';
+          close('note');
+          say('Comment pinned. The board’s people can see it now.');
+        } catch (err) {
+          $('noteErr').textContent = err.message;
+        }
+      };
+
+      // ── Request access ──
+      $('ask').onclick = () => {
+        $('reqErr').textContent = '';
+        open('req');
+        $('reqName').focus();
+      };
+      $('reqForm').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await post('/api/public/join', {
+            name: $('reqName').value,
+            email: $('reqEmail').value,
+            message: $('reqMsg').value,
+            role: 'Board access',
+            website: $('reqSite').value,
+            board: token,
+          });
+          close('req');
+          say('Request sent. We will email you.');
+        } catch (err) {
+          $('reqErr').textContent = err.message;
+        }
+      };
+
+      // ── Load ──
+      $('unlock').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await post(`${base}/unlock`, { password: $('pw').value });
+          close('lock');
+          start();
+        } catch (err) {
+          $('lockErr').textContent = err.message;
+        }
+      };
+      async function start() {
+        const r = await fetch(`${base}/info`);
+        if (!r.ok) return say((await r.text()) || 'This link does not work.');
+        const info = await r.json();
+        if (info.locked) return (open('lock'), say('This board needs a password.'), $('pw').focus());
+        document.title = `${info.name} · Sanktuary`;
+        $('title').textContent = `${info.name} · shared by ${info.sharedBy}`;
+        $('comment').hidden = info.level !== 'comment';
+        const es = new EventSource(`${base}/live`);
+        let first = true;
+        es.addEventListener('init', (e) => {
+          items = Object.fromEntries(JSON.parse(e.data).items.map((i) => [i.id, i]));
+          draw();
+          if (first) fit(); // open around the content, not at the corner
+          first = false;
+          say(info.level === 'comment' ? 'You can look around and add comments.' : 'View only.');
+        });
+        es.addEventListener('ops', (e) => {
+          for (const op of JSON.parse(e.data).ops) op.put ? (items[op.put.id] = op.put) : delete items[op.del];
+          draw();
+        });
+        es.addEventListener('deleted', () => (es.close(), (items = {}), draw(), say('This board was deleted.')));
+      }
+      start();
+    </script>
+  </body>
+</html>

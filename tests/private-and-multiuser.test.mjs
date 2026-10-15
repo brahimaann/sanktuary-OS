@@ -140,6 +140,67 @@ try {
   );
   bobLive.close();
 
+  // ── Public board links: guests view (or comment) without an account, even on a private board ──
+  const guest = async (path, method = 'GET', body, headers = {}) => {
+    const r = await fetch(B + path, {
+      method,
+      headers: { 'content-type': 'application/json', ...headers },
+      body: body && JSON.stringify(body),
+    });
+    return { status: r.status, text: await r.text(), cookie: r.headers.get('set-cookie') };
+  };
+  check('carol cannot make a link to it', (await call('carol', `/api/boards/${board.id}/shares`, 'POST', { days: 7 })).status === 404);
+  const view = (await call('bob', `/api/boards/${board.id}/shares`, 'POST', { days: 7, level: 'view' })).data;
+  check('owner makes a view link', view.level === 'view' && /^\/b\/[\w-]{32}$/.test(view.url));
+  check('the page loads', (await guest(view.url)).status === 200);
+  check('a guest sees the name', JSON.parse((await guest(`${view.url}/info`)).text).name === 'Bob Board');
+  const guestLive = (() => {
+    const ctrl = new AbortController();
+    const s = { text: '', ended: false, close: () => ctrl.abort() };
+    fetch(`${B}${view.url}/live`, { signal: ctrl.signal })
+      .then(async (r) => {
+        for await (const v of r.body) s.text += Buffer.from(v).toString();
+        s.ended = true;
+      })
+      .catch(() => (s.ended = true));
+    return s;
+  })();
+  await wait(300);
+  check('a guest gets the items live', guestLive.text.includes('"id":"a"') && !guestLive.text.includes('"members"'));
+  check('a view link cannot comment', (await guest(`${view.url}/note`, 'POST', { name: 'Zed', text: 'hi' })).status === 403);
+  check('a made-up link is a 404', (await guest(`/b/${'x'.repeat(32)}/info`)).status === 404);
+
+  const talk = (await call('bob', `/api/boards/${board.id}/shares`, 'POST', { days: 0, level: 'comment', password: 'open sesame' })).data;
+  check('a password link hides the board', JSON.parse((await guest(`${talk.url}/info`)).text).locked === true);
+  check('...and its items', (await guest(`${talk.url}/live`)).status === 401);
+  check('wrong password refused', (await guest(`${talk.url}/unlock`, 'POST', { password: 'nope' })).status === 403);
+  const un = await guest(`${talk.url}/unlock`, 'POST', { password: 'open sesame' });
+  const jar = { cookie: un.cookie.split(';')[0] };
+  const note = await guest(`${talk.url}/note`, 'POST', { name: 'Zed', text: 'Love the blue one', x: 10, y: 20 }, jar);
+  check('a comment link pins a signed note', note.status === 200 && JSON.parse(note.text).text.includes('Zed: Love the blue one'));
+  await wait(300);
+  check('other guests see it live', guestLive.text.includes('Love the blue one'));
+  check('carol (no access) still cannot make links', (await call('carol', `/api/boards/${board.id}/shares`)).status === 404);
+  check('owner lists the links', (await call('bob', `/api/boards/${board.id}/shares`)).data.length === 2);
+
+  const ask = await guest('/api/public/join', 'POST', {
+    name: 'Zed',
+    email: 'zed@example.com',
+    message: 'I am the client',
+    board: view.url.slice(3),
+  });
+  check('a guest asks for access', ask.status === 200);
+  const joins = (await call('alice', '/api/public/admin')).data.joins;
+  check(
+    'the request names the board',
+    joins.some((j) => j.name === 'Zed' && j.boardName === 'Bob Board'),
+  );
+
+  check('owner turns the link off', (await call('bob', `/api/boards/${board.id}/shares/${view.token}`, 'DELETE')).data.revoked === true);
+  await wait(300);
+  check('guests on it are dropped', guestLive.ended);
+  check('the link stops working', (await guest(`${view.url}/info`)).status === 410);
+
   // ── Private plan: activity only visible to its people ──
   const plan = (await call('bob', '/api/boards', 'POST', { name: 'Secret Plan', kind: 'kanban' })).data;
   await call('bob', `/api/boards/${plan.id}`, 'PATCH', { members: [] }); // bob only (+ admins)

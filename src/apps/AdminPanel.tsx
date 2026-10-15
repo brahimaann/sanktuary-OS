@@ -1347,7 +1347,17 @@ const ShopTab: React.FC = () => {
   );
 };
 
-type Join = { id: string; name: string; email: string; role: string; links: string; message: string; at: string; status: string };
+type Join = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  links: string;
+  message: string;
+  at: string;
+  status: string;
+  boardName?: string;
+};
 type Booking = {
   id: string;
   artist: string;
@@ -1736,6 +1746,7 @@ const FrontTab: React.FC = () => {
               <b>{j.name}</b>
               <a href={`mailto:${encodeURIComponent(j.email).replace('%40', '@')}`}>{j.email}</a>
               {j.role && <span>· {j.role}</span>}
+              {j.boardName && <span>· for the board "{j.boardName}" (make their account, then its owner adds them)</span>}
               <span style={{ color: '#555' }}>· {new Date(j.at).toLocaleDateString()}</span>
               <span style={{ flex: 1 }} />
               <select style={input} value={j.status} onChange={(e) => save({ join: { id: j.id, status: e.target.value } })}>

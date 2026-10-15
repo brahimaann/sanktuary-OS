@@ -1247,11 +1247,11 @@ try {
     'a published post is locked for its writer',
     (await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { title: 'x' })).status === 403,
   );
-  const shared = await (await fetch(B + '/cities/lyric')).text();
+  const postPage = await (await fetch(B + '/cities/lyric')).text();
   check(
     'a shared post link shows its title and preface',
-    shared.includes('<meta property="og:title" content="Lyric · CITIES" />') &&
-      shared.includes('<meta property="og:description" content="Singing since she was two." />'),
+    postPage.includes('<meta property="og:title" content="Lyric · CITIES" />') &&
+      postPage.includes('<meta property="og:description" content="Singing since she was two." />'),
   );
   check(
     'section pages have their own title',

@@ -3,6 +3,7 @@ import { useAuth } from '@clerk/react';
 import { useWindowManager } from '../wm/manager';
 import { useApi, useMe } from '../utils/api';
 import MembersPicker from './MembersPicker';
+import { PublicLinks, dlg } from './ShareDialog';
 import { isTouch } from './fileTypes';
 import { dialog } from '../utils/dialog';
 import { DRAG_BOARD } from '../utils/refs';
@@ -30,6 +31,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
   const [selected, setSelected] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [linking, setLinking] = useState(false);
   const { me } = useMe();
 
   const load = useCallback(() => {
@@ -134,6 +136,11 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
         <button style={button} disabled={!canShare} onClick={() => setSharing(true)} title="Choose who can see it (creator or admin)">
           Sharing...
         </button>
+        {!plans && (
+          <button style={button} disabled={!canShare} onClick={() => setLinking(true)} title="A link for people without an account">
+            Public link...
+          </button>
+        )}
         <button style={button} onClick={load}>
           Refresh
         </button>
@@ -191,6 +198,15 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
           </div>
         ))}
       </div>
+      {linking && pick && (
+        <div style={{ position: 'absolute', inset: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}>
+          <div style={dlg}>
+            <b>Public link to "{pick.name}"</b>
+            <div>Anyone with the link can see the board on a phone or computer, and ask for an account and access.</div>
+            <PublicLinks board={pick.id} onClose={() => setLinking(false)} />
+          </div>
+        </div>
+      )}
       {sharing && pick && (
         <MembersPicker
           title={`Who can see "${pick.name}"?`}
