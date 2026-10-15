@@ -5223,6 +5223,18 @@ function storyPage(req, res, url) {
   return pipeline(createReadStream(STORY_PAGE), res);
 }
 
+// ── /welcome: the landing page (Home, MRND, MHOTC; Shop is /shop). Visitors see it full screen on the desktop. ──
+const WELCOME_PAGE = new URL('./welcome.html', import.meta.url);
+function welcomePage(req, res, url) {
+  if (!/^\/welcome(\/(mrnd|mhotc))?\/?$/i.test(url.pathname)) fail(404, 'Not found');
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'content-security-policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:",
+  });
+  return pipeline(createReadStream(WELCOME_PAGE), res);
+}
+
 // ── Public release pages (/release/<slug>) and the portfolio (/portfolio) ──
 // A release is public when "Announce publicly" is ticked and it isn't private to some members. Its page shows
 // only the songs ticked "Show on the public page": title, credits, links, and (if a preview start is set) a
@@ -7631,6 +7643,7 @@ const routes = [
   ['/api/stripe/webhook', stripeWebhook],
   ['/pool/', storePage],
   ['/shop', storePage],
+  ['/welcome', welcomePage],
   ['/cities', blogPage],
   ['/blog', blogPage],
   ['/write', writePage],

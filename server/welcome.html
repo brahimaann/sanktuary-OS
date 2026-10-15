@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Welcome to Sanktuary</title>
+    <meta name="description" content="Sanktuary: MRND music and talent, MHOTC community and the CITIES journal, and the shop." />
+    <meta property="og:title" content="Welcome to Sanktuary" />
+    <meta property="og:description" content="MRND music and talent, MHOTC community and the CITIES journal, and the shop." />
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      :root {
+        --face: #c0c0c0;
+        --navy: #000080;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--face);
+        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+        font-size: 13px;
+        color: #000;
+      }
+      a {
+        color: var(--navy);
+      }
+      /* ── Ticker: the latest, endlessly scrolling ── */
+      .ticker {
+        background: #000;
+        color: #55ff55;
+        font-family: 'Courier New', monospace;
+        overflow: hidden;
+        white-space: nowrap;
+        border-bottom: 2px solid #808080;
+      }
+      .ticker .track {
+        display: inline-flex;
+        animation: tick var(--secs, 40s) linear infinite;
+        padding: 5px 0;
+      }
+      .ticker:hover .track {
+        animation-play-state: paused;
+      }
+      .ticker a {
+        color: inherit;
+        text-decoration: none;
+        padding: 0 22px;
+      }
+      .ticker a:hover {
+        text-decoration: underline;
+      }
+      .ticker b {
+        color: #ffff55;
+        font-weight: 400;
+      }
+      @keyframes tick {
+        to {
+          transform: translateX(-50%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ticker {
+          overflow-x: auto;
+        }
+        .ticker .track {
+          animation: none;
+        }
+      }
+      /* ── Header and tabs ── */
+      header {
+        background: linear-gradient(90deg, var(--navy), #1084d0);
+        color: #fff;
+        padding: 14px 16px 0;
+      }
+      .brand {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 6px;
+      }
+      .brand small {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 1px;
+        font-weight: 400;
+        opacity: 0.85;
+      }
+      nav {
+        display: flex;
+        gap: 2px;
+        margin-top: 12px;
+        overflow-x: auto;
+      }
+      nav a {
+        color: #000;
+        background: var(--face);
+        text-decoration: none;
+        padding: 6px 14px;
+        border: 2px solid;
+        border-color: #fff #000 transparent #fff;
+        white-space: nowrap;
+        font-weight: 700;
+        opacity: 0.8;
+      }
+      nav a.on {
+        opacity: 1;
+        padding-bottom: 8px;
+        margin-bottom: -2px;
+      }
+      nav .grow {
+        flex: 1;
+      }
+      main {
+        padding: 16px;
+        max-width: 980px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      fieldset {
+        border: 2px groove #fff;
+        margin: 0;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      legend {
+        font-weight: 700;
+      }
+      .intro {
+        font-size: 15px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 10px;
+      }
+      .card {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        padding: 10px;
+        color: #000;
+        text-decoration: none;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      a.card:hover {
+        outline: 2px solid var(--navy);
+      }
+      .card img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        background: #ddd;
+      }
+      .card .wide {
+        aspect-ratio: 16/9;
+      }
+      .door {
+        background: var(--navy);
+        color: #fff;
+        border-color: #fff #000 #000 #fff;
+        min-height: 130px;
+      }
+      .door b {
+        font-size: 24px;
+        letter-spacing: 3px;
+      }
+      .muted {
+        color: #555;
+      }
+      .door .muted {
+        color: #ccd;
+      }
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .list > * {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .pill {
+        font-size: 11px;
+        border: 1px solid #808080;
+        padding: 0 4px;
+        background: #fff;
+      }
+      .links a {
+        margin-right: 8px;
+      }
+      form {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      input,
+      textarea,
+      select,
+      button {
+        font: inherit;
+        font-size: 16px;
+      }
+      input,
+      textarea,
+      select {
+        padding: 4px;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        background: #fff;
+        width: 100%;
+      }
+      textarea,
+      .full {
+        grid-column: 1 / -1;
+      }
+      button {
+        justify-self: end;
+        grid-column: 1 / -1;
+        padding: 4px 16px;
+        background: var(--face);
+        border: 2px solid;
+        border-color: #fff #000 #000 #fff;
+        cursor: pointer;
+      }
+      .hp {
+        position: absolute;
+        left: -9999px;
+      }
+      @media (max-width: 560px) {
+        form {
+          grid-template-columns: 1fr;
+        }
+        .brand {
+          font-size: 20px;
+          letter-spacing: 3px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ticker" aria-label="Latest from Sanktuary"><div class="track" id="ticker"></div></div>
+    <header>
+      <div class="brand">SANKTUARY<small>Music, community and the Twin Cities arts scene</small></div>
+      <nav>
+        <a href="/welcome" data-tab="">Home</a>
+        <a href="/welcome/mrnd" data-tab="mrnd">MRND</a>
+        <a href="/welcome/mhotc" data-tab="mhotc">MHOTC</a>
+        <a href="/shop">Shop</a>
+        <span class="grow"></span>
+        <a href="/welcome#join" data-tab="" data-join>Join</a>
+      </nav>
+    </header>
+    <main id="app">Loading...</main>
+
+    <script>
+      const app = document.getElementById('app');
+      const esc = (s) =>
+        String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+      // Our own pages stay in this window; other sites open in a new tab
+      const href = (u) => `href="${esc(u)}"${/^\//.test(u || '') ? '' : ' target="_blank" rel="noopener noreferrer"'}`;
+      const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+      const shortDay = (d) => new Date(d.length === 10 ? `${d}T12:00:00` : d).toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const usd = (n) => Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+      const today = new Date().toLocaleDateString('en-CA');
+      let d = null;
+      let videos = [];
+
+      // ── Ticker ──
+      function ticker() {
+        const out = [];
+        for (const r of d.releases.filter((r) => r.date && r.slug).slice(0, 4))
+          out.push([`/release/${r.slug}`, r.date > today ? `Out ${shortDay(r.date)}` : 'Out now', r.title]);
+        for (const p of d.products.slice(0, 3)) out.push([`/shop/${p.slug}`, 'Drop', p.title]);
+        for (const p of d.posts.slice(0, 3)) out.push([p.url, 'CITIES', p.title]);
+        for (const e of d.events.filter((e) => e.start >= today).slice(0, 3)) out.push([e.link || '/welcome/mhotc', day(e.start), e.title]);
+        for (const p of d.pools) out.push([`/pool/${p.slug}`, 'Help us get there', p.title]);
+        if (!out.length) out.push(['/welcome', 'Sanktuary', 'Welcome in']);
+        while (out.length < 8) out.push(...out); // a short list still fills the band
+        const html = out.map(([u, k, t]) => `<a ${href(u)}><b>${esc(k)}:</b> ${esc(t)}</a>`).join('<span>★</span>');
+        const t = document.getElementById('ticker');
+        t.innerHTML = `${html}<span>★</span>${html}<span>★</span>`; // twice, so the loop has no seam
+        t.style.setProperty('--secs', `${Math.max(20, out.length * 6)}s`);
+      }
+
+      // ── Pieces ──
+      const events = (list) =>
+        list.length
+          ? `<div class="list">${list
+              .map(
+                (e) =>
+                  `<div><b style="min-width:110px">${esc(day(e.start))}${e.time ? ` ${esc(e.time)}` : ''}</b>${e.link ? `<a ${href(e.link)}>${esc(e.title)}</a>` : esc(e.title)}<span class="pill">${esc(e.kind)}</span><span class="muted">${esc(e.location)}</span></div>`,
+              )
+              .join('')}</div>`
+          : '<div class="muted">Nothing on the calendar right now.</div>';
+      const posts = (list) =>
+        `<div class="grid">${list
+          .map(
+            (p) =>
+              `<a class="card" ${href(p.url)}>${p.image ? `<img class="wide" src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<b>${esc(p.title)}</b><span class="muted">${esc(p.publication)} · ${esc(shortDay(p.date))}</span></a>`,
+          )
+          .join('')}</div>`;
+      const join = () => `<fieldset id="join"><legend>Join Sanktuary</legend>
+        <div>Artist, engineer, photographer, writer or supporter: tell us about you and we will reach out.</div>
+        <form id="joinForm">
+          <input name="name" placeholder="Your name" required maxlength="100">
+          <input name="email" type="email" placeholder="Email" required maxlength="200">
+          <select name="role"><option>Artist</option><option>Engineer / producer</option><option>Photographer / video</option><option>Writer</option><option>Supporter</option><option>Other</option></select>
+          <input name="links" placeholder="Links to your work (optional)" maxlength="300">
+          <textarea name="message" rows="3" placeholder="A little about you" maxlength="2000"></textarea>
+          <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <span class="full muted" id="joinMsg"></span>
+          <button>Send</button>
+        </form></fieldset>`;
+
+      // ── Tabs ──
+      const pages = {
+        '': () => `
+          ${d.intro ? `<div class="intro">${esc(d.intro)}</div>` : ''}
+          <div class="grid">
+            <a class="card door" href="/welcome/mrnd" data-tab="mrnd"><b>MRND</b><span>Music</span><span class="muted">The talent we host and our music: artists, releases, where to listen.</span></a>
+            <a class="card door" href="/welcome/mhotc" data-tab="mhotc"><b>MHOTC</b><span>Community</span><span class="muted">CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span></a>
+            <a class="card door" href="/shop"><b>SHOP</b><span>Apparel</span><span class="muted">SOTG, Merakaiya and the rest of our apparel and releases.</span></a>
+          </div>
+          <fieldset><legend>Coming up</legend>${events(d.events.filter((e) => !e.past).slice(0, 5))}</fieldset>
+          ${d.posts.length ? `<fieldset><legend>Latest from CITIES</legend>${posts(d.posts.slice(0, 3))}</fieldset>` : ''}
+          ${join()}`,
+        mrnd: () => `
+          <fieldset><legend>MRND: music</legend><div>The talent we host and the music we make together.</div></fieldset>
+          <fieldset><legend>Talent</legend>${
+            d.people.length
+              ? `<div class="grid">${d.people
+                  .map(
+                    (p) =>
+                      `<div class="card">${p.avatar ? `<img src="/api/public/avatar/${esc(p.username)}" alt="" loading="lazy">` : ''}<b>${esc(p.displayName)}</b>${p.role ? `<span class="muted">${esc(p.role)}</span>` : ''}${p.bio ? `<span>${esc(p.bio.slice(0, 220))}</span>` : ''}<span class="links">${Object.entries(
+                        p.links,
+                      )
+                        .map(([k, u]) => `<a ${href(u)}>${esc(k)}</a>`)
+                        .join('')}</span></div>`,
+                  )
+                  .join('')}</div>`
+              : '<div class="muted">Profiles are on their way.</div>'
+          }</fieldset>
+          <fieldset><legend>Releases</legend>${
+            d.releases.length
+              ? `<div class="list">${d.releases
+                  .map(
+                    (r) =>
+                      `<div>${r.slug ? `<a href="/release/${esc(r.slug)}"><b>${esc(r.title)}</b></a>` : `<b>${esc(r.title)}</b>`}<span class="pill">${esc(r.kind)}</span><span class="muted">${r.date ? esc(day(r.date)) : 'Date to come'}${r.tracks ? ` · ${r.tracks} track${r.tracks > 1 ? 's' : ''}` : ''}</span></div>`,
+                  )
+                  .join('')}</div>`
+              : '<div class="muted">Nothing announced yet.</div>'
+          }</fieldset>`,
+        mhotc: () => `
+          <fieldset><legend>MHOTC: community</legend><div>The people, places and nights of the Twin Cities arts scene. <a href="/cities">Read CITIES</a> · <a href="/cities/videos">Watch vlogs</a></div></fieldset>
+          ${d.posts.length ? `<fieldset><legend>CITIES</legend>${posts(d.posts.slice(0, 9))}</fieldset>` : ''}
+          <fieldset><legend>Events</legend>${events(d.events.filter((e) => !e.past))}</fieldset>
+          ${
+            d.stories.length
+              ? `<fieldset><legend>Stories</legend><div class="list">${d.stories.map((s) => `<div><a href="/story/${esc(s.slug)}"><b>${esc(s.title)}</b></a><span class="muted">${esc(s.subtitle || '')}</span></div>`).join('')}</div></fieldset>`
+              : ''
+          }
+          ${
+            videos.length
+              ? `<fieldset><legend>Vlogs</legend><div class="grid">${videos
+                  .slice(0, 6)
+                  .map(
+                    (v) =>
+                      `<a class="card" ${href(`https://www.youtube.com/watch?v=${v.id}`)}><img class="wide" src="https://i.ytimg.com/vi/${esc(v.id)}/hqdefault.jpg" alt="" loading="lazy"><b>${esc(v.title)}</b><span class="muted">${esc(v.channel)}</span></a>`,
+                  )
+                  .join('')}</div></fieldset>`
+              : ''
+          }`,
+      };
+      const TITLES = { '': 'Welcome to Sanktuary', mrnd: 'MRND · Sanktuary', mhotc: 'MHOTC · Sanktuary' };
+      const tabOf = () => (location.pathname.split('/')[2] || '').toLowerCase();
+      function show() {
+        const tab = pages[tabOf()] ? tabOf() : '';
+        document.title = TITLES[tab];
+        document.querySelectorAll('nav a[data-tab]:not([data-join])').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+        app.innerHTML = pages[tab]();
+        const form = document.getElementById('joinForm');
+        if (form) form.onsubmit = joinUs;
+        if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+      }
+      async function joinUs(e) {
+        e.preventDefault();
+        const msg = document.getElementById('joinMsg');
+        const r = await fetch('/api/public/join', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(Object.fromEntries(new FormData(e.target))),
+        });
+        msg.textContent = r.ok ? 'Thanks! We got it and will be in touch.' : (await r.text()) || 'That did not go through. Try again.';
+        if (r.ok) e.target.reset();
+      }
+      // Tabs switch in place (the window keeps its history, so Back works)
+      document.addEventListener('click', (e) => {
+        const a = e.target.closest('a[data-tab]');
+        if (!a || e.ctrlKey || e.metaKey) return;
+        e.preventDefault();
+        history.pushState(null, '', a.getAttribute('href'));
+        show();
+        scrollTo(0, 0);
+        if (a.dataset.join) document.getElementById('join')?.scrollIntoView();
+      });
+      addEventListener('popstate', show);
+
+      Promise.all([
+        fetch('/api/public/directory').then((r) => r.json()),
+        fetch('/api/blog/videos')
+          .then((r) => r.json())
+          .catch(() => ({ videos: [] })),
+      ]).then(
+        ([dir, v]) => {
+          d = dir;
+          videos = v.videos || [];
+          ticker();
+          show();
+        },
+        () => (app.textContent = 'Sanktuary is resting right now. Try again in a minute.'),
+      );
+    </script>
+  </body>
+</html>

@@ -201,6 +201,9 @@ try {
   check('guests on it are dropped', guestLive.ended);
   check('the link stops working', (await guest(`${view.url}/info`)).status === 410);
 
+  check('the landing page and its tabs load', (await guest('/welcome')).status === 200 && (await guest('/welcome/mrnd')).status === 200);
+  check('an unknown landing tab is a 404', (await guest('/welcome/nope')).status === 404);
+
   // ── Private plan: activity only visible to its people ──
   const plan = (await call('bob', '/api/boards', 'POST', { name: 'Secret Plan', kind: 'kanban' })).data;
   await call('bob', `/api/boards/${plan.id}`, 'PATCH', { members: [] }); // bob only (+ admins)
