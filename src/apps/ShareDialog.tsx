@@ -14,11 +14,12 @@ interface Link {
   created: string;
   expires: string | null;
   password: boolean;
-  download: boolean;
+  download?: boolean;
+  level?: 'view' | 'comment';
   revoked: boolean;
   views: number;
-  downloads: number;
-  lastOpened: string | null;
+  downloads?: number;
+  lastOpened?: string | null;
 }
 
 /**
@@ -102,17 +103,21 @@ const SendInTeams: React.FC<{ item: Ref; onClose: (sentTo?: string) => void }> =
   );
 };
 
-const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClose }) => {
+/** Public links to a file/folder, or (with board) view / comment links to a board. */
+export const PublicLinks: React.FC<{ item?: Ref; board?: string; onClose: () => void }> = ({ item, board, onClose }) => {
   const api = useApi();
   const [links, setLinks] = useState<Link[]>([]);
   const [days, setDays] = useState(7);
   const [password, setPassword] = useState('');
   const [download, setDownload] = useState(true);
+  const [level, setLevel] = useState<'view' | 'comment'>('view');
   const [msg, setMsg] = useState('');
-  const path = [...(item.dir || []), item.name].join('/');
-  const qs = `space=${encodeURIComponent(item.app || '')}&path=${encodeURIComponent(path)}`;
+  const path = item ? [...(item.dir || []), item.name].join('/') : '';
+  const listUrl = board
+    ? `/api/boards/${board}/shares`
+    : `/api/links?space=${encodeURIComponent(item?.app || '')}&path=${encodeURIComponent(path)}`;
 
-  const load = useCallback(() => api(`/api/links?${qs}`).then(setLinks, (e) => setMsg(e.message)), [api, qs]);
+  const load = useCallback(() => api(listUrl).then(setLinks, (e) => setMsg(e.message)), [api, listUrl]);
   useEffect(() => {
     load();
   }, [load]);
@@ -128,10 +133,9 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
   };
   const create = async () => {
     try {
-      const l: Link = await api('/api/links', {
-        method: 'POST',
-        body: JSON.stringify({ space: item.app, path, days, password, download }),
-      });
+      const l: Link = board
+        ? await api(listUrl, { method: 'POST', body: JSON.stringify({ days, password, level }) })
+        : await api('/api/links', { method: 'POST', body: JSON.stringify({ space: item?.app, path, days, password, download }) });
       setPassword('');
       await load();
       copy(l);
@@ -141,7 +145,7 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
   };
   const revoke = async (l: Link) => {
     try {
-      await api(`/api/links/${l.token}`, { method: 'DELETE' });
+      await api(board ? `${listUrl}/${l.token}` : `/api/links/${l.token}`, { method: 'DELETE' });
       load();
     } catch (e) {
       setMsg((e as Error).message);
@@ -169,11 +173,23 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
           autoComplete="off"
           style={field}
         />
-        <span />
-        <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <input type="checkbox" checked={download} onChange={(e) => setDownload(e.target.checked)} />
-          Allow downloads (off = stream and view only)
-        </label>
+        {board ? (
+          <>
+            Guests can
+            <select value={level} onChange={(e) => setLevel(e.target.value as 'view' | 'comment')} style={field}>
+              <option value="view">view the board</option>
+              <option value="comment">view and comment</option>
+            </select>
+          </>
+        ) : (
+          <>
+            <span />
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="checkbox" checked={download} onChange={(e) => setDownload(e.target.checked)} />
+              Allow downloads (off = stream and view only)
+            </label>
+          </>
+        )}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
         <button style={{ ...button, fontWeight: 700 }} onClick={create}>
@@ -187,7 +203,8 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {l.password ? '🔑 ' : ''}
-                  {l.download ? '' : '👁 '}by {l.createdBy} · {l.expires ? `until ${new Date(l.expires).toLocaleDateString()}` : 'no expiry'}
+                  {l.level === 'comment' ? '💬 ' : l.download === false || l.level ? '👁 ' : ''}by {l.createdBy} ·{' '}
+                  {l.expires ? `until ${new Date(l.expires).toLocaleDateString()}` : 'no expiry'}
                 </span>
                 <button style={button} onClick={() => copy(l)}>
                   <IconLabel icon="link">Copy</IconLabel>
@@ -197,7 +214,7 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
                 </button>
               </div>
               <div style={{ color: '#555' }}>
-                {l.views} view(s) · {l.downloads} download(s)
+                {l.views} view(s){l.downloads !== undefined ? ` · ${l.downloads} download(s)` : ''}
                 {l.lastOpened ? ` · last opened ${new Date(l.lastOpened).toLocaleString()}` : ''}
               </div>
             </div>
@@ -214,7 +231,7 @@ const PublicLinks: React.FC<{ item: Ref; onClose: () => void }> = ({ item, onClo
   );
 };
 
-const dlg: React.CSSProperties = {
+export const dlg: React.CSSProperties = {
   width: 'min(380px, 100%)',
   maxHeight: '100%',
   overflow: 'auto',

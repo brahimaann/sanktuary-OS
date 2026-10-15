@@ -12,7 +12,8 @@ A Windows 98-style team workspace at **https://sanktuary.studio**, based on Wind
 | Sanktuary Teams | AIM-style buddy list, channels, DMs, file/folder/board links, activity feed |
 | Admin Panel (admins only) | Server health, drives, spaces + per-member rights, members, backups |
 
-Team members log in with a nickname + access code (Clerk) in the boot terminal or any team window.
+Team members log in with a nickname + access code (Clerk) from Log On in the taskbar or any team window; the boot
+loader asks nothing, and a signed-in device stays signed in.
 
 ## How it runs
 

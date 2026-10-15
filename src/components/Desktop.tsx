@@ -71,7 +71,15 @@ const STUDIO_ICONS: DesktopIconDef[] = [
 
 // The front door: works without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)
 const PUBLIC_ICONS: DesktopIconDef[] = [
-  { id: 'welcome', title: 'Welcome', icon: '/images/icons/help-32x32.png', appType: 'welcome', width: 520, height: 560 },
+  {
+    id: 'welcome-page',
+    title: 'Welcome',
+    icon: '/images/icons/help-32x32.png',
+    appType: 'iframe', // the landing page, sanktuary.studio/welcome: MRND, MHOTC, Shop
+    appProps: { src: '/welcome' },
+    width: 900,
+    height: 640,
+  },
   {
     id: 'my-computer',
     title: 'My Computer',
@@ -169,7 +177,7 @@ export const Desktop: React.FC = () => {
   const { openWindow, wallpaper, bgColor } = useWindowManager();
   const { me } = useMe();
   const { isLoaded, isSignedIn } = useAuth();
-  // Visitors without an account land on the Welcome window (once per visit)
+  // Visitors without an account land on the landing page, full screen over the desktop (once per visit)
   useEffect(() => {
     if (!isLoaded || isSignedIn) return;
     try {
@@ -177,12 +185,14 @@ export const Desktop: React.FC = () => {
       sessionStorage.setItem('sk_welcomed', '1');
     } catch {}
     openWindow({
-      id: 'welcome',
+      id: 'welcome-page',
       title: 'Welcome to Sanktuary',
       icon: '/images/icons/network-16x16.png',
-      appType: 'welcome',
-      width: 520,
-      height: 560,
+      appType: 'iframe',
+      appProps: { src: '/welcome' },
+      width: 900,
+      height: 640,
+      isMaximized: true,
     });
   }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
