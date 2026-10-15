@@ -10,7 +10,7 @@ import MediaControls from '../components/MediaControls';
 import { useWindowManager } from '../wm/manager';
 import { dialog } from '../utils/dialog';
 import { sharedAudio } from '../utils/sound';
-import { tempoAndKey } from '../utils/audioAnalysis';
+import { tempoAndKey, waveformPeaks } from '../utils/audioAnalysis';
 import { Term } from '../utils/glossary';
 
 interface FilePreviewProps {
@@ -661,16 +661,7 @@ const AudioPreview: React.FC<{
           return setNote('File is large — waveform skipped.');
         }
         const audio = await sharedAudio()!.decodeAudioData(await res.arrayBuffer());
-        const data = audio.getChannelData(0);
-        const buckets = 600;
-        const size = Math.floor(data.length / buckets) || 1;
-        const out: number[] = [];
-        for (let b = 0; b < buckets; b++) {
-          let max = 0;
-          for (let i = b * size; i < (b + 1) * size && i < data.length; i += 16) max = Math.max(max, Math.abs(data[i]));
-          out.push(max);
-        }
-        setPeaks(out);
+        setPeaks(waveformPeaks(audio.getChannelData(0)));
         setNote('');
         const tk = await tempoAndKey(audio);
         if (!abort.signal.aborted) setMusical({ bpm: tk.tempo?.bpm ?? null, key: tk.key ? `${tk.key.name} (${tk.key.camelot})` : null });
