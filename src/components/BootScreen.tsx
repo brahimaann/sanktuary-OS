@@ -1,16 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { getCookie, setCookie } from '../utils/cookies';
+import React, { useState, useEffect } from 'react';
 import sound from '../utils/sound';
-import { useAuth } from '@clerk/react';
-import { useTeamLogin } from '../utils/teamLogin';
 
 interface BootScreenProps {
   onComplete: () => void;
 }
 
 /* ────────────────────────────────────────────────────────
-   Authentic Award BIOS terminal boot sequence.
-   Renders INSIDE the CRT screen area (not fullscreen).
+   Short Award BIOS style loader: BIOS lines, then the Sanktuary logo, then the desktop.
+   It only sets the mood and asks nothing (Log On lives in the taskbar). Renders INSIDE the CRT
+   screen area, plays once per browser session; any key or click skips ahead.
    ──────────────────────────────────────────────────────── */
 
 interface TermLine {
@@ -128,402 +126,49 @@ const HERCULES_LINES = [
   { text: 'HHCLC005I Mainframe emulation online. Loading OS/390 Subsystems...', color: '#55ff55' },
 ];
 
-type BootStage = 'BIOS' | 'HERCULES' | 'MAINFRAME_LINK';
-type DialogueState = 'ASK_NAME' | 'ASK_PASSWORD' | 'ASK_CODE' | 'VERIFYING' | 'ASK_BOOT' | 'BOOTING' | 'DONE';
-
-const ASK_PASSWORD_LINES = [`TEAM OPERATORS: ENTER YOUR ACCESS CODE.`, `GUESTS: PRESS ENTER TO CONTINUE WITHOUT CLEARANCE.`, ` `];
+type BootStage = 'BIOS' | 'HERCULES';
 
 export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
   const [stage, setStage] = useState<BootStage>('BIOS');
-  const { isSignedIn } = useAuth();
-  const { login: teamLogin, verify: teamVerify } = useTeamLogin();
   const [biosVisibleCount, setBiosVisibleCount] = useState(0);
   const [herculesVisibleCount, setHerculesVisibleCount] = useState(0);
 
-  // Mobile detection
-  const [isMobile, setIsMobile] = useState(false);
+  // Already played in this session: straight to the desktop
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Check if we should bypass the boot intro on this session
-  useEffect(() => {
-    if (sessionStorage.getItem('hq_os_booted')) {
-      onComplete();
-    }
+    if (sessionStorage.getItem('hq_os_booted')) onComplete();
   }, [onComplete]);
 
-  // Wrap onComplete to record that the OS booted in this session
   const handleComplete = () => {
     sessionStorage.setItem('hq_os_booted', 'true');
     sound.playStartup();
     onComplete();
   };
+  const advance = () => (stage === 'BIOS' ? setStage('HERCULES') : handleComplete());
 
-  // Mainframe green screen states
-  const [dialogueState, setDialogueState] = useState<DialogueState>('ASK_NAME');
-  const [mainframeHistory, setMainframeHistory] = useState<string[]>([]);
-  const [promptLabel, setPromptLabel] = useState('ENTER OPERATOR ID (YOUR NAME): ');
-  const [inputValue, setInputValue] = useState('');
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // 1. BIOS stage printing
+  // 1. BIOS lines
   useEffect(() => {
     if (stage !== 'BIOS') return;
-    if (biosVisibleCount >= BIOS_LINES.length) {
-      const timer = setTimeout(() => {
-        setStage('HERCULES');
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-    const delay = BIOS_LINES[biosVisibleCount]?.text === '' ? 50 : 100;
-    const timer = setTimeout(() => {
-      setBiosVisibleCount((prev) => prev + 1);
-    }, delay);
+    const last = biosVisibleCount >= BIOS_LINES.length;
+    const timer = setTimeout(
+      () => (last ? setStage('HERCULES') : setBiosVisibleCount((n) => n + 1)),
+      last ? 250 : BIOS_LINES[biosVisibleCount]?.text === '' ? 15 : 35,
+    );
     return () => clearTimeout(timer);
   }, [biosVisibleCount, stage]);
 
-  // 2. Hercules stage printing
+  // 2. Emulator banner and logo, then the desktop
   useEffect(() => {
     if (stage !== 'HERCULES') return;
-    if (herculesVisibleCount >= HERCULES_LINES.length) {
-      const timer = setTimeout(() => {
-        if (isMobile) {
-          handleComplete();
-        } else {
-          setStage('MAINFRAME_LINK');
-        }
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-    const timer = setTimeout(() => {
-      setHerculesVisibleCount((prev) => prev + 1);
-    }, 45);
+    const last = herculesVisibleCount >= HERCULES_LINES.length;
+    const timer = setTimeout(() => (last ? handleComplete() : setHerculesVisibleCount((n) => n + 1)), last ? 600 : 20);
     return () => clearTimeout(timer);
-  }, [herculesVisibleCount, stage, isMobile]);
+  }, [herculesVisibleCount, stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 3. Mainframe setup
   useEffect(() => {
-    if (stage !== 'MAINFRAME_LINK') return;
-
-    // Retrieve and increment visit cookie
-    const visitsCookieStr = getCookie('hq_os_visits');
-    const newVisits = parseInt(visitsCookieStr || '0', 10) + 1;
-    setCookie('hq_os_visits', newVisits.toString(), 365);
-
-    // Retrieve name cookie
-    const storedName = getCookie('hq_os_username') || '';
-
-    // Format current date and time
-    const dateStr = new Date().toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
-    const timeStr = new Date().toLocaleTimeString(undefined, { hour12: false });
-
-    if (!storedName) {
-      setDialogueState('ASK_NAME');
-      setPromptLabel('ENTER OPERATOR ID (YOUR NAME): ');
-      setMainframeHistory([
-        `*** SKTY TERMINAL v3.12 - SANKTUARY CORE SUBSYSTEMS ***`,
-        `*** DATE: ${dateStr}  TIME: ${timeStr}  NODE: SKTY-CORE ***`,
-        ` `,
-        `ESTABLISHING LINK... SECURE.`,
-        ` `,
-        `WARNING: A NEW OPERATOR TERMINAL ACCESS ATTEMPT DETECTED.`,
-        `ALL SESSION METADATA WILL BE ENCRYPTED AND LOGGED.`,
-        ` `,
-        `IDENTIFICATION IS REQUIRED FOR OS BOOT PERMISSION.`,
-        ` `,
-      ]);
-    } else {
-      setDialogueState('ASK_BOOT');
-      setPromptLabel('===> ');
-      setMainframeHistory([
-        `*** SKTY TERMINAL v3.12 - SANKTUARY CORE SUBSYSTEMS ***`,
-        `*** DATE: ${dateStr}  TIME: ${timeStr}  NODE: SKTY-CORE ***`,
-        ` `,
-        `ESTABLISHING LINK... SECURE.`,
-        ` `,
-        `WELCOME BACK, OPERATOR: ${storedName.toUpperCase()}`,
-        `THIS IS SYSTEM ACCESS VISIT #${newVisits} ON THIS PORT.`,
-        `SYSTEM LOGS SHOW PREVIOUS SESSIONS COMPLETED STABLY.`,
-        ` `,
-        ...(isSignedIn
-          ? [`TEAM CLEARANCE... ACTIVE`, ` `, `DO YOU WISH TO INITIATE THE OS WORKSPACE ENVIRONMENT? (Y/N):`]
-          : ASK_PASSWORD_LINES),
-      ]);
-      if (!isSignedIn) {
-        setDialogueState('ASK_PASSWORD');
-        setPromptLabel('ACCESS CODE: ');
-      }
-    }
-
-    // Refocus input
-    setTimeout(() => {
-      if (inputRef.current) inputRef.current.focus();
-    }, 100);
-  }, [stage]);
-
-  // Auto-scroll as lines print
-  useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-    }
-  }, [biosVisibleCount, herculesVisibleCount, mainframeHistory]);
-
-  // Skip / navigate stages using global keys (specifically Escape)
-  useEffect(() => {
-    const handleGlobalKeys = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleComplete();
-        return;
-      }
-      // Quick advance in BIOS or Hercules stage on any key
-      if (stage === 'BIOS') {
-        setStage('HERCULES');
-      } else if (stage === 'HERCULES') {
-        if (isMobile) {
-          handleComplete();
-        } else {
-          setStage('MAINFRAME_LINK');
-        }
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeys);
-    return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [stage, isMobile]);
-
-  const handleContainerClick = () => {
-    if (stage === 'MAINFRAME_LINK') {
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    } else if (stage === 'BIOS') {
-      setStage('HERCULES');
-    } else if (stage === 'HERCULES') {
-      if (isMobile) {
-        handleComplete();
-      } else {
-        setStage('MAINFRAME_LINK');
-      }
-    }
-  };
-
-  const handleInputSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanInput = inputValue.trim();
-    setInputValue('');
-
-    if (dialogueState === 'BOOTING' || dialogueState === 'DONE' || dialogueState === 'VERIFYING') return;
-
-    // Append operator input to history (access codes are masked)
-    const shown = dialogueState === 'ASK_PASSWORD' ? '*'.repeat(cleanInput.length) : cleanInput;
-    setMainframeHistory((prev) => [...prev, `${promptLabel}${shown}`]);
-
-    if (dialogueState === 'ASK_NAME') {
-      if (!cleanInput) {
-        setMainframeHistory((prev) => [...prev, `*** ERROR: OPERATOR ID CANNOT BE EMPTY.`, ` `]);
-        return;
-      }
-
-      setCookie('hq_os_username', cleanInput, 365);
-
-      setMainframeHistory((prev) => [
-        ...prev,
-        `*** OPERATOR ID '${cleanInput.toUpperCase()}' REGISTERED SUCCESSFULLY.`,
-        `*** CREATING OS SECURITY CONTEXT... OK`,
-        ` `,
-        ...ASK_PASSWORD_LINES,
-      ]);
-      setPromptLabel('ACCESS CODE: ');
-      setDialogueState('ASK_PASSWORD');
-    } else if (dialogueState === 'ASK_PASSWORD') {
-      const askBoot = [` `, `INITIATE GRAPHICAL WORKSPACE INTERFACE? (Y/N):`];
-      if (!cleanInput) {
-        setMainframeHistory((prev) => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
-        setPromptLabel('===> ');
-        setDialogueState('ASK_BOOT');
-        return;
-      }
-      setDialogueState('VERIFYING');
-      setMainframeHistory((prev) => [...prev, `VERIFYING OPERATOR CLEARANCE...`]);
-      teamLogin(getCookie('hq_os_username') || '', cleanInput).then(({ error, needCode }) => {
-        if (error) {
-          setMainframeHistory((prev) => [
-            ...prev,
-            `*** ERROR: ACCESS DENIED. ${error.toUpperCase()}`,
-            `*** RE-ENTER ACCESS CODE, OR PRESS ENTER FOR GUEST ACCESS.`,
-            ` `,
-          ]);
-          setDialogueState('ASK_PASSWORD');
-        } else if (needCode) {
-          setMainframeHistory((prev) => [...prev, `*** ${needCode.toUpperCase()}`, ` `]);
-          setPromptLabel('VERIFICATION CODE: ');
-          setDialogueState('ASK_CODE');
-        } else {
-          setMainframeHistory((prev) => [
-            ...prev,
-            `*** OPERATOR VERIFIED... OK`,
-            `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`,
-            ...askBoot,
-          ]);
-          setPromptLabel('===> ');
-          setDialogueState('ASK_BOOT');
-        }
-        setTimeout(() => inputRef.current?.focus(), 50);
-      });
-    } else if (dialogueState === 'ASK_CODE') {
-      const askBoot = [` `, `INITIATE GRAPHICAL WORKSPACE INTERFACE? (Y/N):`];
-      if (!cleanInput) {
-        setMainframeHistory((prev) => [...prev, `*** GUEST SESSION. TEAM FOLDERS LOCKED.`, ...askBoot]);
-        setPromptLabel('===> ');
-        setDialogueState('ASK_BOOT');
-        return;
-      }
-      setDialogueState('VERIFYING');
-      setMainframeHistory((prev) => [...prev, `CONFIRMING DEVICE...`]);
-      teamVerify(cleanInput).then((error) => {
-        if (error) {
-          setMainframeHistory((prev) => [
-            ...prev,
-            `*** ERROR: CODE REJECTED. ${error.toUpperCase()}`,
-            `*** TRY AGAIN, OR PRESS ENTER FOR GUEST ACCESS.`,
-            ` `,
-          ]);
-          setDialogueState('ASK_CODE');
-        } else {
-          setMainframeHistory((prev) => [
-            ...prev,
-            `*** OPERATOR VERIFIED... OK`,
-            `*** TEAM CLEARANCE GRANTED. TEAM FOLDERS UNLOCKED.`,
-            ...askBoot,
-          ]);
-          setPromptLabel('===> ');
-          setDialogueState('ASK_BOOT');
-        }
-        setTimeout(() => inputRef.current?.focus(), 50);
-      });
-    } else if (dialogueState === 'ASK_BOOT') {
-      const lower = cleanInput.toLowerCase();
-      if (lower === 'y' || lower === 'yes') {
-        setMainframeHistory((prev) => [
-          ...prev,
-          `*** BOOT COMMAND: LOAD GRAPHICAL WORKSPACE`,
-          `*** INITIALIZING WIN98 EMULATION ENVIRONMENT...`,
-          `*** LOADING USER EXPERIENCE STACK... OK`,
-          `*** REDIRECTING CONSOLE... IPL COMPLETED.`,
-        ]);
-        setDialogueState('BOOTING');
-        setTimeout(() => {
-          handleComplete();
-        }, 1200);
-      } else if (lower === 'n' || lower === 'no') {
-        setMainframeHistory((prev) => [
-          ...prev,
-          `*** BOOT COMMAND: TERMINAL ONLY (SUSPENDED)`,
-          `*** SECURITY POLICY ERROR: MAIN DECK INTERFACE MANDATES GUI OVERLAY.`,
-          `*** OVERRIDING OPERATOR CMD... FORCE GRAPHICAL INITIALIZATION.`,
-          `*** DEPLOYING OS SHELL IN 2 SECONDS...`,
-        ]);
-        setDialogueState('BOOTING');
-        setTimeout(() => {
-          handleComplete();
-        }, 2200);
-      } else {
-        setMainframeHistory((prev) => [
-          ...prev,
-          `*** UNRECOGNIZED IPL OPTION: '${cleanInput}'`,
-          `*** ASSUMING DEFAULT: GRAPHICAL BOOT SYSTEM`,
-          `*** BOOTING OS/390 GRAPHICAL LAYER PROTOCOLS...`,
-        ]);
-        setDialogueState('BOOTING');
-        setTimeout(() => {
-          handleComplete();
-        }, 1200);
-      }
-    }
-  };
-
-  const renderHistoryLine = (line: string, index: number) => {
-    if (line.trim() === '') {
-      return (
-        <div key={index} style={{ height: '1.15em' }}>
-          &nbsp;
-        </div>
-      );
-    }
-
-    if (line.startsWith('***')) {
-      return (
-        <div key={index} style={{ color: '#ffffff', fontWeight: 'bold' }}>
-          {line}
-        </div>
-      );
-    }
-
-    if (line.includes('WARNING:')) {
-      const parts = line.split('WARNING:');
-      return (
-        <div key={index}>
-          <span style={{ color: '#aaaaaa' }}>{parts[0]}</span>
-          <span style={{ color: '#ffff55', fontWeight: 'bold' }}>WARNING:</span>
-          <span style={{ color: '#aaaaaa' }}>{parts[1]}</span>
-        </div>
-      );
-    }
-
-    if (line.includes('ERROR:')) {
-      const parts = line.split('ERROR:');
-      return (
-        <div key={index}>
-          <span style={{ color: '#aaaaaa' }}>{parts[0]}</span>
-          <span style={{ color: '#ff5555', fontWeight: 'bold' }}>ERROR:</span>
-          <span style={{ color: '#aaaaaa' }}>{parts[1]}</span>
-        </div>
-      );
-    }
-
-    if (line.includes('... OK')) {
-      const idx = line.lastIndexOf('... OK');
-      return (
-        <div key={index}>
-          <span>{line.substring(0, idx + 4)}</span>
-          <span style={{ color: '#55ff55' }}>OK</span>
-        </div>
-      );
-    }
-
-    if (line.includes('... SECURE')) {
-      const idx = line.lastIndexOf('... SECURE');
-      return (
-        <div key={index}>
-          <span>{line.substring(0, idx + 4)}</span>
-          <span style={{ color: '#55ff55' }}>SECURE</span>
-        </div>
-      );
-    }
-
-    if (line.includes('... SUCCESS')) {
-      const idx = line.lastIndexOf('... SUCCESS');
-      return (
-        <div key={index}>
-          <span>{line.substring(0, idx + 4)}</span>
-          <span style={{ color: '#55ff55' }}>SUCCESS</span>
-        </div>
-      );
-    }
-
-    return (
-      <div key={index} style={{ color: '#aaaaaa', whiteSpace: 'pre-wrap' }}>
-        {line}
-      </div>
-    );
-  };
+    const onKey = (e: KeyboardEvent) => (e.key === 'Escape' ? handleComplete() : advance());
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const renderBioLine = (line: TermLine, i: number) => {
     if (line.text === '') {
@@ -559,7 +204,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
 
   return (
     <div
-      onClick={handleContainerClick}
+      onClick={advance}
       style={{
         width: '100%',
         height: '100%',
@@ -567,7 +212,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
-        cursor: 'text',
+        cursor: 'pointer',
       }}
     >
       <style>{`
@@ -585,25 +230,11 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
           -webkit-font-smoothing: none !important;
           -moz-osx-font-smoothing: unset !important;
         }
-        @keyframes terminal-blink {
-          0%, 49% { opacity: 1; }
-          50%, 100% { opacity: 0; }
-        }
-        .term-cursor {
-          display: inline-block;
-          width: 8px;
-          height: 14px;
-          background-color: currentColor;
-          animation: terminal-blink 1s infinite;
-          vertical-align: middle;
-          margin-left: 2px;
-        }
       `}</style>
 
       {/* Render BIOS Screen */}
       {stage === 'BIOS' && (
         <div
-          ref={containerRef}
           className="bios-terminal"
           style={{
             flex: 1,
@@ -653,7 +284,9 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
       {/* Render Hercules emulation info */}
       {stage === 'HERCULES' && (
         <div
-          ref={containerRef}
+          ref={(el) => {
+            if (el) el.scrollTop = el.scrollHeight;
+          }} // keep the newest lines in view on short screens
           className="bios-terminal"
           style={{
             flex: 1,
@@ -682,83 +315,6 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
         </div>
       )}
 
-      {/* Render custom SKTY style white interactive terminal */}
-      {stage === 'MAINFRAME_LINK' && (
-        <div
-          ref={containerRef}
-          className="bios-terminal"
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '8px 12px',
-            fontSize: '14px',
-            lineHeight: '1.15',
-            position: 'relative',
-            color: '#aaaaaa',
-            backgroundColor: '#000000',
-          }}
-        >
-          {/* History lines */}
-          {mainframeHistory.map((line, i) => renderHistoryLine(line, i))}
-
-          {/* Current Prompt Input line */}
-          {dialogueState !== 'BOOTING' && dialogueState !== 'VERIFYING' && (
-            <form onSubmit={handleInputSubmit} style={{ display: 'inline-block', width: '100%', marginTop: '8px' }}>
-              <span style={{ color: '#ffffff' }}>{promptLabel}</span>
-              <span style={{ position: 'relative', display: 'inline-block', color: '#ffffff' }}>
-                {dialogueState === 'ASK_PASSWORD' ? '*'.repeat(inputValue.length) : inputValue}
-                <span className="term-cursor" />
-              </span>
-              <input
-                ref={inputRef}
-                type={dialogueState === 'ASK_PASSWORD' ? 'password' : 'text'}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                style={{
-                  position: 'absolute',
-                  opacity: 0,
-                  left: 0,
-                  top: 0,
-                  width: '100%',
-                  height: '100%',
-                  cursor: 'text',
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  color: 'transparent',
-                }}
-                autoFocus
-              />
-            </form>
-          )}
-
-          {/* Skip button at the very bottom right */}
-          <div
-            onClick={(e) => {
-              e.stopPropagation();
-              handleComplete();
-            }}
-            style={{
-              position: 'absolute',
-              bottom: '12px',
-              right: '12px',
-              color: '#444444',
-              fontSize: '11px',
-              cursor: 'pointer',
-              border: '1px solid #222222',
-              padding: '2px 6px',
-              background: '#000000',
-              borderRadius: '2px',
-              userSelect: 'none',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = '#ffffff')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = '#444444')}
-          >
-            [ESC] SKIP INTRO
-          </div>
-        </div>
-      )}
-
       {/* Bottom status bar — pinned */}
       <div
         className="bios-terminal"
@@ -775,12 +331,6 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
       >
         {stage === 'BIOS' && <span>Press F8 for Startup Menu.</span>}
         {stage === 'HERCULES' && <span>IPL Link Emulation Port: 3001</span>}
-        {stage === 'MAINFRAME_LINK' && (
-          <>
-            <span>RUNSTATE: ONLINE</span>
-            <span>SKTY CORE v3.12</span>
-          </>
-        )}
       </div>
     </div>
   );
