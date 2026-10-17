@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApi } from '../utils/api';
 import { button } from './TeamFiles';
 
 /**
  * A release's campaign: plan the singles (a waterfall, one every few weeks before the release) and a 3-video
- * campaign onto the Timeline, and copy ready-made pitches for radio, playlist curators and press.
+ * campaign onto the Timeline, and ready-made pitches (radio, playlists, press, distribution, manufacturing, sync). Each
+ * pitch turns into one email draft per matching Outreach contact; nothing is sent until you hit send in your own mail app.
  */
 interface Props {
   release: {
@@ -111,20 +112,52 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
   const listen = release.stores?.spotify || release.stores?.presave || page;
   const when = release.date ? pretty(release.date) : 'soon';
   const about = release.blurb?.trim() || `[Two sentences on the song: the sound, the story, who it's for.]`;
-  const PITCHES: [string, string][] = [
+  const PITCHES: [label: string, kind: string, text: string][] = [
     [
       'College & community radio',
+      'Radio',
       `Subject: ${who} - "${lead}" for your rotation (Twin Cities)\n\nHi [host/music director name],\n\n${who} is a Twin Cities artist, and "${lead}" is from the ${release.kind.toLowerCase()} ${release.title}, out ${when}.\n\n${about}\n\nListen: ${listen || '[link]'}\nClean version: [yes/no]\n\nWe'd love a spin on [show name], and ${who} is happy to come in for an interview or a live session.\n\nThank you,\n[your name]\nSanktuary`,
     ],
     [
       'Playlist curators',
+      'Playlist',
       `Subject: "${lead}" by ${who} for [playlist name]\n\nHi [curator name],\n\nI think "${lead}" would sit well on [playlist name] next to [similar artist/track on the list].\n\n${about}\n\nListen: ${listen || '[link]'}\nGenre / mood: [e.g. alternative R&B, late night]\nOut: ${when}\n\nThanks for listening either way.\n[your name]`,
     ],
     [
       'Blogs & press',
+      'Blog / press',
       `Subject: Premiere / feature: ${who} - ${release.title} (out ${when})\n\nHi [writer name],\n\nI loved your piece on [recent article]. ${who} is releasing ${release.title}, a ${release.kind.toLowerCase()}, on ${when}.\n\n${about}\n\nLead single: "${lead}"\nListen: ${listen || '[private link]'}${page ? `\nPress page (photos, story, credits): ${page}` : ''}\nPortfolio / one-sheet: ${location.origin}/portfolio\n\nAvailable for an interview, a premiere or an exclusive.\n\nBest,\n[your name]\nSanktuary`,
     ],
+    [
+      'Distribution',
+      'Distribution',
+      `Subject: Distribution for ${who} - ${release.title} (out ${when})\n\nHi [contact name],\n\nWe're looking for distribution for ${release.title}, a ${release.kind.toLowerCase()} by ${who} (Twin Cities), with ${tracks.length || '[number of]'} tracks, out ${when}.\n\n${about}\n\nListen (private): ${listen || '[link]'}\nPortfolio / one-sheet: ${location.origin}/portfolio\n\nCould you share your terms (split or fee, term length, territories, marketing and playlist pitching support)? Masters and artwork are ready.\n\nThank you,\n[your name]\nSanktuary`,
+    ],
+    [
+      'Manufacturing (vinyl, CD, cassette, merch)',
+      'Manufacturing',
+      `Subject: Quote request: ${release.title} by ${who}\n\nHi [contact name],\n\nWe'd like a quote for a run of ${release.title} (${release.kind.toLowerCase()}, ${tracks.length || '[number of]'} tracks), ready by ${release.date ? pretty(addDays(release.date, -14)) : '[date]'}.\n\nFormat: [12" vinyl / CD / cassette / shirts]\nQuantity: [100 / 300 / 500]\nPackaging: [jacket, insert, colour, shrink wrap]\nTotal runtime: [mm:ss]\n\nPlease include turnaround time, test pressings and shipping to Minneapolis. Audio and artwork are ready to send.\n\nThank you,\n[your name]\nSanktuary`,
+    ],
+    [
+      'Sync & placement',
+      'Sync / placement',
+      `Subject: ${who} - "${lead}" for sync (one-stop, cleared)\n\nHi [contact name],\n\n"${lead}" by ${who} could fit [show / ad / film / game you have in mind]: [mood, tempo, where it lands in a scene].\n\n${about}\n\nListen: ${listen || '[link]'}\nInstrumental and clean versions: [yes/no]\nRights: master and publishing controlled, one-stop clearance\n\nHappy to send stems or a full catalogue list.\n\nBest,\n[your name]\nSanktuary`,
+    ],
   ];
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const [contacts, setContacts] = useState<{ id: string; name: string; outlet: string; email: string; kind: string; status: string }[]>([]);
+  const loadContacts = () =>
+    api('/api/outreach').then(
+      (d) => setContacts(d.items),
+      (e) => setMsg(e.message),
+    );
+  useEffect(() => {
+    if (tab === 'pitch') loadContacts();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const markPitched = (id: string) =>
+    api(`/api/outreach/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'Pitched' }) }).then(loadContacts, (e) =>
+      setMsg(e.message),
+    );
 
   return (
     <div
@@ -227,10 +260,19 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
             <>
               <div>
                 Starting points filled from the release. Replace the [brackets], make each one personal, send from your own email. Pitch
-                playlists and radio 2-4 weeks before release day.
+                playlists and radio 2-4 weeks before release day. Contacts in Outreach still marked "To pitch" get their own draft (name and
+                outlet filled in): open it, read it over, send, then mark it pitched so the follow-up reminder starts.
               </div>
-              {PITCHES.map(([label, text]) => (
-                <Pitch key={label} label={label} text={text} />
+              {msg && <div style={{ color: '#a00000' }}>{msg}</div>}
+              {PITCHES.map(([label, kind, text]) => (
+                <Pitch
+                  key={label}
+                  label={label}
+                  value={texts[label] ?? text}
+                  onChange={(v) => setTexts({ ...texts, [label]: v })}
+                  contacts={contacts.filter((c) => c.kind === kind && c.status === 'To pitch' && c.email)}
+                  onPitched={markPitched}
+                />
               ))}
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button style={button} onClick={onClose}>
@@ -245,8 +287,22 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
   );
 };
 
-const Pitch: React.FC<{ label: string; text: string }> = ({ label, text }) => {
-  const [value, setValue] = useState(text);
+// One contact's copy of a pitch, as a mailto: link that opens a draft in their own mail app
+const draftFor = (text: string, c: { name: string; outlet: string; email: string }) => {
+  const filled = text
+    .replace(/\[(show|playlist) name\]/g, c.outlet || '$&')
+    .replace(/\[(host\/music director|curator|writer|contact) name\]/g, c.name || 'there');
+  const [, subject = '', body = filled] = filled.match(/^Subject: (.*)\n\n([\s\S]*)$/) || [];
+  return `mailto:${encodeURIComponent(c.email).replace('%40', '@')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+};
+
+const Pitch: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  contacts: { id: string; name: string; outlet: string; email: string }[];
+  onPitched: (id: string) => void;
+}> = ({ label, value, onChange, contacts, onPitched }) => {
   const [note, setNote] = useState('');
   return (
     <fieldset style={fieldset}>
@@ -254,7 +310,7 @@ const Pitch: React.FC<{ label: string; text: string }> = ({ label, text }) => {
       <textarea
         rows={8}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         style={{ ...input, resize: 'vertical', width: '100%', boxSizing: 'border-box' }}
       />
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -271,6 +327,16 @@ const Pitch: React.FC<{ label: string; text: string }> = ({ label, text }) => {
         </button>
         <span>{note}</span>
       </div>
+      {contacts.map((c) => (
+        <div key={c.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <a href={draftFor(value, c)}>Draft to {c.name || c.outlet}</a>
+          <span style={{ color: '#555' }}>{c.name && c.outlet}</span>
+          <span style={{ flex: 1 }} />
+          <button style={button} onClick={() => onPitched(c.id)}>
+            Sent: mark pitched
+          </button>
+        </div>
+      ))}
     </fieldset>
   );
 };
