@@ -6,7 +6,7 @@ import RetroIcon, { IconLabel } from '../components/RetroIcon';
 import { useWindowManager } from '../wm/manager';
 import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
-import { fileIcon, formatSize, hasThumb, isTouch } from './fileTypes';
+import { button, fileIcon, shell, formatSize, hasThumb, isTouch } from './fileTypes';
 import { RANK, Rights } from '../utils/api';
 import { dialog } from '../utils/dialog';
 import { DRAG_FILE, Ref } from '../utils/refs';
@@ -1086,16 +1086,6 @@ export const LogOn: React.FC<{ name: string }> = ({ name }) => {
 };
 
 /* ── Styles ── */
-export const shell: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  width: '100%',
-  height: '100%',
-  background: '#c0c0c0',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
-  fontSize: 11,
-  overflow: 'hidden',
-};
 export const toolbar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -1103,17 +1093,6 @@ export const toolbar: React.CSSProperties = {
   padding: '3px 4px',
   borderBottom: '1px solid #808080',
   flexWrap: 'wrap',
-};
-export const button: React.CSSProperties = {
-  fontFamily: 'inherit',
-  fontSize: 11,
-  padding: '2px 8px',
-  background: '#c0c0c0',
-  minHeight: isTouch ? 32 : undefined,
-  borderTop: '1px solid #fff',
-  borderLeft: '1px solid #fff',
-  borderRight: '1px solid #000',
-  borderBottom: '1px solid #000',
 };
 const address: React.CSSProperties = { display: 'flex', alignItems: 'center', padding: '3px 4px' };
 const favMenu: React.CSSProperties = {
@@ -1227,4 +1206,5 @@ export const statusBar: React.CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+export { button, shell }; // styles live in fileTypes so the taskbar can use them without loading this app
 export default TeamFiles;
