@@ -69,7 +69,8 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
   const [view, setView] = useState<View>({ x: 0, y: 0, z: 1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
-  const [dropping, setDropping] = useState(false);
+  const [dropping, setDropping] = useState<{ x: number; y: number } | null>(null); // where a drop would land
+  const [uploading, setUploading] = useState<{ id: string; x: number; y: number; w: number; h: number; url: string }[]>([]);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const viewRef = useRef(view);
@@ -267,23 +268,30 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
       img.src = src;
     });
 
-  const addFiles = async (files: File[], at = center()) => {
-    let offset = 0;
-    for (const file of files) {
+  // Photos show up where they were dropped straight away (read from the device), centred on the drop point,
+  // while they upload in the background, all at once; the board item replaces the local copy when it's saved.
+  const addFiles = (files: File[], at = center()) =>
+    files.forEach(async (file, i) => {
+      const offset = i * 24;
+      const kind = fileKind(file.name);
+      const local = kind === 'image' ? URL.createObjectURL(file) : '';
+      const size = local ? await imageSize(local) : { w: 240, h: kind === 'audio' ? 110 : 64 };
+      const pos = { x: at.x - size.w / 2 + offset, y: at.y - size.h / 2 + offset };
+      const id = newId();
+      if (local) setUploading((u) => [...u, { id, ...pos, ...size, url: local }]);
+      setStatus(`Uploading ${file.name}...`);
       try {
-        setStatus(`Uploading ${file.name}...`);
         const asset = await uploadAsset(file);
-        const pos = { x: at.x + offset, y: at.y + offset };
-        if (fileKind(file.name) === 'image')
-          add({ type: 'image', ...pos, ...(await imageSize(asset.src)), src: asset.src, name: asset.name });
-        else add({ type: 'file', ...pos, w: 240, h: fileKind(file.name) === 'audio' ? 110 : 64, src: asset.src, name: asset.name });
-        offset += 24;
+        if (local) await imageSize(boardImage(asset.src)); // load the saved copy first, so the swap doesn't flash
+        add({ id, type: kind === 'image' ? 'image' : 'file', ...pos, ...size, src: asset.src, name: asset.name });
         setStatus('');
       } catch (err) {
         setStatus((err as Error).message);
+      } finally {
+        setUploading((u) => u.filter((x) => x.id !== id));
+        if (local) setTimeout(() => URL.revokeObjectURL(local), 5000); // after the saved picture has loaded in its place
       }
-    }
-  };
+    });
 
   // Shared from the phone's share menu: added to the board once it has loaded
   useIncoming(`canvas:${boardId}`, !!me.current, (s) => s.files.length && addFiles(s.files));
@@ -291,8 +299,10 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
   const addTeamFile = async (ref: { app: string; dir: string[]; name: string }, at: { x: number; y: number }) => {
     const src = fileUrl(ref.app, [...ref.dir, ref.name]);
     const shown = needsConversion(ref.name) ? `${src}?preview` : src; // PSD/TIFF: the server's converted image
-    if (fileKind(ref.name) === 'image') add({ type: 'image', ...at, ...(await imageSize(shown)), src: shown, name: ref.name, ref });
-    else add({ type: 'file', ...at, w: 240, h: fileKind(ref.name) === 'audio' ? 110 : 64, name: ref.name, ref, src });
+    const size = fileKind(ref.name) === 'image' ? await imageSize(shown) : { w: 240, h: fileKind(ref.name) === 'audio' ? 110 : 64 };
+    const pos = { x: at.x - size.w / 2, y: at.y - size.h / 2 }; // centred where it was dropped
+    if (fileKind(ref.name) === 'image') add({ type: 'image', ...pos, ...size, src: shown, name: ref.name, ref });
+    else add({ type: 'file', ...pos, ...size, name: ref.name, ref, src });
   };
 
   const addLink = (url: string, at = center()) => {
@@ -302,7 +312,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
-    setDropping(false);
+    setDropping(null);
     const at = toWorld(e.clientX, e.clientY);
     const teamFile = e.dataTransfer.getData(DRAG_FILE);
     if (teamFile) {
@@ -513,10 +523,10 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
         onKeyDown={onKeyDown}
         onDragOver={(e) => {
           e.preventDefault();
-          setDropping(true);
+          setDropping(toWorld(e.clientX, e.clientY));
         }}
         onDragLeave={(e) => {
-          if (e.currentTarget === e.target) setDropping(false);
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(null);
         }}
         onDrop={onDrop}
         style={{
@@ -577,6 +587,30 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
                 }}
               />
             ))}
+          {uploading.map((u) => (
+            <img
+              key={u.id}
+              src={u.url}
+              alt=""
+              title="Uploading..."
+              style={{ position: 'absolute', left: u.x, top: u.y, width: u.w, height: u.h, opacity: 0.7, pointerEvents: 'none' }}
+            />
+          ))}
+          {dropping && (
+            // Where the drop lands: the picture is centred on this point
+            <div
+              style={{
+                position: 'absolute',
+                left: dropping.x - 120,
+                top: dropping.y - 90,
+                width: 240,
+                height: 180,
+                border: `${2 / view.z}px dashed #000080`,
+                background: 'rgba(0,0,128,0.06)',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
           {others.map(
             ([conn, p]) =>
               p.x !== undefined && (
@@ -630,17 +664,6 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
           >
             Double-click to add a note · drop images or files here · drag files in from a team space · paste with Ctrl+V
           </div>
-        )}
-        {dropping && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'rgba(0,0,128,0.12)',
-              border: '2px dashed #000080',
-              pointerEvents: 'none',
-            }}
-          />
         )}
       </div>
       <div style={statusBar}>
