@@ -117,6 +117,15 @@ const PUBLIC_ICONS: DesktopIconDef[] = [
     height: 560,
   },
   {
+    id: 'magazine',
+    title: 'CITIES Vol. 1',
+    icon: '/images/icons/help-32x32.png',
+    appType: 'iframe',
+    appProps: { src: '/magazine' },
+    width: 1000,
+    height: 700,
+  },
+  {
     id: 'shop',
     title: 'Shop',
     icon: '/images/icons/favorites-32x32.png',

@@ -455,18 +455,26 @@
         } else
           bar.innerHTML = `<span>${{ heart: 'Profiles, case studies and spotlights from the Twin Cities arts scene.', 'field-notes': 'Straight from the field: shoots, sessions and shows.' }[section]}</span>`;
         const shown = inSection.filter((p) => section !== 'essays' || !filter || p.publication === filter);
+        // Heart of the Cities opens with the magazine
+        const magazine =
+          section === 'heart'
+            ? `<a class="post" href="/magazine"><img src="/magazine/pages/cover.webp" alt="" loading="lazy">
+                <div style="min-width:0"><div class="meta"><span class="chip" style="background:#b00020">Magazine</span>CITIES</div>
+                <h2>CITIES Vol. 1</h2><div class="excerpt">The magazine: Twin Cities artists in their own words. Flip through the issue.</div></div></a>`
+            : '';
         app.innerHTML =
-          shown
-            .map(
-              (p) => `<a class="post" href="${esc(p.url)}" data-nav>
+          magazine +
+            shown
+              .map(
+                (p) => `<a class="post" href="${esc(p.url)}" data-nav>
                     ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
                     <div style="min-width:0">
                       <div class="meta">${chip(p)}${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
                       <h2>${esc(p.title)}</h2>
                       <div class="excerpt">${esc(p.excerpt)}</div>
                     </div></a>`,
-            )
-            .join('') || '<div class="empty">Nothing here yet. Check back soon.</div>';
+              )
+              .join('') || '<div class="empty">Nothing here yet. Check back soon.</div>';
       }
 
       // Our own posts are plain text: paragraphs, https links made clickable, and a line that is just one of our
