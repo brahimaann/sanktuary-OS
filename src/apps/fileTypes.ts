@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 // Camera RAW: the server previews the JPEG inside (see RAW_PHOTO in server/index.mjs)
 const RAW = 'cr2 cr3 nef nrw arw srf sr2 dng raf orf rw2 pef srw 3fr erf kdc iiq';
 const isRaw = (name: string) => RAW.split(' ').includes(name.split('.').pop()?.toLowerCase() || '');
@@ -59,6 +60,28 @@ export const formatSize = (b: number) =>
 
 /** Phones/tablets: open things with one tap instead of a double-click. */
 export const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
+export const shell: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  height: '100%',
+  background: '#c0c0c0',
+  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontSize: 11,
+  overflow: 'hidden',
+};
+export const button: CSSProperties = {
+  fontFamily: 'inherit',
+  fontSize: 11,
+  padding: '2px 8px',
+  background: '#c0c0c0',
+  minHeight: isTouch ? 32 : undefined,
+  borderTop: '1px solid #fff',
+  borderLeft: '1px solid #fff',
+  borderRight: '1px solid #000',
+  borderBottom: '1px solid #000',
+};
 
 /**
  * Saves a file to this device. Phones get the share sheet, whose "Save Image" puts pictures straight into Photos
