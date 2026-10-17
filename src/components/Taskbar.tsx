@@ -5,7 +5,7 @@ import sound from '../utils/sound';
 import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
 import { openStudio } from '../apps/Studio';
-import { button } from '../apps/TeamFiles';
+import { button } from '../apps/fileTypes';
 
 interface MenuItem {
   id: string;

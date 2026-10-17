@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
-import { button, shell } from './TeamFiles';
+import { button, shell } from './fileTypes';
 
 // Studio: songs (Tracks), the calendar (Timeline), to-do boards (Planner) and opportunities (grants, calls, gigs)
 // in one window. Each tab is the
