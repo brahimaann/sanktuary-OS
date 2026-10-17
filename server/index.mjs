@@ -6151,7 +6151,7 @@ async function boardsApi(req, res, url) {
     const uuid = randomUUID();
     const dir = join(DATA, 'boards', id, 'assets');
     await mkdir(dir, { recursive: true });
-    // Pictures are shown from a compressed WebP (max 2400 px); the original is kept beside it, untouched.
+    // Pictures are shown from a compressed WebP (max 1600 px, plenty for a board); the original is kept beside it, untouched.
     // GIFs stay as they are so animations keep playing.
     if (THUMBABLE.has(ext) && ext !== '.gif') {
       const original = join(dir, `${uuid}-original${ext}`);
@@ -6160,8 +6160,8 @@ async function boardsApi(req, res, url) {
         const img = await imageInput(original, (await stat(original)).size);
         await img
           .rotate()
-          .resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
-          .webp({ quality: 82 })
+          .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 80 })
           .toFile(join(dir, `${uuid}.webp`));
         return json(res, {
           src: `/api/boards/${id}/assets/${uuid}.webp`,
