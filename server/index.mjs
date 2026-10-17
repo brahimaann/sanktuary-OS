@@ -3531,6 +3531,25 @@ async function readChannel(ch) {
   }
 }
 
+// Channels Brahima asked for, added once on start (a handle that can't be looked up is tried again next start).
+// Remembered in channelsSeeded so one removed in the Admin Panel stays removed.
+const CHANNEL_SEED = ['@Bremmydontstop', '@OhHeyAdrian', '@ezeagwulaa'];
+loadBlog().then(async (db) => {
+  db.channelsSeeded ??= [];
+  for (const handle of CHANNEL_SEED.filter((h) => !db.channelsSeeded.includes(h))) {
+    try {
+      const id = await youtubeChannelId(handle);
+      db.channels ??= [];
+      if (!db.channels.some((c) => c.id === id))
+        db.channels.push({ id, name: (await readChannel({ id })).items[0]?.channel || handle.slice(1), added: new Date().toISOString() });
+      db.channelsSeeded.push(handle);
+      saveBlog();
+    } catch (err) {
+      console.error(`CITIES: couldn't add YouTube channel ${handle}:`, err.message);
+    }
+  }
+});
+
 const ownPostView = (p, full) => ({
   id: p.id,
   source: 'sanktuary',
