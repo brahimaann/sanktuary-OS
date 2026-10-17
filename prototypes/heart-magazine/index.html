@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Heart of the Cities</title>
+    <title>CITIES Vol. 1</title>
     <meta name="theme-color" content="#0b0b0f" />
     <style>
       /* Magazine prototype: each page is an image. Edit PAGES below, or drop image files on the page to preview them. */
@@ -143,7 +143,7 @@
   </head>
   <body>
     <header>
-      <h1>Heart of the Cities</h1>
+      <h1>CITIES Vol. 1</h1>
       <p>Drag a page edge, use the arrows, or drop your own images here to try them.</p>
     </header>
     <div id="stage"><div id="book"></div></div>
@@ -156,17 +156,32 @@
 
     <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
     <script>
-      // One image per page, in reading order. First and last are the covers. Keep every page the same shape (here 920×1400).
-      const PAGES = [
-        'pages/01.svg',
-        'pages/02.webp',
-        'pages/03.webp',
-        'pages/04.webp',
-        'pages/05.webp',
-        'pages/06.webp',
-        'pages/07.webp',
-        'pages/08.svg',
+      // Spreads in reading order: each name is a pair of pages, pages/<name>-1.webp (left) and -2 (right). Reorder to reorder the issue.
+      const SPREADS = [
+        'adrian',
+        'ant',
+        'ash',
+        'becca',
+        'braayzie',
+        'brandon',
+        'cyn',
+        'deus',
+        'eddie-cole',
+        'faith',
+        'gilly',
+        'halima',
+        'jaylon',
+        'juice',
+        'kidus',
+        'lyric',
+        'manny',
+        'masto',
+        'mimi',
+        'mk',
+        'mo-swavae',
+        'p',
       ];
+      const PAGES = ['pages/cover.webp', ...SPREADS.flatMap((n) => [`pages/${n}-1.webp`, `pages/${n}-2.webp`]), 'pages/back.webp'];
       const RATIO = 920 / 1400;
 
       const stage = document.getElementById('stage');
@@ -216,8 +231,10 @@
         const px = g.getImageData(0, 0, w, h).data;
         const white = (x) => {
           let n = 0;
-          for (let y = 0; y < h; y++) n += Math.min(px[(y * w + x) * 4], px[(y * w + x) * 4 + 1], px[(y * w + x) * 4 + 2]) > 235;
-          return n > h * 0.97;
+          // Middle rows only, so a dark mat above and below a page doesn't hide its white edge
+          for (let y = h * 0.2; y < h * 0.8; y++)
+            n += Math.min(px[(y * w + x) * 4], px[(y * w + x) * 4 + 1], px[(y * w + x) * 4 + 2]) > 235;
+          return n > h * 0.58;
         };
         let l = 0;
         let r = 0;
