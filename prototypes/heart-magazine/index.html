@@ -19,7 +19,7 @@
       html,
       body {
         margin: 0;
-        min-height: 100%;
+        height: 100%;
         background: var(--bg);
         color: var(--fg);
         font:
@@ -27,8 +27,16 @@
           'Times New Roman',
           serif;
       }
+      /* The magazine takes all the room the header and controls leave */
+      body {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        overflow: hidden;
+        padding: 0 16px;
+      }
       header {
-        padding: 20px 16px 8px;
+        padding: 16px 0 8px;
         text-align: center;
       }
       h1 {
@@ -46,10 +54,10 @@
         font-size: 14px;
       }
       #stage {
-        /* Fit a two-page spread inside the screen height */
-        max-width: min(1100px, calc((100dvh - 220px) * 1.31));
-        margin: 0 auto;
-        padding: 16px;
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        place-items: center;
       }
       .page {
         background: #000;
@@ -62,18 +70,22 @@
         user-select: none;
         pointer-events: none;
       }
+      /* Paint the fold white behind an open spread, so the hairline where the two pages meet doesn't show dark */
+      .open .--landscape .stf__block {
+        background: linear-gradient(90deg, #0000 calc(50% - 2px), #fff 0 calc(50% + 2px), #0000 0);
+      }
       nav {
         display: flex;
         gap: 12px;
         justify-content: center;
         align-items: center;
-        padding: 8px 16px 32px;
+        padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
       }
       button {
         background: none;
         color: var(--fg);
         border: 1px solid var(--accent);
-        padding: 8px 18px;
+        padding: 6px 16px;
         font: inherit;
         cursor: pointer;
       }
@@ -86,20 +98,20 @@
         min-width: 7ch;
         text-align: center;
       }
-      /* Small windows (like the site's browser window): drop the hint line to give the pages room */
-      @media (max-height: 600px) {
-        header p {
+      /* Small screens and fullscreen: just the magazine and a slim control bar */
+      @media (max-width: 600px), (max-height: 600px) {
+        header {
           display: none;
         }
-        #stage {
-          max-width: calc((100dvh - 150px) * 1.31);
+        body {
+          padding: 0;
         }
       }
-      /* Phones: one page at a time (the book switches to single pages below 360px of width) */
-      @media (max-width: 500px) {
-        #stage {
-          max-width: 390px;
-        }
+      :fullscreen header {
+        display: none;
+      }
+      :fullscreen body {
+        padding: 0;
       }
       body.dragging #stage {
         outline: 2px dashed var(--accent);
@@ -109,13 +121,14 @@
   <body>
     <header>
       <h1>Heart of the Cities</h1>
-      <p>Drag a page corner, use the arrows, or drop your own images here to try them.</p>
+      <p>Drag a page edge, use the arrows, or drop your own images here to try them.</p>
     </header>
-    <div id="stage"></div>
+    <div id="stage"><div id="book"></div></div>
     <nav>
       <button id="prev" aria-label="Previous page">←</button>
       <span id="count"></span>
       <button id="next" aria-label="Next page">→</button>
+      <button id="full" aria-label="Full screen" hidden>⛶</button>
     </nav>
 
     <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
@@ -131,15 +144,25 @@
         'pages/07.webp',
         'pages/08.svg',
       ];
+      const RATIO = 920 / 1400;
 
       const stage = document.getElementById('stage');
+      const holder = document.getElementById('book');
       const count = document.getElementById('count');
-      let book;
+      let book, srcs, single;
 
-      function build(srcs) {
+      // A screen taller than it is wide shows one page at a time; otherwise full spreads.
+      const isSingle = () => stage.clientWidth < stage.clientHeight;
+      // Size the book to the largest page or spread that fits the stage.
+      const fit = () => (holder.style.width = Math.min(stage.clientWidth, stage.clientHeight * RATIO * (single ? 1 : 2)) + 'px');
+
+      function build(list, start = 0) {
+        srcs = list;
         book?.destroy();
+        single = isSingle();
+        fit();
         const el = document.createElement('div');
-        stage.replaceChildren(el);
+        holder.replaceChildren(el);
         el.innerHTML = srcs
           .map((src, i) => {
             const hard = i === 0 || i === srcs.length - 1 ? ' data-density="hard"' : '';
@@ -147,13 +170,15 @@
           })
           .join('');
         book = new St.PageFlip(el, {
-          width: 460,
-          height: 700,
+          width: 920,
+          height: 1400,
           size: 'stretch',
-          minWidth: 180,
-          maxWidth: 1000,
-          minHeight: 278,
-          maxHeight: 1400,
+          // The library picks single pages when the book is narrower than 2 × minWidth, so this forces the mode chosen above
+          minWidth: single ? 1e5 : 1,
+          maxWidth: 1e5,
+          minHeight: 1,
+          maxHeight: 1e5,
+          startPage: start,
           showCover: true,
           maxShadowOpacity: 0.5,
           mobileScrollSupport: false,
@@ -173,16 +198,22 @@
           true,
         );
         book.loadFromHTML(el.querySelectorAll('.page'));
+        el.style.minWidth = el.style.minHeight = ''; // drop the library's min size, the stage decides
+        book.update();
         // Only the open pages download; warm up the next spread so a flip never shows a blank page.
         const imgs = el.querySelectorAll('img');
         const show = () => {
           const i = book.getCurrentPageIndex();
           count.textContent = `${i + 1} / ${book.getPageCount()}`;
+          el.classList.toggle('open', i > 0 && i < book.getPageCount() - 1);
           for (const img of [...imgs].slice(i + 1, i + 4)) img.loading = 'eager';
         };
         book.on('flip', show);
         show();
       }
+
+      // Registered before the book's own resize handler, so the size is set before it re-lays out.
+      addEventListener('resize', () => (isSingle() === single ? fit() : build(srcs, book.getCurrentPageIndex())));
 
       document.getElementById('prev').onclick = () => book.flipPrev();
       document.getElementById('next').onclick = () => book.flipNext();
@@ -190,6 +221,11 @@
         if (e.key === 'ArrowLeft') book.flipPrev();
         if (e.key === 'ArrowRight') book.flipNext();
       });
+
+      // Full screen where the browser allows it (iPhone Safari does not, so the button stays hidden there).
+      const full = document.getElementById('full');
+      full.hidden = !document.fullscreenEnabled;
+      full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
 
       // Drop image files anywhere to preview them as the magazine, ordered by file name (01.jpg, 02.jpg, ...).
       addEventListener('dragover', (e) => {
