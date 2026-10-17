@@ -86,6 +86,15 @@
         min-width: 7ch;
         text-align: center;
       }
+      /* Small windows (like the site's browser window): drop the hint line to give the pages room */
+      @media (max-height: 600px) {
+        header p {
+          display: none;
+        }
+        #stage {
+          max-width: calc((100dvh - 150px) * 1.43);
+        }
+      }
       body.dragging #stage {
         outline: 2px dashed var(--accent);
       }
@@ -135,14 +144,28 @@
           width: 500,
           height: 700,
           size: 'stretch',
-          minWidth: 280,
+          minWidth: 150,
           maxWidth: 1000,
-          minHeight: 392,
+          minHeight: 210,
           maxHeight: 1400,
           showCover: true,
           maxShadowOpacity: 0.5,
           mobileScrollSupport: false,
+          flippingTime: 600,
+          showPageCorners: false, // no corner peel on hover
+          disableFlipByClick: true, // a click flips only on a page corner
+          swipeDistance: 60,
         });
+        // A mouse drag only grabs the page from its outer edge, so dragging across the middle does nothing.
+        el.addEventListener(
+          'mousedown',
+          (e) => {
+            const r = el.getBoundingClientRect();
+            const edge = Math.min(e.clientX - r.left, r.right - e.clientX);
+            if (edge > r.width * 0.15) e.stopPropagation();
+          },
+          true,
+        );
         book.loadFromHTML(el.querySelectorAll('.page'));
         // Only the open pages download; warm up the next spread so a flip never shows a blank page.
         const imgs = el.querySelectorAll('img');
