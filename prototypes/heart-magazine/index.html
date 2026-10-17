@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Heart of the Cities</title>
+    <meta name="theme-color" content="#0b0b0f" />
+    <style>
+      /* Magazine prototype: each page is an image. Edit PAGES below, or drop image files on the page to preview them. */
+      :root {
+        --bg: #0b0b0f;
+        --fg: #f3efe8;
+        --dim: #b9b2a6;
+        --accent: #d9a441;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.5 Georgia,
+          'Times New Roman',
+          serif;
+      }
+      header {
+        padding: 20px 16px 8px;
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font:
+          900 clamp(22px, 5vw, 36px) / 1.1 'Arial Black',
+          Helvetica,
+          sans-serif;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      header p {
+        margin: 4px 0 0;
+        color: var(--dim);
+        font-size: 14px;
+      }
+      #stage {
+        /* Fit a two-page spread inside the screen height */
+        max-width: min(1100px, calc((100dvh - 150px) * 1.43));
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .page {
+        background: #000;
+      }
+      .page img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        user-select: none;
+        pointer-events: none;
+      }
+      nav {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        align-items: center;
+        padding: 8px 16px 32px;
+      }
+      button {
+        background: none;
+        color: var(--fg);
+        border: 1px solid var(--accent);
+        padding: 8px 18px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--accent);
+        color: var(--bg);
+      }
+      #count {
+        color: var(--dim);
+        min-width: 7ch;
+        text-align: center;
+      }
+      body.dragging #stage {
+        outline: 2px dashed var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Heart of the Cities</h1>
+      <p>Drag a page corner, use the arrows, or drop your own images here to try them.</p>
+    </header>
+    <div id="stage"></div>
+    <nav>
+      <button id="prev" aria-label="Previous page">←</button>
+      <span id="count"></span>
+      <button id="next" aria-label="Next page">→</button>
+    </nav>
+
+    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+    <script>
+      // One image per page, in reading order. First and last are the covers. Keep every page the same shape (here 5:7).
+      const PAGES = [
+        'pages/01.svg',
+        'pages/02.svg',
+        'pages/03.svg',
+        'pages/04.svg',
+        'pages/05.svg',
+        'pages/06.svg',
+        'pages/07.svg',
+        'pages/08.svg',
+      ];
+
+      const stage = document.getElementById('stage');
+      const count = document.getElementById('count');
+      let book;
+
+      function build(srcs) {
+        book?.destroy();
+        const el = document.createElement('div');
+        stage.replaceChildren(el);
+        el.innerHTML = srcs
+          .map((src, i) => {
+            const hard = i === 0 || i === srcs.length - 1 ? ' data-density="hard"' : '';
+            return `<div class="page"${hard}><img src="${src}" alt="Page ${i + 1}" loading="lazy"></div>`;
+          })
+          .join('');
+        book = new St.PageFlip(el, {
+          width: 500,
+          height: 700,
+          size: 'stretch',
+          minWidth: 280,
+          maxWidth: 1000,
+          minHeight: 392,
+          maxHeight: 1400,
+          showCover: true,
+          maxShadowOpacity: 0.5,
+          mobileScrollSupport: false,
+        });
+        book.loadFromHTML(el.querySelectorAll('.page'));
+        const show = () => (count.textContent = `${book.getCurrentPageIndex() + 1} / ${book.getPageCount()}`);
+        book.on('flip', show);
+        show();
+      }
+
+      document.getElementById('prev').onclick = () => book.flipPrev();
+      document.getElementById('next').onclick = () => book.flipNext();
+      addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') book.flipPrev();
+        if (e.key === 'ArrowRight') book.flipNext();
+      });
+
+      // Drop image files anywhere to preview them as the magazine, ordered by file name (01.jpg, 02.jpg, ...).
+      addEventListener('dragover', (e) => {
+        e.preventDefault();
+        document.body.classList.add('dragging');
+      });
+      addEventListener('dragleave', () => document.body.classList.remove('dragging'));
+      addEventListener('drop', (e) => {
+        e.preventDefault();
+        document.body.classList.remove('dragging');
+        const files = [...e.dataTransfer.files]
+          .filter((f) => f.type.startsWith('image/'))
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        if (files.length) build(files.map((f) => URL.createObjectURL(f)));
+      });
+
+      build(PAGES);
+    </script>
+  </body>
+</html>
