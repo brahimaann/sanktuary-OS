@@ -349,7 +349,8 @@ export const App: React.FC = () => {
           height: H - borderY - borderBottom,
         }}
       >
-        {crtEnabled && (
+        {/* No CRT tint while a moodboard or Darkroom is on screen, so pictures show their true colours */}
+        {crtEnabled && !windows.some((w) => (w.appType === 'canvas' || w.appType === 'darkroom') && !w.isMinimized) && (
           <>
             <div className="crt-screen-vignette" />
             <div className="crt-screen-filter" />

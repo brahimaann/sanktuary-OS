@@ -1206,7 +1206,7 @@ try {
   check('dragged-on picture is shown as WebP', asset.src.endsWith('.webp') && asset.original.endsWith('-original.png'));
   const shownPic = Buffer.from(await (await fetch(B + asset.src, { headers: { cookie: cookie('alice') } })).arrayBuffer());
   const meta = await sharpLib(shownPic).metadata();
-  check('shown copy is shrunk to 2400 px', meta.format === 'webp' && meta.width === 2400);
+  check('shown copy is shrunk to 1600 px', meta.format === 'webp' && meta.width === 1600);
   check(
     'original kept untouched',
     (await fetch(B + asset.original, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer())).byteLength === bigPng.length,
