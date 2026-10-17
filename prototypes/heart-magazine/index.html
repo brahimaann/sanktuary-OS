@@ -70,6 +70,28 @@
         user-select: none;
         pointer-events: none;
       }
+      /* One page at a time: pages are stacked and each turns on its left edge, like a real page */
+      .single {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 920 / 1400;
+        perspective: 2000px;
+        touch-action: none;
+      }
+      .single .page {
+        position: absolute;
+        inset: 0;
+        transform-origin: left center;
+        backface-visibility: hidden;
+        overflow: hidden;
+      }
+      /* Single pages hide their half of the spread's white gutter: inside pages alternate left (gutter on the right) and right (gutter on the left) */
+      .single .page:not(:first-child, :last-child) img {
+        width: 101.5%;
+      }
+      .single .page:nth-child(odd):not(:first-child, :last-child) img {
+        margin-left: -1.5%;
+      }
       /* Paint the fold white behind an open spread, so the hairline where the two pages meet doesn't show dark */
       .open .--landscape .stf__block {
         background: linear-gradient(90deg, #0000 calc(50% - 2px), #fff 0 calc(50% + 2px), #0000 0);
@@ -166,15 +188,30 @@
         el.innerHTML = srcs
           .map((src, i) => {
             const hard = i === 0 || i === srcs.length - 1 ? ' data-density="hard"' : '';
-            return `<div class="page"${hard}><img src="${src}" alt="Page ${i + 1}" loading="lazy" decoding="async"></div>`;
+            return `<div class="page"${hard}><img data-src="${src}" alt="Page ${i + 1}" decoding="async"></div>`;
           })
           .join('');
-        book = new St.PageFlip(el, {
+        book = single ? turner(el, start) : spread(el, start);
+        // Only pages near the open one download, so a flip never shows a blank page and the rest wait.
+        const imgs = [...el.querySelectorAll('img')];
+        const show = () => {
+          const i = book.getCurrentPageIndex();
+          count.textContent = `${i + 1} / ${book.getPageCount()}`;
+          el.classList.toggle('open', i > 0 && i < book.getPageCount() - 1);
+          for (const img of imgs.slice(Math.max(0, i - 2), i + 4)) img.src ||= img.dataset.src;
+        };
+        book.on('flip', show);
+        show();
+      }
+
+      // Two-page spreads: the page-flip library.
+      function spread(el, start) {
+        const flip = new St.PageFlip(el, {
           width: 920,
           height: 1400,
           size: 'stretch',
-          // The library picks single pages when the book is narrower than 2 × minWidth, so this forces the mode chosen above
-          minWidth: single ? 1e5 : 1,
+          // The library picks single pages when the book is narrower than 2 × minWidth; 1 keeps it on spreads
+          minWidth: 1,
           maxWidth: 1e5,
           minHeight: 1,
           maxHeight: 1e5,
@@ -197,19 +234,86 @@
           },
           true,
         );
-        book.loadFromHTML(el.querySelectorAll('.page'));
+        flip.loadFromHTML(el.querySelectorAll('.page'));
         el.style.minWidth = el.style.minHeight = ''; // drop the library's min size, the stage decides
-        book.update();
-        // Only the open pages download; warm up the next spread so a flip never shows a blank page.
-        const imgs = el.querySelectorAll('img');
-        const show = () => {
-          const i = book.getCurrentPageIndex();
-          count.textContent = `${i + 1} / ${book.getPageCount()}`;
-          el.classList.toggle('open', i > 0 && i < book.getPageCount() - 1);
-          for (const img of [...imgs].slice(i + 1, i + 4)) img.loading = 'eager';
+        flip.update();
+        return flip;
+      }
+
+      // One page at a time: each page turns on its left edge and follows your finger.
+      // Same methods as the library's book, so the buttons and keys work on both.
+      function turner(el, start) {
+        el.className = 'single';
+        const pages = [...el.children];
+        const n = pages.length;
+        let i = Math.min(start, n - 1);
+        let onFlip = () => {};
+        const rest = (k) => (k < i ? k : 2 * n - k); // turned pages stack under unturned ones
+        const turn = (p, deg, ms = 0) => {
+          p.style.transition = `transform ${ms}ms ease-out`;
+          p.style.transform = `rotateY(${deg}deg)`;
         };
-        book.on('flip', show);
-        show();
+        pages.forEach((p, k) => {
+          p.style.zIndex = rest(k);
+          turn(p, k < i ? -180 : 0);
+        });
+        // Forward turns the open page away; back brings the last turned page over again.
+        const target = (d) => (d > 0 ? (i < n - 1 ? i : -1) : i - 1);
+        const go = (d) => {
+          const k = target(d);
+          if (k < 0) return;
+          pages[k].style.zIndex = 3 * n;
+          turn(pages[k], d > 0 ? -180 : 0, 600);
+          i += d;
+          onFlip();
+          setTimeout(() => (pages[k].style.zIndex = rest(k)), 600);
+        };
+
+        let dx = 0,
+          x0 = null,
+          d = 0,
+          k = -1;
+        el.onpointerdown = (e) => {
+          const r = el.getBoundingClientRect();
+          // With a mouse, grab from the outer edge only (as on spreads); fingers can swipe anywhere.
+          if (e.pointerType === 'mouse' && Math.min(e.clientX - r.left, r.right - e.clientX) > r.width * 0.15) return;
+          e.preventDefault(); // no text selection or native image drag, which would cancel the gesture
+          x0 = e.clientX;
+          d = 0;
+          dx = 0;
+          el.setPointerCapture(e.pointerId);
+        };
+        el.onpointermove = (e) => {
+          if (x0 === null) return;
+          dx = e.clientX - x0;
+          if (!d && Math.abs(dx) > 5) {
+            d = dx < 0 ? 1 : -1;
+            k = target(d);
+            if (k >= 0) pages[k].style.zIndex = 3 * n;
+          }
+          if (!d || k < 0) return;
+          // The page's free edge follows the finger: forward starts from the outer edge, back from the spine.
+          const rel = Math.max(0, Math.min(1, (d > 0 ? 1 : 0) + dx / el.clientWidth));
+          turn(pages[k], (-Math.acos(rel) * 180) / Math.PI);
+        };
+        el.onpointerup = el.onpointercancel = () => {
+          if (x0 === null) return;
+          x0 = null;
+          if (!d || k < 0) return;
+          if (Math.abs(dx) > el.clientWidth * 0.2) return go(d);
+          turn(pages[k], d > 0 ? 0 : -180, 300); // not far enough: settle back
+          const held = k;
+          setTimeout(() => (pages[held].style.zIndex = rest(held)), 300);
+        };
+
+        return {
+          flipNext: () => go(1),
+          flipPrev: () => go(-1),
+          getCurrentPageIndex: () => i,
+          getPageCount: () => n,
+          on: (_, fn) => (onFlip = fn),
+          destroy() {},
+        };
       }
 
       // Registered before the book's own resize handler, so the size is set before it re-lays out.
