@@ -85,12 +85,13 @@
         backface-visibility: hidden;
         overflow: hidden;
       }
-      /* Single pages hide their half of the spread's white gutter: inside pages alternate left (gutter on the right) and right (gutter on the left) */
-      .single .page:not(:first-child, :last-child) img {
-        width: 101.5%;
+      /* Single pages hide any white edge (their half of a spread's gutter), measured by trim() below */
+      .single .page {
+        clip-path: inset(0);
       }
-      .single .page:nth-child(odd):not(:first-child, :last-child) img {
-        margin-left: -1.5%;
+      .single .page img {
+        width: var(--w, 100%);
+        margin-left: var(--ml, 0);
       }
       /* Paint the fold white behind an open spread, so the hairline where the two pages meet doesn't show dark */
       .open .--landscape .stf__block {
@@ -194,6 +195,7 @@
         book = single ? turner(el, start) : spread(el, start);
         // Only pages near the open one download, so a flip never shows a blank page and the rest wait.
         const imgs = [...el.querySelectorAll('img')];
+        imgs.forEach((img) => (img.onload = () => trim(img)));
         const show = () => {
           const i = book.getCurrentPageIndex();
           count.textContent = `${i + 1} / ${book.getPageCount()}`;
@@ -202,6 +204,30 @@
         };
         book.on('flip', show);
         show();
+      }
+
+      // Measure white columns on a page's left and right edges (a spread's gutter) so single pages can crop them off.
+      function trim(img) {
+        const c = document.createElement('canvas');
+        const w = (c.width = 200);
+        const h = (c.height = 300);
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(img, 0, 0, w, h);
+        const px = g.getImageData(0, 0, w, h).data;
+        const white = (x) => {
+          let n = 0;
+          for (let y = 0; y < h; y++) n += Math.min(px[(y * w + x) * 4], px[(y * w + x) * 4 + 1], px[(y * w + x) * 4 + 2]) > 235;
+          return n > h * 0.97;
+        };
+        let l = 0;
+        let r = 0;
+        while (l < w / 4 && white(l)) l++;
+        while (r < w / 4 && white(w - 1 - r)) r++;
+        l += l && 1; // one more column for the soft edge where white fades into the photo
+        r += r && 1;
+        const keep = 1 - (l + r) / w;
+        img.style.setProperty('--w', 100 / keep + '%');
+        img.style.setProperty('--ml', (-100 * l) / w / keep + '%');
       }
 
       // Two-page spreads: the page-flip library.
