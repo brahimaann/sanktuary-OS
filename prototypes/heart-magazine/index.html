@@ -47,7 +47,7 @@
       }
       #stage {
         /* Fit a two-page spread inside the screen height */
-        max-width: min(1100px, calc((100dvh - 220px) * 1.29));
+        max-width: min(1100px, calc((100dvh - 220px) * 1.31));
         margin: 0 auto;
         padding: 16px;
       }
@@ -92,7 +92,7 @@
           display: none;
         }
         #stage {
-          max-width: calc((100dvh - 150px) * 1.29);
+          max-width: calc((100dvh - 150px) * 1.31);
         }
       }
       /* Phones: one page at a time (the book switches to single pages below 360px of width) */
@@ -120,7 +120,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
     <script>
-      // One image per page, in reading order. First and last are the covers. Keep every page the same shape (here 906×1400).
+      // One image per page, in reading order. First and last are the covers. Keep every page the same shape (here 920×1400).
       const PAGES = [
         'pages/01.svg',
         'pages/02.webp',
@@ -147,7 +147,7 @@
           })
           .join('');
         book = new St.PageFlip(el, {
-          width: 453,
+          width: 460,
           height: 700,
           size: 'stretch',
           minWidth: 180,
