@@ -47,7 +47,7 @@
       }
       #stage {
         /* Fit a two-page spread inside the screen height */
-        max-width: min(1100px, calc((100dvh - 150px) * 1.43));
+        max-width: min(1100px, calc((100dvh - 220px) * 1.43));
         margin: 0 auto;
         padding: 16px;
       }
@@ -128,7 +128,7 @@
         el.innerHTML = srcs
           .map((src, i) => {
             const hard = i === 0 || i === srcs.length - 1 ? ' data-density="hard"' : '';
-            return `<div class="page"${hard}><img src="${src}" alt="Page ${i + 1}" loading="lazy"></div>`;
+            return `<div class="page"${hard}><img src="${src}" alt="Page ${i + 1}" loading="lazy" decoding="async"></div>`;
           })
           .join('');
         book = new St.PageFlip(el, {
@@ -144,7 +144,13 @@
           mobileScrollSupport: false,
         });
         book.loadFromHTML(el.querySelectorAll('.page'));
-        const show = () => (count.textContent = `${book.getCurrentPageIndex() + 1} / ${book.getPageCount()}`);
+        // Only the open pages download; warm up the next spread so a flip never shows a blank page.
+        const imgs = el.querySelectorAll('img');
+        const show = () => {
+          const i = book.getCurrentPageIndex();
+          count.textContent = `${i + 1} / ${book.getPageCount()}`;
+          for (const img of [...imgs].slice(i + 1, i + 4)) img.loading = 'eager';
+        };
         book.on('flip', show);
         show();
       }
@@ -168,7 +174,9 @@
         const files = [...e.dataTransfer.files]
           .filter((f) => f.type.startsWith('image/'))
           .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-        if (files.length) build(files.map((f) => URL.createObjectURL(f)));
+        if (!files.length) return;
+        stage.querySelectorAll('img[src^="blob:"]').forEach((img) => URL.revokeObjectURL(img.src));
+        build(files.map((f) => URL.createObjectURL(f)));
       });
 
       build(PAGES);
