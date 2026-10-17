@@ -1,4 +1,4 @@
-# Usage: python3 split.py "<folder of spread JPGs>" pages
+# Usage: python3 ops/magazine-split.py "<folder of exported spread JPGs>" public/magazine/pages
 # Split each CITIES spread at its white gutter into two 920x1400 WebP pages (padded on a dark mat if the shape differs).
 import sys, glob, os, re
 from PIL import Image

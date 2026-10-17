@@ -5038,6 +5038,25 @@ async function blogPage(req, res, url) {
   res.end(html);
 }
 
+// CITIES, the magazine: sanktuary.studio/magazine, a flipbook of the issue's pages (images in public/magazine/pages)
+const MAGAZINE_PAGE = new URL('./magazine.html', import.meta.url);
+async function magazinePage(req, res, url) {
+  if (!/^\/magazine\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  const origin = siteOrigin(req);
+  const meta = {
+    title: 'CITIES Vol. 1',
+    text: 'The CITIES magazine: Twin Cities artists in their own words. Flip through the issue.',
+    image: origin + '/magazine/pages/cover.webp',
+    link: origin + '/magazine',
+  };
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
+  });
+  res.end((await readFile(MAGAZINE_PAGE, 'utf8')).replace('<!--meta-->', metaTags(meta)));
+}
+
 // /write: where members start drafts for CITIES (signed in, never public); admins publish in Admin Panel > CITIES
 const WRITE_PAGE = new URL('./write.html', import.meta.url);
 function writePage(req, res, url) {
@@ -7662,6 +7681,7 @@ const routes = [
   ['/story/', storyPage],
   ['/release/', htmlPage(RELEASE_PAGE)],
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
+  ['/magazine', magazinePage],
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
   ['/b/', publicBoard],

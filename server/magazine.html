@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>CITIES Vol. 1</title>
+    <!--meta-->
     <meta name="theme-color" content="#0b0b0f" />
     <style>
-      /* Magazine prototype: each page is an image. Edit PAGES below, or drop image files on the page to preview them. */
+      /* CITIES, the magazine (sanktuary.studio/magazine): each page is an image in public/magazine/pages, made by ops/magazine-split.py. */
       :root {
         --bg: #0b0b0f;
         --fg: #f3efe8;
@@ -136,15 +136,12 @@
       :fullscreen body {
         padding: 0;
       }
-      body.dragging #stage {
-        outline: 2px dashed var(--accent);
-      }
     </style>
   </head>
   <body>
     <header>
       <h1>CITIES Vol. 1</h1>
-      <p>Drag a page edge, use the arrows, or drop your own images here to try them.</p>
+      <p>Swipe, drag a page edge or use the arrows.</p>
     </header>
     <div id="stage"><div id="book"></div></div>
     <nav>
@@ -154,9 +151,9 @@
       <button id="full" aria-label="Full screen" hidden>⛶</button>
     </nav>
 
-    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+    <script src="/magazine/page-flip.js"></script>
     <script>
-      // Spreads in reading order: each name is a pair of pages, pages/<name>-1.webp (left) and -2 (right). Reorder to reorder the issue.
+      // Spreads in reading order: each name is a pair of pages, /magazine/pages/<name>-1.webp (left) and -2 (right). Reorder to reorder the issue.
       const SPREADS = [
         'adrian',
         'ant',
@@ -181,7 +178,8 @@
         'mo-swavae',
         'p',
       ];
-      const PAGES = ['pages/cover.webp', ...SPREADS.flatMap((n) => [`pages/${n}-1.webp`, `pages/${n}-2.webp`]), 'pages/back.webp'];
+      const P = '/magazine/pages/';
+      const PAGES = [`${P}cover.webp`, ...SPREADS.flatMap((n) => [`${P}${n}-1.webp`, `${P}${n}-2.webp`]), `${P}back.webp`];
       const RATIO = 920 / 1400;
 
       const stage = document.getElementById('stage');
@@ -373,23 +371,6 @@
       const full = document.getElementById('full');
       full.hidden = !document.fullscreenEnabled;
       full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
-
-      // Drop image files anywhere to preview them as the magazine, ordered by file name (01.jpg, 02.jpg, ...).
-      addEventListener('dragover', (e) => {
-        e.preventDefault();
-        document.body.classList.add('dragging');
-      });
-      addEventListener('dragleave', () => document.body.classList.remove('dragging'));
-      addEventListener('drop', (e) => {
-        e.preventDefault();
-        document.body.classList.remove('dragging');
-        const files = [...e.dataTransfer.files]
-          .filter((f) => f.type.startsWith('image/'))
-          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-        if (!files.length) return;
-        stage.querySelectorAll('img[src^="blob:"]').forEach((img) => URL.revokeObjectURL(img.src));
-        build(files.map((f) => URL.createObjectURL(f)));
-      });
 
       build(PAGES);
     </script>
