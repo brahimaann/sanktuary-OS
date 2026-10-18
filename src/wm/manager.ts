@@ -38,6 +38,7 @@ export type AppType =
   | 'directory'
   | 'producer'
   | 'studio'
+  | 'folder'
   | 'darkroom'
   | 'video-editor';
 

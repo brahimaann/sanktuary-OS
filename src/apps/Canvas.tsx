@@ -250,6 +250,21 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
       .sort((a, b) => b.z - a.z)[0];
 
   // ── Creating items ──
+  // Phones: camera photos are shrunk to 2400 px before upload, so adding one doesn't wait on a 5-10 MB transfer
+  const shrink = async (file: File) => {
+    if (!matchMedia('(pointer: coarse)').matches || !/^image\/(jpeg|heic|heif)$/.test(file.type) || file.size < 1.5e6) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const s = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+      const c = Object.assign(document.createElement('canvas'), { width: Math.round(bmp.width * s), height: Math.round(bmp.height * s) });
+      c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+      const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/jpeg', 0.85));
+      return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+    } catch {
+      return file;
+    }
+  };
+
   const uploadAsset = async (file: File) => {
     if (file.size > MAX_ASSET) throw new Error(`${file.name} is over 95 MB — put it in a team space and drag it in from there`);
     const res = await fetch(`/api/boards/${boardId}/assets?name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file });
@@ -281,7 +296,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
       if (local) setUploading((u) => [...u, { id, ...pos, ...size, url: local }]);
       setStatus(`Uploading ${file.name}...`);
       try {
-        const asset = await uploadAsset(file);
+        const asset = await uploadAsset(await shrink(file));
         if (local) await imageSize(boardImage(asset.src)); // load the saved copy first, so the swap doesn't flash
         add({ id, type: kind === 'image' ? 'image' : 'file', ...pos, ...size, src: asset.src, name: asset.name });
         setStatus('');
