@@ -231,7 +231,14 @@ export const Taskbar: React.FC = () => {
         {/* Log On (visitors) / your account (members), in the corner */}
         <button
           onClick={() =>
-            openWindow({ id: 'profile-me', title: isSignedIn ? 'My Account' : 'Log On', appType: 'profile', icon: icon('logoff-32x32.png'), width: 420, height: 520 })
+            openWindow({
+              id: 'profile-me',
+              title: isSignedIn ? 'My Account' : 'Log On',
+              appType: 'profile',
+              icon: icon('logoff-32x32.png'),
+              width: 420,
+              height: 520,
+            })
           }
           className="ml-1 cursor-pointer border-none bg-transparent outline-none flex items-center"
           style={{ fontSize: 14, lineHeight: 1 }}
@@ -433,8 +440,7 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
   const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
 
-  const isCurrentDay = (d: number) =>
-    now.getFullYear() === year && now.getMonth() === month && now.getDate() === d;
+  const isCurrentDay = (d: number) => now.getFullYear() === year && now.getMonth() === month && now.getDate() === d;
 
   return (
     <div
@@ -493,21 +499,13 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           padding: '2px 4px',
         }}
       >
-        <button
-          onClick={prevMonth}
-          style={{ ...button, padding: '1px 5px', fontSize: 10 }}
-          title="Previous Month"
-        >
+        <button onClick={prevMonth} style={{ ...button, padding: '1px 5px', fontSize: 10 }} title="Previous Month">
           ◀
         </button>
         <b style={{ fontSize: 11 }}>
           {monthName} {year}
         </b>
-        <button
-          onClick={nextMonth}
-          style={{ ...button, padding: '1px 5px', fontSize: 10 }}
-          title="Next Month"
-        >
+        <button onClick={nextMonth} style={{ ...button, padding: '1px 5px', fontSize: 10 }} title="Next Month">
           ▶
         </button>
       </div>
@@ -520,7 +518,18 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           padding: 2,
         }}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontWeight: 700, fontSize: 10, color: '#666', borderBottom: '1px solid #c0c0c0', paddingBottom: 2 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            textAlign: 'center',
+            fontWeight: 700,
+            fontSize: 10,
+            color: '#666',
+            borderBottom: '1px solid #c0c0c0',
+            paddingBottom: 2,
+          }}
+        >
           {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
             <span key={i}>{day}</span>
           ))}
@@ -583,4 +592,3 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     </div>
   );
 };
-

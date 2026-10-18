@@ -22,46 +22,54 @@ export const Archive: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      api('/api/tracks').catch(() => ({ releases: [] })),
-      api('/api/timeline').catch(() => ({ items: [] })),
-    ]).then(([tracksData, timelineData]) => {
-      const list: ArchiveItem[] = [];
+    Promise.all([api('/api/tracks').catch(() => ({ releases: [] })), api('/api/timeline').catch(() => ({ items: [] }))]).then(
+      ([tracksData, timelineData]) => {
+        const list: ArchiveItem[] = [];
 
-      // Releases that are released or past date
-      for (const r of tracksData.releases || []) {
-        list.push({
-          id: r.id,
-          title: r.title,
-          type: 'release',
-          date: r.date || 'No date',
-          detail: `${r.kind} · ${r.artist || 'Sanktuary'}`,
-        });
-      }
-
-      // Past timeline events
-      for (const t of timelineData.items || []) {
-        if (t.past || (t.start && new Date(t.start).getTime() < Date.now())) {
+        // Releases that are released or past date
+        for (const r of tracksData.releases || []) {
           list.push({
-            id: t.id,
-            title: t.title,
-            type: 'timeline',
-            date: t.start || 'Past',
-            detail: `${t.kind} ${t.location ? `· ${t.location}` : ''}`,
+            id: r.id,
+            title: r.title,
+            type: 'release',
+            date: r.date || 'No date',
+            detail: `${r.kind} · ${r.artist || 'Sanktuary'}`,
           });
         }
-      }
 
-      setItems(list.sort((a, b) => b.date.localeCompare(a.date)));
-      setLoading(false);
-    });
+        // Past timeline events
+        for (const t of timelineData.items || []) {
+          if (t.past || (t.start && new Date(t.start).getTime() < Date.now())) {
+            list.push({
+              id: t.id,
+              title: t.title,
+              type: 'timeline',
+              date: t.start || 'Past',
+              detail: `${t.kind} ${t.location ? `· ${t.location}` : ''}`,
+            });
+          }
+        }
+
+        setItems(list.sort((a, b) => b.date.localeCompare(a.date)));
+        setLoading(false);
+      },
+    );
   }, [api]);
 
   const filtered = filter === 'all' ? items : items.filter((i) => i.type === filter);
 
   return (
     <div style={{ ...shell, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', gap: 6, padding: '4px 6px', background: '#dcdcdc', borderBottom: '1px solid #808080', alignItems: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 6,
+          padding: '4px 6px',
+          background: '#dcdcdc',
+          borderBottom: '1px solid #808080',
+          alignItems: 'center',
+        }}
+      >
         <span style={{ fontWeight: 700, fontSize: 11 }}>Archive Filter:</span>
         {(['all', 'release', 'timeline'] as const).map((f) => (
           <button
@@ -79,9 +87,7 @@ export const Archive: React.FC = () => {
             {f === 'all' ? 'All Archives' : f === 'release' ? 'Releases' : 'Timeline'}
           </button>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#444' }}>
-          {filtered.length} item(s) preserved
-        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#444' }}>{filtered.length} item(s) preserved</span>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', background: '#fff', border: '2px inset #808080', margin: 4 }}>

@@ -47,6 +47,13 @@ if ($target) {
   robocopy $data "$target\Sanktuary Backup\_Sanktuary data" /E /XO /XF *.tmp *.log /R:1 /W:1 /NP /NFL /NDL /LOG+:"$data\backup.log" | Out-Null
   $code = $LASTEXITCODE
   $state.results += [ordered]@{ name = 'Sanktuary data'; ok = $code -lt 8; note = if ($code -lt 8) { 'ok' } else { "robocopy error $code (see data/backup.log)" } }
+  # The copy above follows the live files, so a file that went bad is copied bad. Keep a dated copy of each of the
+  # last 14 nights too, to take a file from before it went wrong.
+  $history = "$target\Sanktuary Backup\_Sanktuary data history"
+  robocopy $data "$history\$(Get-Date -Format yyyy-MM-dd)" /E /XF *.tmp *.log /R:1 /W:1 /NP /NFL /NDL /LOG+:"$data\backup.log" | Out-Null
+  $code = $LASTEXITCODE
+  $state.results += [ordered]@{ name = 'Sanktuary data (dated copy)'; ok = $code -lt 8; note = if ($code -lt 8) { 'ok' } else { "robocopy error $code (see data/backup.log)" } }
+  Get-ChildItem $history -Directory | Sort-Object Name -Descending | Select-Object -Skip 14 | Remove-Item -Recurse -Force
   Save $state
 }
 
