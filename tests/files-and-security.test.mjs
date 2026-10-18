@@ -1249,6 +1249,15 @@ try {
     ai.src.endsWith('.webp') && (await fetch(B + ai.src, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer()));
   const aiMeta = aiPic && (await sharpLib(Buffer.from(aiPic)).metadata());
   check('Illustrator file is shown as a picture', aiMeta?.width === 1600 && ai.original.endsWith('-original.ai'));
+  // Not PDF-compatible: the small preview from its XMP metadata
+  const aiThumb = (
+    await sharpLib({ create: { width: 256, height: 128, channels: 3, background: '#f00' } })
+      .jpeg()
+      .toBuffer()
+  ).toString('base64');
+  const oldAi = `%!PS-Adobe-3.0\n<xmpGImg:image>${aiThumb.slice(0, 40)}&#xA;${aiThumb.slice(40)}</xmpGImg:image>\n%%EOF`;
+  const old = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=old.ai`, 'PUT', oldAi, true)).text);
+  check('older Illustrator file shows its embedded preview', old.src.endsWith('.webp'));
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
 

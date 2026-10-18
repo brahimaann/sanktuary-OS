@@ -6019,16 +6019,19 @@ async function imageInput(file, size) {
 }
 
 // Illustrator files saved "PDF Compatible" (the default) are PDFs: render the first artboard at 2400 px.
-// sharp's prebuilt libvips can't read PDF, so pdf.js draws it.
+// sharp's prebuilt libvips can't read PDF, so pdf.js draws it. Anything it can't draw falls back to the small
+// preview Illustrator embeds in the file's XMP metadata.
 async function aiPreview(file) {
-  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const task = getDocument({
-    data: new Uint8Array(await readFile(file)),
-    isEvalSupported: false,
-    // pdf.js wants a trailing "/", and fileURLToPath ends a Windows path in a backslash: forward slashes work on both
-    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))).replaceAll('\\', '/'),
-  });
+  const buf = await readFile(file);
+  let task;
   try {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    task = getDocument({
+      data: new Uint8Array(buf),
+      isEvalSupported: false,
+      // pdf.js wants a trailing "/", and fileURLToPath ends a Windows path in a backslash: forward slashes work on both
+      standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))).replaceAll('\\', '/'),
+    });
     const doc = await task.promise;
     const page = await doc.getPage(1);
     const v = page.getViewport({ scale: 1 });
@@ -6036,10 +6039,14 @@ async function aiPreview(file) {
     const { canvas } = doc.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
     await page.render({ canvas, viewport }).promise;
     return sharp(canvas.toBuffer('image/png'));
-  } catch {
-    fail(415, 'This Illustrator file cannot be previewed (save with Create PDF Compatible File enabled)');
+  } catch (err) {
+    console.error(`Illustrator preview: ${basename(file)}: ${err.message}`);
+    const at = buf.indexOf('<xmpGImg:image>');
+    if (at < 0) fail(415, 'This Illustrator file has no preview (save with Create PDF Compatible File enabled)');
+    const b64 = buf.toString('latin1', at + 15, buf.indexOf('</xmpGImg:image>', at)).replace(/&#xA;|\s/g, '');
+    return sharp(Buffer.from(b64, 'base64'));
   } finally {
-    task.destroy();
+    task?.destroy();
   }
 }
 
