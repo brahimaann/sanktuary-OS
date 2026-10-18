@@ -14,6 +14,7 @@ import { createReadStream, createWriteStream, existsSync, readFileSync, statSync
 import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { verifyToken } from '@clerk/backend';
@@ -5914,19 +5915,41 @@ async function rawPreview(file, size) {
 async function imageInput(file, size) {
   const ext = extname(file).toLowerCase();
   if (RAW_PHOTO.has(ext)) return rawPreview(file, size);
-  if (ext === '.ai') {
-    try {
-      return sharp(file, { page: 0 });
-    } catch {
-      fail(415, 'This Illustrator file cannot be previewed (save with Create PDF Compatible File enabled)');
-    }
-  }
+  if (ext === '.ai') return aiPreview(file);
   if (ext !== '.psd') return sharp(file, { animated: false });
   if (size > PSD_MAX) fail(413, 'This Photoshop file is too large to preview');
-  const psd = readPsd(await readFile(file), { skipLayerImageData: true, skipThumbnail: true, useImageData: true });
-  if (!psd.imageData) fail(415, 'This PSD has no preview image (save it with "Maximize compatibility" on)');
+  const psd = readPsd(await readFile(file), { skipLayerImageData: true, useRawThumbnail: true, useImageData: true });
+  if (!psd.imageData) {
+    // Saved without "Maximize compatibility": no full-size composite, only Photoshop's small thumbnail
+    const small = psd.imageResources?.thumbnailRaw?.data;
+    return small ? sharp(Buffer.from(small)) : fail(415, 'This PSD has no preview image (save it with "Maximize compatibility" on)');
+  }
   const { width, height, data } = psd.imageData;
   return sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { raw: { width, height, channels: 4 } });
+}
+
+// Illustrator files saved "PDF Compatible" (the default) are PDFs: render the first artboard at 2400 px.
+// sharp's prebuilt libvips can't read PDF, so pdf.js draws it.
+async function aiPreview(file) {
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const task = getDocument({
+    data: new Uint8Array(await readFile(file)),
+    isEvalSupported: false,
+    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))),
+  });
+  try {
+    const doc = await task.promise;
+    const page = await doc.getPage(1);
+    const v = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: 2400 / Math.max(v.width, v.height) });
+    const { canvas } = doc.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    await page.render({ canvas, viewport }).promise;
+    return sharp(canvas.toBuffer('image/png'));
+  } catch {
+    fail(415, 'This Illustrator file cannot be previewed (save with Create PDF Compatible File enabled)');
+  } finally {
+    task.destroy();
+  }
 }
 
 /** Cached WebP rendering of an image: 256 px thumbnails, or larger previews for formats browsers can't show (PSD, TIFF). */

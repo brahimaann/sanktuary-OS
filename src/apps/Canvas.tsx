@@ -289,16 +289,18 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
     files.forEach(async (file, i) => {
       const offset = i * 24;
       const kind = fileKind(file.name);
-      const local = kind === 'image' ? URL.createObjectURL(file) : '';
+      // PSD / AI: the browser can't show them, so they appear once the server has made the preview
+      const local = kind === 'image' && !needsConversion(file.name) ? URL.createObjectURL(file) : '';
       const size = local ? await imageSize(local) : { w: 240, h: kind === 'audio' ? 110 : 64 };
-      const pos = { x: at.x - size.w / 2 + offset, y: at.y - size.h / 2 + offset };
       const id = newId();
-      if (local) setUploading((u) => [...u, { id, ...pos, ...size, url: local }]);
+      if (local) setUploading((u) => [...u, { id, x: at.x - size.w / 2 + offset, y: at.y - size.h / 2 + offset, ...size, url: local }]);
       setStatus(`Uploading ${file.name}...`);
       try {
         const asset = await uploadAsset(await shrink(file));
-        if (local) await imageSize(boardImage(asset.src)); // load the saved copy first, so the swap doesn't flash
-        add({ id, type: kind === 'image' ? 'image' : 'file', ...pos, ...size, src: asset.src, name: asset.name });
+        const image = kind === 'image' && !needsConversion(asset.src); // no preview could be made: shown as a file
+        const shown = image ? await imageSize(boardImage(asset.src)) : size; // load the saved copy first, so the swap doesn't flash
+        const pos = { x: at.x - shown.w / 2 + offset, y: at.y - shown.h / 2 + offset };
+        add({ id, type: image ? 'image' : 'file', ...pos, ...shown, src: asset.src, name: asset.name });
         setStatus('');
       } catch (err) {
         setStatus((err as Error).message);

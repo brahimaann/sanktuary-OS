@@ -1211,6 +1211,16 @@ try {
     'original kept untouched',
     (await fetch(B + asset.original, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer())).byteLength === bigPng.length,
   );
+  // Illustrator files are PDFs inside: the board shows a rendering of the artboard
+  const aiFile =
+    '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R>>endobj\n' +
+    '4 0 obj<</Length 30>>stream\n1 0 0 rg 50 50 200 100 re f\nendstream endobj\ntrailer<</Root 1 0 R>>\n%%EOF';
+  const ai = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=logo.ai`, 'PUT', aiFile, true)).text);
+  const aiPic =
+    ai.src.endsWith('.webp') && (await fetch(B + ai.src, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer()));
+  const aiMeta = aiPic && (await sharpLib(Buffer.from(aiPic)).metadata());
+  check('Illustrator file is shown as a picture', aiMeta?.width === 1600 && ai.original.endsWith('-original.ai'));
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
 
