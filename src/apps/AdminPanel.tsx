@@ -55,6 +55,7 @@ interface State {
   };
   backup: null | { state: string; started: string; finished: string | null; results: { name: string; ok: boolean; note: string }[] };
   users: { id: string; username: string | null; email: string | null; hasPassword: boolean; lastSignIn: number | null }[];
+  invitations: { id: string; email: string; created: number }[];
 }
 type Check = { ok: boolean; ms?: number; note?: string };
 interface Health {
@@ -67,26 +68,21 @@ interface Health {
   rapidraw?: Check;
 }
 
-const TABS = [
-  'Health',
-  'Usage',
-  'Drives',
-  'Spaces',
-  'Members',
-  'Backups',
-  'Front page',
-  'Mailing list',
-  'CITIES',
-  'Stories',
-  'Shop & pool',
-  'Log',
-] as const;
+const GROUPS = {
+  Server: ['Health', 'Usage', 'Log'],
+  People: ['Members'],
+  Storage: ['Drives', 'Spaces', 'Backups'],
+  Website: ['Front page', 'CITIES', 'Stories', 'Mailing list', 'Shop & pool'],
+} as const;
+type Tab = (typeof GROUPS)[keyof typeof GROUPS][number];
+// Tabs that edit the shared config, and so use the Save / Discard bar
+const CONFIG_TABS: Tab[] = ['Drives', 'Spaces', 'Members', 'Backups'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
 const AdminPanel: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   const api = useApi();
-  const [tab, setTab] = useState<(typeof TABS)[number]>('Health');
+  const [tab, setTab] = useState<Tab>('Health');
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -149,211 +145,221 @@ const AdminPanel: React.FC = () => {
 
   return (
     <div style={shell}>
-      <div style={{ display: 'flex', gap: 2, padding: '4px 4px 0' }}>
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              ...button,
-              borderBottom: tab === t ? 'none' : button.borderBottom,
-              fontWeight: tab === t ? 700 : 400,
-              position: 'relative',
-              top: tab === t ? 1 : 0,
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      <div style={page}>
-        {tab === 'Health' && <HealthTab state={state} health={health} refresh={loadHealth} />}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0, padding: '4px 0 0' }}>
+        <nav style={{ width: 112, flexShrink: 0, overflow: 'auto', padding: '0 0 0 4px' }}>
+          {Object.entries(GROUPS).map(([group, tabs]) => (
+            <div key={group} style={{ marginBottom: 8 }}>
+              <div style={{ color: '#404040', padding: '0 4px 2px', fontSize: 10, textTransform: 'uppercase' }}>{group}</div>
+              {tabs.map((t) => (
+                <div
+                  key={t}
+                  onClick={() => setTab(t)}
+                  style={{
+                    padding: '3px 6px',
+                    cursor: 'pointer',
+                    background: tab === t ? '#000080' : 'transparent',
+                    color: tab === t ? '#fff' : 'inherit',
+                  }}
+                >
+                  {t}
+                </div>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div style={page}>
+          {tab === 'Health' && <HealthTab state={state} health={health} refresh={loadHealth} />}
 
-        {tab === 'Drives' && (
-          <>
-            <p style={hint}>
-              Every external drive this PC has seen. Tick <b>Connected</b> to make it available to Sanktuary; untick to take it offline for
-              everyone. Unplugging is always safe: it comes back by itself.
-            </p>
-            <table style={table}>
-              <thead>
-                <tr>
-                  {['Connected', 'Name', 'Letter', 'Label', 'Format', 'Size', 'Free', 'State'].map((h) => (
-                    <th key={h} style={th}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {driveIds.map((id) => {
-                  const live = attached.find((d) => d.id === id);
-                  const cfg = draft.drives[id];
-                  return (
-                    <tr key={id}>
-                      <td style={td}>
-                        <input
-                          type="checkbox"
-                          checked={!!cfg?.enabled}
-                          onChange={(e) =>
-                            edit((c) => {
-                              c.drives[id] = { name: c.drives[id]?.name || live?.label || 'Drive', enabled: e.target.checked };
-                            })
-                          }
-                        />
-                      </td>
-                      <td style={td}>
-                        <input
-                          style={input}
-                          value={cfg?.name ?? live?.label ?? ''}
-                          onChange={(e) =>
-                            edit((c) => {
-                              c.drives[id] = { enabled: !!c.drives[id]?.enabled, name: e.target.value };
-                            })
-                          }
-                        />
-                      </td>
-                      <td style={td}>{live?.letter || ''}</td>
-                      <td style={td}>{live?.label || ''}</td>
-                      <td style={td}>
-                        {live?.fs || ''}
-                        {/^FAT/i.test(live?.fs || '') ? ' (4 GB file limit)' : ''}
-                      </td>
-                      <td style={td}>{live ? formatSize(live.sizeBytes) : ''}</td>
-                      <td style={td}>{live ? formatSize(live.freeBytes) : ''}</td>
-                      <td style={td}>
-                        {live ? <Dot ok /> : <Dot ok={false} />} {live ? 'plugged in' : 'unplugged'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <p style={{ ...hint, marginTop: 10 }}>
-              Preview cache (light MP3s of WAVs, image previews and thumbnails, up to 20 GB):{' '}
-              <select
-                style={input}
-                value={draft.cacheDrive || ''}
-                onChange={(e) =>
-                  edit((c) => {
-                    c.cacheDrive = e.target.value || null;
-                  })
-                }
-              >
-                <option value="">This PC's SSD</option>
-                {driveIds.map((id) => (
-                  <option key={id} value={id}>
-                    {driveName(id)}
-                  </option>
-                ))}
-              </select>{' '}
-              — kept in a hidden <b>.sanktuary-cache</b> folder; while that drive is unplugged the SSD is used.
-            </p>
-          </>
-        )}
-
-        {tab === 'Spaces' && <SpacesTab draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} usernames={usernames} />}
-
-        {tab === 'Log' && <LogTab />}
-        {tab === 'CITIES' && <BlogTab />}
-        {tab === 'Front page' && <FrontTab />}
-        {tab === 'Mailing list' && <MailTab />}
-        {tab === 'Usage' && <UsageTab />}
-        {tab === 'Stories' && <StoriesTab />}
-        {tab === 'Shop & pool' && <ShopTab />}
-
-        {tab === 'Members' && (
-          <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
-        )}
-
-        {tab === 'Backups' && (
-          <>
-            <p style={hint}>
-              Copies every space and member space to <b>&lt;backup drive&gt;\Sanktuary Backup</b>. It only adds and updates files, and never
-              deletes anything from the backup. Pick a drive that isn't holding the spaces themselves.
-            </p>
-            <div style={row}>
-              <label>
-                Backup drive{' '}
+          {tab === 'Drives' && (
+            <>
+              <p style={hint}>
+                Every external drive this PC has seen. Tick <b>Connected</b> to make it available to Sanktuary; untick to take it offline
+                for everyone. Unplugging is always safe: it comes back by itself.
+              </p>
+              <table style={table}>
+                <thead>
+                  <tr>
+                    {['Connected', 'Name', 'Letter', 'Label', 'Format', 'Size', 'Free', 'State'].map((h) => (
+                      <th key={h} style={th}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {driveIds.map((id) => {
+                    const live = attached.find((d) => d.id === id);
+                    const cfg = draft.drives[id];
+                    return (
+                      <tr key={id}>
+                        <td style={td}>
+                          <input
+                            type="checkbox"
+                            checked={!!cfg?.enabled}
+                            onChange={(e) =>
+                              edit((c) => {
+                                c.drives[id] = { name: c.drives[id]?.name || live?.label || 'Drive', enabled: e.target.checked };
+                              })
+                            }
+                          />
+                        </td>
+                        <td style={td}>
+                          <input
+                            style={input}
+                            value={cfg?.name ?? live?.label ?? ''}
+                            onChange={(e) =>
+                              edit((c) => {
+                                c.drives[id] = { enabled: !!c.drives[id]?.enabled, name: e.target.value };
+                              })
+                            }
+                          />
+                        </td>
+                        <td style={td}>{live?.letter || ''}</td>
+                        <td style={td}>{live?.label || ''}</td>
+                        <td style={td}>
+                          {live?.fs || ''}
+                          {/^FAT/i.test(live?.fs || '') ? ' (4 GB file limit)' : ''}
+                        </td>
+                        <td style={td}>{live ? formatSize(live.sizeBytes) : ''}</td>
+                        <td style={td}>{live ? formatSize(live.freeBytes) : ''}</td>
+                        <td style={td}>
+                          {live ? <Dot ok /> : <Dot ok={false} />} {live ? 'plugged in' : 'unplugged'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p style={{ ...hint, marginTop: 10 }}>
+                Preview cache (light MP3s of WAVs, image previews and thumbnails, up to 20 GB):{' '}
                 <select
                   style={input}
-                  value={draft.backup.drive || ''}
+                  value={draft.cacheDrive || ''}
                   onChange={(e) =>
                     edit((c) => {
-                      c.backup.drive = e.target.value || null;
+                      c.cacheDrive = e.target.value || null;
                     })
                   }
                 >
-                  <option value="">(backups off)</option>
+                  <option value="">This PC's SSD</option>
                   {driveIds.map((id) => (
                     <option key={id} value={id}>
                       {driveName(id)}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
-                Every day at{' '}
-                <select
-                  style={input}
-                  value={draft.backup.hour}
-                  onChange={(e) =>
-                    edit((c) => {
-                      c.backup.hour = Number(e.target.value);
-                    })
+                </select>{' '}
+                — kept in a hidden <b>.sanktuary-cache</b> folder; while that drive is unplugged the SSD is used.
+              </p>
+            </>
+          )}
+
+          {tab === 'Spaces' && <SpacesTab draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} usernames={usernames} />}
+
+          {tab === 'Log' && <LogTab />}
+          {tab === 'CITIES' && <BlogTab />}
+          {tab === 'Front page' && <FrontTab />}
+          {tab === 'Mailing list' && <MailTab />}
+          {tab === 'Usage' && <UsageTab />}
+          {tab === 'Stories' && <StoriesTab />}
+          {tab === 'Shop & pool' && <ShopTab />}
+
+          {tab === 'Members' && (
+            <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
+          )}
+
+          {tab === 'Backups' && (
+            <>
+              <p style={hint}>
+                Copies every space and member space to <b>&lt;backup drive&gt;\Sanktuary Backup</b>. It only adds and updates files, and
+                never deletes anything from the backup. Pick a drive that isn't holding the spaces themselves.
+              </p>
+              <div style={row}>
+                <label>
+                  Backup drive{' '}
+                  <select
+                    style={input}
+                    value={draft.backup.drive || ''}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.backup.drive = e.target.value || null;
+                      })
+                    }
+                  >
+                    <option value="">(backups off)</option>
+                    {driveIds.map((id) => (
+                      <option key={id} value={id}>
+                        {driveName(id)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Every day at{' '}
+                  <select
+                    style={input}
+                    value={draft.backup.hour}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.backup.hour = Number(e.target.value);
+                      })
+                    }
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, '0')}:00
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  style={button}
+                  disabled={dirty || !state.config.backup.drive}
+                  title={dirty ? 'Save first' : ''}
+                  onClick={() =>
+                    api('/api/admin/backup', { method: 'POST' }).then(
+                      () => setMsg('Backup will start within a minute.'),
+                      (e) => setMsg(e.message),
+                    )
                   }
                 >
-                  {Array.from({ length: 24 }, (_, h) => (
-                    <option key={h} value={h}>
-                      {String(h).padStart(2, '0')}:00
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                style={button}
-                disabled={dirty || !state.config.backup.drive}
-                title={dirty ? 'Save first' : ''}
-                onClick={() =>
-                  api('/api/admin/backup', { method: 'POST' }).then(
-                    () => setMsg('Backup will start within a minute.'),
-                    (e) => setMsg(e.message),
-                  )
-                }
-              >
-                Back up now
-              </button>
-            </div>
-            {/^FAT/i.test(attached.find((d) => d.id === draft.backup.drive)?.fs || '') && (
-              <p style={{ ...hint, color: '#a00000' }}>This drive is FAT32: files over 4 GB can't be backed up to it.</p>
-            )}
-            <h4 style={{ margin: '10px 0 4px' }}>Last backup</h4>
-            {!state.backup ? (
-              <div>None yet.</div>
-            ) : (
-              <div>
-                <div>
-                  {state.backup.state === 'running' ? 'Running since' : 'Finished'}{' '}
-                  {new Date(state.backup.finished || state.backup.started).toLocaleString()}
-                </div>
-                {state.backup.results.map((r) => (
-                  <div key={r.name}>
-                    <Dot ok={r.ok} /> {r.name}: {r.note}
-                  </div>
-                ))}
+                  Back up now
+                </button>
               </div>
-            )}
-          </>
-        )}
+              {/^FAT/i.test(attached.find((d) => d.id === draft.backup.drive)?.fs || '') && (
+                <p style={{ ...hint, color: '#a00000' }}>This drive is FAT32: files over 4 GB can't be backed up to it.</p>
+              )}
+              <h4 style={{ margin: '10px 0 4px' }}>Last backup</h4>
+              {!state.backup ? (
+                <div>None yet.</div>
+              ) : (
+                <div>
+                  <div>
+                    {state.backup.state === 'running' ? 'Running since' : 'Finished'}{' '}
+                    {new Date(state.backup.finished || state.backup.started).toLocaleString()}
+                  </div>
+                  {state.backup.results.map((r) => (
+                    <div key={r.name}>
+                      <Dot ok={r.ok} /> {r.name}: {r.note}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 4 }}>
-        <div style={{ ...statusBar, flex: 1, margin: 0 }}>{msg || (dirty ? 'You have unsaved changes.' : 'No changes.')}</div>
-        <button style={button} disabled={!dirty} onClick={() => setDraft(structuredClone(state.config))}>
-          Discard
-        </button>
-        <button style={{ ...button, fontWeight: 700 }} disabled={!dirty} onClick={save}>
-          Save changes
-        </button>
+        <div style={{ ...statusBar, flex: 1, margin: 0 }}>{msg || (dirty ? 'You have unsaved changes.' : '')}</div>
+        {(dirty || CONFIG_TABS.includes(tab)) && (
+          <>
+            <button style={button} disabled={!dirty} onClick={() => setDraft(structuredClone(state.config))}>
+              Discard
+            </button>
+            <button style={{ ...button, fontWeight: 700 }} disabled={!dirty} onClick={save}>
+              Save changes
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -498,6 +504,31 @@ const MembersTab: React.FC<{
       setMsg((err as Error).message);
     }
   };
+  const invite = async () => {
+    const email = (
+      await dialog.prompt('Email to invite.\nClerk emails them a link to pick their own nickname and access code.', '', {
+        title: 'Invite member',
+      })
+    )?.trim();
+    if (!email) return;
+    try {
+      await api('/api/admin/invitations', { method: 'POST', body: JSON.stringify({ email }) });
+      setMsg(`Invitation sent to ${email}.`);
+      reload();
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  };
+  const revoke = async (id: string, email: string) => {
+    if (!(await dialog.confirm(`Cancel the invitation to ${email}? The link in their email stops working.`))) return;
+    try {
+      await api(`/api/admin/invitations/${id}`, { method: 'DELETE' });
+      setMsg(`Invitation to ${email} cancelled.`);
+      reload();
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  };
   return (
     <>
       <p style={hint}>
@@ -581,9 +612,34 @@ const MembersTab: React.FC<{
           })}
         </tbody>
       </table>
-      <button style={{ ...button, marginTop: 8 }} onClick={add}>
-        Add member...
-      </button>
+      <div style={{ ...row, marginTop: 8 }}>
+        <button style={{ ...button, fontWeight: 700 }} onClick={invite}>
+          Invite by email...
+        </button>
+        <button style={button} onClick={add}>
+          Add member with a code...
+        </button>
+      </div>
+      {state.invitations.length > 0 && (
+        <>
+          <h4 style={{ margin: '10px 0 4px' }}>Invited, not signed up yet</h4>
+          <table style={table}>
+            <tbody>
+              {state.invitations.map((i) => (
+                <tr key={i.id}>
+                  <td style={td}>{i.email}</td>
+                  <td style={td}>sent {new Date(i.created).toLocaleDateString()}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <button style={button} onClick={() => revoke(i.id, i.email)}>
+                      Cancel
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </>
   );
 };
@@ -2594,6 +2650,7 @@ const page: React.CSSProperties = {
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #404040',
   borderBottom: '1px solid #404040',
+  minWidth: 0,
   margin: '0 4px',
   padding: 10,
 };
