@@ -7,7 +7,7 @@ import { LogOn, shell, button, statusBar } from './TeamFiles';
 import { IconLabel } from '../components/RetroIcon';
 
 /**
- * Outreach: who we pitch (radio, playlist curators, press, venues, brands) and where each pitch stands. Shared, so
+ * Outreach: who we pitch (radio, playlists, press, distributors, pressing plants, sync, venues, brands) and where each pitch stands. Shared, so
  * nobody pitches the same curator twice. Marking one Pitched starts a 7-day clock; then whoever pitched is reminded.
  */
 interface Contact {

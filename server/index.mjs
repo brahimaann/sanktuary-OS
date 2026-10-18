@@ -2300,10 +2300,20 @@ async function opportunitiesApi(req, res, url) {
   fail(404, 'Unknown opportunities action');
 }
 
-// ── /api/outreach: who we pitch (radio, playlists, press, venues, brands) and where each pitch stands — data/outreach.json ──
+// ── /api/outreach: who we pitch (radio, playlists, press, distribution, pressing, sync, venues, brands) — data/outreach.json ──
 // Shared by the team so two people never pitch the same curator twice. Marking one "Pitched" starts a clock: after
 // 7 days with no reply, whoever pitched is reminded to follow up.
-const OUT_KINDS = ['Radio', 'Playlist', 'Blog / press', 'Venue', 'Brand / sponsor', 'Other'];
+const OUT_KINDS = [
+  'Radio',
+  'Playlist',
+  'Blog / press',
+  'Distribution',
+  'Manufacturing',
+  'Sync / placement',
+  'Venue',
+  'Brand / sponsor',
+  'Other',
+];
 const OUT_STATUSES = ['To pitch', 'Pitched', 'Replied', 'Yes', 'No'];
 const OUT_TEXT = { name: 100, outlet: 120, email: 200, notes: 2000 };
 let outDb = null;
