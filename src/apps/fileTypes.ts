@@ -19,6 +19,9 @@ const KINDS = Object.fromEntries(Object.entries(EXTENSIONS).flatMap(([kind, exts
   FileKind
 >;
 
+/** Extensions of these kinds, comma separated (Team Files' Photos / Audio / Video / Documents views). */
+export const extsOf = (...kinds: Exclude<FileKind, 'other'>[]) => kinds.map((k) => EXTENSIONS[k].replace(/ /g, ',')).join(',');
+
 export const fileKind = (name: string): FileKind => KINDS[name.split('.').pop()?.toLowerCase() || ''] || 'other';
 
 /** Browsers can't show these, so the server converts them (?preview) — see thumb() in server/index.mjs. */

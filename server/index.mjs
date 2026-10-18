@@ -359,6 +359,12 @@ async function files(req, res, url) {
           entries: whole.sources.map((f) => ({ name: f.label, isDir: true, size: 0, modified: now, offline: !f.online })),
         });
       }
+      if (req.method === 'GET' && q.has('find')) {
+        // Search every connected folder of the space, as one newest-first list
+        const found = await Promise.all(whole.sources.filter((f) => f.online).map((f) => findIn(f.root, ...findArgs(q), [f.label])));
+        const entries = found.flatMap((f) => f.entries).sort((a, b) => b.modified.localeCompare(a.modified));
+        return json(res, { entries: entries.slice(0, 300), more: entries.length > 300 || found.some((f) => f.more) });
+      }
       fail(400, 'Open one of the folders in this space first');
     }
     label = parts[0];
@@ -405,6 +411,7 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     }
+    if (q.has('find')) return json(res, await findIn(target, ...findArgs(q)));
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
@@ -5513,6 +5520,53 @@ async function listDir(dir, includeHidden = false) {
     stats[i] ? [{ name: e.name, isDir: stats[i].isDirectory(), size: stats[i].size, modified: stats[i].mtime.toISOString() }] : [],
   );
 }
+
+/**
+ * ?find: everything below dir whose name holds every word of `words` (files only, ending in one of `exts`, when
+ * exts are given), newest first. Feeds the Team Files search box and its Recent / Photos / Audio / Video views.
+ * Each hit carries `dir`, its folder relative to dir. Looks at 50,000 items at most and returns the newest 300.
+ */
+async function findIn(dir, words, exts, prefix = []) {
+  const hits = [];
+  const queue = [[]];
+  let seen = 0;
+  while (queue.length && seen < 50_000) {
+    const at = queue.shift();
+    for (const e of await readdir(join(dir, ...at), { withFileTypes: true }).catch(() => [])) {
+      if (HIDDEN.test(e.name)) continue;
+      seen++;
+      const isDir = e.isDirectory();
+      if (isDir) queue.push([...at, e.name]);
+      const name = e.name.toLowerCase();
+      if ((exts.length || !words.length) && (isDir || (exts.length && !exts.includes(extname(name).slice(1))))) continue;
+      if (words.every((w) => name.includes(w))) hits.push({ at, name: e.name, isDir });
+    }
+  }
+  const entries = [];
+  for (let i = 0; i < hits.length; i += 64) {
+    const batch = hits.slice(i, i + 64);
+    const stats = await Promise.all(batch.map((h) => stat(join(dir, ...h.at, h.name)).catch(() => null)));
+    batch.forEach((h, j) => {
+      if (stats[j])
+        entries.push({
+          name: h.name,
+          dir: [...prefix, ...h.at],
+          isDir: h.isDir,
+          size: stats[j].size,
+          modified: stats[j].mtime.toISOString(),
+        });
+    });
+  }
+  entries.sort((a, b) => b.modified.localeCompare(a.modified));
+  return { entries: entries.slice(0, 300), more: entries.length > 300 || queue.length > 0 };
+}
+const findArgs = (q) => [
+  String(q.get('find')).toLowerCase().split(/\s+/).filter(Boolean),
+  String(q.get('ext') || '')
+    .toLowerCase()
+    .split(',')
+    .filter(Boolean),
+];
 
 /** Moves the current file into .sk-versions/<path>/<timestamp><ext> so a replace never loses work. */
 async function keepVersion(root, file) {

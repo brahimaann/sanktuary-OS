@@ -463,6 +463,34 @@ try {
   );
   check("group members get the group's rights", top.rights === 'upload');
   check('others do not see the space', (await call('bob', '/api/files/vids/?list')).status === 404);
+
+  // Search and the Recent / Photos / Audio views: every subfolder, hidden folders skipped, newest first
+  const find = async (u, path) => JSON.parse((await call(u, path)).text).entries;
+  const songs = await find('carol', '/api/files/view/?find=SONG');
+  check(
+    'search finds files in subfolders',
+    songs.some((e) => e.name === 'song.txt' && e.dir.join('/') === 'docs'),
+    JSON.stringify(songs),
+  );
+  const pngs = await find('carol', '/api/files/view/?find=&ext=png');
+  check(
+    'a type view only lists that type',
+    pngs.length > 0 && pngs.every((e) => !e.isDir && e.name.endsWith('.png')),
+    JSON.stringify(pngs),
+  );
+  const recent = await find('carol', '/api/files/view/?find=');
+  check(
+    'recent lists files newest first, never hidden ones',
+    recent.length > 0 &&
+      recent.every((e, i) => !e.isDir && (!i || recent[i - 1].modified >= e.modified) && !e.dir.some((d) => d.startsWith('.'))),
+    JSON.stringify(recent),
+  );
+  const combinedHits = await find('carol', '/api/files/vids/?find=song');
+  check(
+    'search covers every folder of a combined space',
+    combinedHits.some((e) => e.dir.join('/') === 'Docs' && e.name === 'song.txt'),
+  );
+  check('search needs access', (await call('bob', '/api/files/vids/?find=song')).status === 404);
   check('files open through their folder', (await call('carol', '/api/files/vids/Docs/song.txt')).status === 200);
   check(
     'uploads land in the right folder on disk',

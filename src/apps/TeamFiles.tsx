@@ -6,7 +6,7 @@ import RetroIcon, { IconLabel } from '../components/RetroIcon';
 import { useWindowManager } from '../wm/manager';
 import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
-import { button, fileIcon, shell, formatSize, hasThumb, isTouch } from './fileTypes';
+import { button, extsOf, fileIcon, fileKind, shell, formatSize, hasThumb, isTouch } from './fileTypes';
 import { RANK, Rights } from '../utils/api';
 import { dialog } from '../utils/dialog';
 import { DRAG_FILE, Ref } from '../utils/refs';
@@ -33,7 +33,27 @@ interface Entry {
   size: number;
   modified: string;
   project?: ProjectInfo; // Ableton / FL / Premiere / AE folder, or a PSD / AI file
+  dir?: string[]; // search results: the folder it's in, below the one searched
 }
+
+// What the window shows: this folder, or a view of everything below it (newest first, via ?find)
+const VIEWS = {
+  here: { label: 'This folder', exts: '' },
+  recent: { label: 'Recent files', exts: '' },
+  photos: { label: 'Photos', exts: extsOf('image') },
+  audio: { label: 'Audio', exts: extsOf('audio') },
+  video: { label: 'Video', exts: extsOf('video') },
+  docs: { label: 'Documents', exts: extsOf('pdf', 'doc', 'sheet', 'text') },
+};
+type View = keyof typeof VIEWS;
+type Sort = 'name' | 'newest' | 'largest' | 'type';
+const ext = (n: string) => (n.includes('.') ? n.split('.').pop()!.toLowerCase() : '');
+const SORTS: Record<Sort, (a: Entry, b: Entry) => number> = {
+  name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
+  newest: (a, b) => b.modified.localeCompare(a.modified),
+  largest: (a, b) => b.size - a.size,
+  type: (a, b) => fileKind(a.name).localeCompare(fileKind(b.name)) || ext(a.name).localeCompare(ext(b.name)) || SORTS.name(a, b),
+};
 
 interface Upload {
   file: File;
@@ -158,6 +178,11 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     }
   });
   const uploadRef = useRef<HTMLInputElement>(null);
+  // Search box, Show (this folder / Recent / Photos...) and sort order
+  const [query, setQuery] = useState('');
+  const [viewOf, setViewOf] = useState<View>('here');
+  const [sort, setSort] = useState<Sort>('name');
+  const [found, setFound] = useState<Entry[] | null>(null); // search / view results instead of the folder
   const [hist, setHist] = useState<{ back: string[][]; fwd: string[][] }>({ back: [], fwd: [] });
   const [xfer, setXfer] = useState<Transfer | null>(null);
   const [over, setOver] = useState<string | null>(null); // drop target under the dragged item
@@ -291,6 +316,41 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     if (isSignedIn) load();
   }, [isSignedIn, load]);
 
+  // Opening another folder leaves search; typing searches here and in every subfolder
+  useEffect(() => {
+    setQuery('');
+    setViewOf('here');
+  }, [app, here]);
+  const findSeq = useRef(0);
+  useEffect(() => {
+    const mine = ++findSeq.current;
+    if (!isSignedIn || (!query.trim() && viewOf === 'here')) {
+      if (found) setStatus('');
+      return setFound(null);
+    }
+    const t = setTimeout(
+      async () => {
+        setStatus('Searching...');
+        const res = await fetch(`${url(path)}?find=${encodeURIComponent(query.trim())}&ext=${VIEWS[viewOf].exts}`, {
+          headers: { Authorization: `Bearer ${await getToken()}` },
+        }).catch(() => null);
+        if (mine !== findSeq.current) return;
+        if (!res?.ok) return setStatus(res ? await res.text() : "Couldn't reach the server — check your connection.");
+        const d: { entries: Entry[]; more: boolean } = await res.json();
+        setSelected(null);
+        setFound(d.entries);
+        setStatus(
+          `${d.entries.length ? d.entries.length.toLocaleString() : 'Nothing'} found in ${folderName(path)} and its subfolders${d.more ? ' (the newest; type more to narrow it down)' : ''}.`,
+        );
+      },
+      query ? 350 : 0,
+    );
+    return () => clearTimeout(t);
+  }, [query, viewOf, isSignedIn, app, here]); // eslint-disable-line react-hooks/exhaustive-deps
+  const full = (e: Entry) => [...path, ...(e.dir || []), e.name];
+  const idOf = (e: Entry) => [...(e.dir || []), e.name].join('/');
+  const rows = [...(found || entries)].sort((a, b) => Number(b.isDir) - Number(a.isDir) || SORTS[sort](a, b));
+
   const setViewMode = (v: 'list' | 'icons') => {
     setView(v);
     try {
@@ -299,13 +359,19 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   };
 
   const open = (e: Entry) => {
-    if (e.isDir) return go([...path, e.name]);
+    if (e.isDir) return go(full(e));
+    const dir = full(e).slice(0, -1);
     openWindow({
-      id: `preview-${app}-${[...path, e.name].join('/')}`,
+      id: `preview-${app}-${full(e).join('/')}`,
       title: e.name,
       icon: fileIcon(e.name, false),
       appType: 'file-preview',
-      appProps: { app, dir: path, name: e.name, siblings: entries.filter((x) => !x.isDir).map((x) => x.name) },
+      appProps: {
+        app,
+        dir,
+        name: e.name,
+        siblings: rows.filter((x) => !x.isDir && String(x.dir) === String(e.dir)).map((x) => x.name),
+      },
       width: 720,
       height: 520,
     });
@@ -542,7 +608,8 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     res.ok ? load() : setStatus(res.status === 409 ? 'A folder with that name already exists.' : `Couldn't create folder (${res.status}).`);
   };
 
-  const pick = entries.find((e) => e.name === selected);
+  const pick = found ? undefined : entries.find((e) => e.name === selected); // the toolbar acts on this folder's items
+  const pickFound = found?.find((e) => idOf(e) === selected);
 
   const renameSelected = async () => {
     const to = pick && (await dialog.prompt('Rename to:', pick.name, { title: 'Rename' }))?.trim();
@@ -605,19 +672,19 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   const rowProps = (e: Entry) => ({
     onClick: () => {
       if (skipClick.current) return void (skipClick.current = false); // the tap that ended a finger drag
-      isTouch ? open(e) : setSelected(e.name);
+      isTouch ? open(e) : setSelected(idOf(e));
     },
     onDoubleClick: () => open(e),
     draggable: !isTouch,
     onDragStart: (ev: React.DragEvent) =>
-      ev.dataTransfer.setData(DRAG_FILE, JSON.stringify({ app, dir: path, name: e.name, isDir: e.isDir })),
+      ev.dataTransfer.setData(DRAG_FILE, JSON.stringify({ app, dir: full(e).slice(0, -1), name: e.name, isDir: e.isDir })),
     onDragEnd: () => setOver(null),
     onPointerDown: (ev: React.PointerEvent) => {
-      if (ev.pointerType !== 'touch' || !can('upload')) return;
+      if (ev.pointerType !== 'touch' || !can('upload') || found) return;
       const d = { name: e.name, isDir: e.isDir, x: ev.clientX, y: ev.clientY, active: false, timer: 0 };
       d.timer = window.setTimeout(() => {
         d.active = true;
-        setSelected(e.name);
+        setSelected(idOf(e));
         setGhost({ name: e.name, isDir: e.isDir, x: d.x, y: d.y });
         setStatus('Drag onto a folder or Up to move it.');
         navigator.vibrate?.(15);
@@ -625,13 +692,11 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       touchDrag.current = d;
     },
     onContextMenu: (ev: React.MouseEvent) => isTouch && ev.preventDefault(), // no long-press menu on phones
-    ...(e.isDir && !isTouch
-      ? { onPointerEnter: () => prefetch([...path, e.name]), onPointerLeave: () => clearTimeout(hover.current) }
-      : {}),
-    ...(e.isDir ? dropProps([...path, e.name]) : {}),
+    ...(e.isDir && !isTouch ? { onPointerEnter: () => prefetch(full(e)), onPointerLeave: () => clearTimeout(hover.current) } : {}),
+    ...(e.isDir ? dropProps(full(e)) : {}),
     style: {
-      ...(selected === e.name ? selectedStyle : {}),
-      ...(e.isDir && over === JSON.stringify([...path, e.name]) ? dropHover : {}),
+      ...(selected === idOf(e) ? selectedStyle : {}),
+      ...(e.isDir && over === JSON.stringify(full(e)) ? dropHover : {}),
       WebkitTouchCallout: 'none',
     } as React.CSSProperties,
   });
@@ -764,6 +829,51 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           </div>
         )}
       </div>
+      <div style={{ ...address, gap: 4, flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          style={{ ...addressBox, flex: '1 1 160px', fontFamily: 'inherit', fontSize: isTouch ? 16 : 11 }}
+          placeholder={`Search ${folderName(path)} and every folder in it`}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <label>
+          Show{' '}
+          <select
+            style={button}
+            value={viewOf}
+            onChange={(e) => {
+              const v = e.target.value as View;
+              setViewOf(v);
+              setSort(v === 'here' ? 'name' : 'newest');
+            }}
+          >
+            {Object.entries(VIEWS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Sort{' '}
+          <select style={button} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+            <option value="name">Name</option>
+            <option value="newest">Newest</option>
+            <option value="largest">Largest</option>
+            <option value="type">Type</option>
+          </select>
+        </label>
+        {pickFound && (
+          <button
+            style={button}
+            onClick={() => go(pickFound.isDir ? full(pickFound) : full(pickFound).slice(0, -1))}
+            title="Go to the folder this is in"
+          >
+            Open folder
+          </button>
+        )}
+      </div>
       <div
         ref={listRef}
         style={{ ...listBox, position: 'relative', overflowX: 'hidden' }}
@@ -775,16 +885,25 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                {(narrow ? ['Name'] : ['Name', 'Size', 'Modified']).map((h) => (
-                  <th key={h} style={{ ...th, width: h === 'Size' ? 80 : h === 'Modified' ? 150 : undefined }}>
-                    {h}
-                  </th>
-                ))}
+                {(narrow ? ['Name'] : ['Name', ...(found ? ['In folder'] : []), 'Size', 'Modified']).map((h) => {
+                  const by = ({ Name: 'name', Size: 'largest', Modified: 'newest' } as Record<string, Sort>)[h];
+                  return (
+                    <th
+                      key={h}
+                      style={{ ...th, width: h === 'Size' ? 80 : h === 'Modified' ? 150 : undefined, cursor: by ? 'pointer' : undefined }}
+                      onClick={() => by && setSort(by)}
+                      title={by ? `Sort by ${h.toLowerCase()}` : undefined}
+                    >
+                      {h}
+                      {sort === by ? ' ▾' : ''}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {entries.slice(0, shown).map((e) => (
-                <tr key={e.name} {...rowProps(e)}>
+              {rows.slice(0, shown).map((e) => (
+                <tr key={idOf(e)} {...rowProps(e)}>
                   <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     <img
                       src={fileIcon(e.name, e.isDir)}
@@ -795,11 +914,15 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                     {e.project && <ProjectTag p={e.project} />}
                     {narrow && (
                       <div style={{ fontSize: 10, opacity: 0.7, marginLeft: 20 }}>
+                        {found ? `${[folderName(path), ...e.dir!].join(' \\ ')} · ` : ''}
                         {e.isDir ? '' : `${formatSize(e.size)} · `}
                         {new Date(e.modified).toLocaleDateString()}
                       </div>
                     )}
                   </td>
+                  {!narrow && found && (
+                    <td style={{ ...td, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[folderName(path), ...e.dir!].join(' \\ ')}</td>
+                  )}
                   {!narrow && <td style={{ ...td, width: 80 }}>{e.isDir ? '' : formatSize(e.size)}</td>}
                   {!narrow && (
                     <td style={{ ...td, width: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -812,17 +935,17 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
           </table>
         ) : (
           <div style={grid}>
-            {entries.slice(0, shown).map((e) => (
+            {rows.slice(0, shown).map((e) => (
               <div
-                key={e.name}
+                key={idOf(e)}
                 {...rowProps(e)}
-                style={{ ...tile, ...(e.isDir && over === JSON.stringify([...path, e.name]) ? dropHover : {}) }}
-                title={e.name}
+                style={{ ...tile, ...(e.isDir && over === JSON.stringify(full(e)) ? dropHover : {}) }}
+                title={e.dir ? [...e.dir, e.name].join(' \\ ') : e.name}
               >
                 <div style={thumbBox}>
                   {!e.isDir && hasThumb(e.name) && token ? (
                     <img
-                      src={`${url([...path, e.name])}?thumb&t=${token}`}
+                      src={`${url(full(e))}?thumb&t=${token}`}
                       alt=""
                       loading="lazy"
                       style={{ maxWidth: '100%', maxHeight: '100%' }}
@@ -834,7 +957,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                     <img src={fileIcon(e.name, e.isDir, 32)} alt="" style={{ width: 32, height: 32 }} />
                   )}
                 </div>
-                <div style={{ ...tileLabel, ...(selected === e.name ? selectedStyle : {}) }}>
+                <div style={{ ...tileLabel, ...(selected === idOf(e) ? selectedStyle : {}) }}>
                   {e.name}
                   {e.project?.lock ? ' 🔒' : ''}
                 </div>
@@ -842,10 +965,10 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             ))}
           </div>
         )}
-        {entries.length > shown && (
+        {rows.length > shown && (
           <div style={{ padding: 6, textAlign: 'center' }}>
             <button style={button} onClick={() => setShown((n) => n + PAGE * 4)}>
-              Show more ({(entries.length - shown).toLocaleString()} not shown yet)
+              Show more ({(rows.length - shown).toLocaleString()} not shown yet)
             </button>
           </div>
         )}
@@ -938,7 +1061,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       <div style={statusBar}>
         {status ||
           (lockedBy && `🔒 ${lockedBy.project} is checked out by ${lockedBy.user}: you can view and download, not change.`) ||
-          `${entries.length} object(s) · ${{ none: '', view: 'view only', upload: 'you can upload and delete your own files', edit: 'full edit' }[rights]}${quota ? ` · ${formatSize(quota.used)} of ${formatSize(quota.quota)} used` : ''} — ${isTouch ? 'tap' : 'double-click'} to open${can('upload') ? ' · drag files here to upload' : ''}`}
+          `${found ? `${found.length} found` : `${entries.length} object(s)`} · ${{ none: '', view: 'view only', upload: 'you can upload and delete your own files', edit: 'full edit' }[rights]}${quota ? ` · ${formatSize(quota.used)} of ${formatSize(quota.quota)} used` : ''} — ${isTouch ? 'tap' : 'double-click'} to open${can('upload') ? ' · drag files here to upload' : ''}`}
       </div>
     </div>
   );
