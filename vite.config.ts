@@ -8,6 +8,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Test sign-in without Clerk, dev server only (tests/signed-in.mjs)
+      ...(process.env.FAKE_CLERK && { '@clerk/react': path.resolve(__dirname, './tests/fake-clerk.js') }),
     },
   },
   server: {
