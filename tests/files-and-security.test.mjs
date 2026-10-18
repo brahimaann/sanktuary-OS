@@ -1738,6 +1738,22 @@ try {
   check('directory never shows folders or owners', !/folder|owner|members/.test(JSON.stringify(dirData.releases)));
   check('avatar of someone not listed is not public', (await fetch(B + '/api/public/avatar/carol')).status === 404);
   check('avatar name cannot climb', (await fetch(B + '/api/public/avatar/..%2F..%2Fconfig')).status === 404);
+  const square = (background) =>
+    sharpLib({ create: { width: 200, height: 200, channels: 3, background } })
+      .png()
+      .toBuffer();
+  await call('bob', '/api/profiles/me/avatar', 'PUT', await square('#ff0000'), true);
+  check(
+    'the internal picture never goes public',
+    (await fetch(B + '/api/public/avatar/bob')).status === 404 &&
+      !(await (await fetch(B + '/api/public/directory')).json()).people.find((p) => p.username === 'bob').avatar,
+  );
+  await call('bob', '/api/profiles/me/photo', 'PUT', await square('#0000ff'), true);
+  const publicPhoto = await fetch(B + '/api/public/avatar/bob');
+  const { data: blue } = await sharpLib(Buffer.from(await publicPhoto.arrayBuffer()))
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  check('the public photo is its own picture', publicPhoto.status === 200 && blue[2] > 200 && blue[0] < 50);
 
   // Public release pages: only songs ticked for the page, 30-second previews, never the bounce itself
   const rate = 8000;
