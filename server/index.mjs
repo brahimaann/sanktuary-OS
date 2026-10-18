@@ -5971,7 +5971,8 @@ async function aiPreview(file) {
   const task = getDocument({
     data: new Uint8Array(await readFile(file)),
     isEvalSupported: false,
-    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))),
+    // pdf.js wants a trailing "/", and fileURLToPath ends a Windows path in a backslash: forward slashes work on both
+    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))).replaceAll('\\', '/'),
   });
   try {
     const doc = await task.promise;

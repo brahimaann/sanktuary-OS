@@ -90,10 +90,10 @@ const stream = (u, path) => {
   return s;
 };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-let pass = 0,
-  failN = 0;
+let pass = 0;
+const failed = [];
 const check = (name, ok, extra = '') => {
-  ok ? pass++ : failN++;
+  ok ? pass++ : failed.push(name);
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  (' + extra + ')' : ''}`);
 };
 
@@ -280,7 +280,9 @@ try {
   srv.kill();
   clerk.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
-  console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
-  if (failN) process.exitCode = 1; // a failed check fails npm test, so auto-deploy keeps the current site
+  console.log(
+    `\n${pass} passed, ${failed.length} failed${failed.length ? ': ' + failed.join('; ') : ''}${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`,
+  );
+  if (failed.length) process.exitCode = 1; // a failed check fails npm test, so auto-deploy keeps the current site
   rmSync(dir, { recursive: true, force: true });
 }
