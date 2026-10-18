@@ -86,8 +86,6 @@ interface WindowManagerState {
   setScreensaver: (s: ScreensaverType) => void;
   setScreensaverTimeout: (mins: number) => void;
   setScreensaverActive: (active: boolean) => void;
-  crtEnabled: boolean;
-  setCrtEnabled: (enabled: boolean) => void;
 }
 
 // Each app's last size and place on this device, so it reopens where it was left
@@ -130,8 +128,8 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
 
       // Get active desktop dimensions dynamically
       const desktopEl = typeof document !== 'undefined' ? document.querySelector('.crt-screen-content') : null;
-      const desktopWidth = desktopEl ? desktopEl.clientWidth : typeof window !== 'undefined' ? window.innerWidth * 0.88 : 800;
-      const desktopHeight = desktopEl ? desktopEl.clientHeight : typeof window !== 'undefined' ? window.innerHeight * 0.85 : 600;
+      const desktopWidth = desktopEl ? desktopEl.clientWidth : typeof window !== 'undefined' ? window.innerWidth : 800;
+      const desktopHeight = desktopEl ? desktopEl.clientHeight : typeof window !== 'undefined' ? window.innerHeight : 600;
 
       let computedWidth = spec.width || 400;
       let computedHeight = spec.height || 300;
@@ -313,11 +311,4 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
     set({ screensaverTimeout: mins });
   },
   setScreensaverActive: (active) => set({ isScreensaverActive: active }),
-  crtEnabled: typeof localStorage !== 'undefined' ? localStorage.getItem('sk_crt_enabled') !== '0' : true,
-  setCrtEnabled: (enabled) => {
-    try {
-      localStorage.setItem('sk_crt_enabled', enabled ? '1' : '0');
-    } catch (_) {}
-    set({ crtEnabled: enabled });
-  },
 }));

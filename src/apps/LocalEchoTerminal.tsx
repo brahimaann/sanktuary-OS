@@ -810,8 +810,6 @@ const LocalEchoTerminal: React.FC = () => {
       <div style={terminalScreenContainer}>
         {/* Screen Monitor Box */}
         <div ref={screenRef} className="dos-screen" style={monitorScreen(terminalFontSize)} onClick={focusInput}>
-          <div style={scanlineOverlay} />
-
           <div style={screenContent}>
             {/* Scrollable console lines */}
             {consoleHistory.map((item) => (
@@ -902,18 +900,6 @@ const monitorScreen = (fontSize: number): React.CSSProperties => ({
   fontSize: fontSize,
   color: '#c0c0c0',
 });
-
-const scanlineOverlay: React.CSSProperties = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  width: '100%',
-  height: '100%',
-  background: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.15) 50%)',
-  backgroundSize: '100% 4px',
-  pointerEvents: 'none',
-  zIndex: 10,
-};
 
 const screenContent: React.CSSProperties = {
   position: 'relative',

@@ -91,30 +91,14 @@ class WindowErrorBoundary extends React.Component<{ children: React.ReactNode },
 }
 
 export const App: React.FC = () => {
-  const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive, crtEnabled } = useWindowManager();
+  const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
   const [isBooting, setIsBooting] = useState(true);
-  const [powerOnClass, setPowerOnClass] = useState('');
-
-  const [windowSize, setWindowSize] = useState({
-    width: typeof window !== 'undefined' ? window.innerWidth : 1024,
-    height: typeof window !== 'undefined' ? window.innerHeight : 768,
-  });
 
   useEffect(() => {
-    const handleResize = () => {
-      setWindowSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-    };
     // Phones scroll the page up to make room for the keyboard (signing in) and don't always scroll back when it closes
-    const settle = () => setTimeout(() => (window.scrollTo(0, 0), handleResize()), 100);
-    window.addEventListener('resize', handleResize);
+    const settle = () => setTimeout(() => window.scrollTo(0, 0), 100);
     window.addEventListener('focusout', settle);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('focusout', settle);
-    };
+    return () => window.removeEventListener('focusout', settle);
   }, []);
 
   // Screensaver idle detection
@@ -150,21 +134,6 @@ export const App: React.FC = () => {
       window.removeEventListener('pointerdown', handleActivity);
     };
   }, [isBooting, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive]);
-
-  const W = windowSize.width;
-  const H = windowSize.height;
-
-  // CRT bezel sizing — mobile gets a very thin frame so the screen area is maximised
-  // Large screens  (W >= 1400): 33px sides
-  // Medium screens (1000 <= W < 1400): 28px sides
-  // Small screens  (600 <= W < 1000): 12px sides
-  // Mobile         (W < 600):  4px sides (halved from 8px for maximum mobile viewport)
-  const borderX = W >= 1400 ? 33 : W >= 1000 ? 28 : W >= 600 ? 12 : 4;
-  const borderY = H >= 900 ? 33 : H >= 700 ? 28 : H >= 500 ? 10 : 4;
-  const borderBottom = W < 600 ? Math.round(borderY * 1.1) : borderY * 1.4; // slimmer bottom chin on mobile
-
-  const curveX = borderX * 0.2;
-  const curveY = borderY * 0.2;
 
   const renderAppContent = (win: any) => {
     let content: React.ReactNode;
@@ -318,59 +287,15 @@ export const App: React.FC = () => {
 
   const handleBootComplete = () => {
     setIsBooting(false);
-    setPowerOnClass('crt-power-on');
   };
-
-  /* CRT monitor frame is ALWAYS visible.
-     During boot: BIOS terminal renders inside the screen area.
-     After boot: Desktop + windows render inside the screen area. */
 
   return (
     <div className="crt-wrapper">
-      {/* Custom responsive SVG CRT Bezel — always present, matches dynamic size */}
-      <svg className="crt-bezel-overlay" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <radialGradient id="bezel-shading" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-            <stop offset="85%" stopColor="#e2ded6" />
-            <stop offset="100%" stopColor="#a6a299" />
-          </radialGradient>
-        </defs>
-        <path
-          d={`M 0 0 H ${W} V ${H} H 0 Z M ${borderX} ${borderY} Q ${W / 2} ${borderY - curveY} ${W - borderX} ${borderY} Q ${W - borderX + curveX} ${(H - borderBottom + borderY) / 2} ${W - borderX} ${H - borderBottom} Q ${W / 2} ${H - borderBottom + curveY} ${borderX} ${H - borderBottom} Q ${borderX - curveX} ${(H - borderBottom + borderY) / 2} ${borderX} ${borderY} Z`}
-          fill="url(#bezel-shading)"
-          fillRule="evenodd"
-        />
-        <path
-          d={`M ${borderX} ${borderY} Q ${W / 2} ${borderY - curveY} ${W - borderX} ${borderY} Q ${W - borderX + curveX} ${(H - borderBottom + borderY) / 2} ${W - borderX} ${H - borderBottom} Q ${W / 2} ${H - borderBottom + curveY} ${borderX} ${H - borderBottom} Q ${borderX - curveX} ${(H - borderBottom + borderY) / 2} ${borderX} ${borderY}`}
-          fill="none"
-          stroke="#807d75"
-          strokeWidth={Math.max(1.5, borderX * 0.08)}
-        />
-      </svg>
-
-      {/* Screen Content Window — dynamic dimensions positioned to match the bezel hole */}
-      <div
-        className={`crt-screen-content ${isBooting ? '' : powerOnClass}`}
-        style={{
-          top: borderY,
-          left: borderX,
-          width: W - borderX * 2,
-          height: H - borderY - borderBottom,
-        }}
-      >
-        {/* No CRT tint while a moodboard or Darkroom is on screen, so pictures show their true colours */}
-        {crtEnabled && !windows.some((w) => (w.appType === 'canvas' || w.appType === 'darkroom') && !w.isMinimized) && (
-          <>
-            <div className="crt-screen-vignette" />
-            <div className="crt-screen-filter" />
-            <div className="crt-screen-flicker" />
-          </>
-        )}
-
+      <div className="crt-screen-content">
         {isScreensaverActive && <Screensaver type={screensaver} onDismiss={() => setScreensaverActive(false)} />}
 
         {isBooting ? (
-          /* BIOS boot terminal — rendered INSIDE the CRT screen */
+          /* BIOS boot terminal */
           <BootScreen onComplete={handleBootComplete} />
         ) : (
           /* Desktop environment */
