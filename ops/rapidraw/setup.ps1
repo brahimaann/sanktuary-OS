@@ -98,11 +98,13 @@ if (-not (Get-ScheduledTask -TaskName 'Sanktuary RapidRAW' -ErrorAction Silently
 
 Step 'Start and check'
 Stop-ScheduledTask -TaskName 'Sanktuary RapidRAW' # else the task still counts as running and Start is ignored (IgnoreNew)
-Get-CimInstance Win32_Process -Filter "Name='$($exe.Name)'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Get-CimInstance Win32_Process -Filter "Name='$($exe.Name)'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Wait-Process -Id $_.ProcessId -Timeout 30 -ErrorAction SilentlyContinue }
 Start-ScheduledTask -TaskName 'Sanktuary RapidRAW'
 $ok = $false
 foreach ($i in 1..30) {
   Start-Sleep 2
+  # A start can still be lost (the new engine sees the old one going away and quits, exit code 0): start it again
+  if (-not (Get-Process -Name $exe.BaseName -ErrorAction SilentlyContinue)) { Start-ScheduledTask -TaskName 'Sanktuary RapidRAW' }
   try {
     Invoke-WebRequest "http://127.0.0.1:$port/invoke/get_supported_file_types" -Method Post -Body '{}' -Headers @{ 'x-bridge-token' = $token } -UseBasicParsing -TimeoutSec 3 | Out-Null
     $ok = $true; break

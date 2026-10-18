@@ -384,7 +384,12 @@ const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => 
     [
       'Auto-deploy (GitHub main)',
       health?.deploy ? health.deploy.ok : null,
-      health?.deploy ? `${health.deploy.message.split(/\r?\n/)[0]} · ${new Date(health.deploy.at).toLocaleString()}` : 'no deploys yet',
+      health?.deploy
+        ? `${health.deploy.message
+            .split(/\r?\n/)
+            .filter((l, i) => i === 0 || /^\d+ passed, \d+ failed: /.test(l)) // the first line, and which tests failed
+            .join(' ')} · ${new Date(health.deploy.at).toLocaleString()}`
+        : 'no deploys yet',
     ],
     ['Photo editor (SANKTUARY)', health?.rapidraw?.ok ?? null, health?.rapidraw?.note || ''],
     [
