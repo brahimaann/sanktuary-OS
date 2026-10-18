@@ -34,7 +34,8 @@ export interface Profile extends Partial<Record<LinkKey, string>> {
   status?: string;
   role?: string;
   bio?: string;
-  avatar?: number;
+  avatar?: number; // the picture inside Sanktuary
+  photo?: number; // the picture on the public profile and portfolio, kept separate from avatar
   listed?: boolean;
   pro?: string; // roster, members only: "BMI · IPI 123456789"
   rates?: string; // roster, members only: rate card and availability

@@ -41,6 +41,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   const [msg, setMsg] = useState('');
   const [activeLink, setActiveLink] = useState<string | null>(null);
   const picInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   const openRef = useOpenRef();
 
   useEffect(() => {
@@ -67,12 +68,12 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
       setMsg((e as Error).message);
     }
   };
-  const uploadPic = async (file?: File) => {
+  const uploadPic = async (file?: File, sub: 'avatar' | 'photo' = 'avatar') => {
     if (!file) return;
     try {
-      const res = await fetch('/api/profiles/me/avatar', { method: 'PUT', body: file });
+      const res = await fetch(`/api/profiles/me/${sub}`, { method: 'PUT', body: file });
       if (!res.ok) throw new Error(await res.text());
-      setMsg('Picture updated.');
+      setMsg(sub === 'avatar' ? 'Picture updated.' : 'Public photo updated.');
     } catch (e) {
       setMsg((e as Error).message);
     }
@@ -279,8 +280,29 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
         </label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="My Computer on sanktuary.studio, which visitors can open">
           <input type="checkbox" checked={!!draft.listed} onChange={(e) => setDraft({ ...draft, listed: e.target.checked })} />
-          Show me in the public directory (name, picture, role, about me and links; never your status)
+          Show me in the public directory (name, public photo, role, about me and links; never your status)
         </label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {p?.photo ? (
+            <img src={`/api/profiles/${who}/photo?v=${p.photo}`} alt="" width={48} height={48} style={{ border: '1px solid #808080' }} />
+          ) : (
+            <span style={{ color: '#444' }}>No public photo.</span>
+          )}
+          <button style={button} onClick={() => photoInput.current?.click()}>
+            {p?.photo ? 'Change public photo...' : 'Add public photo...'}
+          </button>
+          <span style={{ color: '#444' }}>Shown on your public profile and portfolio; separate from your picture above.</span>
+          <input
+            ref={photoInput}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              uploadPic(e.target.files?.[0], 'photo');
+              e.target.value = '';
+            }}
+          />
+        </div>
         <fieldset
           style={{ border: '2px groove #fff', margin: 0, padding: '2px 8px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}
         >

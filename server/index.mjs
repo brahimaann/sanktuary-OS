@@ -3856,7 +3856,7 @@ async function listedPeople() {
           .map((k) => [k, publicLink(k, p[k])])
           .filter(([, v]) => v),
       ),
-      avatar: !!p.avatar && existsSync(join(DATA, 'profiles', 'avatars', `${username}.webp`)),
+      avatar: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)), // the public photo, never the internal avatar
       bookable: p.bookable === true, // "Take bookings through Sanktuary": a Book button on their public card
     });
   }
@@ -3918,7 +3918,7 @@ async function publicApi(req, res, url) {
     const name = /^[\w.-]{1,64}$/.test(who || '') ? who : fail(404, 'Not found');
     if (!(await listedPeople()).some((p) => p.username === name && p.avatar)) fail(404, 'Not found');
     res.setHeader('cache-control', 'public, max-age=300');
-    return stream(req, res, url.searchParams, join(DATA, 'profiles', 'avatars', `${name}.webp`));
+    return stream(req, res, url.searchParams, join(DATA, 'profiles', 'photos', `${name}.webp`));
   }
   if (req.method === 'GET' && !what) {
     const today = localDate();
@@ -6976,7 +6976,7 @@ async function chat(req, res, url) {
   fail(404, 'Unknown chat action');
 }
 
-// ── /api/profiles: display name, status (away message), role, bio, links, avatar ──
+// ── /api/profiles: display name, status (away message), role, bio, links, avatar (internal) and photo (public) ──
 const PROFILE_FIELDS = {
   displayName: 60,
   status: 140,
@@ -6990,7 +6990,7 @@ const PROFILE_FIELDS = {
 async function profiles(req, res, url) {
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
-  const [, , , who, sub] = url.pathname.split('/'); // /api/profiles/<username|me>/<avatar>
+  const [, , , who, sub] = url.pathname.split('/'); // /api/profiles/<username|me>/<avatar|photo>
 
   if (!who && req.method === 'GET') {
     const r = await clerk('/users?limit=100&order_by=-created_at');
@@ -7012,11 +7012,12 @@ async function profiles(req, res, url) {
   const name = who === 'me' ? user.username : who;
   if (!/^[\w.-]{1,64}$/.test(name || '')) fail(400, 'Bad username');
 
-  if (sub === 'avatar' && req.method === 'GET')
-    return stream(req, res, url.searchParams, join(DATA, 'profiles', 'avatars', `${name}.webp`));
+  if ((sub === 'avatar' || sub === 'photo') && req.method === 'GET')
+    return stream(req, res, url.searchParams, join(DATA, 'profiles', sub === 'avatar' ? 'avatars' : 'photos', `${name}.webp`));
   if (who !== 'me') fail(403, 'You can only change your own profile');
 
-  if (sub === 'avatar' && req.method === 'PUT') {
+  // avatar: the small picture inside Sanktuary; photo: the one on the public profile and portfolio
+  if ((sub === 'avatar' || sub === 'photo') && req.method === 'PUT') {
     const chunks = [];
     let size = 0;
     for await (const c of req) {
@@ -7024,12 +7025,14 @@ async function profiles(req, res, url) {
       if (size > 10 * 1024 * 1024) fail(413, 'Picture must be under 10 MB');
       chunks.push(c);
     }
-    await mkdir(join(DATA, 'profiles', 'avatars'), { recursive: true });
+    const folder = sub === 'avatar' ? 'avatars' : 'photos';
+    const px = sub === 'avatar' ? 160 : 480;
+    await mkdir(join(DATA, 'profiles', folder), { recursive: true });
     await writeFile(
-      join(DATA, 'profiles', 'avatars', `${name}.webp`),
-      await sharp(Buffer.concat(chunks)).rotate().resize(160, 160, { fit: 'cover' }).webp({ quality: 80 }).toBuffer(),
+      join(DATA, 'profiles', folder, `${name}.webp`),
+      await sharp(Buffer.concat(chunks)).rotate().resize(px, px, { fit: 'cover' }).webp({ quality: 80 }).toBuffer(),
     );
-    const profile = { ...(await readJson(`profiles/${name}.json`, {})), avatar: Date.now() };
+    const profile = { ...(await readJson(`profiles/${name}.json`, {})), [sub]: Date.now() };
     await mkdir(join(DATA, 'profiles'), { recursive: true });
     await saveJson(`profiles/${name}.json`, profile);
     emit('profile', { username: name, ...profile });
