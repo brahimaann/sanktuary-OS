@@ -359,6 +359,12 @@ async function files(req, res, url) {
           entries: whole.sources.map((f) => ({ name: f.label, isDir: true, size: 0, modified: now, offline: !f.online })),
         });
       }
+      if (req.method === 'GET' && q.has('find')) {
+        // Search every connected folder of the space, as one newest-first list
+        const found = await Promise.all(whole.sources.filter((f) => f.online).map((f) => findIn(f.root, ...findArgs(q), [f.label])));
+        const entries = found.flatMap((f) => f.entries).sort((a, b) => b.modified.localeCompare(a.modified));
+        return json(res, { entries: entries.slice(0, 300), more: entries.length > 300 || found.some((f) => f.more) });
+      }
       fail(400, 'Open one of the folders in this space first');
     }
     label = parts[0];
@@ -405,6 +411,7 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     }
+    if (q.has('find')) return json(res, await findIn(target, ...findArgs(q)));
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
@@ -5514,6 +5521,53 @@ async function listDir(dir, includeHidden = false) {
   );
 }
 
+/**
+ * ?find: everything below dir whose name holds every word of `words` (files only, ending in one of `exts`, when
+ * exts are given), newest first. Feeds the Team Files search box and its Recent / Photos / Audio / Video views.
+ * Each hit carries `dir`, its folder relative to dir. Looks at 50,000 items at most and returns the newest 300.
+ */
+async function findIn(dir, words, exts, prefix = []) {
+  const hits = [];
+  const queue = [[]];
+  let seen = 0;
+  while (queue.length && seen < 50_000) {
+    const at = queue.shift();
+    for (const e of await readdir(join(dir, ...at), { withFileTypes: true }).catch(() => [])) {
+      if (HIDDEN.test(e.name)) continue;
+      seen++;
+      const isDir = e.isDirectory();
+      if (isDir) queue.push([...at, e.name]);
+      const name = e.name.toLowerCase();
+      if ((exts.length || !words.length) && (isDir || (exts.length && !exts.includes(extname(name).slice(1))))) continue;
+      if (words.every((w) => name.includes(w))) hits.push({ at, name: e.name, isDir });
+    }
+  }
+  const entries = [];
+  for (let i = 0; i < hits.length; i += 64) {
+    const batch = hits.slice(i, i + 64);
+    const stats = await Promise.all(batch.map((h) => stat(join(dir, ...h.at, h.name)).catch(() => null)));
+    batch.forEach((h, j) => {
+      if (stats[j])
+        entries.push({
+          name: h.name,
+          dir: [...prefix, ...h.at],
+          isDir: h.isDir,
+          size: stats[j].size,
+          modified: stats[j].mtime.toISOString(),
+        });
+    });
+  }
+  entries.sort((a, b) => b.modified.localeCompare(a.modified));
+  return { entries: entries.slice(0, 300), more: entries.length > 300 || queue.length > 0 };
+}
+const findArgs = (q) => [
+  String(q.get('find')).toLowerCase().split(/\s+/).filter(Boolean),
+  String(q.get('ext') || '')
+    .toLowerCase()
+    .split(',')
+    .filter(Boolean),
+];
+
 /** Moves the current file into .sk-versions/<path>/<timestamp><ext> so a replace never loses work. */
 async function keepVersion(root, file) {
   if (!existsSync(file)) return;
@@ -5965,15 +6019,19 @@ async function imageInput(file, size) {
 }
 
 // Illustrator files saved "PDF Compatible" (the default) are PDFs: render the first artboard at 2400 px.
-// sharp's prebuilt libvips can't read PDF, so pdf.js draws it.
+// sharp's prebuilt libvips can't read PDF, so pdf.js draws it. Anything it can't draw falls back to the small
+// preview Illustrator embeds in the file's XMP metadata.
 async function aiPreview(file) {
-  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const task = getDocument({
-    data: new Uint8Array(await readFile(file)),
-    isEvalSupported: false,
-    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))),
-  });
+  const buf = await readFile(file);
+  let task;
   try {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    task = getDocument({
+      data: new Uint8Array(buf),
+      isEvalSupported: false,
+      // pdf.js wants a trailing "/", and fileURLToPath ends a Windows path in a backslash: forward slashes work on both
+      standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))).replaceAll('\\', '/'),
+    });
     const doc = await task.promise;
     const page = await doc.getPage(1);
     const v = page.getViewport({ scale: 1 });
@@ -5981,10 +6039,14 @@ async function aiPreview(file) {
     const { canvas } = doc.canvasFactory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
     await page.render({ canvas, viewport }).promise;
     return sharp(canvas.toBuffer('image/png'));
-  } catch {
-    fail(415, 'This Illustrator file cannot be previewed (save with Create PDF Compatible File enabled)');
+  } catch (err) {
+    console.error(`Illustrator preview: ${basename(file)}: ${err.message}`);
+    const at = buf.indexOf('<xmpGImg:image>');
+    if (at < 0) fail(415, 'This Illustrator file has no preview (save with Create PDF Compatible File enabled)');
+    const b64 = buf.toString('latin1', at + 15, buf.indexOf('</xmpGImg:image>', at)).replace(/&#xA;|\s/g, '');
+    return sharp(Buffer.from(b64, 'base64'));
   } finally {
-    task.destroy();
+    task?.destroy();
   }
 }
 
@@ -6446,7 +6508,16 @@ async function admin(req, res, url) {
   const action = url.pathname.split('/')[3];
 
   if (req.method === 'GET' && action === 'state') {
-    const r = await clerk('/users?limit=100&order_by=-created_at');
+    const [r, inv] = await Promise.all([
+      clerk('/users?limit=100&order_by=-created_at'),
+      clerk('/invitations?status=pending&limit=100').catch(() => null),
+    ]);
+    const invList = inv?.ok ? await inv.json() : [];
+    const invitations = (Array.isArray(invList) ? invList : invList.data || []).map((i) => ({
+      id: i.id,
+      email: i.email_address,
+      created: i.created_at,
+    }));
     const users = r.ok
       ? (await r.json()).map((u) => ({
           id: u.id,
@@ -6457,7 +6528,13 @@ async function admin(req, res, url) {
           created: u.created_at,
         }))
       : [];
-    return json(res, { config: cfg, status: await readJson('status.json', null), backup: await readJson('backup.json', null), users });
+    return json(res, {
+      config: cfg,
+      status: await readJson('status.json', null),
+      backup: await readJson('backup.json', null),
+      users,
+      invitations,
+    });
   }
   if (req.method === 'GET' && action === 'health') return json(res, await health());
   if (req.method === 'GET' && action === 'usage') return json(res, await usageReport());
@@ -6499,6 +6576,25 @@ async function admin(req, res, url) {
     const out = await r.json();
     if (!r.ok) fail(400, out.errors?.[0]?.long_message || out.errors?.[0]?.message || 'Clerk refused');
     return json(res, { ok: true, id: out.id });
+  }
+  // Invitations: Clerk emails a sign-up link (works while sign-up is Restricted). With no redirect_url the link opens
+  // Clerk's hosted sign-up page, where they pick their nickname and access code.
+  if (req.method === 'POST' && action === 'invitations') {
+    const { email } = await jsonBody(req);
+    const r = await clerk('/invitations', {
+      method: 'POST',
+      body: JSON.stringify({ email_address: String(email || '').trim(), notify: true }),
+    });
+    const out = await r.json();
+    if (!r.ok) fail(400, out.errors?.[0]?.long_message || out.errors?.[0]?.message || 'Clerk refused');
+    return json(res, { ok: true, id: out.id });
+  }
+  if (req.method === 'DELETE' && action === 'invitations') {
+    const id = url.pathname.split('/')[4] || '';
+    if (!/^inv_\w+$/.test(id)) fail(400, 'Bad invitation');
+    const r = await clerk(`/invitations/${id}/revoke`, { method: 'POST' });
+    if (!r.ok) fail(400, 'Clerk refused');
+    return json(res, { ok: true });
   }
   if (req.method === 'POST' && action === 'backup') {
     await writeFile(join(DATA, 'backup-now'), '');
