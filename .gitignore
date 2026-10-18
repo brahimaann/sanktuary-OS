@@ -31,3 +31,7 @@ ops/nextcloud/.env
 dist-next/
 dist-old/
 dist-bad/
+
+# tests/signed-in.mjs output
+signed-in.png
+signed-in-state.json
