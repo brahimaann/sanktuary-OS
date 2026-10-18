@@ -2931,6 +2931,12 @@ ${thisYear}-03;Comma Song;0,456`,
       (n) => /drill edit\.mp4" is ready/.test(n.text) && n.open?.name === 'drill edit.mp4',
     ),
   );
+
+  // ── Taskbar on phones ──
+  check(
+    'the taskbar clock stays on one line',
+    /\.taskbar-time \{[^}]*white-space: nowrap/.test(readFileSync(new URL('../src/styles/layout.css', import.meta.url), 'utf8')),
+  );
 } finally {
   srv.kill();
   clerk.close();
