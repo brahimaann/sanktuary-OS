@@ -2931,6 +2931,19 @@ ${thisYear}-03;Comma Song;0,456`,
       (n) => /drill edit\.mp4" is ready/.test(n.text) && n.open?.name === 'drill edit.mp4',
     ),
   );
+
+  // ── Taskbar on phones ──
+  check(
+    'the taskbar clock stays on one line',
+    /\.taskbar-time \{[^}]*white-space: nowrap/.test(readFileSync(new URL('../src/styles/layout.css', import.meta.url), 'utf8')),
+  );
+
+  // ── Landing page leaves out empty sections ("Nothing announced yet" reads as a dormant site) ──
+  const welcomeHtml = (await call('bob', '/welcome')).text;
+  check(
+    'the landing page has no "nothing here" placeholders',
+    welcomeHtml.includes('Coming up') && !/Nothing on the calendar|Nothing announced yet|Profiles are on their way/.test(welcomeHtml),
+  );
 } finally {
   srv.kill();
   clerk.close();

@@ -103,7 +103,8 @@ body {
   margin-left: 1px;
 }
 .taskbar-time {
-  width: 60px;
+  min-width: 60px;
+  white-space: nowrap; /* "04:00 PM" wrapped onto two lines and spilled out of the taskbar on phones */
   text-align: center;
 }
 /* TODO: offset task button contents down a px when depressed... actually most buttons */
