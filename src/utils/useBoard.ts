@@ -34,7 +34,10 @@ export function useBoard<T extends { id: string }>(boardId: string) {
       on('init', (d) => {
         me.current = d.you;
         setItems(Object.fromEntries(d.items.map((i: T) => [i.id, i])));
-        setPeers(Object.fromEntries(d.peers.map((p: BoardPeer & { conn: string }) => [p.conn, p])));
+        // Your own older streams (a phone resuming after the file picker reconnects before the old one closes) are not peers
+        setPeers(
+          Object.fromEntries(d.peers.filter((p: BoardPeer) => p.user !== d.you.user).map((p: BoardPeer & { conn: string }) => [p.conn, p])),
+        );
         setStatus('');
       });
       on('ops', ({ ops }) =>
@@ -44,7 +47,7 @@ export function useBoard<T extends { id: string }>(boardId: string) {
           return next;
         }),
       );
-      on('join', (p) => setPeers((prev) => ({ ...prev, [p.conn]: p })));
+      on('join', (p) => p.user !== me.current?.user && setPeers((prev) => ({ ...prev, [p.conn]: p })));
       on('leave', ({ conn }) =>
         setPeers((prev) => {
           const n = { ...prev };
@@ -52,7 +55,7 @@ export function useBoard<T extends { id: string }>(boardId: string) {
           return n;
         }),
       );
-      on('cursor', (c) => setPeers((prev) => ({ ...prev, [c.conn]: { ...prev[c.conn], ...c } })));
+      on('cursor', (c) => c.user !== me.current?.user && setPeers((prev) => ({ ...prev, [c.conn]: { ...prev[c.conn], ...c } })));
       on('deleted', () => {
         setStatus('This board was deleted.');
         es?.close();

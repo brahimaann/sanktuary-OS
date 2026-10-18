@@ -1,6 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useWindowManager } from './wm/manager';
-import Desktop from './components/Desktop';
+import Desktop, { Folder } from './components/Desktop';
 import Taskbar from './components/Taskbar';
 import Window from './components/Window';
 import BootScreen from './components/BootScreen';
@@ -107,8 +107,14 @@ export const App: React.FC = () => {
         height: window.innerHeight,
       });
     };
+    // Phones scroll the page up to make room for the keyboard (signing in) and don't always scroll back when it closes
+    const settle = () => setTimeout(() => (window.scrollTo(0, 0), handleResize()), 100);
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('focusout', settle);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('focusout', settle);
+    };
   }, []);
 
   // Screensaver idle detection
@@ -282,6 +288,9 @@ export const App: React.FC = () => {
         break;
       case 'share-in':
         content = <ShareIn missed={win.appProps?.missed} />;
+        break;
+      case 'folder':
+        content = <Folder items={win.appProps?.items || []} />;
         break;
       case 'canvas':
         content = <Canvas boardId={win.appProps?.boardId} name={win.title} />;
