@@ -295,15 +295,16 @@
       }
 
       // ── Pieces ──
-      const events = (list) =>
+      // Empty sections are left out: "nothing here" reads as a dormant site
+      const events = (legend, list) =>
         list.length
-          ? `<div class="list">${list
+          ? `<fieldset><legend>${legend}</legend><div class="list">${list
               .map(
                 (e) =>
                   `<div><b style="min-width:110px">${esc(day(e.start))}${e.time ? ` ${esc(e.time)}` : ''}</b>${e.link ? `<a ${href(e.link)}>${esc(e.title)}</a>` : esc(e.title)}<span class="pill">${esc(e.kind)}</span><span class="muted">${esc(e.location)}</span></div>`,
               )
-              .join('')}</div>`
-          : '<div class="muted">Nothing on the calendar right now.</div>';
+              .join('')}</div></fieldset>`
+          : '';
       const posts = (list) =>
         `<div class="grid">${list
           .map(
@@ -333,14 +334,14 @@
             <a class="card door" href="/welcome/mhotc" data-tab="mhotc"><b>MHOTC</b><span>Community</span><span class="muted">CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span></a>
             <a class="card door" href="/shop"><b>SHOP</b><span>Apparel</span><span class="muted">SOTG, Merakaiya and the rest of our apparel and releases.</span></a>
           </div>
-          <fieldset><legend>Coming up</legend>${events(d.events.filter((e) => !e.past).slice(0, 5))}</fieldset>
+          ${events('Coming up', d.events.filter((e) => !e.past).slice(0, 5))}
           ${d.posts.length ? `<fieldset><legend>Latest from CITIES</legend>${posts(d.posts.slice(0, 3))}</fieldset>` : ''}
           ${join()}`,
         mrnd: () => `
           <fieldset><legend>MRND: music</legend><div>The talent we host and the music we make together.</div></fieldset>
-          <fieldset><legend>Talent</legend>${
+          ${
             d.people.length
-              ? `<div class="grid">${d.people
+              ? `<fieldset><legend>Talent</legend><div class="grid">${d.people
                   .map(
                     (p) =>
                       `<div class="card">${p.avatar ? `<img src="/api/public/avatar/${esc(p.username)}" alt="" loading="lazy">` : ''}<b>${esc(p.displayName)}</b>${p.role ? `<span class="muted">${esc(p.role)}</span>` : ''}${p.bio ? `<span>${esc(p.bio.slice(0, 220))}</span>` : ''}<span class="links">${Object.entries(
@@ -349,23 +350,26 @@
                         .map(([k, u]) => `<a ${href(u)}>${esc(k)}</a>`)
                         .join('')}</span></div>`,
                   )
-                  .join('')}</div>`
-              : '<div class="muted">Profiles are on their way.</div>'
-          }</fieldset>
-          <fieldset><legend>Releases</legend>${
+                  .join('')}</div></fieldset>`
+              : ''
+          }
+          ${
             d.releases.length
-              ? `<div class="list">${d.releases
+              ? `<fieldset><legend>Releases</legend><div class="list">${d.releases
                   .map(
                     (r) =>
                       `<div>${r.slug ? `<a href="/release/${esc(r.slug)}"><b>${esc(r.title)}</b></a>` : `<b>${esc(r.title)}</b>`}<span class="pill">${esc(r.kind)}</span><span class="muted">${r.date ? esc(day(r.date)) : 'Date to come'}${r.tracks ? ` · ${r.tracks} track${r.tracks > 1 ? 's' : ''}` : ''}</span></div>`,
                   )
-                  .join('')}</div>`
-              : '<div class="muted">Nothing announced yet.</div>'
-          }</fieldset>`,
+                  .join('')}</div></fieldset>`
+              : ''
+          }`,
         mhotc: () => `
           <fieldset><legend>MHOTC: community</legend><div>The people, places and nights of the Twin Cities arts scene. <a href="/cities">Read CITIES</a> · <a href="/cities/videos">Watch vlogs</a></div></fieldset>
           ${d.posts.length ? `<fieldset><legend>CITIES</legend>${posts(d.posts.slice(0, 9))}</fieldset>` : ''}
-          <fieldset><legend>Events</legend>${events(d.events.filter((e) => !e.past))}</fieldset>
+          ${events(
+            'Events',
+            d.events.filter((e) => !e.past),
+          )}
           ${
             d.stories.length
               ? `<fieldset><legend>Stories</legend><div class="list">${d.stories.map((s) => `<div><a href="/story/${esc(s.slug)}"><b>${esc(s.title)}</b></a><span class="muted">${esc(s.subtitle || '')}</span></div>`).join('')}</div></fieldset>`
