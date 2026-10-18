@@ -10,8 +10,14 @@ const signOut = async () => {
   location.reload();
 };
 
+// One object each, like Clerk's: a new getToken every render would re-run every effect that depends on it
+const auth = { isLoaded: true, isSignedIn: !!user, userId: user?.id ?? null, getToken: async () => null };
+const userState = { isLoaded: true, isSignedIn: !!user, user };
+const clerk = { session: null, signOut, openUserProfile: () => alert('No account settings in fake sign-in') };
+const signInState = { signIn: {} };
+
 export const ClerkProvider = ({ children }) => children;
-export const useAuth = () => ({ isLoaded: true, isSignedIn: !!user, userId: user?.id ?? null, getToken: async () => null });
-export const useUser = () => ({ isLoaded: true, isSignedIn: !!user, user });
-export const useClerk = () => ({ session: null, signOut, openUserProfile: () => alert('No account settings in fake sign-in') });
-export const useSignIn = () => ({ signIn: {} });
+export const useAuth = () => auth;
+export const useUser = () => userState;
+export const useClerk = () => clerk;
+export const useSignIn = () => signInState;
