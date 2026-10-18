@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
 import { statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, parse, relative, sep } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
 
@@ -33,9 +33,11 @@ writeFileSync(join(drive, 'team', 'evil.svg'), '<svg xmlns="http://www.w3.org/20
 writeFileSync(join(drive, 'team', 'pic.png'), Buffer.from('89504e47', 'hex'));
 writeFileSync(join(drive, 'team', 'old.txt'), 'was on the drive before Sanktuary');
 writeFileSync(join(drive, 'team', 'loose.txt'), 'also already there');
-// The server sees drives as letters (C:); off Windows, '/.' + '/' is the root, so the tests run on Linux CI too
-const letter = process.platform === 'win32' ? drive.slice(0, 2) : '/.';
-const rel = relative(parse(drive).root, drive).split(sep).join('/');
+// The server finds a drive by its letter (e.g. C:); off Windows, the first folder of the path stands in for it
+const [letter, rel] =
+  process.platform === 'win32'
+    ? [drive.slice(0, 2), drive.slice(3).split('\\').join('/')]
+    : ['/' + drive.split('/')[1], drive.split('/').slice(2).join('/')];
 writeFileSync(
   join(dir, 'data', 'config.json'),
   JSON.stringify({
@@ -152,6 +154,16 @@ const fakeGoogle = http
         if (f.get('grant_type') === 'refresh_token' && f.get('refresh_token') === 'rt1') return j(200, { access_token: 'at2' });
         return j(400, { error: 'invalid_grant' });
       }
+      // A fake song.link: a single by bob, on SoundCloud and Audiomack
+      if (req.url.startsWith('/odesli?'))
+        return j(200, {
+          entityUniqueId: 'S1',
+          entitiesByUniqueId: { S1: { type: 'song', title: 'Open', artistName: 'bob & carol' } },
+          linksByPlatform: {
+            soundcloud: { url: 'https://soundcloud.com/bob-music/open' },
+            audiomack: { url: 'https://audiomack.com/bob-music/song/open' },
+          },
+        });
       if (req.url.startsWith('/yt/channels')) return j(200, { items: [{ id: 'UC123', snippet: { title: 'Sanktuary TV' } }] });
       if (req.url.startsWith('/upload?') && req.headers.authorization === 'Bearer at2')
         return j(200, {}, { location: 'http://127.0.0.1:3192/upload-session/1' });
@@ -200,6 +212,7 @@ const srv = spawn(process.execPath, [SERVER], {
     GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
     GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
     YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
+    ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
     YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
   },
 });
@@ -1193,18 +1206,83 @@ try {
   check('dragged-on picture is shown as WebP', asset.src.endsWith('.webp') && asset.original.endsWith('-original.png'));
   const shownPic = Buffer.from(await (await fetch(B + asset.src, { headers: { cookie: cookie('alice') } })).arrayBuffer());
   const meta = await sharpLib(shownPic).metadata();
-  check('shown copy is shrunk to 2400 px', meta.format === 'webp' && meta.width === 2400);
+  check('shown copy is shrunk to 1600 px', meta.format === 'webp' && meta.width === 1600);
   check(
     'original kept untouched',
     (await fetch(B + asset.original, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer())).byteLength === bigPng.length,
   );
+  // Illustrator files are PDFs inside: the board shows a rendering of the artboard
+  const aiFile =
+    '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n' +
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R>>endobj\n' +
+    '4 0 obj<</Length 30>>stream\n1 0 0 rg 50 50 200 100 re f\nendstream endobj\ntrailer<</Root 1 0 R>>\n%%EOF';
+  const ai = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=logo.ai`, 'PUT', aiFile, true)).text);
+  const aiPic =
+    ai.src.endsWith('.webp') && (await fetch(B + ai.src, { headers: { cookie: cookie('alice') } }).then((r) => r.arrayBuffer()));
+  const aiMeta = aiPic && (await sharpLib(Buffer.from(aiPic)).metadata());
+  check('Illustrator file is shown as a picture', aiMeta?.width === 1600 && ai.original.endsWith('-original.ai'));
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
 
-  // Blog: public reading, admin-only writing, drafts hidden, feeds limited to public websites
+  // CITIES (the blog): public reading, members' drafts, admin publishing, drafts hidden, feeds limited to public websites
   check('blog reads without an account', (await fetch(B + '/api/blog')).status === 200);
-  check('blog page is public', (await fetch(B + '/blog')).status === 200 && (await fetch(B + '/blog/abc123')).status === 200);
-  check('members cannot write posts', (await call('bob', '/api/blog/posts', 'POST', { title: 'x' })).status === 403);
+  check('CITIES page is public', (await fetch(B + '/cities')).status === 200 && (await fetch(B + '/cities/abc123')).status === 200);
+  const oldLink = await fetch(B + '/blog/abc123?x=1', { redirect: 'manual' });
+  check('old /blog links forward to /cities', oldLink.status === 301 && oldLink.headers.get('location') === '/cities/abc123?x=1');
+  check('the writing page needs no account to load', (await fetch(B + '/write')).status === 200);
+  check('but drafts need a sign-in', (await call(null, '/api/blog/mine')).status === 401);
+  const bobDraft = JSON.parse((await call('bob', '/api/blog/posts', 'POST', { title: 'Lyric', line: 'heart', kind: 'profile' })).text);
+  check('members can start a draft', bobDraft.owner === 'bob' && bobDraft.kind === 'profile' && !bobDraft.published);
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { published: true, preface: 'Singing since she was two.', line: 'nope' });
+  const bobMine = JSON.parse((await call('bob', '/api/blog/mine')).text);
+  check(
+    'members cannot publish, and a bad section falls back to Heart',
+    bobMine.length === 1 && !bobMine[0].published && bobMine[0].line === 'heart' && bobMine[0].preface === 'Singing since she was two.',
+  );
+  check('others only see their own drafts', JSON.parse((await call('carol', '/api/blog/mine')).text).length === 0);
+  check(
+    "members cannot touch someone else's draft",
+    (await call('carol', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { title: 'x' })).status === 403,
+  );
+  check('members cannot manage writers', (await call('bob', '/api/blog/feeds', 'POST', { url: 'boroma' })).status === 403);
+  check('members cannot read the admin list', (await call('bob', '/api/blog/admin')).status === 403);
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { submitted: true });
+  check(
+    'sending a draft in tells the admins',
+    JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /bob sent a draft for CITIES: "Lyric"/.test(n.text)),
+  );
+  await call('alice', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { published: true });
+  check(
+    "admins publish members' drafts",
+    (await (await fetch(B + '/api/blog')).json()).posts.some((p) => p.id === bobDraft.id),
+  );
+  check(
+    'a published post is locked for its writer',
+    (await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { title: 'x' })).status === 403,
+  );
+  const postPage = await (await fetch(B + '/cities/lyric')).text();
+  check(
+    'a shared post link shows its title and preface',
+    postPage.includes('<meta property="og:title" content="Lyric · CITIES" />') &&
+      postPage.includes('<meta property="og:description" content="Singing since she was two." />'),
+  );
+  check(
+    'section pages have their own title',
+    (await (await fetch(B + '/cities/heart')).text()).includes('<title>Heart of the Cities · CITIES</title>'),
+  );
+  const heartTitled = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Heart' })).text);
+  await call('alice', `/api/blog/posts/${heartTitled.id}`, 'PATCH', { published: true });
+  check(
+    'a post called "Heart" does not take over /cities/heart',
+    JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === heartTitled.id).slug !== 'heart',
+  );
+  await call('alice', `/api/blog/posts/${heartTitled.id}`, 'DELETE');
+  const vids = await fetch(B + '/api/blog/videos');
+  check('videos read without an account', vids.status === 200 && Array.isArray((await vids.json()).videos));
+  check(
+    'a channel needs a channel link or handle',
+    (await call('alice', '/api/blog/channels', 'POST', { url: 'not a channel!' })).status === 400,
+  );
   const draft = JSON.parse(
     (await call('alice', '/api/blog/posts', 'POST', { title: 'Why culture', body: 'First line.\n\nSecond https://example.com' })).text,
   );
@@ -1214,16 +1292,16 @@ try {
   const publicPosts = (await (await fetch(B + '/api/blog')).json()).posts;
   check(
     'published post gets a readable address',
-    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === '/blog/why-culture'),
+    publicPosts.some((p) => p.id === draft.id && p.source === 'sanktuary' && p.url === '/cities/why-culture'),
   );
   check('post readable by its address', (await (await fetch(B + '/api/blog/post/why-culture')).json()).title === 'Why culture');
-  check('two-part blog addresses load the page', (await fetch(B + '/blog/boroma/what-does-change-look-like')).status === 200);
+  check('two-part blog addresses load the page', (await fetch(B + '/cities/boroma/what-does-change-look-like')).status === 200);
   const notesWall = await fetch(B + '/api/blog/notes');
   check('notes wall reads without an account', notesWall.status === 200 && Array.isArray((await notesWall.json()).notes));
   const titledNotes = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Notes', body: 'x' })).text);
   await call('alice', `/api/blog/posts/${titledNotes.id}`, 'PATCH', { published: true });
   check(
-    'a post called "Notes" does not take over /blog/notes',
+    'a post called "Notes" does not take over /cities/notes',
     JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === titledNotes.id).slug !== 'notes',
   );
   await call('alice', `/api/blog/posts/${titledNotes.id}`, 'DELETE');
@@ -1255,6 +1333,25 @@ try {
   const secret = JSON.parse((await call('bob', '/api/timeline', 'POST', { title: 'Secret shoot', kind: 'Shoot', start: day(10) })).text);
   await call('bob', `/api/timeline/${gig.id}`, 'PATCH', { public: true });
   const ep = JSON.parse((await call('alice', '/api/tracks/release', 'POST', { title: 'Open EP', kind: 'EP', date: day(30) })).text);
+  check(
+    'finding streaming links needs an https link',
+    (await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'http://example.com/album' })).status === 400,
+  );
+  const found = JSON.parse(
+    (await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'https://soundcloud.com/bob-music/open' })).text,
+  );
+  check(
+    "streaming links fill the release and its artist's empty profile links",
+    found.stores.soundcloud === 'https://soundcloud.com/bob-music/open' &&
+      found.profile?.username === 'bob' &&
+      JSON.parse((await call('bob', '/api/profiles')).text).find((u) => u.username === 'bob').audiomack ===
+        'https://audiomack.com/bob-music',
+  );
+  check(
+    'profile links already there are kept',
+    JSON.parse((await call('alice', `/api/tracks/release/${ep.id}?links`, 'POST', { url: 'https://soundcloud.com/bob-music/open' })).text)
+      .profile === null,
+  );
   // New releases ask who it's by and who wrote it first; songs' BMI sheets start from these
   const credited = JSON.parse(
     (
@@ -2714,6 +2811,22 @@ ${thisYear}-03;Comma Song;0,456`,
     join(drive, 'team', 'clip.mp4'),
   ]);
   spawnSync(ffmpegBin, ['-f', 'lavfi', '-i', 'sine=frequency=220:duration=3', '-y', join(drive, 'team', 'beat.wav')]);
+  // A clip the browser can't decode (an iPhone HEVC .mov) gets an H.264 MP4 preview copy for the editor
+  spawnSync(ffmpegBin, [
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc=size=320x240:duration=1',
+    '-c:v',
+    'libx265',
+    '-tag:v',
+    'hvc1',
+    '-y',
+    join(drive, 'team', 'phone.mov'),
+  ]);
+  const proxy = await getBin('alice', '/api/files/view/phone.mov?preview');
+  const proxyInfo = spawnSync(ffmpegBin, ['-hide_banner', '-i', 'pipe:0'], { input: proxy.bytes }).stderr.toString();
+  check('HEVC .mov preview is an H.264 MP4', proxy.type === 'video/mp4' && /Video: h264/.test(proxyInfo), `${proxy.status} ${proxy.type}`);
   const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   const renderJob = (u, over = {}) =>
     call(u, '/api/video/render', 'POST', {

@@ -85,7 +85,7 @@ interface Track {
   bounce: FileRef | null;
   project: FileRef | null;
   stems: FileRef | null;
-  links: Partial<Record<'bandlab' | 'untitled' | 'soundcloud' | 'other', string>>;
+  links: Partial<Record<(typeof LINKS)[number][0], string>>;
   following: boolean;
   followers: number;
   history: { at: string; user: string; action: string }[];
@@ -112,12 +112,20 @@ const STATUS_COLORS: Record<string, string> = {
   Mastering: '#008080',
   Done: '#008000',
 };
-const LINKS: [keyof Track['links'], string][] = [
+// Work-in-progress links, then where the finished song streams (shown on the public page and in CITIES)
+const LINKS = [
   ['bandlab', 'BandLab'],
   ['untitled', 'Untitled'],
   ['soundcloud', 'SoundCloud'],
   ['other', 'Other'],
-];
+  ['spotify', 'Spotify'],
+  ['appleMusic', 'Apple Music'],
+  ['youtubeMusic', 'YouTube Music'],
+  ['tidal', 'Tidal'],
+  ['amazonMusic', 'Amazon Music'],
+  ['deezer', 'Deezer'],
+  ['audiomack', 'Audiomack'],
+] as const;
 const daysUntil = (d: string) => Math.round((Date.parse(d) - Date.parse(new Date().toLocaleDateString('en-CA'))) / 864e5);
 const due = (d: string) => {
   const n = daysUntil(d);
@@ -1695,6 +1703,8 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
   const [blurb, setBlurb] = useState(release.blurb || '');
   const [story, setStory] = useState(release.story || '');
   const [stores, setStores] = useState<Record<string, string>>(release.stores || {});
+  const [findUrl, setFindUrl] = useState('');
+  const [finding, setFinding] = useState('');
   const [pageUntil, setPageUntil] = useState(release.pageUntil || '');
   const [video, setVideo] = useState(release.videoId ? `https://youtu.be/${release.videoId}` : '');
   const [stories, setStories] = useState<{ slug: string; title: string }[]>([]);
@@ -1742,6 +1752,36 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
             The story (e.g. Heart of the Cities) gets an "Enter the world" button on the page once it's published.
           </div>
           <Section title="Where to listen (paste the links from your distributor)">
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                style={{ ...input, flex: 1 }}
+                placeholder="Or paste one link to the album or single, on any platform"
+                value={findUrl}
+                onChange={(e) => setFindUrl(e.target.value)}
+              />
+              <button
+                style={button}
+                disabled={!findUrl.trim() || finding === 'Looking it up...'}
+                onClick={() => {
+                  setFinding('Looking it up...');
+                  api(`/api/tracks/release/${release.id}?links`, { method: 'POST', body: JSON.stringify({ url: findUrl.trim() }) }).then(
+                    (d: { stores: Record<string, string>; songs: number; profile: { username: string; added: string[] } | null }) => {
+                      setStores((s) => ({ ...s, ...d.stores }));
+                      const names = d.profile?.added.map((k) => STORES.find(([s]) => s === k)?.[1] || k).join(', ');
+                      setFinding(
+                        (d.songs > 1
+                          ? `Found the album. Each song's links are being filled in; you'll get a notification when it's done.`
+                          : 'Found it.') + (d.profile ? ` Added ${names} to ${d.profile.username}'s profile.` : ''),
+                      );
+                    },
+                    (e) => setFinding((e as Error).message),
+                  );
+                }}
+              >
+                Find streaming links
+              </button>
+            </div>
+            {finding && <div style={{ color: '#555' }}>{finding}</div>}
             <div
               style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 4, alignItems: 'center', maxHeight: 180, overflow: 'auto' }}
             >

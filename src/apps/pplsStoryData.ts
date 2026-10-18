@@ -767,16 +767,6 @@ export function calculateHaversineDistance(lat1: number, lon1: number, lat2: num
   return R * c;
 }
 
-/** Return events filtered by region, sorted chronologically */
-export function getEventsForRegion(region: Region): TimelineEvent[] {
-  return TIMELINE_EVENTS.filter((e) => e.region === region).sort((a, b) => a.year - b.year);
-}
-
-/** Return events within a year range, sorted chronologically */
-export function getEventsInRange(startYear: number, endYear: number): TimelineEvent[] {
-  return TIMELINE_EVENTS.filter((e) => e.year >= startYear && e.year <= endYear).sort((a, b) => a.year - b.year);
-}
-
 /** Return events for a region within a year range */
 export function getFilteredEvents(region: Region | 'All', startYear: number, endYear: number): TimelineEvent[] {
   return TIMELINE_EVENTS.filter((e) => (region === 'All' || e.region === region) && e.year >= startYear && e.year <= endYear).sort(
@@ -788,18 +778,6 @@ export function getFilteredEvents(region: Region | 'All', startYear: number, end
 export function getYearRange(): { min: number; max: number } {
   const years = TIMELINE_EVENTS.map((e) => e.year);
   return { min: Math.min(...years), max: Math.max(...years) };
-}
-
-/** Return local echoes sorted by proximity to the user's location */
-export function getNearbyEchoes(userLat: number, userLng: number, radiusMiles: number = 20): LocalEcho[] {
-  return LOCAL_ECHOES.filter((echo) => {
-    const distance = calculateHaversineDistance(userLat, userLng, echo.location.lat, echo.location.lng);
-    return distance <= radiusMiles;
-  }).sort((a, b) => {
-    const distA = calculateHaversineDistance(userLat, userLng, a.location.lat, a.location.lng);
-    const distB = calculateHaversineDistance(userLat, userLng, b.location.lat, b.location.lng);
-    return distA - distB;
-  });
 }
 
 export default TIMELINE_EVENTS;

@@ -22,21 +22,20 @@ interface DesktopIconDef {
   height?: number;
 }
 
-// Studio apps: members only, so visitors aren't shown doors they can't open. First column when logged on.
-const STUDIO_ICONS: DesktopIconDef[] = [
-  { id: 'new', title: 'New...', icon: '/images/icons/file-32x32.png', appType: 'new', width: 460, height: 420 },
-  { id: 'sanktuary-network', title: 'Team Files', icon: '/images/icons/network-32x32.png', appType: 'network', width: 560, height: 420 },
+const I = (name: string) => `/images/icons/${name}-32x32.png`;
+const app = {
+  new: { id: 'new', title: 'New...', icon: I('file'), appType: 'new', width: 460, height: 420 },
   // Studio: songs (Tracks), calendar (Timeline) and to-do boards (Planner) in one window
-  {
+  studio: {
     id: 'studio',
     title: 'Studio',
-    icon: '/images/icons/media-player-32x32.png',
+    icon: I('media-player'),
     appType: 'studio',
     appProps: { tab: 'songs' },
     width: 960,
     height: 620,
   },
-  {
+  calendar: {
     id: 'calendar',
     title: 'Calendar',
     icon: '/images/icons/calendar-32x32.svg',
@@ -45,8 +44,11 @@ const STUDIO_ICONS: DesktopIconDef[] = [
     width: 960,
     height: 620,
   },
-  { id: 'moodboards', title: 'Moodboards', icon: '/images/icons/paint-32x32.png', appType: 'boards', width: 560, height: 420 },
-  {
+  moodboards: { id: 'moodboards', title: 'Moodboards', icon: I('paint'), appType: 'boards', width: 560, height: 420 },
+  teams: { id: 'teams', title: 'Messages', icon: I('outlook-express'), appType: 'teams', width: 300, height: 520 },
+  files: { id: 'sanktuary-network', title: 'Team Files', icon: I('network'), appType: 'network', width: 560, height: 420 },
+  producer: { id: 'producer', title: 'Producer', icon: I('convert-audio'), appType: 'producer', width: 720, height: 560 },
+  rapidraw: {
     id: 'rapidraw',
     title: 'SANKTUARY RAW',
     icon: '/images/icons/paint-file-32x32-higher-color.png',
@@ -55,111 +57,141 @@ const STUDIO_ICONS: DesktopIconDef[] = [
     width: 1100,
     height: 720,
   },
-  { id: 'teams', title: 'Messages', icon: '/images/icons/outlook-express-32x32.png', appType: 'teams', width: 300, height: 520 },
-  { id: 'video-editor', title: 'Video Editor', icon: '/images/icons/video-32x32.png', appType: 'video-editor', width: 960, height: 680 },
-];
-
-// The front door: works without an account (Shop and Blog are the same pages as sanktuary.studio/shop and /blog)
-const PUBLIC_ICONS: DesktopIconDef[] = [
-  { id: 'welcome', title: 'Welcome', icon: '/images/icons/help-32x32.png', appType: 'welcome', width: 520, height: 560 },
-  {
-    id: 'my-computer',
-    title: 'My Computer',
-    icon: '/images/icons/my-computer-32x32.png',
-    appType: 'directory', // the public directory: people, releases, events, writing, shop
-    width: 680,
-    height: 500,
-  },
-  {
-    id: 'calendar',
-    title: 'Calendar',
-    icon: '/images/icons/calendar-32x32.svg',
-    appType: 'studio',
-    appProps: { tab: 'calendar' },
-    width: 960,
-    height: 620,
-  },
-  { id: 'producer', title: 'Producer', icon: '/images/icons/convert-audio-32x32.png', appType: 'producer', width: 720, height: 560 },
-  {
-    id: 'rapidraw',
-    title: 'SANKTUARY RAW',
-    icon: '/images/icons/paint-file-32x32-higher-color.png',
+  darkroom: { id: 'darkroom', title: 'Darkroom', icon: I('kodak-imaging'), appType: 'darkroom', width: 900, height: 600 },
+  videoEditor: { id: 'video-editor', title: 'Video Editor', icon: I('video'), appType: 'video-editor', width: 960, height: 680 },
+  notepad: { id: 'notepad', title: 'Notepad', icon: I('notepad'), appType: 'notepad', width: 480, height: 360 },
+  // CITIES, the public journal; drafts from Write are published by admins in Admin Panel > CITIES
+  blog: { id: 'blog', title: 'CITIES', icon: I('news'), appType: 'iframe', appProps: { src: '/cities' }, width: 760, height: 560 },
+  magazine: {
+    id: 'magazine',
+    title: 'CITIES Vol. 1',
+    icon: I('help'),
     appType: 'iframe',
-    appProps: { src: '/apps/rapidraw/' },
-    width: 1100,
-    height: 720,
+    appProps: { src: '/magazine' },
+    width: 1000,
+    height: 700,
   },
-  {
-    id: 'blog',
-    title: 'Blog',
-    icon: '/images/icons/news-32x32.png',
+  write: {
+    id: 'write',
+    title: 'Write for CITIES',
+    icon: I('notepad'),
     appType: 'iframe',
-    appProps: { src: '/blog' },
+    appProps: { src: '/write' },
     width: 760,
-    height: 560,
+    height: 600,
   },
-  {
-    id: 'shop',
-    title: 'Shop',
-    icon: '/images/icons/favorites-32x32.png',
+  // The landing page, sanktuary.studio/welcome: MRND, MHOTC, Shop
+  welcome: {
+    id: 'welcome-page',
+    title: 'Welcome',
+    icon: I('help'),
     appType: 'iframe',
-    appProps: { src: '/shop' },
-    width: 760,
-    height: 560,
+    appProps: { src: '/welcome' },
+    width: 900,
+    height: 640,
   },
-];
-
-// Extras and games, last
-const EXTRA_ICONS: DesktopIconDef[] = [
-  {
+  // The public directory: people, releases, events, writing, shop
+  computer: { id: 'my-computer', title: 'My Computer', icon: I('my-computer'), appType: 'directory', width: 680, height: 500 },
+  shop: { id: 'shop', title: 'Shop', icon: I('favorites'), appType: 'iframe', appProps: { src: '/shop' }, width: 760, height: 560 },
+  ie: {
     id: 'ie',
     title: 'Internet Explorer',
-    icon: '/images/icons/internet-explorer-32x32.png',
+    icon: I('internet-explorer'),
     appType: 'internet-explorer',
     appProps: { src: 'https://en.m.wikipedia.org/wiki/African_history' },
     width: 900,
     height: 640,
   },
-  { id: 'africaonly', title: 'AfricaOnly.TV', icon: '/images/icons/video-32x32.png', appType: 'africaonly', width: 900, height: 620 },
-  { id: 'darkroom', title: 'Darkroom', icon: '/images/icons/kodak-imaging-32x32.png', appType: 'darkroom', width: 900, height: 600 },
-  { id: 'notepad', title: 'Notepad', icon: '/images/icons/notepad-32x32.png', appType: 'notepad', width: 480, height: 360 },
-  { id: 'pong', title: 'Pong', icon: '/images/icons/pinball-32x32.png', appType: 'pong', width: 520, height: 380 },
-  {
+  africaonly: { id: 'africaonly', title: 'AfricaOnly.TV', icon: I('video'), appType: 'africaonly', width: 900, height: 620 },
+  pong: { id: 'pong', title: 'Pong', icon: I('pinball'), appType: 'pong', width: 520, height: 380 },
+  recycle: {
     id: 'recycle',
     title: 'Recycle Bin',
-    icon: '/images/icons/recycle-bin-32x32.png',
+    icon: I('recycle-bin'),
     appType: 'explorer',
     appProps: { path: 'C:/Recycled' },
     width: 640,
     height: 480,
   },
+  // Admins only; the server additionally requires two-step verification for Business
+  admin: { id: 'admin-panel', title: 'Admin Panel', icon: I('settings'), appType: 'admin', width: 760, height: 540 },
+  business: { id: 'business', title: 'Business', icon: I('my-documents-folder'), appType: 'business', width: 860, height: 600 },
+} satisfies Record<string, DesktopIconDef>;
+
+// A desktop folder: a small window of icons, so a phone screen holds the whole desktop
+const folder = (id: string, title: string, icon: string, items: DesktopIconDef[]): DesktopIconDef => ({
+  id,
+  title,
+  icon: I(icon),
+  appType: 'folder',
+  appProps: { items },
+  width: 420,
+  height: 300,
+});
+
+// Logged on: everyday studio apps first, then the front door, then folders. Visitors get the front door and extras.
+const memberIcons = (admin: boolean): DesktopIconDef[] => [
+  app.new,
+  app.studio,
+  app.moodboards,
+  app.teams,
+  app.files,
+  app.producer,
+  folder('folder-create', 'Create', 'programs-folder', [app.rapidraw, app.darkroom, app.videoEditor, app.notepad]),
+  folder('folder-cities', 'CITIES', 'internet-folder', [app.blog, app.magazine, app.write]),
+  app.welcome,
+  app.computer,
+  app.shop,
+  ...(admin ? [folder('folder-admin', 'Admin', 'tools-folder', [app.admin, app.business])] : []),
+  folder('folder-extras', 'Extras', 'folder', [app.ie, app.africaonly, app.pong]),
+  app.recycle,
+];
+const visitorIcons: DesktopIconDef[] = [
+  app.welcome,
+  app.computer,
+  app.calendar,
+  app.producer,
+  folder('folder-cities', 'CITIES', 'internet-folder', [app.blog, app.magazine]),
+  app.shop,
+  folder('folder-create', 'Create', 'programs-folder', [app.rapidraw, app.darkroom, app.notepad]),
+  folder('folder-extras', 'Extras', 'folder', [app.africaonly, app.pong]),
+  app.recycle,
 ];
 
-// Only shown to admins (see useMe)
-// Admins only too; the server additionally requires two-step verification
-const BUSINESS_ICON: DesktopIconDef = {
-  id: 'business',
-  title: 'Business',
-  icon: '/images/icons/my-documents-folder-32x32.png',
-  appType: 'business',
-  width: 860,
-  height: 600,
-};
+// Window settings for a desktop or folder icon (small icon in the title bar)
+const windowFor = (d: DesktopIconDef) => ({
+  id: d.id,
+  title: d.title,
+  appType: d.appType,
+  icon: d.icon.replace('-32x32', '-16x16'),
+  appProps: d.appProps || {},
+  width: d.width || 400,
+  height: d.height || 300,
+});
 
-const ADMIN_ICON: DesktopIconDef = {
-  id: 'admin-panel',
-  title: 'Admin Panel',
-  icon: '/images/icons/settings-32x32.png',
-  appType: 'admin',
-  width: 760,
-  height: 540,
+export const Folder: React.FC<{ items: DesktopIconDef[] }> = ({ items }) => {
+  const { openWindow } = useWindowManager();
+  return (
+    <div className="flex flex-wrap content-start gap-1 p-2 h-full overflow-auto bg-white">
+      {items.map((d) => (
+        <button
+          key={d.id}
+          className="w-[75px] p-1 flex flex-col items-center gap-1 text-center text-xs"
+          onClick={() => openWindow(windowFor(d))}
+        >
+          <img src={d.icon} alt="" className="w-[32px] h-[32px] image-render-pixelated" />
+          {d.title}
+        </button>
+      ))}
+    </div>
+  );
 };
 
 export const Desktop: React.FC = () => {
   const { openWindow, wallpaper, bgColor } = useWindowManager();
   const { me } = useMe();
   const { isLoaded, isSignedIn } = useAuth();
-  // Visitors without an account land on the Welcome window (once per visit)
+  // Visitors without an account land on the landing page, full screen over the desktop (once per visit)
   useEffect(() => {
     if (!isLoaded || isSignedIn) return;
     try {
@@ -167,12 +199,14 @@ export const Desktop: React.FC = () => {
       sessionStorage.setItem('sk_welcomed', '1');
     } catch {}
     openWindow({
-      id: 'welcome',
+      id: 'welcome-page',
       title: 'Welcome to Sanktuary',
       icon: '/images/icons/network-16x16.png',
-      appType: 'welcome',
-      width: 520,
-      height: 560,
+      appType: 'iframe',
+      appProps: { src: '/welcome' },
+      width: 900,
+      height: 640,
+      isMaximized: true,
     });
   }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -314,11 +348,7 @@ export const Desktop: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedIds, vfsIcons]);
 
-  // Logged on: studio apps first, then the front door (+ admin tools), then extras.
-  // Visitors: a simpler desktop (front door + extras, no Internet Explorer); Log On is the key in the taskbar.
-  const allIcons = isSignedIn
-    ? [...STUDIO_ICONS, ...PUBLIC_ICONS, ...(me?.admin ? [ADMIN_ICON, BUSINESS_ICON] : []), ...EXTRA_ICONS, ...vfsIcons]
-    : [...PUBLIC_ICONS, ...EXTRA_ICONS.filter((i) => i.id !== 'ie'), ...vfsIcons];
+  const allIcons = [...(isSignedIn ? memberIcons(!!me?.admin) : visitorIcons), ...vfsIcons];
 
   // Marquee Selection Logic / Clicking background
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -514,15 +544,7 @@ export const Desktop: React.FC = () => {
       }
     }
 
-    openWindow({
-      id: iconDef.id,
-      title: iconDef.title,
-      appType: iconDef.appType,
-      icon: iconDef.icon.replace('-32x32', '-16x16'), // Use small icon for title bar
-      appProps: iconDef.appProps || {},
-      width: iconDef.width || 400,
-      height: iconDef.height || 300,
-    });
+    openWindow(windowFor(iconDef));
   };
 
   // Right click Desktop Menu

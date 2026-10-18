@@ -3,6 +3,18 @@
 // The pure functions take Float32Arrays so they can be tested outside a browser.
 import { sharedAudio } from './sound';
 
+/** The loudest sample in each of `buckets` slices (every 16th sample is enough): a waveform to draw. */
+export function waveformPeaks(data: Float32Array, buckets = 600) {
+  const size = Math.floor(data.length / buckets) || 1;
+  const out: number[] = [];
+  for (let b = 0; b < buckets; b++) {
+    let max = 0;
+    for (let i = b * size; i < (b + 1) * size && i < data.length; i += 16) max = Math.max(max, Math.abs(data[i]));
+    out.push(max);
+  }
+  return out;
+}
+
 /** In-place radix-2 FFT (re/im length must be a power of two). */
 export function fft(re: Float64Array, im: Float64Array) {
   const n = re.length;

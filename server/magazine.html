@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!--meta-->
+    <meta name="theme-color" content="#0b0b0f" />
+    <!-- Start the cover and the flip library together, before the page's script asks for them -->
+    <link rel="preload" as="image" href="/magazine/pages/cover.webp" fetchpriority="high" />
+    <link rel="preload" as="script" href="/magazine/page-flip.js" />
+    <style>
+      /* CITIES, the magazine (sanktuary.studio/magazine): each page is an image in public/magazine/pages, made by ops/magazine-split.py. */
+      :root {
+        --bg: #0b0b0f;
+        --fg: #f3efe8;
+        --dim: #b9b2a6;
+        --accent: #d9a441;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.5 Georgia,
+          'Times New Roman',
+          serif;
+        /* Swipes and long presses turn pages: never select text, flash a tap highlight or open the image menu */
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      /* The magazine takes all the room the header and controls leave */
+      body {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        overflow: hidden;
+        padding: 0 16px;
+      }
+      header {
+        padding: 16px 0 8px;
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font:
+          900 clamp(22px, 5vw, 36px) / 1.1 'Arial Black',
+          Helvetica,
+          sans-serif;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      header p {
+        margin: 4px 0 0;
+        color: var(--dim);
+        font-size: 14px;
+      }
+      #stage {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        place-items: center;
+      }
+      .page {
+        background: #000;
+      }
+      .page img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        user-select: none;
+        pointer-events: none;
+      }
+      /* One page at a time: pages are stacked and each turns on its left edge, like a real page */
+      .single {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 920 / 1400;
+        perspective: 2000px;
+        touch-action: none;
+      }
+      .single .page {
+        position: absolute;
+        inset: 0;
+        transform-origin: left center;
+        backface-visibility: hidden;
+        overflow: hidden;
+      }
+      /* Single pages hide any white edge (their half of a spread's gutter), measured by trim() below */
+      .single .page {
+        clip-path: inset(0);
+      }
+      .single .page img {
+        width: var(--w, 100%);
+        margin-left: var(--ml, 0);
+      }
+      /* Paint the fold white behind an open spread, so the hairline where the two pages meet doesn't show dark */
+      .open .--landscape .stf__block {
+        background: linear-gradient(90deg, #0000 calc(50% - 2px), #fff 0 calc(50% + 2px), #0000 0);
+      }
+      nav {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        align-items: center;
+        padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+      }
+      /* Small retro arrows, no boxes */
+      button {
+        background: none;
+        color: var(--dim);
+        border: 0;
+        padding: 6px 10px;
+        font:
+          13px/1 'Courier New',
+          monospace;
+        cursor: pointer;
+      }
+      button:hover {
+        color: var(--accent);
+      }
+      #count {
+        color: var(--dim);
+        min-width: 7ch;
+        text-align: center;
+      }
+      /* Small screens and fullscreen: just the magazine and a slim control bar */
+      @media (max-width: 600px), (max-height: 600px) {
+        header {
+          display: none;
+        }
+        body {
+          padding: 0;
+        }
+      }
+      :fullscreen header {
+        display: none;
+      }
+      :fullscreen body {
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>CITIES Vol. 1</h1>
+      <p>Swipe, drag a page edge or use the arrows.</p>
+    </header>
+    <div id="stage"><div id="book"></div></div>
+    <nav>
+      <button id="prev" aria-label="Previous page">◄</button>
+      <span id="count"></span>
+      <button id="next" aria-label="Next page">►</button>
+      <button id="full" aria-label="Full screen" hidden>⛶</button>
+    </nav>
+
+    <script src="/magazine/page-flip.js"></script>
+    <script>
+      // Spreads in reading order: each name is a pair of pages, /magazine/pages/<name>-1.webp (left) and -2 (right). Reorder to reorder the issue.
+      const SPREADS = [
+        'adrian',
+        'ant',
+        'ash',
+        'becca',
+        'braayzie',
+        'brandon',
+        'cyn',
+        'deus',
+        'eddie-cole',
+        'faith',
+        'gilly',
+        'halima',
+        'jaylon',
+        'juice',
+        'kidus',
+        'lyric',
+        'manny',
+        'masto',
+        'mimi',
+        'mk',
+        'mo-swavae',
+        'p',
+      ];
+      const P = '/magazine/pages/';
+      const PAGES = [`${P}cover.webp`, ...SPREADS.flatMap((n) => [`${P}${n}-1.webp`, `${P}${n}-2.webp`]), `${P}back.webp`];
+      const RATIO = 920 / 1400;
+
+      const stage = document.getElementById('stage');
+      const holder = document.getElementById('book');
+      const count = document.getElementById('count');
+      let book, srcs, single;
+
+      // A screen taller than it is wide shows one page at a time; otherwise full spreads.
+      const isSingle = () => stage.clientWidth < stage.clientHeight;
+      // Size the book to the largest page or spread that fits the stage.
+      const fit = () => (holder.style.width = Math.min(stage.clientWidth, stage.clientHeight * RATIO * (single ? 1 : 2)) + 'px');
+
+      function build(list, start = 0) {
+        srcs = list;
+        book?.destroy();
+        single = isSingle();
+        fit();
+        const el = document.createElement('div');
+        holder.replaceChildren(el);
+        el.innerHTML = srcs
+          .map((src, i) => {
+            const hard = i === 0 || i === srcs.length - 1 ? ' data-density="hard"' : '';
+            return `<div class="page"${hard}><img data-src="${src}" alt="Page ${i + 1}" decoding="async"></div>`;
+          })
+          .join('');
+        book = single ? turner(el, start) : spread(el, start);
+        // Only pages near the open one download, so a flip never shows a blank page and the rest wait.
+        const imgs = [...el.querySelectorAll('img')];
+        imgs.forEach((img) => (img.onload = () => trim(img)));
+        const show = () => {
+          const i = book.getCurrentPageIndex();
+          count.textContent = `${i + 1} / ${book.getPageCount()}`;
+          el.classList.toggle('open', i > 0 && i < book.getPageCount() - 1);
+          // The open pages first; neighbours wait their turn so they don't slow the pages on screen
+          for (let n = Math.max(0, i - 2); n < Math.min(imgs.length, i + 4); n++) {
+            if (imgs[n].src) continue;
+            imgs[n].fetchPriority = n === i || n === i + 1 ? 'high' : 'low';
+            imgs[n].src = imgs[n].dataset.src;
+          }
+        };
+        book.on('flip', show);
+        show();
+      }
+
+      // Measure white columns on a page's left and right edges (a spread's gutter) so single pages can crop them off.
+      function trim(img) {
+        const c = document.createElement('canvas');
+        const w = (c.width = 200);
+        const h = (c.height = 300);
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(img, 0, 0, w, h);
+        const px = g.getImageData(0, 0, w, h).data;
+        const white = (x) => {
+          let n = 0;
+          // Middle rows only, so a dark mat above and below a page doesn't hide its white edge
+          for (let y = h * 0.2; y < h * 0.8; y++)
+            n += Math.min(px[(y * w + x) * 4], px[(y * w + x) * 4 + 1], px[(y * w + x) * 4 + 2]) > 235;
+          return n > h * 0.58;
+        };
+        let l = 0;
+        let r = 0;
+        while (l < w / 4 && white(l)) l++;
+        while (r < w / 4 && white(w - 1 - r)) r++;
+        l += l && 1; // one more column for the soft edge where white fades into the photo
+        r += r && 1;
+        const keep = 1 - (l + r) / w;
+        img.style.setProperty('--w', 100 / keep + '%');
+        img.style.setProperty('--ml', (-100 * l) / w / keep + '%');
+      }
+
+      // Two-page spreads: the page-flip library.
+      function spread(el, start) {
+        const flip = new St.PageFlip(el, {
+          width: 920,
+          height: 1400,
+          size: 'stretch',
+          // The library picks single pages when the book is narrower than 2 × minWidth; 1 keeps it on spreads
+          minWidth: 1,
+          maxWidth: 1e5,
+          minHeight: 1,
+          maxHeight: 1e5,
+          startPage: start,
+          showCover: true,
+          maxShadowOpacity: 0.5,
+          mobileScrollSupport: false,
+          flippingTime: 600,
+          showPageCorners: false, // no corner peel on hover
+          disableFlipByClick: true, // a click flips only on a page corner
+          swipeDistance: 60,
+        });
+        // A mouse drag only grabs the page from its outer edge, so dragging across the middle does nothing.
+        el.addEventListener(
+          'mousedown',
+          (e) => {
+            const r = el.getBoundingClientRect();
+            const edge = Math.min(e.clientX - r.left, r.right - e.clientX);
+            if (edge > r.width * 0.15) e.stopPropagation();
+          },
+          true,
+        );
+        flip.loadFromHTML(el.querySelectorAll('.page'));
+        el.style.minWidth = el.style.minHeight = ''; // drop the library's min size, the stage decides
+        flip.update();
+        return flip;
+      }
+
+      // One page at a time: each page turns on its left edge and follows your finger.
+      // Same methods as the library's book, so the buttons and keys work on both.
+      function turner(el, start) {
+        el.className = 'single';
+        const pages = [...el.children];
+        const n = pages.length;
+        let i = Math.min(start, n - 1);
+        let onFlip = () => {};
+        const rest = (k) => (k < i ? k : 2 * n - k); // turned pages stack under unturned ones
+        const turn = (p, deg, ms = 0) => {
+          p.style.transition = `transform ${ms}ms ease-out`;
+          p.style.transform = `rotateY(${deg}deg)`;
+        };
+        pages.forEach((p, k) => {
+          p.style.zIndex = rest(k);
+          turn(p, k < i ? -180 : 0);
+        });
+        // Forward turns the open page away; back brings the last turned page over again.
+        const target = (d) => (d > 0 ? (i < n - 1 ? i : -1) : i - 1);
+        const go = (d) => {
+          const k = target(d);
+          if (k < 0) return;
+          pages[k].style.zIndex = 3 * n;
+          turn(pages[k], d > 0 ? -180 : 0, 600);
+          i += d;
+          onFlip();
+          setTimeout(() => (pages[k].style.zIndex = rest(k)), 600);
+        };
+
+        let dx = 0,
+          x0 = null,
+          d = 0,
+          k = -1;
+        el.onpointerdown = (e) => {
+          const r = el.getBoundingClientRect();
+          // With a mouse, grab from the outer edge only (as on spreads); fingers can swipe anywhere.
+          if (e.pointerType === 'mouse' && Math.min(e.clientX - r.left, r.right - e.clientX) > r.width * 0.15) return;
+          e.preventDefault(); // no text selection or native image drag, which would cancel the gesture
+          x0 = e.clientX;
+          d = 0;
+          dx = 0;
+          el.setPointerCapture(e.pointerId);
+        };
+        el.onpointermove = (e) => {
+          if (x0 === null) return;
+          dx = e.clientX - x0;
+          if (!d && Math.abs(dx) > 5) {
+            d = dx < 0 ? 1 : -1;
+            k = target(d);
+            if (k >= 0) pages[k].style.zIndex = 3 * n;
+          }
+          if (!d || k < 0) return;
+          // The page's free edge follows the finger: forward starts from the outer edge, back from the spine.
+          const rel = Math.max(0, Math.min(1, (d > 0 ? 1 : 0) + dx / el.clientWidth));
+          turn(pages[k], (-Math.acos(rel) * 180) / Math.PI);
+        };
+        el.onpointerup = el.onpointercancel = () => {
+          if (x0 === null) return;
+          x0 = null;
+          if (!d || k < 0) return;
+          if (Math.abs(dx) > el.clientWidth * 0.2) return go(d);
+          turn(pages[k], d > 0 ? 0 : -180, 300); // not far enough: settle back
+          const held = k;
+          setTimeout(() => (pages[held].style.zIndex = rest(held)), 300);
+        };
+
+        return {
+          flipNext: () => go(1),
+          flipPrev: () => go(-1),
+          getCurrentPageIndex: () => i,
+          getPageCount: () => n,
+          on: (_, fn) => (onFlip = fn),
+          destroy() {},
+        };
+      }
+
+      // Registered before the book's own resize handler, so the size is set before it re-lays out.
+      addEventListener('resize', () => (isSingle() === single ? fit() : build(srcs, book.getCurrentPageIndex())));
+
+      document.getElementById('prev').onclick = () => book.flipPrev();
+      document.getElementById('next').onclick = () => book.flipNext();
+      addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') book.flipPrev();
+        if (e.key === 'ArrowRight') book.flipNext();
+      });
+
+      // Full screen where the browser allows it (iPhone Safari does not, so the button stays hidden there).
+      const full = document.getElementById('full');
+      full.hidden = !document.fullscreenEnabled;
+      full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
+
+      build(PAGES);
+    </script>
+  </body>
+</html>

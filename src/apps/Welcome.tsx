@@ -46,9 +46,9 @@ const VISITOR_TOUR: Step[] = [
     open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png', 720, 560),
   },
   {
-    title: 'Read the blog',
-    text: 'Essays and notes from the studio, readable right here.',
-    open: win('blog', 'Blog', 'iframe', 'news-16x16.png', 760, 560, { src: '/blog' }),
+    title: 'Read CITIES',
+    text: 'Our journal of the Twin Cities arts scene: profiles and case studies, essays, field notes and videos.',
+    open: win('blog', 'CITIES', 'iframe', 'news-16x16.png', 760, 560, { src: '/cities' }),
   },
   {
     title: 'Shop',
@@ -168,10 +168,10 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
       .then((r) => r.json())
       .then(setF, () => {});
   }, []);
-  const openBlog = (src = '/blog') =>
+  const openBlog = (src = '/cities') =>
     openWindow({
       id: 'blog',
-      title: 'Blog',
+      title: 'CITIES',
       icon: '/images/icons/news-16x16.png',
       appType: 'iframe',
       appProps: { src },
@@ -229,7 +229,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
         )}
 
         {f && f.posts.length > 0 && (
-          <Section title="Latest writing">
+          <Section title="From CITIES">
             {f.posts.map((p) => (
               <div key={p.id} onClick={() => openBlog(p.url)} style={{ cursor: 'pointer', display: 'flex', gap: 8 }}>
                 {p.image && <img src={p.image} alt="" style={{ width: 64, height: 48, objectFit: 'cover', border: '1px solid #808080' }} />}

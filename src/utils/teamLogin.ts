@@ -8,7 +8,7 @@ interface LoginResult {
 }
 
 /**
- * Nickname + access code sign-in against Clerk, used by the boot terminal and team windows.
+ * Nickname + access code sign-in against Clerk, used by the Log On window and team windows.
  * On a new device Clerk may ask for one more step (device trust / two-step): login() then returns
  * needCode with a prompt, and verify(code) finishes the sign-in.
  */
