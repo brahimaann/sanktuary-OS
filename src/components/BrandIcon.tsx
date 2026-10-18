@@ -73,13 +73,7 @@ export interface BrandIconProps {
   style?: React.CSSProperties;
 }
 
-export const BrandIcon: React.FC<BrandIconProps> = ({
-  name,
-  size = 16,
-  color,
-  useBrandColor = false,
-  style,
-}) => {
+export const BrandIcon: React.FC<BrandIconProps> = ({ name, size = 16, color, useBrandColor = false, style }) => {
   const icon = ICONS[name] || ICONS[name.toLowerCase()] || ICONS.website;
   const fillColor = color || (useBrandColor ? icon.color : 'currentColor');
 

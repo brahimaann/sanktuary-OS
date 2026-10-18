@@ -111,8 +111,12 @@ const fail = (status, message) => {
 const own = (db, id) => (db && typeof id === 'string' && Object.hasOwn(db, id) ? db[id] : undefined);
 
 // ── Config & status files ──────────────────────────────────────────────
+// Only a missing file means "start empty": any other read error (a lock from antivirus or OneDrive) must not
+// load an empty store that the next save would write over the real data
 const readJson = async (file, fallback) =>
-  JSON.parse((await readFile(join(DATA, file), 'utf8').catch(() => 'null')).replace(/^﻿/, '')) ?? fallback; // PowerShell may write a BOM
+  JSON.parse(
+    (await readFile(join(DATA, file), 'utf8').catch((e) => (e.code === 'ENOENT' ? 'null' : Promise.reject(e)))).replace(/^﻿/, ''), // PowerShell may write a BOM
+  ) ?? fallback;
 const loadConfig = () => readJson('config.json', { admins: [], drives: {}, spaces: [], members: {}, backup: { drive: null, hour: 3 } });
 async function saveJson(file, value) {
   await writeFile(join(DATA, file + '.tmp'), JSON.stringify(value, null, 2));
@@ -355,6 +359,12 @@ async function files(req, res, url) {
           entries: whole.sources.map((f) => ({ name: f.label, isDir: true, size: 0, modified: now, offline: !f.online })),
         });
       }
+      if (req.method === 'GET' && q.has('find')) {
+        // Search every connected folder of the space, as one newest-first list
+        const found = await Promise.all(whole.sources.filter((f) => f.online).map((f) => findIn(f.root, ...findArgs(q), [f.label])));
+        const entries = found.flatMap((f) => f.entries).sort((a, b) => b.modified.localeCompare(a.modified));
+        return json(res, { entries: entries.slice(0, 300), more: entries.length > 300 || found.some((f) => f.more) });
+      }
       fail(400, 'Open one of the folders in this space first');
     }
     label = parts[0];
@@ -401,6 +411,7 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     }
+    if (q.has('find')) return json(res, await findIn(target, ...findArgs(q)));
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
@@ -631,7 +642,8 @@ function logTransfer(req, user, action, space, path, bytes) {
 
 // A folder as one .zip (e.g. an Ableton project with its Samples), streamed by Windows' own tar so nothing
 // is staged on disk. Stored, not compressed: audio barely shrinks and this keeps it fast.
-const TAR = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+// Windows' tar.exe is bsdtar (libarchive); elsewhere (test CI) the same tool is installed as bsdtar
+const TAR = process.platform === 'win32' ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'bsdtar';
 async function zipFolder(res, dir, name, transfer) {
   if (!(await stat(dir).catch(() => null))?.isDirectory()) fail(404, 'Not a folder');
   const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
@@ -654,6 +666,7 @@ async function zipFolder(res, dir, name, transfer) {
     ...items.map((n) => `./${n}`),
   ]);
   tar.stderr.resume();
+  tar.on('error', (e) => res.destroy(e)); // tar missing: end this download, don't crash the whole server
   res.on('close', () => tar.kill());
   res.writeHead(200, {
     'content-type': 'application/zip',
@@ -3781,6 +3794,7 @@ const loadFront = async () =>
   }));
 const saveFront = () => (frontSaved = frontSaved.then(() => saveJson('front.json', frontDb)).catch(console.error));
 const joinTries = new Map(); // ip -> { n, since }
+const JOIN_STATUSES = ['New', 'Contacted', 'Agreement sent', 'Signed', 'Event done', 'Joined', 'Archived'];
 
 async function latestPosts(n) {
   const blog = await loadBlog();
@@ -4007,6 +4021,9 @@ async function publicApi(req, res, url) {
       role: String(input.role || '').slice(0, 60),
       links: String(input.links || '').slice(0, 300),
       message: String(input.message || '').slice(0, 2000),
+      artwork: String(input.artwork || '').slice(0, 2000),
+      needs: String(input.needs || '').slice(0, 1000),
+      availability: String(input.availability || '').slice(0, 500),
       at: new Date().toISOString(),
       status: 'New',
     };
@@ -4036,6 +4053,8 @@ async function publicApi(req, res, url) {
     return json(res, {
       intro: front.intro,
       portfolio: front.portfolio || {},
+      welcome: front.welcome || { subject: '', body: '' },
+      mail: mailReady(),
       joins: Object.values(front.joins).sort((a, b) => b.at.localeCompare(a.at)),
       bookings: Object.values(front.bookings || {}).sort((a, b) => b.at.localeCompare(a.at)),
     });
@@ -4048,13 +4067,37 @@ async function publicApi(req, res, url) {
         Object.entries(limits).map(([k, max]) => [k, String(input.portfolio[k] ?? front.portfolio?.[k] ?? '').slice(0, max)]),
       );
     }
-    if (input.join && own(front.joins, input.join.id) && ['New', 'Contacted', 'Joined', 'Archived'].includes(input.join.status))
-      front.joins[input.join.id].status = input.join.status;
+    if (input.welcome && typeof input.welcome === 'object')
+      front.welcome = { subject: String(input.welcome.subject ?? '').slice(0, 150), body: String(input.welcome.body ?? '').slice(0, 6000) };
+    // Artist onboarding: hello -> agreement -> signed (the welcome email goes out once) -> event day
+    const j = input.join && own(front.joins, input.join.id) && front.joins[input.join.id];
+    if (j && input.join.event !== undefined) j.event = String(input.join.event).slice(0, 200);
+    if (j && input.join.eventDate !== undefined) j.eventDate = /^\d{4}-\d{2}-\d{2}$/.test(input.join.eventDate) ? input.join.eventDate : '';
+    if (j && JOIN_STATUSES.includes(input.join.status)) j.status = input.join.status;
+    let welcome = null;
+    if (j && j.status === 'Signed' && !j.welcomed && front.welcome?.body?.trim()) {
+      const fill = (t) =>
+        t
+          .replace(/\{event\}/g, j.event || 'the event')
+          .replace(/\{date\}/g, j.eventDate || 'the date we agreed')
+          .replace(/\{name\}/g, j.name.split(' ')[0]);
+      j.welcomed = new Date().toISOString(); // before the send, so a double click never mails twice
+      welcome = mailReady()
+        ? await sendMail(
+            { email: j.email, name: j.name.split(' ')[0] },
+            fill(front.welcome.subject || 'Welcome to Sanktuary'),
+            fill(front.welcome.body),
+            siteOrigin(req),
+          )
+            .then(() => 'sent')
+            .catch((e) => (delete j.welcomed, e.message))
+        : (delete j.welcomed, 'Email isn’t set up on the server yet (RESEND_API_KEY / MAIL_FROM)');
+    }
     const booking = input.booking && own(front.bookings, input.booking.id);
     if (booking && ['New', 'Contacted', 'Confirmed', 'Declined', 'Archived'].includes(input.booking.status))
       booking.status = input.booking.status;
     saveFront();
-    return json(res, { ok: true });
+    return json(res, { ok: true, welcome });
   }
   fail(404, 'Not found');
 }
@@ -4659,7 +4702,7 @@ async function rawApi(req, res, url) {
       )
       .sort((a, b) => b[0].length - a[0].length || used.has(b[2]) - used.has(a[2]));
   const toSk = (v) => {
-    if (typeof v === 'string' && /^[a-z]:[\\/]/i.test(v)) {
+    if (typeof v === 'string' && (process.platform === 'win32' ? /^[a-z]:[\\/]/i : /^\//).test(v)) {
       const l = v.toLowerCase();
       // whole folders only: D:\team must not claim D:\teamx
       const hit = roots().find(([r]) => l.startsWith(r) && (l.length === r.length || /[\\/]$/.test(r) || /[\\/]/.test(l[r.length])));
@@ -5478,6 +5521,53 @@ async function listDir(dir, includeHidden = false) {
   );
 }
 
+/**
+ * ?find: everything below dir whose name holds every word of `words` (files only, ending in one of `exts`, when
+ * exts are given), newest first. Feeds the Team Files search box and its Recent / Photos / Audio / Video views.
+ * Each hit carries `dir`, its folder relative to dir. Looks at 50,000 items at most and returns the newest 300.
+ */
+async function findIn(dir, words, exts, prefix = []) {
+  const hits = [];
+  const queue = [[]];
+  let seen = 0;
+  while (queue.length && seen < 50_000) {
+    const at = queue.shift();
+    for (const e of await readdir(join(dir, ...at), { withFileTypes: true }).catch(() => [])) {
+      if (HIDDEN.test(e.name)) continue;
+      seen++;
+      const isDir = e.isDirectory();
+      if (isDir) queue.push([...at, e.name]);
+      const name = e.name.toLowerCase();
+      if ((exts.length || !words.length) && (isDir || (exts.length && !exts.includes(extname(name).slice(1))))) continue;
+      if (words.every((w) => name.includes(w))) hits.push({ at, name: e.name, isDir });
+    }
+  }
+  const entries = [];
+  for (let i = 0; i < hits.length; i += 64) {
+    const batch = hits.slice(i, i + 64);
+    const stats = await Promise.all(batch.map((h) => stat(join(dir, ...h.at, h.name)).catch(() => null)));
+    batch.forEach((h, j) => {
+      if (stats[j])
+        entries.push({
+          name: h.name,
+          dir: [...prefix, ...h.at],
+          isDir: h.isDir,
+          size: stats[j].size,
+          modified: stats[j].mtime.toISOString(),
+        });
+    });
+  }
+  entries.sort((a, b) => b.modified.localeCompare(a.modified));
+  return { entries: entries.slice(0, 300), more: entries.length > 300 || queue.length > 0 };
+}
+const findArgs = (q) => [
+  String(q.get('find')).toLowerCase().split(/\s+/).filter(Boolean),
+  String(q.get('ext') || '')
+    .toLowerCase()
+    .split(',')
+    .filter(Boolean),
+];
+
 /** Moves the current file into .sk-versions/<path>/<timestamp><ext> so a replace never loses work. */
 async function keepVersion(root, file) {
   if (!existsSync(file)) return;
@@ -5935,7 +6025,8 @@ async function aiPreview(file) {
   const task = getDocument({
     data: new Uint8Array(await readFile(file)),
     isEvalSupported: false,
-    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))),
+    // pdf.js wants a trailing "/", and fileURLToPath ends a Windows path in a backslash: forward slashes work on both
+    standardFontDataUrl: fileURLToPath(new URL('standard_fonts/', import.meta.resolve('pdfjs-dist/package.json'))).replaceAll('\\', '/'),
   });
   try {
     const doc = await task.promise;
@@ -7317,13 +7408,17 @@ function mailPage(res, title, body) {
 /** One email through Resend: plain text plus a simple HTML copy, with the unsubscribe link and the postal address. */
 async function sendMail(sub, subject, text, origin) {
   const settings = (await loadMail()).settings;
-  const unsub = `${origin}/api/mail/unsubscribe?id=${sub.id}&sig=${unsubSig(sub.id)}`;
+  // No subscriber id = a one-to-one email (an artist's welcome), not list mail: no unsubscribe footer
+  const unsub = sub.id && `${origin}/api/mail/unsubscribe?id=${sub.id}&sig=${unsubSig(sub.id)}`;
   const body = String(text).replace(/\{name\}/g, sub.name || 'there');
-  const foot = `\n\n—\nYou get this because you signed up at ${origin}.\nUnsubscribe: ${unsub}\n${settings.address}`;
+  const foot = unsub ? `\n\n—\nYou get this because you signed up at ${origin}.\nUnsubscribe: ${unsub}\n${settings.address}` : '';
   const html =
     `<div style="font:15px/1.55 Arial,sans-serif;color:#111;max-width:560px">${mailEsc(body).replace(/\n/g, '<br>')}` +
-    `<p style="color:#777;font-size:12px;margin-top:28px">You get this because you signed up at ${mailEsc(origin)}.<br>` +
-    `<a href="${mailEsc(unsub)}">Unsubscribe</a> · ${mailEsc(settings.address)}</p></div>`;
+    (unsub
+      ? `<p style="color:#777;font-size:12px;margin-top:28px">You get this because you signed up at ${mailEsc(origin)}.<br>` +
+        `<a href="${mailEsc(unsub)}">Unsubscribe</a> · ${mailEsc(settings.address)}</p>`
+      : '') +
+    `</div>`;
   const r = await fetch(`${RESEND}/emails`, {
     method: 'POST',
     headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
@@ -7335,7 +7430,7 @@ async function sendMail(sub, subject, text, origin) {
         .slice(0, 150),
       text: body + foot,
       html,
-      headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+      headers: unsub ? { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {},
     }),
   });
   if (!r.ok) throw new Error(`Resend refused the email (${r.status})`);

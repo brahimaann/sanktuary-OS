@@ -7,8 +7,8 @@ interface RadioTrack {
 }
 
 const RADIO_TRACKS: RadioTrack[] = [
-  { title: 'Yellow Diamonds (Demo)', artist: 'mrnd', url: '/audio/yellow_diamonds_demo.wav' },
-  { title: 'Trophies', artist: 'Drake', url: '/audio/drake_trophies.wav' },
+  { title: 'Yellow Diamonds (Demo)', artist: 'mrnd', url: '/audio/yellow_diamonds_demo.mp3' },
+  { title: 'Trophies', artist: 'Drake', url: '/audio/drake_trophies.mp3' },
   { title: 'Windows 98 Sound (Lofi Ambient)', artist: 'retro', url: '/audio/The Microsoft Sound.wav' },
   { title: 'Classic Tada (Retro Synth)', artist: 'Windows 98', url: '/audio/TADA.WAV' },
   { title: 'Chord Chill', artist: 'Windows 98', url: '/audio/CHORD.WAV' },

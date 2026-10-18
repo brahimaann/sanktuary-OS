@@ -230,10 +230,10 @@ const call = async (u, path, method = 'GET', body, raw = false) => {
   const r = await fetch(B + path, { method, headers: u ? { cookie: cookie(u) } : {}, body: raw ? body : body && JSON.stringify(body) });
   return { status: r.status, headers: r.headers, text: await r.text() };
 };
-let pass = 0,
-  failN = 0;
+let pass = 0;
+const failed = [];
 const check = (name, ok, extra = '') => {
-  ok ? pass++ : failN++;
+  ok ? pass++ : failed.push(name);
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  (' + extra + ')' : ''}`);
 };
 const up = (u, space, path, data, extra = '') =>
@@ -463,6 +463,34 @@ try {
   );
   check("group members get the group's rights", top.rights === 'upload');
   check('others do not see the space', (await call('bob', '/api/files/vids/?list')).status === 404);
+
+  // Search and the Recent / Photos / Audio views: every subfolder, hidden folders skipped, newest first
+  const find = async (u, path) => JSON.parse((await call(u, path)).text).entries;
+  const songs = await find('carol', '/api/files/view/?find=SONG');
+  check(
+    'search finds files in subfolders',
+    songs.some((e) => e.name === 'song.txt' && e.dir.join('/') === 'docs'),
+    JSON.stringify(songs),
+  );
+  const pngs = await find('carol', '/api/files/view/?find=&ext=png');
+  check(
+    'a type view only lists that type',
+    pngs.length > 0 && pngs.every((e) => !e.isDir && e.name.endsWith('.png')),
+    JSON.stringify(pngs),
+  );
+  const recent = await find('carol', '/api/files/view/?find=');
+  check(
+    'recent lists files newest first, never hidden ones',
+    recent.length > 0 &&
+      recent.every((e, i) => !e.isDir && (!i || recent[i - 1].modified >= e.modified) && !e.dir.some((d) => d.startsWith('.'))),
+    JSON.stringify(recent),
+  );
+  const combinedHits = await find('carol', '/api/files/vids/?find=song');
+  check(
+    'search covers every folder of a combined space',
+    combinedHits.some((e) => e.dir.join('/') === 'Docs' && e.name === 'song.txt'),
+  );
+  check('search needs access', (await call('bob', '/api/files/vids/?find=song')).status === 404);
   check('files open through their folder', (await call('carol', '/api/files/vids/Docs/song.txt')).status === 200);
   check(
     'uploads land in the right folder on disk',
@@ -1924,6 +1952,41 @@ try {
     joins.some((j) => j.name === 'Amara' && j.status === 'New'),
   );
   check('bots filling the hidden field are dropped', !joins.some((j) => j.name === 'Bot'));
+
+  // Artist onboarding: intake fields, event + date, and one automatic welcome email when moved to Signed
+  await fetch(B + '/api/public/join', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'Kofi Art',
+      email: 'kofi@example.com',
+      artwork: '3 paintings, 90x120',
+      needs: 'wall',
+      availability: 'Fridays',
+    }),
+  });
+  const kofi = JSON.parse((await call('alice', '/api/public/admin')).text).joins.find((j) => j.name === 'Kofi Art');
+  check(
+    'intake keeps artwork, needs and availability',
+    kofi?.artwork === '3 paintings, 90x120' && kofi.needs === 'wall' && kofi.availability === 'Fridays',
+  );
+  await call('alice', '/api/public/admin', 'PATCH', {
+    welcome: { subject: 'Welcome to {event}', body: 'Hi {name}, see you {date}. Load-in 5pm.' },
+  });
+  await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, event: 'Spring Show', eventDate: '2027-04-10' } });
+  const mailsBefore = mails.length;
+  const signed = JSON.parse((await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, status: 'Signed' } })).text);
+  const wm = mails[mailsBefore];
+  check(
+    'moving an artist to Signed sends the filled-in welcome email, without list unsubscribe',
+    signed.welcome === 'sent' &&
+      wm?.to[0] === 'kofi@example.com' &&
+      wm.subject === 'Welcome to Spring Show' &&
+      wm.text === 'Hi Kofi, see you 2027-04-10. Load-in 5pm.' &&
+      !wm.headers['List-Unsubscribe'],
+  );
+  await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, status: 'Agreement sent' } });
+  await call('alice', '/api/public/admin', 'PATCH', { join: { id: kofi.id, status: 'Signed' } });
+  check('the welcome email goes out only once', mails.length === mailsBefore + 1);
   check(
     'admins are notified of join requests',
     JSON.parse((await call('alice', '/api/projects?notifications')).text).some((n) => /Amara wants to join/.test(n.text)),
@@ -2851,6 +2914,9 @@ ${thisYear}-03;Comma Song;0,456`,
   fakeGoogle.close();
   fakeResend.close();
   const errors = srvOut.split('\n').filter((l) => l && !l.includes('sanktuary-os on'));
-  console.log(`\n${pass} passed, ${failN} failed${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`);
+  console.log(
+    `\n${pass} passed, ${failed.length} failed${failed.length ? ': ' + failed.join('; ') : ''}${errors.length ? '\nserver log:\n' + errors.join('\n') : ''}`,
+  );
+  if (failed.length) process.exitCode = 1; // a failed check fails npm test, so auto-deploy keeps the current site
   rmSync(dir, { recursive: true, force: true });
 }
