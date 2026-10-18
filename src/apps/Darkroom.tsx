@@ -62,7 +62,16 @@ export const PRESETS: FilterPreset[] = [
 
 // ── Collage Presets & Types ──
 export type CollageGridPreset =
-  'single' | 'split-v' | 'split-h' | '3-col' | '3-row' | '2x2' | 'banner-top' | 'banner-bottom' | 'hero-left' | 'hero-right';
+  | 'single'
+  | 'split-v'
+  | 'split-h'
+  | '3-col'
+  | '3-row'
+  | '2x2'
+  | 'banner-top'
+  | 'banner-bottom'
+  | 'hero-left'
+  | 'hero-right';
 
 export type AspectRatioPreset = 'photo' | '1:1' | '4:3' | '16:9' | '3:4' | '9:16';
 type Fit = 'crop' | 'fit' | 'stretch' | 'none'; // none: no photos, just the background and text
