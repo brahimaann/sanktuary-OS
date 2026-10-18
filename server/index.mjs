@@ -6410,7 +6410,16 @@ async function admin(req, res, url) {
   const action = url.pathname.split('/')[3];
 
   if (req.method === 'GET' && action === 'state') {
-    const r = await clerk('/users?limit=100&order_by=-created_at');
+    const [r, inv] = await Promise.all([
+      clerk('/users?limit=100&order_by=-created_at'),
+      clerk('/invitations?status=pending&limit=100').catch(() => null),
+    ]);
+    const invList = inv?.ok ? await inv.json() : [];
+    const invitations = (Array.isArray(invList) ? invList : invList.data || []).map((i) => ({
+      id: i.id,
+      email: i.email_address,
+      created: i.created_at,
+    }));
     const users = r.ok
       ? (await r.json()).map((u) => ({
           id: u.id,
@@ -6421,7 +6430,13 @@ async function admin(req, res, url) {
           created: u.created_at,
         }))
       : [];
-    return json(res, { config: cfg, status: await readJson('status.json', null), backup: await readJson('backup.json', null), users });
+    return json(res, {
+      config: cfg,
+      status: await readJson('status.json', null),
+      backup: await readJson('backup.json', null),
+      users,
+      invitations,
+    });
   }
   if (req.method === 'GET' && action === 'health') return json(res, await health());
   if (req.method === 'GET' && action === 'usage') return json(res, await usageReport());
@@ -6463,6 +6478,25 @@ async function admin(req, res, url) {
     const out = await r.json();
     if (!r.ok) fail(400, out.errors?.[0]?.long_message || out.errors?.[0]?.message || 'Clerk refused');
     return json(res, { ok: true, id: out.id });
+  }
+  // Invitations: Clerk emails a sign-up link (works while sign-up is Restricted). With no redirect_url the link opens
+  // Clerk's hosted sign-up page, where they pick their nickname and access code.
+  if (req.method === 'POST' && action === 'invitations') {
+    const { email } = await jsonBody(req);
+    const r = await clerk('/invitations', {
+      method: 'POST',
+      body: JSON.stringify({ email_address: String(email || '').trim(), notify: true }),
+    });
+    const out = await r.json();
+    if (!r.ok) fail(400, out.errors?.[0]?.long_message || out.errors?.[0]?.message || 'Clerk refused');
+    return json(res, { ok: true, id: out.id });
+  }
+  if (req.method === 'DELETE' && action === 'invitations') {
+    const id = url.pathname.split('/')[4] || '';
+    if (!/^inv_\w+$/.test(id)) fail(400, 'Bad invitation');
+    const r = await clerk(`/invitations/${id}/revoke`, { method: 'POST' });
+    if (!r.ok) fail(400, 'Clerk refused');
+    return json(res, { ok: true });
   }
   if (req.method === 'POST' && action === 'backup') {
     await writeFile(join(DATA, 'backup-now'), '');
