@@ -4,6 +4,7 @@ import { useWindowManager } from '../wm/manager';
 import { useBoard } from '../utils/useBoard';
 import { useIncoming } from '../utils/incoming';
 import { DRAG_FILE } from '../utils/refs';
+import { imageFromDrop } from '../utils/webImage';
 import { dialog } from '../utils/dialog';
 import { fileIcon, fileKind, lightAudio, needsConversion } from './fileTypes';
 import { LogOn, fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
@@ -327,6 +328,22 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
     add({ type: 'link', ...at, w: 260, h: 64, url: clean, text: new URL(clean).hostname });
   };
 
+  // Pictures from other sites are copied onto the board when the site lets us read them (data: always does);
+  // otherwise the board shows the picture from where it lives.
+  const addWebImage = async (src: string, at = center()) => {
+    try {
+      const blob = await (await fetch(src)).blob();
+      if (!blob.type.startsWith('image/')) throw new Error();
+      return addFiles(
+        [new File([blob], `web image.${blob.type.slice(6).replace('jpeg', 'jpg').replace(/\W.*/, '')}`, { type: blob.type })],
+        at,
+      );
+    } catch {
+      const size = await imageSize(src);
+      add({ type: 'image', x: at.x - size.w / 2, y: at.y - size.h / 2, ...size, src, name: new URL(src).hostname || 'web image' });
+    }
+  };
+
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDropping(null);
@@ -338,7 +355,9 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
     }
     if (e.dataTransfer.files.length) return addFiles([...e.dataTransfer.files], at);
     const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-    if (/^https?:\/\//i.test(text)) addLink(text.split('\n')[0], at);
+    const picture = imageFromDrop(e.dataTransfer.getData('text/html'), text.split('\n')[0]);
+    if (picture) addWebImage(picture, at);
+    else if (/^https?:\/\//i.test(text)) addLink(text.split('\n')[0], at);
   };
 
   // Paste images, links or text while the board has focus
