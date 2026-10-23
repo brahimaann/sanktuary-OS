@@ -641,6 +641,7 @@ const Nodes: React.FC = () => {
   const zoomBy = useRef<(factor: number) => void>(() => {});
   const pick = useRef<(spot: number) => void>(() => {});
   const [spot, setSpot] = useState(-1);
+  const [credits, setCredits] = useState(false);
   const [away, setAway] = useState<string[]>([]);
   const [status, setStatus] = useState<'ready' | 'loading' | 'lost' | 'no-webgl'>('ready');
 
@@ -1084,7 +1085,7 @@ const Nodes: React.FC = () => {
           ctx.fillText(c.short, x + (c.lng < -90 ? -10 : 10), y + 4);
         });
       } else {
-        // The projector: a lens below the pad throwing light up into the city, brightest at its source
+        // The projector: a light below the screen throwing a beam up into the city, brightest at its source
         // and fading as it spreads, with a few rays flickering through it
         const rim = Array.from({ length: 48 }, (_, i) => {
           const ang = (i / 48) * Math.PI * 2;
@@ -1093,7 +1094,8 @@ const Nodes: React.FC = () => {
         const left = rim.reduce((a, b) => (b[0] < a[0] ? b : a));
         const right = rim.reduce((a, b) => (b[0] > a[0] ? b : a));
         const low = Math.max(...rim.map((p) => p[1]));
-        const [ex, ey] = [(left[0] + right[0]) / 2, Math.min(H - 16, low + Math.max(40, (H - low) * 0.7))];
+        // The source sits just below the bottom edge, so only its glow shows
+        const [ex, ey] = [(left[0] + right[0]) / 2, H + 50];
         const glow = Math.min(1, grow * 2) * flicker;
         const reach = Math.hypot(ex - left[0], ey - (left[1] + right[1]) / 2) * 1.1;
         ctx.globalCompositeOperation = 'lighter';
@@ -1140,7 +1142,7 @@ const Nodes: React.FC = () => {
           ctx.lineTo(x, y);
           ctx.stroke();
         }
-        // The lens itself
+        // The glow of the source, coming up over the bottom edge
         const pulse = 1 + 0.06 * Math.sin(now / 240);
         const halo = ctx.createRadialGradient(ex, ey, 0, ex, ey, 46 * pulse);
         halo.addColorStop(0, 'rgba(235,252,255,0.9)');
@@ -1151,17 +1153,6 @@ const Nodes: React.FC = () => {
         ctx.beginPath();
         ctx.arc(ex, ey, 46 * pulse, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#8fe6ff';
-        for (const [rx, a] of [
-          [20, 0.7],
-          [34, 0.3],
-        ]) {
-          ctx.globalAlpha = a * glow;
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.ellipse(ex, ey + 2, rx * pulse, rx * 0.26 * pulse, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        }
         // The picked spot, or the one the camera is drifting past: a light column and a ring pulsing out from it
         const s = scene?.spots[sel] ?? tour;
         if (s) {
@@ -1355,6 +1346,9 @@ const Nodes: React.FC = () => {
               ◎
             </button>
           )}
+          <button className={btn} onClick={() => setCredits((c) => !c)} aria-label="Map credits">
+            ©
+          </button>
           <button className={btn} onClick={() => zoomBy.current(0.8)} aria-label="Zoom in">
             +
           </button>
@@ -1376,9 +1370,10 @@ const Nodes: React.FC = () => {
           {a}
         </button>
       ))}
-      {view.mode === 'city' && (
-        <div className="absolute bottom-1 left-2 right-2 text-[10px] opacity-40 pointer-events-none">
-          Buildings © OpenStreetMap contributors, Overture Maps Foundation (ODbL), Google Open Buildings (CC BY 4.0)
+      {credits && (
+        <div className="absolute top-12 right-3 max-w-[260px] border border-[#5fd8ff]/50 bg-[#020a12]/90 px-2 py-1 text-[11px] opacity-90">
+          Map data © OpenStreetMap contributors, Overture Maps Foundation (ODbL), Google Open Buildings (CC BY 4.0). Coastlines: Natural
+          Earth.
         </div>
       )}
     </div>
