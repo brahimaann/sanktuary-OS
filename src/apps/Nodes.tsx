@@ -3,97 +3,25 @@ import React, { useEffect, useRef, useState } from 'react';
 import land from './landOutline.json';
 
 /**
- * Sanktuary's nodes: a spinning wireframe globe with every city on it, and a hologram of each city's skyline.
- * Plain canvas with a hand-rolled projection; the skylines are generated around a few real landmarks per city.
+ * Sanktuary's nodes: a spinning wireframe globe with every city on it, and a hologram of each city built from
+ * its real buildings (public/nodes/*.bin, made by ops/nodes/build_cities.py from Overture Maps).
+ * Drawn with WebGL2: glowing instanced lines over dark see-through building shells, bloom, then an old-screen pass.
  */
 
 type V3 = [number, number, number];
-type Shape = (g: Geo) => void;
+/** Name, a line about it, latitude, longitude */
+type Spot = [name: string, note: string, lat: number, lng: number];
 interface City {
   name: string;
   short: string;
   lat: number;
   lng: number;
   tz: string;
-  /** Street grid angle in radians, and how tall and wide the downtown is */
-  grid: number;
-  peak: number;
-  spread: number;
-  /** Extra downtowns: [x, z, peak, spread] */
-  more?: [number, number, number, number][];
-  /** Rivers and shorelines: polyline in ground coordinates, and its width (0 = shoreline) */
-  water?: { pts: [number, number][]; width: number; side?: 1 | -1 }[];
-  landmarks: Shape[];
-  /** Ten places that matter to the crew: name, a line about it, ground position */
+  /** Ten places that matter to the crew */
   spots: Spot[];
-  /** Labels for the modelled landmarks: name and where the label sits */
-  marks: [name: string, x: number, y: number, z: number][];
+  /** Landmarks to label: name, latitude, longitude */
+  marks: [name: string, lat: number, lng: number][];
 }
-type Spot = [name: string, note: string, x: number, z: number];
-
-// Edge kinds, drawn in this order
-const GROUND = 0,
-  WATER = 1,
-  BUILDING = 2,
-  LANDMARK = 3,
-  SPOT = 4;
-const KINDS = 5;
-
-class Geo {
-  v: number[] = [];
-  e: number[] = [];
-  pt(p: V3) {
-    this.v.push(...p);
-    return this.v.length / 3 - 1;
-  }
-  line(pts: V3[], kind: number, closed = false) {
-    const ids = pts.map((p) => this.pt(p));
-    for (let i = 0; i < ids.length - (closed ? 0 : 1); i++) this.e.push(ids[i], ids[(i + 1) % ids.length], kind);
-  }
-  /** A footprint extruded from y0 to y1, its top scaled toward the centre; rings adds floor lines */
-  prism(base: [number, number][], x: number, z: number, y0: number, y1: number, top = 1, kind = BUILDING, rings = 0) {
-    const at = (y: number, s: number) => base.map(([bx, bz]) => [x + bx * s, y, z + bz * s] as V3);
-    const lo = at(y0, 1).map((p) => this.pt(p));
-    const hi = at(y1, top).map((p) => this.pt(p));
-    const n = base.length;
-    for (let i = 0; i < n; i++) this.e.push(lo[i], lo[(i + 1) % n], kind, hi[i], hi[(i + 1) % n], kind, lo[i], hi[i], kind);
-    for (let r = 1; r <= rings; r++) {
-      const t = r / (rings + 1);
-      this.line(at(y0 + (y1 - y0) * t, 1 + (top - 1) * t), kind, true);
-    }
-  }
-}
-
-const ngon = (n: number, r: number, rot = 0): [number, number][] =>
-  Array.from({ length: n }, (_, i) => {
-    const a = rot + (i / n) * Math.PI * 2;
-    return [Math.cos(a) * r, Math.sin(a) * r];
-  });
-const rect = (w: number, d: number, rot = 0): [number, number][] =>
-  (
-    [
-      [-w / 2, -d / 2],
-      [w / 2, -d / 2],
-      [w / 2, d / 2],
-      [-w / 2, d / 2],
-    ] as [number, number][]
-  ).map(([x, z]) => [x * Math.cos(rot) - z * Math.sin(rot), x * Math.sin(rot) + z * Math.cos(rot)]);
-/** A circle standing up, facing along z (a Ferris wheel, a sphere's rings) */
-const hoop = (x: number, y: number, z: number, r: number, turn = 0, n = 20): V3[] =>
-  Array.from({ length: n }, (_, i) => {
-    const a = (i / n) * Math.PI * 2;
-    return [x + Math.cos(a) * r * Math.cos(turn), y + Math.sin(a) * r, z + Math.cos(a) * r * Math.sin(turn)];
-  });
-const spire =
-  (x: number, z: number, y0: number, y1: number): Shape =>
-  (g) =>
-    g.line(
-      [
-        [x, y0, z],
-        [x, y1, z],
-      ],
-      LANDMARK,
-    );
 
 const CITIES: City[] = [
   {
@@ -102,63 +30,23 @@ const CITIES: City[] = [
     lat: 44.9778,
     lng: -93.265,
     tz: 'America/Chicago',
-    grid: Math.PI / 4,
-    peak: 55,
-    spread: 34,
-    more: [[60, 28, 32, 20]],
-    water: [
-      {
-        pts: [
-          [-10, -110],
-          [5, -60],
-          [18, -25],
-          [22, 5],
-          [35, 45],
-          [70, 60],
-          [105, 52],
-        ],
-        width: 7,
-      },
-    ],
     spots: [
-      ['First Avenue', "Prince's club: the Purple Rain stage, Rhymesayers shows, stars on the wall", -36, 14],
-      ['Cedar-Riverside', 'The heart of Somali Minneapolis and The Cedar, the global roots venue', 36, -4],
-      ['Walker Art Center', 'Contemporary art and the Spoonbridge and Cherry in the sculpture garden', -66, 24],
-      ['North Loop', 'Old brick warehouses full of streetwear shops, studios and galleries', -40, -40],
-      ['Midtown Global Market', 'The old Sears building on Lake Street, now East African, Latino and Native makers', -24, 66],
-      ['Mia and MCAD', 'The art museum next door to the art and design college', -46, 86],
-      ['George Floyd Square', 'The memorial at 38th and Chicago, murals and community art', 4, 100],
-      ['Penumbra Theatre', "St. Paul's Black theater since 1976, where August Wilson got his start, in historic Rondo", 34, 62],
-      ['Lowertown', "St. Paul's warehouse lofts, the Art Crawl and Union Depot", 76, 14],
-      ['Paisley Park', "Prince's studio and home, out in Chanhassen", -100, 58],
+      ['First Avenue', "Prince's club: the Purple Rain stage, Rhymesayers shows, stars on the wall", 44.9785, -93.276],
+      ['Cedar-Riverside', 'The heart of Somali Minneapolis and The Cedar, the global roots venue', 44.969, -93.2475],
+      ['Walker Art Center', 'Contemporary art and the Spoonbridge and Cherry in the sculpture garden', 44.9682, -93.2886],
+      ['North Loop', 'Old brick warehouses full of streetwear shops, studios and galleries', 44.987, -93.277],
+      ['Midtown Global Market', 'The old Sears building on Lake Street, now East African, Latino and Native makers', 44.9485, -93.2605],
+      ['Mia and MCAD', 'The art museum next door to the art and design college', 44.9586, -93.2738],
+      ['George Floyd Square', 'The memorial at 38th and Chicago, murals and community art', 44.9343, -93.262],
+      ['Penumbra Theatre', "St. Paul's Black theater since 1976, where August Wilson got his start, in historic Rondo", 44.9497, -93.1269],
+      ['Lowertown', "St. Paul's warehouse lofts, the Art Crawl and Union Depot", 44.95, -93.086],
+      ['Paisley Park', "Prince's studio and home, out in Chanhassen", 44.8617, -93.5592],
     ],
     marks: [
-      ['IDS CENTER', -18, 84, 0],
-      ['STONE ARCH', 18, 8, -26],
-      ['CATHEDRAL', 52, 32, 44],
-    ],
-    landmarks: [
-      // IDS Center, the tallest in Minneapolis, with its notched corners
-      (g) => {
-        g.prism(ngon(8, 7, Math.PI / 8), -18, 0, 0, 80, 1, LANDMARK, 7);
-      },
-      // Cathedral of Saint Paul: a drum and a dome
-      (g) => {
-        g.prism(ngon(12, 7), 52, 44, 0, 14, 1, LANDMARK);
-        g.prism(ngon(12, 7), 52, 44, 14, 24, 0.55, LANDMARK);
-        g.prism(ngon(12, 3.8), 52, 44, 24, 28, 0.3, LANDMARK);
-      },
-      // Stone Arch Bridge over the Mississippi
-      (g) => {
-        for (const side of [-2, 2])
-          g.line(
-            Array.from(
-              { length: 25 },
-              (_, i) => [8 + i * 0.9 + side * 0.4, 2 + Math.abs(Math.sin((i / 24) * 4 * Math.PI)) * 2.5, -32 + i * 0.5 + side] as V3,
-            ),
-            LANDMARK,
-          );
-      },
+      ['IDS CENTER', 44.9759, -93.2723],
+      ['CAPELLA TOWER', 44.9761, -93.2694],
+      ['STONE ARCH BRIDGE', 44.9808, -93.253],
+      ['U.S. BANK STADIUM', 44.9737, -93.2575],
     ],
   },
   {
@@ -167,55 +55,23 @@ const CITIES: City[] = [
     lat: 47.6062,
     lng: -122.3321,
     tz: 'America/Los_Angeles',
-    grid: -0.55,
-    peak: 70,
-    spread: 30,
-    water: [
-      {
-        pts: [
-          [-40, -120],
-          [-52, -60],
-          [-38, -10],
-          [-30, 30],
-          [-50, 80],
-          [-60, 120],
-        ],
-        width: 0,
-        side: 1,
-      },
-    ],
     spots: [
-      ['The Crocodile', 'The Belltown club where grunge broke out', -24, -38],
-      ['Central District', "Black Seattle's historic heart: Quincy Jones and Hendrix grew up here; Wa Na Wari gallery", 50, 26],
-      ['International District', 'Chinatown, Japantown and Little Saigon, and the Wing Luke Museum', 18, 58],
-      ['KEXP', 'The listener-powered radio station, with a live room at Seattle Center', -24, -70],
-      ['Capitol Hill', 'Pike/Pine nightlife: Neumos, Chop Suey and the record shops', 38, -28],
-      ['Pike Place Market', 'The public market over the bay since 1907: artisans, printmakers, buskers', -28, -12],
-      ['MoPOP', 'The Museum of Pop Culture: Hendrix, Northwest hip-hop, Afrofuturism', -4, -78],
-      ['Pioneer Square', "The city's oldest blocks and the First Thursday gallery walk", -12, 42],
-      ['Olympic Sculpture Park', "The Seattle Art Museum's park stepping down to the bay", -48, -52],
-      ['Columbia City', 'Little Ethiopia along Rainier Ave and the old Columbia City Theater', 64, 92],
+      ['The Crocodile', 'The Belltown club where grunge broke out', 47.6145, -122.348],
+      ['Central District', "Black Seattle's historic heart: Quincy Jones and Hendrix grew up here; Wa Na Wari gallery", 47.6098, -122.3013],
+      ['International District', 'Chinatown, Japantown and Little Saigon, and the Wing Luke Museum', 47.5982, -122.3233],
+      ['KEXP', 'The listener-powered radio station, with a live room at Seattle Center', 47.6216, -122.354],
+      ['Capitol Hill', 'Pike/Pine nightlife: Neumos, Chop Suey and the record shops', 47.6141, -122.3196],
+      ['Pike Place Market', 'The public market over the bay since 1907: artisans, printmakers, buskers', 47.6097, -122.3422],
+      ['MoPOP', 'The Museum of Pop Culture: Hendrix, Northwest hip-hop, Afrofuturism', 47.6215, -122.3481],
+      ['Pioneer Square', "The city's oldest blocks and the First Thursday gallery walk", 47.6005, -122.3335],
+      ['Olympic Sculpture Park', "The Seattle Art Museum's park stepping down to the bay", 47.6166, -122.3553],
+      ['Columbia City', 'Little Ethiopia along Rainier Ave and the old Columbia City Theater', 47.5596, -122.2866],
     ],
     marks: [
-      ['SPACE NEEDLE', -15, 74, -62],
-      ['COLUMBIA CENTER', 10, 106, 10],
-    ],
-    landmarks: [
-      // Space Needle
-      (g) => {
-        const x = -15,
-          z = -62;
-        g.prism(ngon(3, 5, Math.PI / 2), x, z, 0, 30, 0.25, LANDMARK, 2);
-        g.prism(ngon(3, 1.3, Math.PI / 2), x, z, 30, 52, 1.2, LANDMARK);
-        g.prism(ngon(16, 6), x, z, 52, 56, 1.4, LANDMARK);
-        g.prism(ngon(16, 8.4), x, z, 56, 59, 0.45, LANDMARK);
-        spire(x, z, 59, 70)(g);
-      },
-      // Columbia Center, the tall black three-lobed tower
-      (g) => {
-        g.prism(ngon(3, 9, Math.PI / 6), 10, 10, 0, 92, 1, LANDMARK, 3);
-        g.prism(ngon(6, 6.5), 10, 10, 0, 102, 1, LANDMARK, 0);
-      },
+      ['SPACE NEEDLE', 47.6205, -122.3493],
+      ['COLUMBIA CENTER', 47.6045, -122.3305],
+      ['SMITH TOWER', 47.6018, -122.3319],
+      ['LUMEN FIELD', 47.5952, -122.3316],
     ],
   },
   {
@@ -224,64 +80,28 @@ const CITIES: City[] = [
     lat: 39.9526,
     lng: -75.1652,
     tz: 'America/New_York',
-    grid: 0,
-    peak: 62,
-    spread: 32,
-    water: [
-      {
-        pts: [
-          [-80, -120],
-          [-70, -40],
-          [-78, 30],
-          [-72, 120],
-        ],
-        width: 6,
-      },
-      {
-        pts: [
-          [95, -120],
-          [82, -20],
-          [88, 60],
-          [100, 120],
-        ],
-        width: 10,
-      },
-    ],
     spots: [
-      ['Sigma Sound', "Where Gamble and Huff made the Sound of Philadelphia: the O'Jays, Teddy Pendergrass, Patti LaBelle", 18, -24],
-      ['Clef Club of Jazz', "The jazz home started by the Black musicians' union, Local 274", -4, 38],
-      ['South Street', 'Vintage, streetwear and the Magic Gardens mosaics', 40, 62],
-      ['Franklin Music Hall', 'The old Electric Factory, home of the neo-soul and club nights', 44, -60],
-      ['African American Museum', 'The first city-funded museum of Black life in the US, near Mother Bethel AME', 50, -6],
-      ['Barnes Foundation', 'Modern art and African sculpture on the Parkway', -40, -48],
-      ['Village of Arts and Humanities', 'Community-built sculpture parks and studios in North Philly', 10, -100],
-      ['ICA', 'Contemporary art at Penn, where Warhol had his first museum show', -100, 10],
-      ['Reading Terminal Market', 'The food hall under the old train shed, by the Chinatown Friendship Gate', 22, 10],
-      ['Bok Building', 'A 1938 trade school turned into studios for designers, makers and filmmakers', 20, 98],
+      [
+        'Sigma Sound',
+        "Where Gamble and Huff made the Sound of Philadelphia: the O'Jays, Teddy Pendergrass, Patti LaBelle",
+        39.956,
+        -75.159,
+      ],
+      ['Clef Club of Jazz', "The jazz home started by the Black musicians' union, Local 274", 39.9418, -75.1655],
+      ['South Street', 'Vintage, streetwear and the Magic Gardens mosaics', 39.9427, -75.1593],
+      ['Franklin Music Hall', 'The old Electric Factory, home of the neo-soul and club nights', 39.959, -75.149],
+      ['African American Museum', 'The first city-funded museum of Black life in the US, near Mother Bethel AME', 39.9533, -75.1528],
+      ['Barnes Foundation', 'Modern art and African sculpture on the Parkway', 39.9606, -75.1727],
+      ['Village of Arts and Humanities', 'Community-built sculpture parks and studios in North Philly', 39.9905, -75.1475],
+      ['ICA', 'Contemporary art at Penn, where Warhol had his first museum show', 39.954, -75.1945],
+      ['Reading Terminal Market', 'The food hall under the old train shed, by the Chinatown Friendship Gate', 39.9533, -75.159],
+      ['Bok Building', 'A 1938 trade school turned into studios for designers, makers and filmmakers', 39.9265, -75.1593],
     ],
     marks: [
-      ['CITY HALL', 0, 60, 0],
-      ['COMCAST CENTER', 26, 108, -14],
-      ['LIBERTY PLACE', -24, 100, -6],
-    ],
-    landmarks: [
-      // City Hall with William Penn on top
-      (g) => {
-        g.prism(rect(26, 26), 0, 0, 0, 16, 1, LANDMARK, 1);
-        g.prism(rect(7, 7), 0, 0, 16, 40, 1, LANDMARK, 2);
-        g.prism(ngon(8, 4.2, Math.PI / 8), 0, 0, 40, 50, 0.4, LANDMARK);
-        spire(0, 0, 50, 56)(g);
-      },
-      // Comcast Technology Center
-      (g) => {
-        g.prism(rect(13, 13), 26, -14, 0, 104, 0.9, LANDMARK, 6);
-      },
-      // Liberty Place, the Chrysler-style spire
-      (g) => {
-        g.prism(rect(12, 12), -24, -6, 0, 70, 1, LANDMARK, 3);
-        g.prism(rect(12, 12), -24, -6, 70, 88, 0.15, LANDMARK, 2);
-        spire(-24, -6, 88, 96)(g);
-      },
+      ['CITY HALL', 39.9524, -75.1636],
+      ['COMCAST TECHNOLOGY CENTER', 39.9551, -75.17],
+      ['ONE LIBERTY PLACE', 39.9526, -75.168],
+      ['ART MUSEUM', 39.9656, -75.181],
     ],
   },
   {
@@ -290,71 +110,24 @@ const CITIES: City[] = [
     lat: 51.5074,
     lng: -0.1278,
     tz: 'Europe/London',
-    grid: 0.2,
-    peak: 38,
-    spread: 52,
-    water: [
-      {
-        pts: [
-          [-120, 10],
-          [-80, 30],
-          [-48, 5],
-          [-30, -30],
-          [5, -12],
-          [40, 18],
-          [80, 10],
-          [120, 30],
-        ],
-        width: 9,
-      },
-    ],
     spots: [
-      ['Soho', "Ronnie Scott's, the record shops on Berwick Street and the old studios", -86, -40],
-      ['Brixton', 'Windrush Square, the Black Cultural Archives and the sound-system lineage', -22, 96],
-      ['Brick Lane', 'Banglatown, street art, and the roots of garage, grime and jungle', 56, -64],
-      ['Barbican', 'The Brutalist arts centre: experimental music, film and exhibitions', 4, -66],
-      ['Tate Modern', 'The power station turned museum; the Tanks show live and sound art', 12, 14],
-      ['Somerset House', 'London Fashion Week shows and the 1-54 Contemporary African Art Fair', -50, -22],
-      ['Fabric', 'The club in the old Smithfield cold stores that shaped drum and bass and dubstep', -16, -50],
-      ['Peckham', 'Rye Lane, "Little Lagos", the Bussey Building and rooftop nights', 58, 86],
-      ['Central Saint Martins', "The fashion school at King's Cross: McQueen, Wales Bonner, Mowalola", -40, -100],
-      ['Camden', 'Camden Market, the canal and the Roundhouse', -80, -90],
+      ['Soho', "Ronnie Scott's, the record shops on Berwick Street and the old studios", 51.5136, -0.1355],
+      ['Brixton', 'Windrush Square, the Black Cultural Archives and the sound-system lineage', 51.4612, -0.115],
+      ['Brick Lane', 'Banglatown, street art, and the roots of garage, grime and jungle', 51.5215, -0.0717],
+      ['Barbican', 'The Brutalist arts centre: experimental music, film and exhibitions', 51.5201, -0.0937],
+      ['Tate Modern', 'The power station turned museum; the Tanks show live and sound art', 51.5076, -0.0994],
+      ['Somerset House', 'London Fashion Week shows and the 1-54 Contemporary African Art Fair', 51.511, -0.1172],
+      ['Fabric', 'The club in the old Smithfield cold stores that shaped drum and bass and dubstep', 51.5196, -0.1025],
+      ['Peckham', 'Rye Lane, "Little Lagos", the Bussey Building and rooftop nights', 51.4697, -0.0688],
+      ['Central Saint Martins', "The fashion school at King's Cross: McQueen, Wales Bonner, Mowalola", 51.5354, -0.1253],
+      ['Camden', 'Camden Market, the canal and the Roundhouse', 51.5432, -0.1519],
     ],
     marks: [
-      ['THE SHARD', 35, 102, 34],
-      ['BIG BEN', -72, 44, 40],
-      ['LONDON EYE', -48, 38, -14],
-      ['GHERKIN', 16, 70, -40],
-    ],
-    landmarks: [
-      // The Shard
-      (g) => {
-        g.prism(ngon(4, 11, Math.PI / 4), 35, 34, 0, 98, 0.04, LANDMARK, 6);
-      },
-      // Elizabeth Tower (Big Ben)
-      (g) => {
-        g.prism(rect(5, 5), -72, 40, 0, 30, 1, LANDMARK, 3);
-        g.prism(rect(5, 5), -72, 40, 30, 40, 0.1, LANDMARK);
-      },
-      // London Eye
-      (g) => {
-        const [x, z] = [-48, -14];
-        g.line(hoop(x, 18, z, 16, 0.6, 28), LANDMARK, true);
-        g.line(hoop(x, 18, z, 15, 0.6, 28), LANDMARK, true);
-        g.line(
-          [
-            [x - 6, 0, z - 4],
-            [x, 18, z],
-            [x + 6, 0, z + 4],
-          ],
-          LANDMARK,
-        );
-      },
-      // The Gherkin
-      (g) => {
-        const r = [4, 6, 6.6, 6.2, 5, 3, 0.4];
-        for (let i = 0; i < r.length - 1; i++) g.prism(ngon(12, r[i]), 16, -40, i * 11, (i + 1) * 11, r[i + 1] / r[i], LANDMARK);
-      },
+      ['THE SHARD', 51.5045, -0.0865],
+      ["ST PAUL'S", 51.5138, -0.0984],
+      ['GHERKIN', 51.5145, -0.0803],
+      ['BIG BEN', 51.5007, -0.1246],
+      ['TOWER BRIDGE', 51.5055, -0.0754],
     ],
   },
   {
@@ -363,61 +136,21 @@ const CITIES: City[] = [
     lat: 24.7136,
     lng: 46.6753,
     tz: 'Asia/Riyadh',
-    grid: 0.62,
-    peak: 34,
-    spread: 48,
     spots: [
-      ['JAX District', "Diriyah's warehouse arts district and home of the Diriyah Contemporary Art Biennale", -96, 8],
-      ['XP Music Futures', "MDLBEAST's music conference and studios in JAX: Arab hip-hop and electronic", -88, -16],
-      ['SAMoCA', 'The Saudi Arabia Museum of Contemporary Art, in JAX', -104, 30],
-      ['National Museum', 'Saudi history from prehistory to today, by Murabba Palace', 40, 64],
-      ['Al-Batha', 'Markets shaped by Sudanese, Yemeni, Egyptian and South Asian communities', 44, 96],
-      ['Souq Al-Zal', 'The old market by Masmak Fortress: Sadu weaving, bishts, ouds', 14, 86],
-      ['Noor Riyadh', 'The yearly light-art festival that takes over towers, wadis and courtyards', 0, 10],
-      ['At-Turaif', 'The UNESCO mud-brick city in Diriyah, birthplace of the first Saudi state', -100, -48],
-      ['KAFD', 'The King Abdullah Financial District, its plazas and new towers', 62, -72],
-      ['Tuwaiq Palace', "Frei Otto's long stone wall and white tents over the cliffs of Wadi Hanifah", -72, 70],
+      ['JAX District', "Diriyah's warehouse arts district and home of the Diriyah Contemporary Art Biennale", 24.74, 46.577],
+      ['XP Music Futures', "MDLBEAST's music conference and studios in JAX: Arab hip-hop and electronic", 24.739, 46.579],
+      ['SAMoCA', 'The Saudi Arabia Museum of Contemporary Art, in JAX', 24.738, 46.576],
+      ['National Museum', 'Saudi history from prehistory to today, by Murabba Palace', 24.6475, 46.7105],
+      ['Al-Batha', 'Markets shaped by Sudanese, Yemeni, Egyptian and South Asian communities', 24.634, 46.718],
+      ['Souq Al-Zal', 'The old market by Masmak Fortress: Sadu weaving, bishts, ouds', 24.63, 46.713],
+      ['Noor Riyadh', 'The yearly light-art festival that takes over towers, wadis and courtyards', 24.69, 46.685],
+      ['At-Turaif', 'The UNESCO mud-brick city in Diriyah, birthplace of the first Saudi state', 24.734, 46.573],
+      ['KAFD', 'The King Abdullah Financial District, its plazas and new towers', 24.763, 46.64],
+      ['Tuwaiq Palace', "Frei Otto's long stone wall and white tents over the cliffs of Wadi Hanifah", 24.683, 46.621],
     ],
     marks: [
-      ['KINGDOM CENTRE', -10, 108, -20],
-      ['AL FAISALIAH', 36, 92, 32],
-    ],
-    landmarks: [
-      // Kingdom Centre: a tower that opens into a parabolic arch with a sky bridge
-      (g) => {
-        const [x, z] = [-10, -20];
-        g.prism(rect(22, 10), x, z, 0, 62, 0.86, LANDMARK, 5);
-        for (const dz of [-4.3, 4.3]) {
-          const arch = (s: number) =>
-            Array.from({ length: 11 }, (_, i) => {
-              const t = i / 10;
-              return [x + s * (9.5 - 9 * t * t), 62 + t * 40, z + dz] as V3;
-            });
-          g.line(arch(1), LANDMARK);
-          g.line(arch(-1), LANDMARK);
-          g.line(
-            Array.from({ length: 13 }, (_, i) => {
-              const t = (i / 12) * 2 - 1;
-              return [x + t * 5, 70 + 22 * (1 - t * t), z + dz] as V3;
-            }),
-            LANDMARK,
-            true,
-          );
-          g.line(
-            [
-              [x - 3, 84, z + dz],
-              [x + 3, 84, z + dz],
-            ],
-            LANDMARK,
-          );
-        }
-      },
-      // Al Faisaliah: a pyramid holding a golden globe
-      (g) => {
-        const [x, z] = [36, 32];
-        g.prism(ngon(4, 13, Math.PI / 4), x, z, 0, 86, 0.02, LANDMARK, 4);
-        for (const t of [0, Math.PI / 3, (2 * Math.PI) / 3]) g.line(hoop(x, 62, z, 5, t, 16), LANDMARK, true);
-      },
+      ['KINGDOM CENTRE', 24.7114, 46.6744],
+      ['AL FAISALIAH', 24.6904, 46.6853],
     ],
   },
   {
@@ -426,56 +159,22 @@ const CITIES: City[] = [
     lat: 29.7604,
     lng: -95.3698,
     tz: 'America/Chicago',
-    grid: 0.6,
-    peak: 82,
-    spread: 26,
-    more: [[-80, 40, 40, 12]],
-    water: [
-      {
-        pts: [
-          [-120, -40],
-          [-60, -48],
-          [-20, -36],
-          [20, -44],
-          [60, -30],
-          [120, -38],
-        ],
-        width: 5,
-      },
-    ],
     spots: [
-      ['Project Row Houses', "Rick Lowe and fellow artists' Third Ward shotgun houses, art and community since 1993", 42, 58],
-      ['Screwed Up Records', "DJ Screw's shop on the South Side, home of chopped and screwed and the S.U.C.", 26, 98],
-      ['Emancipation Park', 'Bought by freed Texans in 1872 for Juneteenth, across from the Eldorado Ballroom', 58, 40],
-      ['Menil and Rothko Chapel', 'The Menil Collection and the Rothko Chapel', -40, 64],
-      ['TSU and S.H.A.P.E.', "Texas Southern's John Biggers murals and the S.H.A.P.E. Community Center", 72, 74],
-      ['Museum District', 'The MFAH and the Contemporary Arts Museum', -12, 80],
-      ['POST Houston', 'The old post office on the bayou, now 713 Music Hall and a rooftop park', -10, -30],
-      ['Fifth Ward', 'The DeLuxe Theater on Lyons Ave, Peacock Records and the Geto Boys', 56, -64],
-      ["Freedmen's Town", 'Brick streets laid by freed Black craftsmen after 1865, just west of downtown', -46, 6],
-      ['Southwest Houston', 'Alief and Asiatown: Nigerian, Vietnamese and Latin American Houston', -100, 70],
+      ['Project Row Houses', "Rick Lowe and fellow artists' Third Ward shotgun houses, art and community since 1993", 29.734, -95.36],
+      ['Screwed Up Records', "DJ Screw's shop on the South Side, home of chopped and screwed and the S.U.C.", 29.69, -95.338],
+      ['Emancipation Park', 'Bought by freed Texans in 1872 for Juneteenth, across from the Eldorado Ballroom', 29.731, -95.356],
+      ['Menil and Rothko Chapel', 'The Menil Collection and the Rothko Chapel', 29.7375, -95.3985],
+      ['TSU and S.H.A.P.E.', "Texas Southern's John Biggers murals and the S.H.A.P.E. Community Center", 29.7225, -95.36],
+      ['Museum District', 'The MFAH and the Contemporary Arts Museum', 29.7256, -95.3905],
+      ['POST Houston', 'The old post office on the bayou, now 713 Music Hall and a rooftop park', 29.765, -95.366],
+      ['Fifth Ward', 'The DeLuxe Theater on Lyons Ave, Peacock Records and the Geto Boys', 29.778, -95.333],
+      ["Freedmen's Town", 'Brick streets laid by freed Black craftsmen after 1865, just west of downtown', 29.755, -95.383],
+      ['Southwest Houston', 'Alief and Asiatown: Nigerian, Vietnamese and Latin American Houston', 29.705, -95.545],
     ],
     marks: [
-      ['CHASE TOWER', 6, 116, 6],
-      ['WILLIAMS TOWER', -80, 100, 40],
-    ],
-    landmarks: [
-      // JPMorgan Chase Tower, five-sided
-      (g) => {
-        g.prism(ngon(5, 11, -Math.PI / 2), 6, 6, 0, 112, 1, LANDMARK, 7);
-      },
-      // Williams Tower out in Uptown
-      (g) => {
-        g.prism(rect(12, 12, Math.PI / 4), -80, 40, 0, 88, 1, LANDMARK, 5);
-        g.prism(rect(12, 12, Math.PI / 4), -80, 40, 88, 96, 0.2, LANDMARK);
-      },
-      // The 610 Loop
-      (g) =>
-        g.line(
-          hoop(-20, 0, 10, 112, Math.PI / 2, 48).map(([x, , z]) => [x, 0, z] as V3),
-          GROUND,
-          true,
-        ),
+      ['CHASE TOWER', 29.7601, -95.364],
+      ['WELLS FARGO PLAZA', 29.7577, -95.3687],
+      ['DAIKIN PARK', 29.7573, -95.3555],
     ],
   },
   {
@@ -484,181 +183,55 @@ const CITIES: City[] = [
     lat: 33.749,
     lng: -84.388,
     tz: 'America/New_York',
-    grid: 0.1,
-    peak: 64,
-    spread: 34,
-    more: [[10, -70, 48, 18]],
     spots: [
-      ['Sweet Auburn', "Dr. King's street: the APEX Museum, the Curb Market and WERD, the first Black-owned radio station", 46, 14],
-      ['Trap Music Museum', "T.I.'s museum to trap music on the Westside", -60, -40],
-      ['Atlanta University Center', 'Morehouse, Spelman and Clark Atlanta, and the Spelman College Museum of Fine Art', -72, 78],
-      ['Hammonds House', 'African American and diaspora art in a West End house museum', -50, 100],
-      ['SCAD FASH', 'The fashion and film museum in Midtown', 14, -96],
-      ['High Museum', "The Southeast's big art museum, on Peachtree", 2, -80],
-      ['Castleberry Hill', 'Lofts, galleries and studios on the edge of downtown', -30, 52],
-      ['Little Five Points', 'Criminal Records, the Variety Playhouse, vintage shops and murals', 90, 22],
-      ['Patchwerk Studios', 'Where OutKast, TLC, Goodie Mob and Young Thug cut records', -40, -86],
-      ['Cascade', "Cascade Family Skating in Southwest Atlanta, a home of the city's music and dance", -96, 50],
+      [
+        'Sweet Auburn',
+        "Dr. King's street: the APEX Museum, the Curb Market and WERD, the first Black-owned radio station",
+        33.7552,
+        -84.377,
+      ],
+      ['Trap Music Museum', "T.I.'s museum to trap music on the Westside", 33.7811, -84.4113],
+      ['Atlanta University Center', 'Morehouse, Spelman and Clark Atlanta, and the Spelman College Museum of Fine Art', 33.746, -84.413],
+      ['Hammonds House', 'African American and diaspora art in a West End house museum', 33.7385, -84.421],
+      ['SCAD FASH', 'The fashion and film museum in Midtown', 33.792, -84.388],
+      ['High Museum', "The Southeast's big art museum, on Peachtree", 33.79, -84.3856],
+      ['Castleberry Hill', 'Lofts, galleries and studios on the edge of downtown', 33.748, -84.4],
+      ['Little Five Points', 'Criminal Records, the Variety Playhouse, vintage shops and murals', 33.7645, -84.349],
+      ['Patchwerk Studios', 'Where OutKast, TLC, Goodie Mob and Young Thug cut records', 33.784, -84.407],
+      ['Cascade', "Cascade Family Skating in Southwest Atlanta, a home of the city's music and dance", 33.723, -84.503],
     ],
     marks: [
-      ['BOA PLAZA', 4, 126, -40],
-      ['WESTIN', -6, 80, 4],
-      ['MERCEDES-BENZ', -72, 22, 34],
-    ],
-    landmarks: [
-      // Bank of America Plaza: pyramid top and gold spire
-      (g) => {
-        g.prism(rect(14, 14, Math.PI / 4), 4, -40, 0, 96, 1, LANDMARK, 6);
-        g.prism(rect(14, 14, Math.PI / 4), 4, -40, 96, 108, 0.3, LANDMARK);
-        spire(4, -40, 108, 122)(g);
-      },
-      // Westin Peachtree Plaza, the glass cylinder
-      (g) => {
-        g.prism(ngon(16, 8), -6, 4, 0, 76, 1, LANDMARK, 5);
-      },
-      // Mercedes-Benz Stadium and its pinwheel roof
-      (g) => {
-        const [x, z] = [-72, 34];
-        g.prism(ngon(8, 20, Math.PI / 8), x, z, 0, 14, 1.1, LANDMARK, 1);
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * Math.PI * 2;
-          g.line(
-            [
-              [x + Math.cos(a) * 22, 15.4, z + Math.sin(a) * 22],
-              [x + Math.cos(a + 1) * 6, 15.4, z + Math.sin(a + 1) * 6],
-            ],
-            LANDMARK,
-          );
-        }
-      },
+      ['BANK OF AMERICA PLAZA', 33.771, -84.386],
+      ['WESTIN PEACHTREE', 33.7594, -84.3876],
+      ['MERCEDES-BENZ STADIUM', 33.7554, -84.4008],
+      ['ONE ATLANTIC CENTER', 33.7864, -84.3875],
     ],
   },
 ];
 
-// Deterministic per city, so a skyline looks the same every visit
-const rng = (seed: string) => {
-  let a = [...seed].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
-const distToLine = (x: number, z: number, pts: [number, number][]) => {
-  let best = Infinity;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [ax, az] = pts[i],
-      [bx, bz] = pts[i + 1];
-    const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / ((bx - ax) ** 2 + (bz - az) ** 2)));
-    best = Math.min(best, Math.hypot(x - ax - t * (bx - ax), z - az - t * (bz - az)));
-  }
-  return best;
-};
-/** Which side of a shoreline a point is on (sign of the cross product with the nearest segment) */
-const sideOf = (x: number, z: number, pts: [number, number][]) => {
-  let best = Infinity,
-    side = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [ax, az] = pts[i],
-      [bx, bz] = pts[i + 1];
-    const d = Math.hypot((ax + bx) / 2 - x, (az + bz) / 2 - z);
-    if (d < best) [best, side] = [d, Math.sign((bx - ax) * (z - az) - (bz - az) * (x - ax))];
-  }
-  return side;
-};
-const offset = (pts: [number, number][], d: number): V3[] =>
-  pts.map(([x, z], i) => {
-    const [ax, az] = pts[Math.max(0, i - 1)],
-      [bx, bz] = pts[Math.min(pts.length - 1, i + 1)];
-    const len = Math.hypot(bx - ax, bz - az) || 1;
-    return [x + ((bz - az) / len) * d, 0, z - ((bx - ax) / len) * d];
-  });
-
+// Line kinds; each has its own colour, width and strength in the shaders below
+const GROUND = 0,
+  WATER = 1,
+  BLOCK = 2,
+  TOWER = 3,
+  SPOT = 4,
+  ROAD = 5;
 const RADIUS = 120;
-const buildCity = (c: City) => {
-  const g = new Geo();
-  const rand = rng(c.name);
-  // The projector pad: rings and ticks on the ground
-  for (const r of [RADIUS, RADIUS + 4])
-    g.line(
-      hoop(0, 0, 0, r, Math.PI / 2, 72).map(([x, , z]) => [x, 0, z] as V3),
-      GROUND,
-      true,
-    );
-  for (let i = 0; i < 36; i++) {
-    const a = (i / 36) * Math.PI * 2;
-    g.line(
-      [
-        [Math.cos(a) * (RADIUS + 4), 0, Math.sin(a) * (RADIUS + 4)],
-        [Math.cos(a) * (RADIUS + 10), 0, Math.sin(a) * (RADIUS + 10)],
-      ],
-      GROUND,
-    );
+/** Real heights look flat from across a city; stretch them so the skyline reads */
+const LIFT = 3;
+
+/** Segments as [x0, y0, z0, x1, y1, z1, kind] runs */
+class Lines {
+  d: number[] = [];
+  seg(a: V3, b: V3, kind: number) {
+    this.d.push(...a, ...b, kind);
   }
-  for (const w of c.water || []) {
-    if (w.width) {
-      g.line(offset(w.pts, w.width / 2), WATER);
-      g.line(offset(w.pts, -w.width / 2), WATER);
-    } else
-      g.line(
-        w.pts.map(([x, z]) => [x, 0, z] as V3),
-        WATER,
-      );
+  line(pts: V3[], kind: number, closed = false) {
+    for (let i = 0; i < pts.length - (closed ? 0 : 1); i++) this.seg(pts[i], pts[(i + 1) % pts.length], kind);
   }
-  const wet = (x: number, z: number) =>
-    (c.water || []).some((w) =>
-      w.width ? distToLine(x, z, w.pts) < w.width / 2 + 4 : sideOf(x, z, w.pts) === w.side || distToLine(x, z, w.pts) < 4,
-    );
-  // Blocks on the street grid, tallest at each downtown's centre
-  const centres: [number, number, number, number][] = [[0, 0, c.peak, c.spread], ...(c.more || [])];
-  const step = 13,
-    cos = Math.cos(c.grid),
-    sin = Math.sin(c.grid);
-  for (let i = -9; i <= 9; i++)
-    for (let j = -9; j <= 9; j++) {
-      const lx = i * step + (rand() - 0.5) * 3,
-        lz = j * step + (rand() - 0.5) * 3;
-      const x = lx * cos - lz * sin,
-        z = lx * sin + lz * cos;
-      if (Math.hypot(x, z) > RADIUS - 10 || wet(x, z)) continue;
-      const h = Math.max(...centres.map(([cx, cz, p, s]) => p * Math.exp(-((x - cx) ** 2 + (z - cz) ** 2) / (2 * s * s))));
-      const tall = h * (0.35 + rand() * 0.9) + 2 + rand() * 4;
-      if (tall < 4 && rand() < 0.5) continue;
-      const w = 5 + rand() * 4,
-        d = 5 + rand() * 4;
-      const round = tall > 30 && rand() < 0.12;
-      g.prism(
-        round ? ngon(10, w / 2) : rect(w, d, c.grid),
-        x,
-        z,
-        0,
-        tall,
-        tall > 40 && rand() < 0.3 ? 0.75 : 1,
-        BUILDING,
-        tall > 28 ? Math.floor(tall / 22) : 0,
-      );
-    }
-  c.landmarks.forEach((l) => l(g));
-  // A ring on the ground at each highlighted place and a diamond floating over it
-  for (const [, , x, z] of c.spots) {
-    g.line(
-      ngon(12, 4).map(([a, b]) => [x + a, 0.3, z + b] as V3),
-      SPOT,
-      true,
-    );
-    g.line(
-      [
-        [x, 0, z],
-        [x, 11, z],
-      ],
-      SPOT,
-    );
-    g.prism(ngon(4, 2.4), x, z, 14, 17.5, 0, SPOT);
-    g.prism(ngon(4, 2.4), x, z, 14, 11, 0, SPOT);
-  }
-  return g;
-};
+}
+const ring = (r: number, n: number, y = 0, x = 0, z = 0): V3[] =>
+  Array.from({ length: n }, (_, i) => [x + Math.cos((i / n) * Math.PI * 2) * r, y, z + Math.sin((i / n) * Math.PI * 2) * r]);
 
 const GLOBE_R = 100;
 const sphere = (lat: number, lng: number, r = GLOBE_R): V3 => {
@@ -666,7 +239,7 @@ const sphere = (lat: number, lng: number, r = GLOBE_R): V3 => {
   return [r * Math.cos(la) * Math.sin(ln), r * Math.sin(la), r * Math.cos(la) * Math.cos(ln)];
 };
 const buildGlobe = () => {
-  const g = new Geo();
+  const g = new Lines();
   for (let lat = -60; lat <= 60; lat += 30)
     g.line(
       Array.from({ length: 72 }, (_, i) => sphere(lat, i * 5)),
@@ -695,22 +268,332 @@ const buildGlobe = () => {
         const r = GLOBE_R * (1 + 0.12 * ang * Math.sin(Math.PI * t));
         return [0, 1, 2].map((k) => (a * home[k] + b * to[k]) * r) as V3;
       }),
-      LANDMARK,
+      TOWER,
     );
   }
-  return g;
+  return new Float32Array(g.d);
 };
 
-const COLORS = ['#2a8fb8', '#3a7cff', '#5fd8ff', '#bff4ff', '#e8fbff'];
+const COMPASS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
+type Scene = {
+  lines: Float32Array<ArrayBuffer>;
+  /** Wall and roof triangles as [x, y, z, nx, ny, nz] per vertex */
+  hull: Float32Array<ArrayBuffer>;
+  /** Where each spot sits; spots beyond the disc stand on its rim, with how far off they really are */
+  spots: { x: number; z: number; away: string }[];
+  marks: { name: string; at: V3 }[];
+};
+
+/** Unpacks a city file (format in ops/nodes/build_cities.py) into lines and shells */
+const decodeCity = (buf: ArrayBuffer, c: City): Scene => {
+  const v = new DataView(buf);
+  const [lat0, lng0, r] = [v.getFloat32(5, true), v.getFloat32(9, true), v.getUint16(13, true)];
+  let o = 15;
+  const s = RADIUS / r / 2; // file units are half metres
+  const g = new Lines();
+  const hull: number[] = [];
+  const tops: V3[] = [];
+  const read = (n: number) => {
+    const pts: [number, number][] = [];
+    let [x, z] = [0, 0];
+    for (let i = 0; i < n; i++, o += 4) {
+      x += v.getInt16(o, true);
+      z += v.getInt16(o + 2, true);
+      pts.push([x * s, z * s]);
+    }
+    return pts;
+  };
+  for (let n = v.getUint16(o, true), i = (o += 2) * 0; i < n; i++) {
+    const [count, tier, b, t] = [v.getUint8(o), v.getUint8(o + 1), v.getUint16(o + 2, true), v.getUint16(o + 4, true)];
+    o += 6;
+    const pts = read(count);
+    const [y0, y1] = [b * s * LIFT, Math.max(t * s * LIFT, 0.6)];
+    const kind = tier ? TOWER : BLOCK;
+    let convex = true;
+    pts.forEach(([x, z], k) => {
+      const [nx, nz] = pts[(k + 1) % count];
+      const [px, pz] = pts[(k + count - 1) % count];
+      g.seg([x, y1, z], [nx, y1, nz], kind);
+      if (tier || y0 > 0) g.seg([x, y0, z], [nx, y0, nz], kind);
+      // Uprights only where the outline turns, so round towers get ribs instead of a solid wall
+      const [ax, az, bx, bz] = [x - px, z - pz, nx - x, nz - z];
+      const turn = (ax * bx + az * bz) / (Math.hypot(ax, az) * Math.hypot(bx, bz) || 1);
+      if (turn < 0.94) g.seg([x, y0, z], [x, y1, z], kind);
+      if (ax * bz - az * bx < 0 !== pts.length > 0 && ax * bz - az * bx !== 0) convex &&= true;
+      const len = Math.hypot(bx, bz) || 1;
+      const [wx, wz] = [bz / len, -bx / len];
+      hull.push(x, y0, z, wx, 0, wz, nx, y0, nz, wx, 0, wz, nx, y1, nz, wx, 0, wz);
+      hull.push(x, y0, z, wx, 0, wz, nx, y1, nz, wx, 0, wz, x, y1, z, wx, 0, wz);
+      tops.push([x, y1, z]);
+    });
+    // Roofs as a fan; only for convex outlines, where a fan stays inside the shape
+    const cross = pts.map(([x, z], k) => {
+      const [nx, nz] = pts[(k + 1) % count];
+      const [mx, mz] = pts[(k + 2) % count];
+      return Math.sign((nx - x) * (mz - nz) - (nz - z) * (mx - nx));
+    });
+    convex = cross.every((c) => c >= 0) || cross.every((c) => c <= 0);
+    if (convex)
+      for (let k = 1; k < count - 1; k++)
+        hull.push(pts[0][0], y1, pts[0][1], 0, 1, 0, pts[k][0], y1, pts[k][1], 0, 1, 0, pts[k + 1][0], y1, pts[k + 1][1], 0, 1, 0);
+  }
+  for (let n = v.getUint16(o, true), i = (o += 2) * 0; i < n; i++) {
+    const [kind, count] = [v.getUint8(o), v.getUint16(o + 1, true)];
+    o += 3;
+    const y = kind === 1 ? 0.3 : 0.15;
+    g.line(
+      read(count).map(([x, z]) => [x, y, z]),
+      kind === 1 ? WATER : ROAD,
+    );
+  }
+
+  // The projector pad: rings and ticks on the ground
+  g.line(ring(RADIUS, 96), GROUND, true);
+  g.line(ring(RADIUS + 4, 96), GROUND, true);
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2;
+    g.seg(
+      [Math.cos(a) * (RADIUS + 4), 0, Math.sin(a) * (RADIUS + 4)],
+      [Math.cos(a) * (RADIUS + 10), 0, Math.sin(a) * (RADIUS + 10)],
+      GROUND,
+    );
+  }
+
+  const kx = 111320 * Math.cos((lat0 * Math.PI) / 180) * (RADIUS / r);
+  const kz = 110540 * (RADIUS / r);
+  const place = (lat: number, lng: number) => [(lng - lng0) * kx, -(lat - lat0) * kz];
+  const spots: Scene['spots'] = [];
+  for (const [, , lat, lng] of c.spots) {
+    let [x, z] = place(lat, lng);
+    let away = '';
+    const d = Math.hypot(x, z);
+    if (d > RADIUS - 4) {
+      const km = (d / RADIUS) * (r / 1000);
+      away = `${km < 10 ? km.toFixed(1) : Math.round(km)} km ${COMPASS[Math.round(((Math.atan2(x, -z) / Math.PI) * 4 + 8) % 8) % 8]}`;
+      let a = Math.atan2(z, x);
+      // Neighbours on the rim step aside so their beacons don't stack
+      while (spots.some((p) => p.away && Math.hypot(p.x - Math.cos(a) * (RADIUS + 8), p.z - Math.sin(a) * (RADIUS + 8)) < 10)) a += 0.07;
+      [x, z] = [Math.cos(a) * (RADIUS + 8), Math.sin(a) * (RADIUS + 8)];
+    }
+    spots.push({ x, z, away });
+    g.line(ring(4, 12, 0.3, x, z), SPOT, true);
+    g.seg([x, 0, z], [x, 11, z], SPOT);
+    const diamond: V3[] = [
+      [x + 2.4, 14, z],
+      [x, 14, z + 2.4],
+      [x - 2.4, 14, z],
+      [x, 14, z - 2.4],
+    ];
+    g.line(diamond, SPOT, true);
+    for (const p of diamond) {
+      g.seg(p, [x, 17.5, z], SPOT);
+      g.seg(p, [x, 10.5, z], SPOT);
+    }
+  }
+  const marks = c.marks.map(([name, lat, lng]) => {
+    const [x, z] = place(lat, lng);
+    const top = tops.reduce((h, t) => (Math.hypot(t[0] - x, t[2] - z) < 3 ? Math.max(h, t[1]) : h), 4);
+    return { name, at: [x, top + 5, z] as V3 };
+  });
+  return { lines: new Float32Array(g.d), hull: new Float32Array(hull), spots, marks };
+};
+
+// --- WebGL2 ---------------------------------------------------------------------------------------------------
+
+const LINE_VS = `#version 300 es
+layout(location=0) in vec2 a_quad;
+layout(location=1) in vec3 i_p0;
+layout(location=2) in vec3 i_p1;
+layout(location=3) in float i_kind;
+uniform mat4 u_mvp;
+uniform vec2 u_res;
+uniform float u_rise, u_globe, u_dim, u_px;
+uniform vec3 u_eye;
+out float v_cross, v_glow;
+flat out int v_kind;
+const float W[6] = float[6](1.1, 1.6, 1.1, 1.9, 2.2, 1.3);
+// The skyline rises from the middle of the pad outwards
+vec3 lift(vec3 p) { return vec3(p.x, p.y * clamp(u_rise * 1.35 - length(p.xz) / 120.0 * 0.35, 0.0, 1.0), p.z); }
+void main() {
+  vec4 c0 = u_mvp * vec4(lift(i_p0), 1.0), c1 = u_mvp * vec4(lift(i_p1), 1.0);
+  if (c0.w < 1.0 && c1.w < 1.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (c0.w < 1.0) c0 = mix(c0, c1, (1.0 - c0.w) / (c1.w - c0.w));
+  else if (c1.w < 1.0) c1 = mix(c1, c0, (1.0 - c1.w) / (c0.w - c1.w));
+  vec2 dir = normalize((c1.xy / c1.w - c0.xy / c0.w) * u_res + vec2(1e-5, 0.0));
+  v_kind = int(i_kind + 0.5);
+  vec4 c = mix(c0, c1, a_quad.x);
+  c.xy += vec2(-dir.y, dir.x) * a_quad.y * W[v_kind] * u_px / u_res * c.w;
+  c.z -= 0.0006 * c.w;
+  v_cross = a_quad.y;
+  // On the globe, lines on the far side are faint
+  float facing = u_globe > 0.5 && dot(mix(i_p0, i_p1, a_quad.x), u_eye) < 0.0 ? 0.16 : 1.0;
+  // Spot beacons show through the buildings in front of them
+  v_glow = facing * (v_kind == 4 ? max(u_dim, 0.6) : u_dim);
+  gl_Position = c;
+}`;
+const LINE_FS = `#version 300 es
+precision mediump float;
+in float v_cross, v_glow;
+flat in int v_kind;
+uniform float u_flicker;
+out vec4 o;
+const vec3 C[6] = vec3[6](vec3(0.16, 0.56, 0.72), vec3(0.23, 0.45, 1.0), vec3(0.08, 0.42, 0.85), vec3(0.16, 0.76, 1.0), vec3(0.75, 0.96, 1.0), vec3(0.11, 0.38, 0.72));
+const float A[6] = float[6](0.55, 0.9, 0.55, 0.8, 1.0, 0.6);
+void main() {
+  float core = smoothstep(1.0, 0.0, abs(v_cross));
+  vec3 col = mix(C[v_kind], vec3(0.85, 0.97, 1.0), pow(core, 4.0) * 0.6);
+  o = vec4(col * core * A[v_kind] * v_glow * u_flicker * HEADROOM, 1.0);
+}`;
+const HULL_VS = `#version 300 es
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec3 a_n;
+uniform mat4 u_mvp;
+uniform float u_rise;
+out vec3 v_n, v_pos;
+void main() {
+  vec3 p = vec3(a_pos.x, a_pos.y * clamp(u_rise * 1.35 - length(a_pos.xz) / 120.0 * 0.35, 0.0, 1.0), a_pos.z);
+  v_n = a_n;
+  v_pos = p;
+  gl_Position = u_mvp * vec4(p, 1.0);
+}`;
+// Dark glass that hides what's behind it, glowing where you see it edge-on
+const HULL_FS = `#version 300 es
+precision mediump float;
+in vec3 v_n, v_pos;
+uniform vec3 u_eye;
+uniform float u_flicker;
+out vec4 o;
+void main() {
+  float rim = pow(1.0 - abs(dot(normalize(v_n), normalize(u_eye - v_pos))), 2.5);
+  o = vec4((vec3(0.027, 0.1, 0.22) + vec3(0.16, 0.76, 1.0) * rim * 0.3) * HEADROOM, 0.72 * u_flicker);
+}`;
+const MOTE_VS = `#version 300 es
+layout(location=0) in vec4 a_m;
+uniform mat4 u_mvp;
+uniform float u_time, u_px;
+out float v_a;
+void main() {
+  float y = mod(a_m.y + u_time * a_m.w, 130.0);
+  v_a = 0.25 + 0.5 * sin(y / 130.0 * 3.14159);
+  gl_Position = u_mvp * vec4(a_m.x, y, a_m.z, 1.0);
+  gl_PointSize = 2.0 * u_px;
+}`;
+const MOTE_FS = `#version 300 es
+precision mediump float;
+in float v_a;
+uniform float u_flicker;
+out vec4 o;
+void main() { o = vec4(vec3(0.62, 0.91, 1.0) * v_a * u_flicker * HEADROOM, 1.0); }`;
+const FULL_VS = `#version 300 es
+out vec2 v_uv;
+void main() {
+  vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+  v_uv = p * 0.5 + 0.5;
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+// Dual Kawase blur: cheap wide bloom from a couple of small passes
+const DOWN_FS = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_texel;
+out vec4 o;
+void main() {
+  vec2 d = u_texel;
+  o = (texture(u_tex, v_uv) * 4.0 + texture(u_tex, v_uv - d) + texture(u_tex, v_uv + d) + texture(u_tex, v_uv + vec2(d.x, -d.y)) + texture(u_tex, v_uv + vec2(-d.x, d.y))) / 8.0;
+}`;
+const UP_FS = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_texel;
+out vec4 o;
+void main() {
+  vec2 d = u_texel;
+  vec4 s = texture(u_tex, v_uv + vec2(-d.x * 2.0, 0.0)) + texture(u_tex, v_uv + vec2(d.x * 2.0, 0.0));
+  s += texture(u_tex, v_uv + vec2(0.0, d.y * 2.0)) + texture(u_tex, v_uv + vec2(0.0, -d.y * 2.0));
+  s += (texture(u_tex, v_uv + vec2(-d.x, d.y)) + texture(u_tex, v_uv + d) + texture(u_tex, v_uv + vec2(d.x, -d.y)) + texture(u_tex, v_uv - d)) * 2.0;
+  o = s / 12.0;
+}`;
+// The old screen: background glow, colour fringing, scanlines, a rolling band, dithering and the odd signal slip
+const SCREEN_FS = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_scene, u_bloom;
+uniform vec2 u_res;
+uniform float u_time, u_glitch, u_calm;
+out vec4 o;
+float hash(float n) { return fract(sin(n) * 43758.5453); }
+void main() {
+  vec2 uv = v_uv;
+  uv.x += u_glitch * step(0.8, hash(floor(uv.y * 28.0) + floor(u_time * 16.0))) * 0.012;
+  vec2 sh = (uv - 0.5) * 0.004;
+  vec3 mid = texture(u_scene, uv).rgb;
+  vec3 c = vec3(texture(u_scene, uv - sh).r * 0.6 + mid.r * 0.4, mid.g, max(texture(u_scene, uv - sh).b, texture(u_scene, uv + sh).b));
+  c = (c + texture(u_bloom, uv).rgb) / HEADROOM;
+  // Soft knee: dense downtowns stay blue instead of burning out to white, with a little white in the hottest spots
+  float m = max(c.b, max(c.g, c.r));
+  if (m > 0.7) c *= (0.7 + 0.3 * (1.0 - exp((0.7 - m) / 0.3))) / m;
+  c = mix(c, vec3(0.9, 0.98, 1.0), smoothstep(1.2, 3.0, m) * 0.35);
+  float d = length((uv - vec2(0.5, 0.3)) * vec2(u_res.x / u_res.y, 1.0));
+  c += mix(vec3(0.03, 0.12, 0.19), vec3(0.008, 0.024, 0.051), smoothstep(0.0, 0.8, d));
+  float roll = fract(uv.y + u_time * 0.12 * (1.0 - u_calm));
+  c *= (0.86 + 0.14 * sin(gl_FragCoord.y * 1.5708)) * (1.0 + 0.1 * smoothstep(0.1, 0.0, abs(roll - 0.5)));
+  ivec2 p = ivec2(gl_FragCoord.xy) % 4;
+  int b[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  c += (float(b[p.y * 4 + p.x]) / 16.0 - 0.5) / 64.0;
+  o = vec4(c, 1.0);
+}`;
+
+const program = (gl: WebGL2RenderingContext, vs: string, fs: string) => {
+  const p = gl.createProgram()!;
+  for (const [type, src] of [
+    [gl.VERTEX_SHADER, vs],
+    [gl.FRAGMENT_SHADER, fs],
+  ] as const) {
+    const s = gl.createShader(type)!;
+    // Everything renders at under half strength so overlapping glow has room before the 8-bit buffers clip
+    gl.shaderSource(s, src.replace('es\n', 'es\n#define HEADROOM 0.45\n'));
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) || 'shader');
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || 'program');
+  const loc: Record<string, WebGLUniformLocation | null> = {};
+  return { p, u: (name: string) => (name in loc ? loc[name] : (loc[name] = gl.getUniformLocation(p, name))) };
+};
+
+/** A render target: a texture, plus a depth buffer for the scene */
+const target = (gl: WebGL2RenderingContext, w: number, h: number, depth = false) => {
+  const tex = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
+  for (const k of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) gl.texParameteri(gl.TEXTURE_2D, k, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer()!;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  let rb: WebGLRenderbuffer | null = null;
+  if (depth) {
+    rb = gl.createRenderbuffer()!;
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
+  }
+  return { tex, fb, w, h, free: () => (gl.deleteTexture(tex), gl.deleteFramebuffer(fb), rb && gl.deleteRenderbuffer(rb)) };
+};
+
 type View = { mode: 'globe' | 'city'; city: number };
 const CAM = {
   globe: { min: 230, max: 700, start: 380, target: 0 },
-  city: { min: 110, max: 460, start: 310, target: 26 },
+  city: { min: 90, max: 460, start: 300, target: 18 },
 };
 
 const time = (tz: string) => new Date().toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
 
 const Nodes: React.FC = () => {
+  const glRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState<View>({ mode: 'globe', city: 0 });
   const [, tick] = useState(0);
@@ -718,29 +601,108 @@ const Nodes: React.FC = () => {
   const zoomBy = useRef<(factor: number) => void>(() => {});
   const pick = useRef<(spot: number) => void>(() => {});
   const [spot, setSpot] = useState(-1);
+  const [away, setAway] = useState<string[]>([]);
+  const [status, setStatus] = useState<'ready' | 'loading' | 'lost' | 'no-webgl'>('ready');
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext('2d')!;
+    const gl = glRef.current!.getContext('webgl2', { antialias: false, alpha: false });
+    if (!gl) return setStatus('no-webgl');
     const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const globe = buildGlobe();
-    const cities = new Map<number, Geo>();
-    // tx/tz is the point the camera circles, gliding toward gx/gz when a spot is picked
-    const cam = { yaw: 0, pitch: 0.35, dist: CAM.globe.start, born: performance.now(), tx: 0, tz: 0, gx: 0, gz: 0 };
-    let sel = -1;
+
+    const lineP = program(gl, LINE_VS, LINE_FS),
+      hullP = program(gl, HULL_VS, HULL_FS),
+      moteP = program(gl, MOTE_VS, MOTE_FS),
+      downP = program(gl, FULL_VS, DOWN_FS),
+      upP = program(gl, FULL_VS, UP_FS),
+      screenP = program(gl, FULL_VS, SCREEN_FS);
+    const quad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]), gl.STATIC_DRAW);
+    /** Uploads a scene's lines and shells into their own vertex arrays */
+    const upload = (lines: Float32Array, hull = new Float32Array()) => {
+      const lineVao = gl.createVertexArray()!;
+      gl.bindVertexArray(lineVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER, lines, gl.STATIC_DRAW);
+      for (const [i, size, off] of [
+        [1, 3, 0],
+        [2, 3, 12],
+        [3, 1, 24],
+      ]) {
+        gl.enableVertexAttribArray(i);
+        gl.vertexAttribPointer(i, size, gl.FLOAT, false, 28, off);
+        gl.vertexAttribDivisor(i, 1);
+      }
+      const hullVao = gl.createVertexArray()!;
+      gl.bindVertexArray(hullVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER, hull, gl.STATIC_DRAW);
+      for (const [i, off] of [
+        [0, 0],
+        [1, 12],
+      ]) {
+        gl.enableVertexAttribArray(i);
+        gl.vertexAttribPointer(i, 3, gl.FLOAT, false, 24, off);
+      }
+      gl.bindVertexArray(null);
+      return { lineVao, segs: lines.length / 7, hullVao, tris: hull.length / 6 };
+    };
+    const globe = upload(buildGlobe());
     // Dust drifting up through the projection
-    const motes = Array.from({ length: 140 }, () => {
-      const [a, r] = [Math.random() * Math.PI * 2, Math.sqrt(Math.random()) * RADIUS];
-      return [Math.cos(a) * r, Math.random() * 130, Math.sin(a) * r, 4 + Math.random() * 10];
-    });
+    const moteVao = gl.createVertexArray()!;
+    gl.bindVertexArray(moteVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array(
+        Array.from({ length: 160 }, () => {
+          const [a, r] = [Math.random() * Math.PI * 2, Math.sqrt(Math.random()) * RADIUS];
+          return [Math.cos(a) * r, Math.random() * 130, Math.sin(a) * r, 4 + Math.random() * 10];
+        }).flat(),
+      ),
+      gl.STATIC_DRAW,
+    );
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+    const emptyVao = gl.createVertexArray();
+    gl.bindVertexArray(null);
+
+    const scenes = new Map<number, Scene & ReturnType<typeof upload>>();
+    const loading = new Set<number>();
+    const load = (i: number) => {
+      if (scenes.has(i) || loading.has(i)) return;
+      loading.add(i);
+      fetch(`/nodes/${CITIES[i].short.toLowerCase()}.bin`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+        .then((buf) => {
+          const s = decodeCity(buf, CITIES[i]);
+          scenes.set(i, { ...s, ...upload(s.lines, s.hull) });
+          if (cur.mode === 'city' && cur.city === i) {
+            cam.born = performance.now();
+            setStatus('ready');
+            setAway(s.spots.map((p) => p.away));
+          }
+        })
+        .catch(() => cur.city === i && setStatus('lost'))
+        .finally(() => loading.delete(i));
+    };
+
+    const cam = { yaw: 0, pitch: 0.35, dist: CAM.globe.start, born: performance.now(), tx: 0, tz: 0, gx: 0, gz: 0 };
     let cur: View = { mode: 'globe', city: 0 };
-    let touched = 0,
+    let sel = -1,
+      touched = 0,
       overscroll = 0,
       W = 0,
       H = 0,
       raf = 0,
       last = performance.now();
     let hits: { i: number; x: number; y: number }[] = [];
+    let fbs: ReturnType<typeof target>[] = [];
 
     const show = (v: View) => {
       const from = cur;
@@ -754,16 +716,23 @@ const Nodes: React.FC = () => {
         // Come back out facing the city you were in
         const c = CITIES[v.city];
         Object.assign(cam, { yaw: (-c.lng * Math.PI) / 180, pitch: (c.lat * Math.PI) / 180, dist: CAM.globe.start });
-      } else Object.assign(cam, { yaw: from.mode === 'city' ? cam.yaw : -0.5, pitch: 0.42, dist: CAM.city.start });
+        setStatus('ready');
+      } else {
+        Object.assign(cam, { yaw: from.mode === 'city' ? cam.yaw : -0.5, pitch: 0.5, dist: CAM.city.start });
+        const s = scenes.get(v.city);
+        setStatus(s ? 'ready' : 'loading');
+        setAway(s ? s.spots.map((p) => p.away) : []);
+        load(v.city);
+      }
       setView(v);
     };
     go.current = show;
 
     const select = (i: number) => {
-      const s = i >= 0 ? CITIES[cur.city].spots[i] : undefined;
-      sel = s ? i : -1;
-      [cam.gx, cam.gz] = s ? [s[2], s[3]] : [0, 0];
-      if (s) cam.dist = Math.min(cam.dist, 220);
+      const p = scenes.get(cur.city)?.spots[i];
+      sel = p ? i : -1;
+      [cam.gx, cam.gz] = p ? [p.x, p.z] : [0, 0];
+      if (p) cam.dist = Math.min(cam.dist, 200);
       touched = performance.now();
       setSpot(sel);
     };
@@ -785,137 +754,160 @@ const Nodes: React.FC = () => {
         if (near) show({ mode: 'city', city: near.i });
       }
     };
+    zoomBy.current = zoom;
 
+    const mvp = new Float32Array(16);
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      if (!calm && now - touched > 2500) cam.yaw += dt * (cur.mode === 'globe' ? 0.12 : 0.16);
-      const dpr = Math.min(2, devicePixelRatio || 1);
-      if (canvas.width !== Math.round(W * dpr)) [canvas.width, canvas.height] = [Math.round(W * dpr), Math.round(H * dpr)];
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.clearRect(0, 0, W, H);
-      ctx.globalCompositeOperation = 'lighter';
+      if (!calm && now - touched > 2500) cam.yaw += dt * (cur.mode === 'globe' ? 0.12 : 0.1);
       cam.tx += (cam.gx - cam.tx) * Math.min(1, dt * 3);
       cam.tz += (cam.gz - cam.tz) * Math.min(1, dt * 3);
-      // Now and then the signal slips sideways, like an old transmission
-      if (!calm && now % 5300 < 90) ctx.translate((Math.random() - 0.5) * 8, 0);
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      // The hologram renders at a little under screen resolution: lighter on phones, and softer like an old tube
+      const [gw, gh] = [Math.max(1, Math.round(W * dpr * 0.75)), Math.max(1, Math.round(H * dpr * 0.75))];
+      const glc = gl.canvas as HTMLCanvasElement;
+      if (glc.width !== gw || glc.height !== gh || !fbs.length) {
+        [glc.width, glc.height] = [gw, gh];
+        fbs.forEach((f) => f.free());
+        fbs = [
+          target(gl, gw, gh, true),
+          target(gl, gw >> 1 || 1, gh >> 1 || 1),
+          target(gl, gw >> 2 || 1, gh >> 2 || 1),
+          target(gl, gw >> 1 || 1, gh >> 1 || 1),
+        ];
+      }
+      if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr))
+        [canvas.width, canvas.height] = [Math.round(W * dpr), Math.round(H * dpr)];
 
-      const g = cur.mode === 'globe' ? globe : (cities.get(cur.city) ?? cities.set(cur.city, buildCity(CITIES[cur.city])).get(cur.city)!);
-      // The hologram builds up from the pad when it appears, and flickers a little
+      const scene = cur.mode === 'city' ? scenes.get(cur.city) : undefined;
       const grow = Math.min(1, (now - cam.born) / 1100);
       const rise = cur.mode === 'city' ? 1 - (1 - grow) ** 3 : 1;
       const flicker = (0.9 + 0.1 * Math.sin(now / 47) * Math.sin(now / 131)) * Math.min(1, grow * 1.6);
-      const f = Math.min(W, H) * 1.15;
+
+      // Camera: orbit (yaw, pitch) at a distance around the target point
       const [cy, sy, cp, sp] = [Math.cos(cam.yaw), Math.sin(cam.yaw), Math.cos(cam.pitch), Math.sin(cam.pitch)];
-      const target = CAM[cur.mode].target;
-      const n = g.v.length / 3;
-      const px = new Float32Array(n),
-        py = new Float32Array(n),
-        pz = new Float32Array(n);
-      const project = (x: number, y: number, z: number, out: number) => {
-        x -= cam.tx;
-        z -= cam.tz;
-        y = y * rise - target;
-        const x1 = x * cy + z * sy,
-          z1 = -x * sy + z * cy;
-        const y2 = y * cp - z1 * sp,
-          z2 = y * sp + z1 * cp;
-        const d = cam.dist - z2;
-        if (out < 0) return [W / 2 + (f * x1) / d, H / 2 - (f * y2) / d, z2, d] as const;
-        px[out] = W / 2 + (f * x1) / d;
-        py[out] = H / 2 - (f * y2) / d;
-        pz[out] = d > 5 ? z2 : NaN;
-        return null;
+      const t: V3 = [cam.tx, CAM[cur.mode].target, cam.tz];
+      const R = [
+        [cy, 0, sy],
+        [sp * sy, cp, -sp * cy],
+        [-cp * sy, sp, cp * cy],
+      ];
+      const tr = R.map((r) => -(r[0] * t[0] + r[1] * t[1] + r[2] * t[2]));
+      const f = Math.min(W, H) * 1.15;
+      const [a, b, n, fa] = [f / (W / 2), f / (H / 2), 1, 3000];
+      const [A, B] = [-(fa + n) / (fa - n), (-2 * fa * n) / (fa - n)];
+      const rows = [
+        [...R[0].map((k) => k * a), tr[0] * a],
+        [...R[1].map((k) => k * b), tr[1] * b],
+        [...R[2].map((k) => k * A), (tr[2] - cam.dist) * A + B],
+        [...R[2].map((k) => -k), -(tr[2] - cam.dist)],
+      ];
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) mvp[c * 4 + r] = rows[r][c];
+      const eye: V3 = [t[0] + R[2][0] * cam.dist, t[1] + R[2][1] * cam.dist, t[2] + R[2][2] * cam.dist];
+      const project = (x: number, y: number, z: number) => {
+        const v = rows.map((r) => r[0] * x + r[1] * y + r[2] * z + r[3]);
+        return [W / 2 + (v[0] / v[3]) * (W / 2), H / 2 - (v[1] / v[3]) * (H / 2), v[3]] as const;
       };
-      for (let i = 0; i < n; i++) project(g.v[i * 3], g.v[i * 3 + 1], g.v[i * 3 + 2], i);
 
-      // The beam from the projector below up to the pad (the pad's outer ring is the city's first 72 points)
-      if (cur.mode === 'city') {
-        let [l, r, top] = [W, 0, H];
-        for (let i = 0; i < 72; i++) [l, r, top] = [Math.min(l, px[i]), Math.max(r, px[i]), Math.min(top, py[i])];
-        const beam = ctx.createLinearGradient(0, H, 0, top);
-        beam.addColorStop(0, 'rgba(95,216,255,0.22)');
-        beam.addColorStop(1, 'rgba(95,216,255,0)');
-        ctx.fillStyle = beam;
-        ctx.globalAlpha = flicker;
-        ctx.beginPath();
-        ctx.moveTo(W / 2 - 30, H);
-        ctx.lineTo(l, top + (H - top) * 0.45);
-        ctx.lineTo(r, top + (H - top) * 0.45);
-        ctx.lineTo(W / 2 + 30, H);
-        ctx.fill();
+      const [scn, half, quarter, bloom] = fbs;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, scn.fb);
+      gl.viewport(0, 0, scn.w, scn.h);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      // Now and then the signal slips sideways, like an old transmission
+      const glitch = !calm && now % 5300 < 90 ? 1 : 0;
+      const drawLines = (s: { lineVao: WebGLVertexArrayObject; segs: number }, dim: number, globeMode: number) => {
+        gl.useProgram(lineP.p);
+        gl.uniformMatrix4fv(lineP.u('u_mvp'), false, mvp);
+        gl.uniform2f(lineP.u('u_res'), scn.w, scn.h);
+        gl.uniform1f(lineP.u('u_rise'), rise);
+        gl.uniform1f(lineP.u('u_globe'), globeMode);
+        gl.uniform1f(lineP.u('u_dim'), dim);
+        gl.uniform1f(lineP.u('u_px'), dpr * 0.75);
+        gl.uniform1f(lineP.u('u_flicker'), flicker);
+        gl.uniform3f(lineP.u('u_eye'), ...(globeMode ? (R[2] as V3) : eye));
+        gl.bindVertexArray(s.lineVao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, s.segs);
+      };
+      gl.enable(gl.BLEND);
+      if (cur.mode === 'globe') {
+        gl.disable(gl.DEPTH_TEST);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        drawLines(globe, 1, 1);
+      } else if (scene) {
+        // Shells first so they hide what's behind them, then a faint see-through pass, then the lines that show
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthMask(true);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.useProgram(hullP.p);
+        gl.uniformMatrix4fv(hullP.u('u_mvp'), false, mvp);
+        gl.uniform1f(hullP.u('u_rise'), rise);
+        gl.uniform3f(hullP.u('u_eye'), ...eye);
+        gl.uniform1f(hullP.u('u_flicker'), flicker);
+        gl.bindVertexArray(scene.hullVao);
+        gl.drawArrays(gl.TRIANGLES, 0, scene.tris);
+        gl.depthMask(false);
+        gl.blendFunc(gl.ONE, gl.ONE);
+        gl.disable(gl.DEPTH_TEST);
+        drawLines(scene, 0.18, 0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        drawLines(scene, 1, 0);
+        gl.disable(gl.DEPTH_TEST);
+        gl.useProgram(moteP.p);
+        gl.uniformMatrix4fv(moteP.u('u_mvp'), false, mvp);
+        gl.uniform1f(moteP.u('u_time'), now / 1000);
+        gl.uniform1f(moteP.u('u_px'), dpr * 0.75);
+        gl.uniform1f(moteP.u('u_flicker'), flicker);
+        gl.bindVertexArray(moteVao);
+        gl.drawArrays(gl.POINTS, 0, 160);
+        gl.depthMask(true);
       }
+      gl.disable(gl.BLEND);
+      gl.disable(gl.DEPTH_TEST);
+      gl.bindVertexArray(emptyVao);
+      const pass = (prog: ReturnType<typeof program>, from: typeof scn, to: typeof scn | null) => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, to ? to.fb : null);
+        gl.viewport(0, 0, to ? to.w : gw, to ? to.h : gh);
+        gl.useProgram(prog.p);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, from.tex);
+        gl.uniform1i(prog.u('u_tex'), 0);
+        gl.uniform2f(prog.u('u_texel'), 1 / from.w, 1 / from.h);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      pass(downP, scn, half);
+      pass(downP, half, quarter);
+      pass(upP, quarter, bloom);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, gw, gh);
+      gl.useProgram(screenP.p);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, scn.tex);
+      gl.uniform1i(screenP.u('u_scene'), 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, bloom.tex);
+      gl.uniform1i(screenP.u('u_bloom'), 1);
+      gl.uniform2f(screenP.u('u_res'), gw, gh);
+      gl.uniform1f(screenP.u('u_time'), now / 1000);
+      gl.uniform1f(screenP.u('u_glitch'), glitch);
+      gl.uniform1f(screenP.u('u_calm'), calm ? 1 : 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-      // Lines facing away (the far side of the globe, the back of the city) are dimmer
-      const back = cur.mode === 'globe' ? 0 : -RADIUS * 0.3;
-      for (let k = 0; k < KINDS; k++)
-        for (const near of [false, true]) {
-          ctx.beginPath();
-          for (let e = 0; e < g.e.length; e += 3) {
-            if (g.e[e + 2] !== k) continue;
-            const [a, b] = [g.e[e], g.e[e + 1]];
-            if (isNaN(pz[a]) || isNaN(pz[b])) continue;
-            if (pz[a] + pz[b] > back * 2 !== near) continue;
-            ctx.moveTo(px[a], py[a]);
-            ctx.lineTo(px[b], py[b]);
-          }
-          const strength = (near ? 1 : cur.mode === 'globe' ? 0.16 : 0.45) * flicker;
-          ctx.strokeStyle = COLORS[k];
-          ctx.globalAlpha = strength * 0.22;
-          ctx.lineWidth = k >= LANDMARK ? 4 : 3;
-          ctx.stroke();
-          ctx.globalAlpha = strength * (k === GROUND ? 0.45 : k === BUILDING ? 0.55 : 0.9);
-          ctx.lineWidth = k >= LANDMARK ? 1.3 : 0.8;
-          ctx.stroke();
-        }
-
-      if (cur.mode === 'city') {
-        ctx.fillStyle = '#9fe9ff';
-        for (const m of motes) {
-          m[1] = (m[1] + dt * m[3]) % 130;
-          const [x, y, z] = project(m[0] + cam.tx, m[1], m[2] + cam.tz, -1)!;
-          ctx.globalAlpha = (0.25 + 0.5 * Math.sin((m[1] / 130) * Math.PI)) * flicker;
-          ctx.fillRect(Math.round(x), Math.round(y), z > 0 ? 2 : 1, z > 0 ? 2 : 1);
-        }
-        // The picked spot: a light column and a ring pulsing out from it
-        const s = CITIES[cur.city].spots[sel];
-        if (s) {
-          const r = 6 + ((now / 25) % 18);
-          ctx.strokeStyle = '#e8fbff';
-          ctx.lineWidth = 1.5;
-          ctx.globalAlpha = (1 - (r - 6) / 18) * flicker;
-          ctx.beginPath();
-          for (let i = 0; i <= 24; i++) {
-            const a = (i / 24) * Math.PI * 2;
-            const [x, y] = project(s[2] + Math.cos(a) * r, 0.5, s[3] + Math.sin(a) * r, -1)!;
-            ctx[i ? 'lineTo' : 'moveTo'](x, y);
-          }
-          ctx.stroke();
-          const [x0, y0] = project(s[2], 0, s[3], -1)!;
-          const [x1, y1] = project(s[2], 58, s[3], -1)!;
-          const col = ctx.createLinearGradient(x0, y0, x1, y1);
-          col.addColorStop(0, 'rgba(232,251,255,0.5)');
-          col.addColorStop(1, 'rgba(232,251,255,0)');
-          ctx.strokeStyle = col;
-          ctx.lineWidth = 6;
-          ctx.globalAlpha = flicker;
-          ctx.beginPath();
-          ctx.moveTo(x0, y0);
-          ctx.lineTo(x1, y1);
-          ctx.stroke();
-        }
-      }
-
-      ctx.globalCompositeOperation = 'source-over';
+      // Labels, beacons and the projector beam on the 2D layer above
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      if (glitch) ctx.translate((Math.random() - 0.5) * 8, 0);
       ctx.font = '12px "Fixedsys Excelsior", "Courier New", monospace';
       ctx.textAlign = 'center';
       hits = [];
       if (cur.mode === 'globe') {
         CITIES.forEach((c, i) => {
-          const [x, y, z] = project(...sphere(c.lat, c.lng), -1)!;
-          if (z < 0) return;
+          const p = sphere(c.lat, c.lng);
+          if (p[0] * R[2][0] + p[1] * R[2][1] + p[2] * R[2][2] < 0) return;
+          const [x, y] = project(...p);
           hits.push({ i, x, y });
           const pulse = 3 + 2 * Math.sin(now / 300 + i);
           ctx.globalAlpha = 0.35 * flicker;
@@ -932,29 +924,80 @@ const Nodes: React.FC = () => {
           ctx.textAlign = c.lng < -90 ? 'right' : 'left';
           ctx.fillText(c.short, x + (c.lng < -90 ? -10 : 10), y + 4);
         });
-      } else if (grow === 1) {
-        // Landmark names stay faint so the spots lead
-        for (const [name, mx, my, mz] of CITIES[cur.city].marks) {
-          const [x, y, z] = project(mx, my, mz, -1)!;
-          ctx.fillStyle = '#5fd8ff';
-          ctx.globalAlpha = (sel >= 0 ? 0.25 : z > back ? 0.55 : 0.25) * flicker;
-          ctx.fillText(name, x, y);
+      } else {
+        // The beam from the projector below up to the pad
+        let [l, r, top] = [W, 0, H];
+        for (let i = 0; i < 48; i++) {
+          const ang = (i / 48) * Math.PI * 2;
+          const [x, y] = project(Math.cos(ang) * RADIUS, 0, Math.sin(ang) * RADIUS);
+          [l, r, top] = [Math.min(l, x), Math.max(r, x), Math.min(top, y)];
         }
-        CITIES[cur.city].spots.forEach(([name, , sx, sz], i) => {
-          const [x, y, z] = project(sx, 23, sz, -1)!;
-          hits.push({ i, x, y });
-          const on = i === sel;
-          ctx.fillStyle = on ? '#ffffff' : '#bff4ff';
-          ctx.globalAlpha = (on ? 1 : sel >= 0 ? 0.35 : z > back ? 0.85 : 0.35) * flicker;
-          // Only the picked spot spells out its name; the others show their number, so the middle of town stays readable
-          if (on) ctx.fillText(`[${i + 1}] ${name.toUpperCase()}`, x, y);
-          else {
-            ctx.strokeStyle = ctx.fillStyle;
-            ctx.lineWidth = 1;
-            ctx.strokeRect(Math.round(x) - 8.5, Math.round(y) - 11.5, 17, 15);
-            ctx.fillText(String(i + 1), x, y);
+        const beam = ctx.createLinearGradient(0, H, 0, top);
+        beam.addColorStop(0, 'rgba(95,216,255,0.2)');
+        beam.addColorStop(1, 'rgba(95,216,255,0)');
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = beam;
+        ctx.globalAlpha = Math.min(1, grow * 2);
+        ctx.beginPath();
+        ctx.moveTo(W / 2 - 30, H);
+        ctx.lineTo(l, top + (H - top) * 0.45);
+        ctx.lineTo(r, top + (H - top) * 0.45);
+        ctx.lineTo(W / 2 + 30, H);
+        ctx.fill();
+        // The picked spot: a light column and a ring pulsing out from it
+        const s = scene?.spots[sel];
+        if (s) {
+          const rr = 6 + ((now / 25) % 18);
+          ctx.strokeStyle = '#e8fbff';
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = (1 - (rr - 6) / 18) * flicker;
+          ctx.beginPath();
+          for (let i = 0; i <= 24; i++) {
+            const ang = (i / 24) * Math.PI * 2;
+            const [x, y] = project(s.x + Math.cos(ang) * rr, 0.5, s.z + Math.sin(ang) * rr);
+            ctx[i ? 'lineTo' : 'moveTo'](x, y);
           }
-        });
+          ctx.stroke();
+          const [x0, y0] = project(s.x, 0, s.z);
+          const [x1, y1] = project(s.x, 60, s.z);
+          const col = ctx.createLinearGradient(x0, y0, x1, y1);
+          col.addColorStop(0, 'rgba(232,251,255,0.5)');
+          col.addColorStop(1, 'rgba(232,251,255,0)');
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 6;
+          ctx.globalAlpha = flicker;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        if (scene && grow === 1) {
+          // Landmark names stay faint so the spots lead
+          ctx.fillStyle = '#5fd8ff';
+          for (const m of scene.marks) {
+            const [x, y, w] = project(...m.at);
+            if (w <= 1) continue;
+            ctx.globalAlpha = (sel >= 0 ? 0.25 : 0.6) * flicker;
+            ctx.fillText(m.name, x, y);
+          }
+          scene.spots.forEach((p, i) => {
+            const [x, y, w] = project(p.x, 23, p.z);
+            if (w <= 1) return;
+            hits.push({ i, x, y });
+            const on = i === sel;
+            ctx.fillStyle = on ? '#ffffff' : '#bff4ff';
+            ctx.globalAlpha = (on ? 1 : sel >= 0 ? 0.35 : 0.85) * flicker;
+            // Only the picked spot spells out its name; the others show their number, so the middle of town stays readable
+            if (on) ctx.fillText(`[${i + 1}] ${CITIES[cur.city].spots[i][0].toUpperCase()}`, x, y);
+            else {
+              ctx.strokeStyle = ctx.fillStyle;
+              ctx.lineWidth = 1;
+              ctx.strokeRect(Math.round(x) - 8.5, Math.round(y) - 11.5, 17, 15);
+              ctx.fillText(String(i + 1), x, y);
+            }
+          });
+        }
       }
       ctx.globalAlpha = 1;
     };
@@ -989,7 +1032,7 @@ const Nodes: React.FC = () => {
       }
       moved += Math.abs(dx) + Math.abs(dy);
       cam.yaw += dx * 0.008;
-      cam.pitch = Math.max(cur.mode === 'globe' ? -1.2 : 0.05, Math.min(cur.mode === 'globe' ? 1.2 : 1.35, cam.pitch + dy * 0.006));
+      cam.pitch = Math.max(cur.mode === 'globe' ? -1.2 : 0.12, Math.min(cur.mode === 'globe' ? 1.2 : 1.35, cam.pitch + dy * 0.006));
     };
     const up = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
@@ -1008,12 +1051,12 @@ const Nodes: React.FC = () => {
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
     canvas.addEventListener('wheel', wheel, { passive: false });
-    zoomBy.current = zoom;
     const clock = setInterval(() => tick((t) => t + 1), 20000);
     return () => {
       cancelAnimationFrame(raf);
       clearInterval(clock);
       resize.disconnect();
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
   }, []);
 
@@ -1023,7 +1066,7 @@ const Nodes: React.FC = () => {
 
   return (
     <div
-      className="nodes relative w-full h-full overflow-hidden bg-[#020a12] text-[14px] leading-tight text-[#bff4ff] select-none outline-none"
+      className="nodes relative w-full h-full overflow-hidden bg-[#02060d] text-[14px] leading-tight text-[#bff4ff] select-none outline-none"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'ArrowRight') step(1);
@@ -1039,15 +1082,10 @@ const Nodes: React.FC = () => {
           src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
         }
         .nodes, .nodes button { font-family: 'Fixedsys Excelsior', 'Courier New', monospace; -webkit-font-smoothing: none; }
-        .nodes .roll { animation: nodes-roll 7s linear infinite; }
-        @keyframes nodes-roll { from { transform: translateY(-20%); } to { transform: translateY(520%); } }
-        @media (prefers-reduced-motion: reduce) { .nodes .roll { display: none; } }
       `}</style>
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_70%,rgba(40,140,200,0.25),transparent_65%)]" />
+      <canvas ref={glRef} className="absolute inset-0 w-full h-full" />
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full touch-none cursor-grab active:cursor-grabbing" />
-      {/* Old-screen look: scanlines, a bright band rolling down, dark corners */}
-      <div className="absolute inset-0 pointer-events-none opacity-40 bg-[repeating-linear-gradient(0deg,transparent_0,transparent_2px,rgba(0,0,0,0.6)_3px)]" />
-      <div className="roll absolute inset-x-0 top-0 h-1/5 pointer-events-none bg-[linear-gradient(transparent,rgba(95,216,255,0.06),transparent)]" />
+      {/* Dark corners, like the edge of a tube */}
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(0,0,0,0.55))]" />
 
       <div className="absolute top-2 left-3 right-3 flex items-start justify-between gap-2 pointer-events-none">
@@ -1062,8 +1100,11 @@ const Nodes: React.FC = () => {
                 NODE {String(view.city + 1).padStart(2, '0')}/{String(CITIES.length).padStart(2, '0')} · {Math.abs(city.lat).toFixed(2)}°
                 {city.lat < 0 ? 'S' : 'N'} {Math.abs(city.lng).toFixed(2)}°{city.lng < 0 ? 'W' : 'E'} · {time(city.tz)}
               </div>
+              {status === 'loading' && <div className="mt-1 animate-pulse">RECEIVING TRANSMISSION...</div>}
+              {status === 'lost' && <div className="mt-1">SIGNAL LOST. CHECK YOUR CONNECTION.</div>}
             </>
           )}
+          {status === 'no-webgl' && <div className="mt-1">This device can't show the hologram (no WebGL2).</div>}
         </div>
         <div className="flex gap-1 pointer-events-auto">
           <button className={btn} onClick={() => zoomBy.current(0.8)} aria-label="Zoom in">
@@ -1082,6 +1123,7 @@ const Nodes: React.FC = () => {
               [{spot + 1}] {city.spots[spot][0].toUpperCase()}
             </div>
             <div className="opacity-80">{city.spots[spot][1]}</div>
+            {away[spot] && <div className="opacity-60">Off the map: {away[spot]}</div>}
           </div>
         )}
         {view.mode === 'city' && (
@@ -1119,6 +1161,11 @@ const Nodes: React.FC = () => {
             ›
           </button>
         </div>
+        {view.mode === 'city' && (
+          <div className="text-[10px] opacity-50">
+            Buildings © OpenStreetMap contributors, Overture Maps Foundation (ODbL), Google Open Buildings (CC BY 4.0)
+          </div>
+        )}
       </div>
     </div>
   );
