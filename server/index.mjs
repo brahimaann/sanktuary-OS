@@ -3588,7 +3588,21 @@ const ownPostView = (p, full) => ({
   publication: 'CITIES',
   release: p.release || null,
   date: p.published || p.created,
+  people: (p.people || [])
+    .map((i) => blogDb.people?.[i])
+    .filter((x) => x?.published && !x.deleted)
+    .map((x) => personView(x)),
   ...(full ? { body: p.body } : {}),
+});
+// An interview subject's page under Heart of the Cities (/cities/heart/<slug>): not an account, just the person as
+// CITIES met them, with portraits, a few lines of info, the interview or a note, and every story they're in
+const personView = (x, full) => ({
+  slug: x.slug,
+  name: x.name,
+  role: x.role || '',
+  portrait: x.portraits?.[0] || null,
+  url: `/cities/heart/${x.slug}`,
+  ...(full ? { info: x.info || '', note: x.note || '', portraits: x.portraits || [], links: x.links || [] } : {}),
 });
 
 // The mood lanes of a monthly moodboard: a drop belongs to the lane whose title is nearest it across the board
@@ -3711,6 +3725,16 @@ async function blogApi(req, res, url) {
     const p = Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === id || x.id === id)) || fail(404, 'No such post');
     return json(res, ownPostView(p, true));
   }
+  if (req.method === 'GET' && what === 'people') {
+    const live = Object.values(db.people || {}).filter((x) => x.published && !x.deleted);
+    if (!id) return json(res, { people: live.sort((a, b) => a.name.localeCompare(b.name)).map((x) => personView(x)) });
+    const x = live.find((x) => x.slug === id) || fail(404, 'No such person');
+    const stories = Object.values(db.posts)
+      .filter((p) => p.published && !p.deleted && (p.people || []).includes(x.id))
+      .sort((a, b) => b.published.localeCompare(a.published))
+      .map((p) => ownPostView(p));
+    return json(res, { ...personView(x, true), stories });
+  }
   if (req.method === 'GET' && what === 'images') return stream(req, res, url.searchParams, join(DATA, 'blog', 'images', safeName(id)));
 
   // Writing: any member starts drafts (the /write page) and sends them in; admins publish and manage the rest
@@ -3737,6 +3761,9 @@ async function blogApi(req, res, url) {
       posts: Object.values(db.posts)
         .filter((p) => !p.deleted)
         .sort((a, b) => b.created.localeCompare(a.created)),
+      people: Object.values(db.people || {})
+        .filter((x) => !x.deleted)
+        .sort((a, b) => a.name.localeCompare(b.name)),
     });
   }
   if (what === 'feeds' && req.method === 'POST') {
@@ -3802,6 +3829,55 @@ async function blogApi(req, res, url) {
       .toFile(join(DATA, 'blog', 'images', `${id}.webp`));
     return json(res, { url: `/api/blog/images/${id}.webp` });
   }
+  if (what === 'people') {
+    // Admins add the people CITIES interviews; a page goes public at /cities/heart/<name> once published
+    const input = req.method === 'POST' || req.method === 'PATCH' ? await jsonBody(req) : {};
+    const text = (v, n) =>
+      String(v ?? '')
+        .trim()
+        .slice(0, n);
+    const list = (v) => (Array.isArray(v) ? v.slice(0, 12) : []);
+    const apply = (x) => {
+      if (input.name !== undefined) x.name = text(input.name, 100) || x.name;
+      if (input.role !== undefined) x.role = text(input.role, 160);
+      if (input.info !== undefined) x.info = text(input.info, 5000);
+      if (input.note !== undefined) x.note = text(input.note, 50_000);
+      if (input.portraits !== undefined) x.portraits = list(input.portraits).filter((u) => /^\/api\/blog\/images\/[\w-]+\.webp$/.test(u));
+      if (input.links !== undefined)
+        x.links = list(input.links)
+          .map((v) => publicLink('website', v))
+          .filter(Boolean);
+      if (input.published !== undefined) x.published = !!input.published;
+      // Like posts, the address is fixed once the page is first published, so shared links keep working
+      if (x.published && !x.slug) {
+        const base = slugify(x.name) || x.id;
+        x.slug = Object.values(db.people).some((o) => o.slug === base) ? `${base}-${x.id.slice(0, 4)}` : base;
+      }
+      x.updated = new Date().toISOString();
+    };
+    db.people ??= {};
+    if (req.method === 'POST' && !id) {
+      const x = {
+        id: randomUUID().slice(0, 10),
+        name: 'New person',
+        portraits: [],
+        links: [],
+        published: false,
+        created: new Date().toISOString(),
+      };
+      apply(x);
+      db.people[x.id] = x;
+      saveBlog();
+      return json(res, x);
+    }
+    const x = (own(db.people, id) && !db.people[id].deleted && db.people[id]) || fail(404, 'No such person');
+    if (req.method === 'PATCH') apply(x);
+    else if (req.method === 'DELETE')
+      x.deleted = new Date().toISOString(); // hidden, kept in the file
+    else fail(404, 'Unknown blog action');
+    saveBlog();
+    return json(res, x);
+  }
   if (what === 'posts') {
     const input = req.method === 'POST' || req.method === 'PATCH' ? await jsonBody(req) : {};
     const apply = (p) => {
@@ -3811,6 +3887,9 @@ async function blogApi(req, res, url) {
       if (input.image !== undefined) p.image = input.image && /^\/api\/blog\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
       if (input.line !== undefined) p.line = BLOG_LINES.includes(input.line) ? input.line : 'heart';
       if (input.kind !== undefined) p.kind = HEART_KINDS.includes(input.kind) ? input.kind : null;
+      // Who the story is about: links it to their page under Heart of the Cities, and theirs back to it
+      if (input.people !== undefined)
+        p.people = (Array.isArray(input.people) ? input.people : []).filter((i) => own(db.people || {}, i)).slice(0, 20);
       // The preface: one engaging line under the title, and what a shared link shows
       if (input.preface !== undefined)
         p.preface = String(input.preface ?? '')
@@ -5180,6 +5259,14 @@ async function blogPage(req, res, url) {
   else if (a === 'moodboard' && /^\d{4}-(0[1-9]|1[0-2])$/.test(b)) {
     const name = new Date(`${b}-15`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     meta = { title: `${name} Moodboard · CITIES`, text: BLOG_SECTIONS.moodboard[1], image: null };
+  } else if (a === 'heart' && b) {
+    const x = Object.values((await loadBlog()).people || {}).find((x) => x.published && !x.deleted && x.slug === b);
+    if (x)
+      meta = {
+        title: `${x.name} · CITIES`,
+        text: [x.role, x.info].filter(Boolean).join('. ').slice(0, 200) || BLOG_SECTIONS.heart[1],
+        image: x.portraits?.[0] || null,
+      };
   } else if (a) {
     const db = await loadBlog();
     const own = !b && Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === a || x.id === a));

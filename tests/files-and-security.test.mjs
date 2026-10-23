@@ -1333,6 +1333,35 @@ try {
   );
   check('post readable by its address', (await (await fetch(B + '/api/blog/post/why-culture')).json()).title === 'Why culture');
   check('two-part blog addresses load the page', (await fetch(B + '/cities/boroma/what-does-change-look-like')).status === 200);
+  // Interview subjects: admin-made pages under /cities/heart/<name>, hidden until published, linked both ways with posts
+  check('members cannot add interview subjects', (await call('bob', '/api/blog/people', 'POST', { name: 'X' })).status === 403);
+  const subject = JSON.parse((await call('alice', '/api/blog/people', 'POST', { name: 'Ayo Diallo', role: 'Painter' })).text);
+  check('unpublished subject page is hidden', !(await (await fetch(B + '/api/blog/people')).json()).people.length);
+  await call('alice', `/api/blog/people/${subject.id}`, 'PATCH', {
+    published: true,
+    portraits: ['/api/blog/images/abc.webp', 'https://evil.example/x.png'],
+    links: ['instagram.com/ayo', 'javascript:alert(1)'],
+  });
+  await call('alice', `/api/blog/posts/${draft.id}`, 'PATCH', { people: [subject.id, 'nobody'] });
+  const subjectPage = await (await fetch(B + '/api/blog/people/ayo-diallo')).json();
+  check(
+    'published subject has a page with only safe portraits and links',
+    subjectPage.name === 'Ayo Diallo' &&
+      subjectPage.portraits.length === 1 &&
+      subjectPage.links.length === 1 &&
+      subjectPage.links[0] === 'https://instagram.com/ayo' &&
+      subjectPage.stories.some((p) => p.url === '/cities/why-culture'),
+  );
+  check(
+    'the post links back to the subject',
+    (await (await fetch(B + '/api/blog/post/why-culture')).json()).people.map((x) => x.url).join() === '/cities/heart/ayo-diallo',
+  );
+  check(
+    'subject page shares with their name',
+    (await (await fetch(B + '/cities/heart/ayo-diallo')).text()).includes('Ayo Diallo · CITIES'),
+  );
+  await call('alice', `/api/blog/people/${subject.id}`, 'DELETE');
+  check('removed subject page is gone', (await fetch(B + '/api/blog/people/ayo-diallo')).status === 404);
   const notesWall = await fetch(B + '/api/blog/notes');
   check('notes wall reads without an account', notesWall.status === 200 && Array.isArray((await notesWall.json()).notes));
   const titledNotes = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Notes', body: 'x' })).text);
