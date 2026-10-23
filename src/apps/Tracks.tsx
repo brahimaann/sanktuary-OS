@@ -638,6 +638,34 @@ const TrackPage: React.FC<{
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [bmiOpen, setBmiOpen] = useState(false);
   const { me } = useMe();
+  const syncKit = async () => {
+    try {
+      const l = await api('/api/links', {
+        method: 'POST',
+        body: JSON.stringify({ space: t.stems!.space, path: t.stems!.path, days: 30, download: true }),
+      });
+      const list = (rows: { name: string; share: number }[] | undefined, extra: (r: any) => string) =>
+        (rows || []).map((r) => `${r.name} (${extra(r)}) ${r.share}%`).join(', ');
+      const text = [
+        `"${t.title}"${release.artist ? ` by ${release.artist}` : ''}`,
+        [t.bpm && `${t.bpm} BPM`, t.key, t.explicit === true ? 'Explicit' : t.explicit === false ? 'Clean' : '']
+          .filter(Boolean)
+          .join(' · '),
+        t.bmi?.isrc && `ISRC ${t.bmi.isrc}`,
+        t.bmi?.writers.length && `Writers: ${list(t.bmi.writers, (w) => w.pro)}`,
+        t.master?.splits.length && `Master: ${list(t.master.splits, (r) => r.role)}`,
+        `Stems: ${location.origin}${l.url} (download link, works for 30 days)`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      await navigator.clipboard.writeText(text).then(
+        () => setMsg('Sync kit copied: paste it into the pitch.'),
+        () => dialog.alert(text, { title: 'Sync kit' }),
+      );
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!focus) return;
@@ -835,6 +863,15 @@ const TrackPage: React.FC<{
           {t.stems && (
             <button style={button} onClick={() => openFolder(t.stems!)}>
               <IconLabel icon="external">Open</IconLabel>
+            </button>
+          )}
+          {t.stems && (
+            <button
+              style={button}
+              onClick={syncKit}
+              title="A 30-day download link to the stems plus the song's facts and splits, to paste into a sync pitch"
+            >
+              Copy sync kit
             </button>
           )}
           <button style={button} onClick={() => setPicking('stems')}>
