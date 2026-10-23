@@ -6,6 +6,7 @@ import FilePicker, { FileRef } from '../components/FilePicker';
 import { isTouch, saveFilesToDevice, saveToDevice } from './fileTypes';
 import { uploadFiles } from '../utils/upload';
 import { drawText, TEXT_STYLES, TextOverlayItem, TextStyle } from '../utils/captions';
+import { filmLut, isLutLook, LUT_SIZE } from './filmLuts';
 
 /**
  * Darkroom: Professional retro image grading & degradation suite.
@@ -25,7 +26,7 @@ interface Props {
 export interface FilterPreset {
   id: number;
   name: string;
-  category: 'swag' | 'goth' | 'camera';
+  category: 'swag' | 'goth' | 'camera' | 'film';
   desc: string;
 }
 
@@ -58,6 +59,12 @@ export const PRESETS: FilterPreset[] = [
   { id: 22, name: 'Tungsten Cam', category: 'camera', desc: 'Dark, warm, soft camcorder under one bare bulb' },
   { id: 23, name: 'Cold VHS', category: 'goth', desc: 'Blue-cyan tape, washed blacks, soft and cold' },
   { id: 21, name: 'Faded IG', category: 'swag', desc: 'Old Instagram fade: creamy lifted blacks, soft warm highlights' },
+  // Film stocks (3D LUTs built in filmLuts.ts)
+  { id: 24, name: 'Portra 400', category: 'film', desc: 'Warm, soft colour negative: glowing skin, olive greens, cyan-leaning blues' },
+  { id: 25, name: 'Kodachrome', category: 'film', desc: 'Dense slide film: deep reds and yellows, dark blues, black blacks' },
+  { id: 26, name: 'Cinestill 800T', category: 'film', desc: 'Tungsten cine film: cool, teal shadows, red halation around lights' },
+  { id: 27, name: 'Classic Chrome', category: 'film', desc: 'Muted documentary colour: hard shadows, teal blues, red that holds' },
+  { id: 28, name: 'Velvia 50', category: 'film', desc: 'Punchy slide film: rich greens and reds, deep blacks' },
 ];
 
 // ── Collage Presets & Types ──
@@ -343,6 +350,8 @@ uniform float uNoise;
 uniform float uSharpen;
 uniform float uPixel2x;
 uniform float uTime;
+uniform sampler2D lut;
+uniform float uLut;
 
 varying vec2 uv;
 
@@ -377,6 +386,31 @@ vec3 shoulder(vec3 c) {
   c += (vec3(over.r + over.g + over.b) - over) * 0.15;
   vec3 x = max(c - 0.95, 0.0);
   return min(c, 0.95 + 0.05 * x / (x + 0.0125)); // 1.0 lands on 0.99, anything brighter approaches 1.0
+}
+
+// Film look: 33^3 LUT packed as 33 slices side by side (blue picks the slice), blended across two slices
+vec3 lut3d(vec3 c) {
+  const float N = ${LUT_SIZE}.0;
+  c = clamp(c, 0.0, 1.0) * (N - 1.0);
+  float b0 = floor(c.b);
+  vec2 rg = (c.rg + 0.5) / vec2(N * N, N);
+  vec3 s0 = texture2D(lut, rg + vec2(b0 / N, 0.0)).rgb;
+  vec3 s1 = texture2D(lut, rg + vec2(min(b0 + 1.0, N - 1.0) / N, 0.0)).rgb;
+  return mix(s0, s1, c.b - b0);
+}
+
+// Halation: light from bright spots bounces off the film base back into the red layer, so lights get a red-orange
+// fringe. A ring of samples around the pixel, rotated per pixel so it reads as a glow, not copies.
+vec3 halation(vec2 st, float big) {
+  float a = hash12(gl_FragCoord.xy) * 6.2831853;
+  vec3 h = vec3(0.0);
+  for (int i = 0; i < 12; i++) {
+    float t = a + float(i) * 0.5236;
+    float r = (1.0 + mod(float(i), 3.0)) * big / 300.0;
+    vec3 s = texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb;
+    h += srgb2lin(s) * smoothstep(0.7, 1.0, luma(s));
+  }
+  return h / 12.0;
 }
 
 // Interleaved gradient noise: half a code value of dither so gradients and vignettes don't band in 8 bits
@@ -754,7 +788,7 @@ void main() {
     c = texture2D(img, snap(st, res / radius)).rgb;
   }
 
-  // 4. Photometric Color Grading Presets (1-18)
+  // 4. Photometric Color Grading Presets (1-23 in code, film stocks from the LUT)
   vec3 graded = c;
   if (preset == 1) graded = nashville_grade(c);
   else if (preset == 2) graded = chief_keef_grade(c, st);
@@ -779,6 +813,11 @@ void main() {
   else if (preset == 21) graded = faded_ig_grade(c);
   else if (preset == 22) graded = tungsten_grade(c, st, big);
   else if (preset == 23) graded = cold_vhs_grade(c, st, big);
+  else if (uLut > 0.5) graded = lut3d(c);
+  if (preset == 26) { // the fringe shows around lights, not on top of them
+    float glowOn = 1.0 - 0.85 * smoothstep(0.6, 1.0, luma(c));
+    graded = lin2srgb(srgb2lin(graded) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 1.4 * glowOn);
+  }
 
   c = mix(c, graded, amount);
 
@@ -839,6 +878,7 @@ const TABS = [
   ['collage', 'Collage'],
   ['swag', 'Swag Filters'],
   ['goth', 'Goth Filters'],
+  ['film', 'Film Stocks'],
   ['jpeg', 'JPEG Degradation'],
   ['ccd', 'CCD Bloom'],
   ['camera', '1-Click Cameras'],
@@ -863,7 +903,7 @@ const forget = (vs: Version[]) => vs.forEach((v) => v.img.src.startsWith('blob:'
 const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const { getToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram } | null>(null);
+  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram; lut: number } | null>(null);
 
   const [history, setHistory] = useState<Version[]>([]);
   const [pos, setPos] = useState(0);
@@ -1372,7 +1412,14 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_S, ctx.CLAMP_TO_EDGE);
       ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_T, ctx.CLAMP_TO_EDGE);
       ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_MIN_FILTER, ctx.LINEAR);
-      glRef.current = { ctx, prog };
+      // film-look LUT on texture unit 1 (filled when a film look is picked); the photo stays on unit 0
+      ctx.activeTexture(ctx.TEXTURE1);
+      ctx.bindTexture(ctx.TEXTURE_2D, ctx.createTexture());
+      for (const k of [ctx.TEXTURE_WRAP_S, ctx.TEXTURE_WRAP_T]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.CLAMP_TO_EDGE);
+      for (const k of [ctx.TEXTURE_MIN_FILTER, ctx.TEXTURE_MAG_FILTER]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.LINEAR);
+      ctx.activeTexture(ctx.TEXTURE0);
+      ctx.uniform1i(ctx.getUniformLocation(prog, 'lut'), 1);
+      glRef.current = { ctx, prog, lut: 0 };
     }
     const { ctx } = glRef.current;
     const [w, h] = dims(source);
@@ -1447,6 +1494,16 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
 
     ctx.uniform2f(u('res'), canvasRef.current.width, canvasRef.current.height);
     ctx.uniform1i(u('preset'), p.preset);
+    ctx.uniform1f(u('uLut'), isLutLook(p.preset) ? 1 : 0);
+    if (isLutLook(p.preset) && glRef.current.lut !== p.preset) {
+      glRef.current.lut = p.preset;
+      ctx.activeTexture(ctx.TEXTURE1);
+      ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, false);
+      const n = LUT_SIZE;
+      ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, n * n, n, 0, ctx.RGBA, ctx.UNSIGNED_BYTE, filmLut(p.preset));
+      ctx.pixelStorei(ctx.UNPACK_FLIP_Y_WEBGL, true);
+      ctx.activeTexture(ctx.TEXTURE0);
+    }
     ctx.uniform1f(u('amount'), p.amount);
     ctx.uniform1f(u('contrast'), p.contrast);
     ctx.uniform1f(u('warmth'), p.warmth);
@@ -2295,6 +2352,19 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   {slider('Contrast', 'contrast', 0.5, 2, 0.01, `${params.contrast.toFixed(2)}x`)}
                   {slider('Warmth', 'warmth', -1, 1, 0.02, params.warmth.toFixed(2))}
                   {slider('Fade (lifted blacks)', 'fade', 0, 1, 0.01, pct(params.fade))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Film Stocks ── */}
+            {activeTab === 'film' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {presetButtons('film')}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
+                  {strength}
+                  {slider('Grain', 'grain', 0, 1, 0.01, pct(params.grain))}
+                  {slider('Contrast', 'contrast', 0.5, 2, 0.01, `${params.contrast.toFixed(2)}x`)}
+                  {slider('Warmth', 'warmth', -1, 1, 0.02, params.warmth.toFixed(2))}
                 </div>
               </div>
             )}
