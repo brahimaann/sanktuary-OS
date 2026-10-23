@@ -1946,6 +1946,19 @@ type BlogPost = {
   release?: string | null;
   owner?: string;
   submitted?: string;
+  people?: string[];
+};
+/** Someone CITIES interviewed: their page at /cities/heart/<slug> (not an account) */
+type Person = {
+  id: string;
+  name: string;
+  slug?: string;
+  role?: string;
+  info?: string;
+  note?: string;
+  portraits: string[];
+  links: string[];
+  published: boolean;
 };
 type Feed = { url: string; name: string; posts: number; error: string | null };
 type Channel = { id: string; name: string; videos: number; error: string | null };
@@ -1956,11 +1969,12 @@ const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spot
  *  the Substack writers under Essays and the YouTube channels under Videos. */
 const BlogTab: React.FC = () => {
   const api = useApi();
-  const [data, setData] = useState<{ feeds: Feed[]; channels: Channel[]; posts: BlogPost[] } | null>(null);
+  const [data, setData] = useState<{ feeds: Feed[]; channels: Channel[]; posts: BlogPost[]; people: Person[] } | null>(null);
   const [releases, setReleases] = useState<{ slug: string | null; title: string }[]>([]);
   const [feed, setFeed] = useState('');
   const [channel, setChannel] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const [personId, setPersonId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const load = useCallback(() => api('/api/blog/admin').then(setData, (e) => setMsg(e.message)), [api]);
   useEffect(() => {
@@ -1975,15 +1989,18 @@ const BlogTab: React.FC = () => {
   const run = (p: Promise<unknown>) => p.then(load, (e) => setMsg(e.message));
   const post = data?.posts.find((p) => p.id === openId);
   const patch = (body: object) => run(api(`/api/blog/posts/${openId}`, { method: 'PATCH', body: JSON.stringify(body) }));
-  const cover = async (file?: File) => {
+  const person = data?.people.find((x) => x.id === personId);
+  const patchPerson = (body: object) => run(api(`/api/blog/people/${personId}`, { method: 'PATCH', body: JSON.stringify(body) }));
+  const upload = async (file: File | undefined, then: (url: string) => void) => {
     if (!file) return;
     try {
       const { url } = await api(`/api/blog/images?name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file });
-      patch({ image: url });
+      then(url);
     } catch (e) {
       setMsg((e as Error).message);
     }
   };
+  const cover = (file?: File) => upload(file, (url) => patch({ image: url }));
   if (!data) return <div>{msg || 'Loading...'}</div>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -2157,6 +2174,27 @@ const BlogTab: React.FC = () => {
               defaultValue={post.author}
               onBlur={(e) => e.target.value !== post.author && patch({ author: e.target.value })}
             />
+            {!!data.people.length && (
+              <>
+                People
+                <span style={row}>
+                  {data.people.map((x) => (
+                    <label key={x.id}>
+                      <input
+                        type="checkbox"
+                        checked={!!post.people?.includes(x.id)}
+                        onChange={(e) =>
+                          patch({
+                            people: e.target.checked ? [...(post.people || []), x.id] : (post.people || []).filter((i) => i !== x.id),
+                          })
+                        }
+                      />{' '}
+                      {x.name}
+                    </label>
+                  ))}
+                </span>
+              </>
+            )}
             Cover
             <span style={row}>
               {post.image ? <img src={post.image} alt="" style={{ height: 48, border: '1px solid #808080' }} /> : 'none'}
@@ -2208,6 +2246,145 @@ const BlogTab: React.FC = () => {
               }
             >
               Remove post
+            </button>
+          </div>
+        </fieldset>
+      )}
+      <fieldset style={fieldset}>
+        <legend>People (interview subjects)</legend>
+        <p style={{ ...hint, marginTop: 0 }}>
+          Everyone CITIES interviews gets a page under Heart of the Cities: portraits, a few lines about them, the interview or a note, and
+          every post you tick them on.
+        </p>
+        <div style={{ marginBottom: 6 }}>
+          <button
+            style={button}
+            onClick={() =>
+              api('/api/blog/people', { method: 'POST', body: JSON.stringify({}) }).then(
+                (x: Person) => (setPersonId(x.id), load()),
+                (e) => setMsg(e.message),
+              )
+            }
+          >
+            New person
+          </button>
+        </div>
+        {data.people.map((x) => (
+          <div
+            key={x.id}
+            onClick={() => setPersonId(x.id === personId ? null : x.id)}
+            style={{
+              padding: '3px 6px',
+              cursor: 'default',
+              background: x.id === personId ? '#000080' : '#fff',
+              color: x.id === personId ? '#fff' : '#000',
+              borderBottom: '1px solid #eee',
+            }}
+          >
+            <b>{x.name}</b>
+            {x.role && ` · ${x.role}`} · {x.published ? 'published' : 'draft'} · in{' '}
+            {data.posts.filter((p) => p.people?.includes(x.id)).length} posts
+          </div>
+        ))}
+        {!data.people.length && <div style={{ color: '#555' }}>No one yet.</div>}
+      </fieldset>
+      {person && (
+        <fieldset key={person.id} style={fieldset}>
+          <legend>Editing: {person.name}</legend>
+          <label style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+            Name
+            <input
+              style={input}
+              defaultValue={person.name}
+              onBlur={(e) => e.target.value !== person.name && patchPerson({ name: e.target.value })}
+            />
+            Role
+            <input
+              style={input}
+              maxLength={160}
+              placeholder="What they do and where, e.g. Painter, North Minneapolis"
+              defaultValue={person.role || ''}
+              onBlur={(e) => e.target.value !== (person.role || '') && patchPerson({ role: e.target.value })}
+            />
+            Info
+            <textarea
+              style={{ ...input, minHeight: 60, resize: 'vertical' }}
+              placeholder="A few lines about who they are"
+              defaultValue={person.info || ''}
+              onBlur={(e) => e.target.value !== (person.info || '') && patchPerson({ info: e.target.value })}
+            />
+            Links
+            <textarea
+              style={{ ...input, minHeight: 40, resize: 'vertical' }}
+              placeholder="One per line: Instagram, website, Spotify..."
+              defaultValue={person.links.join('\n')}
+              onBlur={(e) => patchPerson({ links: e.target.value.split('\n').filter((l) => l.trim()) })}
+            />
+            Portraits
+            <span style={row}>
+              {person.portraits.map((u) => (
+                <span key={u} style={{ position: 'relative' }}>
+                  <img src={u} alt="" style={{ height: 64, border: '1px solid #808080', display: 'block' }} />
+                  <button
+                    style={{ ...button, position: 'absolute', top: 0, right: 0, padding: '0 4px', minHeight: 0 }}
+                    title="Remove"
+                    onClick={() => patchPerson({ portraits: person.portraits.filter((x) => x !== u) })}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <label style={{ ...button, display: 'inline-block' }}>
+                Add picture...
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => (
+                    upload(e.target.files?.[0], (url) => patchPerson({ portraits: [...person.portraits, url] })),
+                    (e.target.value = '')
+                  )}
+                />
+              </label>
+            </span>
+          </label>
+          <textarea
+            style={{
+              ...input,
+              width: '100%',
+              minHeight: 160,
+              resize: 'vertical',
+              fontFamily: 'Georgia, serif',
+              fontSize: 14,
+              lineHeight: 1.5,
+            }}
+            defaultValue={person.note || ''}
+            placeholder="The interview, or a note about them. Same as posts: a blank line between paragraphs; a line that is just an uploaded photo's address shows the photo."
+            onBlur={(e) => e.target.value !== (person.note || '') && patchPerson({ note: e.target.value })}
+          />
+          <div style={{ ...row, marginTop: 6 }}>
+            <button style={{ ...button, fontWeight: 700 }} onClick={() => patchPerson({ published: !person.published })}>
+              {person.published ? 'Unpublish (back to draft)' : 'Publish'}
+            </button>
+            {person.published && (
+              <a
+                href={`/cities/heart/${person.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...button, textDecoration: 'none', color: '#000' }}
+              >
+                View on CITIES
+              </a>
+            )}
+            <span style={{ flex: 1 }} />
+            <button
+              style={button}
+              onClick={async () =>
+                (await dialog.confirm(`Remove ${person.name}'s page? It's hidden, not destroyed.`, { icon: 'warning' })) &&
+                run(api(`/api/blog/people/${person.id}`, { method: 'DELETE' }).then(() => setPersonId(null)))
+              }
+            >
+              Remove person
             </button>
           </div>
         </fieldset>

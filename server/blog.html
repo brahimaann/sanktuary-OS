@@ -492,6 +492,86 @@
         height: 100%;
         border: 0;
       }
+      /* Heart of the Cities: the people CITIES has interviewed, each with a page of their own */
+      .people {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .face {
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        color: inherit;
+        text-decoration: none;
+        font:
+          13px Tahoma,
+          Arial,
+          sans-serif;
+      }
+      .face:hover {
+        background: #f0f0ff;
+      }
+      .face img,
+      .face .blank {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4/5;
+        object-fit: cover;
+        background: #ddd;
+      }
+      .face > div {
+        padding: 4px 6px;
+      }
+      .face .meta {
+        margin: 0;
+      }
+      .portraits {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 6px;
+        margin: 12px 0;
+      }
+      .portraits img {
+        width: 100%;
+        aspect-ratio: 4/5;
+        object-fit: cover;
+        border: 1px solid #808080;
+      }
+      .portraits img:first-child {
+        grid-column: 1 / -1;
+        aspect-ratio: auto;
+        max-height: 560px;
+      }
+      .info {
+        font:
+          14px/1.5 Tahoma,
+          Arial,
+          sans-serif;
+        background: #f4f4f4;
+        border: 2px solid;
+        border-color: #fff #808080 #808080 #fff;
+        padding: 10px 12px;
+        margin-bottom: 16px;
+      }
+      .info p {
+        margin: 0 0 8px;
+      }
+      .info a {
+        color: var(--navy);
+        margin-right: 10px;
+      }
+      .reader h3 {
+        font:
+          700 13px Tahoma,
+          Arial,
+          sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #555;
+        margin: 22px 0 8px;
+      }
       @media (max-width: 520px) {
         .post {
           flex-direction: column;
@@ -557,6 +637,7 @@
         } else
           bar.innerHTML = `<span>${{ heart: 'Profiles, case studies and spotlights from the Twin Cities arts scene.', 'field-notes': 'Straight from the field: shoots, sessions and shows.' }[section]}</span>`;
         const shown = inSection.filter((p) => section !== 'essays' || !filter || p.publication === filter);
+        const faces = section === 'heart' && people.length ? `<div class="people">${people.map(face).join('')}</div>` : '';
         // Heart of the Cities opens with the magazine
         const magazine =
           section === 'heart'
@@ -566,6 +647,7 @@
             : '';
         app.innerHTML =
           magazine +
+            faces +
             shown
               .map(
                 (p) => `<a class="post" href="${esc(p.url)}" data-nav>
@@ -622,6 +704,29 @@
           ${songs ? `<ol>${songs}</ol>` : ''}</div>`;
       }
 
+      let people = [];
+      const face = (x) =>
+        `<a class="face" href="${esc(x.url)}" data-nav>${x.portrait ? `<img src="${esc(x.portrait)}" alt="" loading="lazy">` : '<span class="blank"></span>'}<div><b>${esc(x.name)}</b>${x.role ? `<div class="meta">${esc(x.role)}</div>` : ''}</div></a>`;
+
+      // An interview subject's page: portraits, who they are, the interview or a note, and the stories they're in
+      async function person(slug) {
+        sectionTabs('heart');
+        bar.innerHTML = '<a class="btn" href="/cities" data-nav>&larr; Heart of the Cities</a>';
+        app.textContent = 'Loading...';
+        const r = await fetch(`/api/blog/people/${encodeURIComponent(slug)}`).catch(() => null);
+        if (!r?.ok) return (app.innerHTML = '<div class="empty">This page is not available.</div>');
+        const x = await r.json();
+        document.title = `${x.name} · CITIES`;
+        const host = (u) => new URL(u).hostname.replace(/^www\./, '');
+        app.innerHTML = `<article class="reader"><div class="meta"><span class="chip" style="background:#b00020">Heart of the Cities</span></div><h1>${esc(x.name)}</h1>${x.role ? `<p class="preface">${esc(x.role)}</p>` : ''}
+          ${x.portraits.length ? `<div class="portraits">${x.portraits.map((u) => `<img src="${esc(u)}" alt="${esc(x.name)}" loading="lazy">`).join('')}</div>` : ''}
+          ${x.info || x.links.length ? `<div class="info">${x.info ? body(x.info) : ''}${x.links.length ? `<div>${x.links.map((u) => outLink(u, host(u))).join('')}</div>` : ''}</div>` : ''}
+          ${x.note ? `<div class="content">${body(x.note)}</div>` : ''}
+          ${x.stories.length ? `<h3>In CITIES</h3>${x.stories.map((p) => `<a class="post" href="${esc(p.url)}" data-nav>${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : ''}<div style="min-width:0"><div class="meta">${chip(p)}${when(p.date)}</div><h2>${esc(p.title)}</h2><div class="excerpt">${esc(p.excerpt)}</div></div></a>`).join('')}` : ''}
+        </article>`;
+        scrollTo(0, 0);
+      }
+
       // A Shop item featured in the post: buy it without hunting for it in the shop
       async function shopCard(slug) {
         const r = await fetch('/api/shop').catch(() => null);
@@ -647,7 +752,7 @@
           ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
           : '';
         app.innerHTML = `<article class="reader"><div class="meta">${chip(p)}</div><h1>${esc(p.title)}</h1>${p.preface ? `<p class="preface">${esc(p.preface)}</p>` : ''}<div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}<div id="listen"></div><div id="shop"></div>${credit}</article>`;
+                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}${p.people?.length ? `<h3>People in this story</h3><div class="people">${p.people.map(face).join('')}</div>` : ''}<div id="listen"></div><div id="shop"></div>${credit}</article>`;
         scrollTo(0, 0);
         if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
         if (p.product) document.getElementById('shop').outerHTML = await shopCard(p.product);
@@ -883,12 +988,20 @@
         if (path === 'notes') return notes();
         if (path === 'videos') return videos();
         if (path.split('/')[0] === 'moodboard') return moodboard(path.split('/')[1]);
+        if (path.startsWith('heart/')) return person(path.split('/')[1]);
         const section = path === '' ? 'heart' : ['heart', 'essays', 'field-notes'].includes(path) ? path : null;
         if (!section) return read(path);
         document.title = section === 'heart' ? 'CITIES' : `${SECTIONS.find(([k]) => k === section)[1]} · CITIES`;
         if (!all.length) {
           try {
-            all = (await (await fetch('/api/blog')).json()).posts;
+            [all, people] = await Promise.all([
+              fetch('/api/blog')
+                .then((r) => r.json())
+                .then((d) => d.posts),
+              fetch('/api/blog/people')
+                .then((r) => r.json())
+                .then((d) => d.people),
+            ]);
           } catch {
             app.innerHTML = '<div class="empty">CITIES could not load. Try again in a minute.</div>';
             return;
