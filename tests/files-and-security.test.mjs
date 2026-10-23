@@ -610,7 +610,7 @@ try {
   const bmi = (isrc) => ({ isrc, writers: [{ name: 'Ada Writer', pro: 'BMI', share: 100 }] });
   await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('') });
   await call(null, new URL((await signLinks('bmi'))[0].url).pathname, 'POST', 'name=Ada', true);
-  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('USABC2600001') });
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('USXYZ2699999') });
   check('split sheet signatures survive saving other fields', !!(await signLinks('bmi'))[0].signed);
 
   // Release folders: files fill Tracks in
@@ -1833,6 +1833,26 @@ try {
     JSON.stringify(epPage2.tracks),
   );
   check('bounce paths never reach the page', !JSON.stringify(epPage2).includes('master.wav') && !JSON.stringify(epPage2).includes('team'));
+  // Credits that link to people: listed members on the master split show (no shares); their card lists the song
+  await call('alice', `/api/tracks/track/${opening.id}`, 'PATCH', {
+    master: [
+      { name: 'Bob B', role: 'Producer', share: 40, member: 'bob' },
+      { name: 'Carol', role: 'Artist', share: 40, member: 'carol' },
+      { name: 'Outside Engineer', role: 'Engineer', share: 20 },
+    ],
+  });
+  const onSong = (await (await fetch(B + rp)).json()).tracks[0].people;
+  check(
+    'a song lists only the credited members who are in the public directory, without shares',
+    onSong.length === 1 && onSong[0].username === 'bob' && onSong[0].role === 'Producer' && !('share' in onSong[0]),
+    JSON.stringify(onSong),
+  );
+  const bobCredits = (await (await fetch(B + '/api/public/directory')).json()).people.find((p) => p.username === 'bob').credits;
+  check(
+    'a member’s public card lists the songs they’re credited on',
+    bobCredits.length === 1 && bobCredits[0].song === 'Opening' && bobCredits[0].url === '/release/open-ep/opening',
+    JSON.stringify(bobCredits),
+  );
   const clipRes = await fetch(B + `${rp}/preview/${opening.id}`);
   const clipBytes = Buffer.from(await clipRes.arrayBuffer());
   check(

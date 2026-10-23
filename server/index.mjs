@@ -4069,8 +4069,28 @@ async function currentMembers() {
 }
 
 /** Everyone who chose "Show me in the public directory": name, role, bio, links and whether there's a picture. */
+/** Songs on public release pages, per member on their master split: the "Credited on" list of their public card. */
+async function publicCredits() {
+  const db = await publicTracks();
+  const out = {};
+  for (const t of Object.values(db.tracks)) {
+    const r = db.releases[t.release];
+    if (t.deleted || !t.onPage || !publicRelease(r)) continue;
+    for (const x of t.master?.splits || [])
+      if (x.member)
+        (out[x.member] ??= []).push({
+          song: t.title,
+          role: x.role,
+          release: r.title,
+          url: `/release/${r.slug}/${slugify(t.title) || t.id}`,
+        });
+  }
+  return out;
+}
+
 async function listedPeople() {
   const members = await currentMembers();
+  const credits = await publicCredits();
   const files = (await readdir(join(DATA, 'profiles')).catch(() => [])).filter((f) => f.endsWith('.json'));
   const people = [];
   for (const f of files) {
@@ -4090,6 +4110,7 @@ async function listedPeople() {
       ),
       avatar: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)), // the public photo, never the internal avatar
       bookable: p.bookable === true, // "Take bookings through Sanktuary": a Book button on their public card
+      credits: credits[username] || [],
     });
   }
   return people.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -5609,6 +5630,7 @@ async function releaseFile(ref) {
 
 async function releaseView(r) {
   const tdb = await loadTracks();
+  const listed = new Set((await listedPeople()).map((p) => p.username));
   const st = r.story && (await loadStories()).stories[r.story];
   const tracks = Object.values(tdb.tracks)
     .filter((t) => t.release === r.id && !t.deleted && t.onPage)
@@ -5619,6 +5641,8 @@ async function releaseView(r) {
       title: t.title,
       slug: slugify(t.title) || t.id,
       credits: t.credits || '',
+      // Members on the master split who show in the public directory, linked to their card there (no shares)
+      people: (t.master?.splits || []).filter((x) => listed.has(x.member)).map((x) => ({ name: x.name, role: x.role, username: x.member })),
       links: Object.fromEntries(Object.entries(t.links || {}).filter(([, v]) => /^https:\/\//.test(v))),
       preview: t.previewAt !== null && t.previewAt !== undefined && !!t.bounce,
     }));
