@@ -374,6 +374,15 @@
             const details = el('div', 'details');
             details.hidden = true;
             if (t.credits) details.append(t.credits);
+            if (t.people.length) {
+              const people = el('div', 'links');
+              for (const x of t.people) {
+                const a = el('a', '', `${x.name} · ${x.role}`);
+                a.href = `/welcome/mrnd#p-${x.username}`;
+                people.append(a);
+              }
+              details.append(people);
+            }
             const links = el('div', 'links');
             for (const [k, url] of Object.entries(t.links)) {
               const a = el('a', '', LINK_NAMES[k] || 'Listen');

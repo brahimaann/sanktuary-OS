@@ -136,6 +136,7 @@
       ];
       let drafts = [];
       let releases = [];
+      let products = [];
       let openId = null;
       let msg = '';
 
@@ -156,9 +157,9 @@
               : `<p class="msg">${esc(e.message)}</p>`;
           return;
         }
-        releases = await api('/api/public/directory')
-          .then((d) => d.releases.filter((r) => r.slug))
-          .catch(() => []);
+        [releases, products] = await api('/api/public/directory')
+          .then((d) => [d.releases.filter((r) => r.slug), d.products.filter((x) => !x.vault)])
+          .catch(() => [[], []]);
         render();
       }
 
@@ -223,6 +224,9 @@
                 (r) => `<option value="${esc(r.slug)}" ${p.release === r.slug ? 'selected' : ''}>${esc(r.title)} (${esc(r.kind)})</option>`,
               )
               .join('')}</select>
+            Shop <select id="product" ${dis}><option value="">Nothing to buy</option>${products
+              .map((x) => `<option value="${esc(x.slug)}" ${p.product === x.slug ? 'selected' : ''}>${esc(x.title)}</option>`)
+              .join('')}</select>
           </div>
           <div class="row" style="margin:8px 0">
             <label class="btn">Add photo...<input id="photo" type="file" accept="image/*" multiple hidden ${dis} /></label>
@@ -259,6 +263,7 @@
           line: $('line').value,
           kind: $('kind') ? $('kind').value : null,
           release: $('release').value || null,
+          product: $('product').value || null,
         });
         const patch = async (extra = {}) => {
           const d = await api(`/api/blog/posts/${p.id}`, { method: 'PATCH', body: JSON.stringify({ ...fields(), ...extra }) });

@@ -622,6 +622,16 @@
           ${songs ? `<ol>${songs}</ol>` : ''}</div>`;
       }
 
+      // A Shop item featured in the post: buy it without hunting for it in the shop
+      async function shopCard(slug) {
+        const r = await fetch('/api/shop').catch(() => null);
+        const x = r?.ok && (await r.json()).products.find((p) => p.slug === slug);
+        if (!x) return '';
+        const price = Number(x.price).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+        return `<div class="listen"><div class="head">${x.image ? `<img src="${esc(x.image)}" alt="">` : ''}<div><div class="meta">In this story</div><b style="font-size:15px">${esc(x.title)}</b> · ${x.soldOut || x.vault ? 'Sold out' : esc(price)}
+          <div><a class="btn" href="/shop/${esc(x.slug)}">${x.soldOut || x.vault ? 'See it in the shop' : 'Buy it'}</a></div></div></div></div>`;
+      }
+
       async function read(id) {
         const back = id.includes('/') ? '/cities/essays' : '/cities';
         bar.innerHTML = `<a class="btn" href="${back}" data-nav>&larr; Back</a>`;
@@ -637,9 +647,10 @@
           ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
           : '';
         app.innerHTML = `<article class="reader"><div class="meta">${chip(p)}</div><h1>${esc(p.title)}</h1>${p.preface ? `<p class="preface">${esc(p.preface)}</p>` : ''}<div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}<div id="listen"></div>${credit}</article>`;
+                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}<div id="listen"></div><div id="shop"></div>${credit}</article>`;
         scrollTo(0, 0);
         if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
+        if (p.product) document.getElementById('shop').outerHTML = await shopCard(p.product);
       }
 
       // The moodboard of the month: whatever the team dropped on its board this month, as a wall sorted into four

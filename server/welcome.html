@@ -391,11 +391,17 @@
               ? `<fieldset><legend>Talent</legend><div class="grid">${d.people
                   .map(
                     (p) =>
-                      `<div class="card">${p.avatar ? `<img src="/api/public/avatar/${esc(p.username)}" alt="" loading="lazy">` : ''}<b>${esc(p.displayName)}</b>${p.role ? `<span class="muted">${esc(p.role)}</span>` : ''}${p.bio ? `<span>${esc(p.bio.slice(0, 220))}</span>` : ''}<span class="links">${Object.entries(
+                      `<div class="card" id="p-${esc(p.username)}">${p.avatar ? `<img src="/api/public/avatar/${esc(p.username)}" alt="" loading="lazy">` : ''}<b>${esc(p.displayName)}</b>${p.role ? `<span class="muted">${esc(p.role)}</span>` : ''}${p.bio ? `<span>${esc(p.bio.slice(0, 220))}</span>` : ''}<span class="links">${Object.entries(
                         p.links,
                       )
                         .map(([k, u]) => `<a ${href(u)}>${esc(k)}</a>`)
-                        .join('')}</span></div>`,
+                        .join('')}</span>${
+                        p.credits.length
+                          ? `<span class="muted">Credited on</span><span class="links">${p.credits
+                              .map((c) => `<a href="${esc(c.url)}" title="${esc(`${c.role} · ${c.release}`)}">${esc(c.song)}</a>`)
+                              .join('')}</span>`
+                          : ''
+                      }</div>`,
                   )
                   .join('')}</div></fieldset>`
               : ''
@@ -444,7 +450,7 @@
         app.innerHTML = pages[tab]();
         const form = document.getElementById('joinForm');
         if (form) form.onsubmit = joinUs;
-        if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+        if (location.hash) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
       }
       async function joinUs(e) {
         e.preventDefault();
