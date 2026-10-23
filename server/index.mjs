@@ -3285,7 +3285,7 @@ const feedCache = new Map(); // feed url -> { at, items, error }
 const BLOG_LINES = ['heart', 'essays', 'field-notes'];
 const HEART_KINDS = ['profile', 'case-study', 'spotlight'];
 // Section pages (/cities/heart ...) and the writing page: no post may take these addresses
-const BLOG_RESERVED = ['notes', 'videos', 'write', ...BLOG_LINES];
+const BLOG_RESERVED = ['notes', 'videos', 'moodboard', 'write', ...BLOG_LINES];
 const FEED_MINUTES = 10;
 
 /** "hima", "hima.substack.com" or any Substack / RSS URL -> the feed URL. */
@@ -3591,6 +3591,48 @@ const ownPostView = (p, full) => ({
   ...(full ? { body: p.body } : {}),
 });
 
+// The mood lanes of a monthly moodboard: a drop belongs to the lane whose title is nearest it across the board
+const MOODS = [
+  ['hype', '🔥 HYPE'],
+  ['cool', '😎 COOL'],
+  ['sad', '😢 SAD'],
+  ['beautiful', '✨ BEAUTIFUL'],
+];
+const MOOD_LANE = 1200; // px between lane titles on a new month's board
+const moodTaps = new Map(); // ip -> { n, since }
+const MEDIA = { video: /\.(mp4|webm|mov|m4v)$/i, audio: /\.(mp3|wav|m4a|aac|ogg|flac)$/i, image: /\.(png|jpe?g|gif|webp|avif)$/i };
+function moodDrops(b, m) {
+  const items = [...b.items.values()].filter((i) => i.type !== 'edge');
+  const lanes = items
+    .filter((i) => i.type === 'text')
+    .flatMap((i) => {
+      const k = MOODS.find(([, title]) => (i.text || '').toUpperCase().includes(title.split(' ')[1]));
+      return k && (i.text || '').length < 40 ? [{ mood: k[0], id: i.id, x: i.x + i.w / 2 }] : [];
+    });
+  const mid = (i) => i.x + i.w / 2;
+  return items
+    .filter((i) => !lanes.some((l) => l.id === i.id))
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((i) => {
+      const lane = lanes.reduce((best, l) => (!best || Math.abs(l.x - mid(i)) < Math.abs(best.x - mid(i)) ? l : best), null);
+      // Only the board's own uploads are public (through its link); team files stay inside Sanktuary
+      const file = /^\/api\/boards\/[\w-]+\/assets\/([^?]+)/.exec(i.src || '')?.[1];
+      const kind = file && Object.keys(MEDIA).find((k) => MEDIA[k].test(file));
+      return {
+        id: i.id,
+        mood: lane?.mood || null,
+        kind: kind || (i.url ? 'link' : i.type === 'note' || i.type === 'text' ? 'words' : 'file'),
+        text: i.type === 'note' || i.type === 'text' ? i.text || '' : undefined,
+        name: i.name || undefined,
+        url: i.url && /^https?:\/\//i.test(i.url) ? i.url : undefined,
+        src: kind ? `/b/${m.token}/asset/${file}${kind === 'image' && !/\.(gif|webp)$/i.test(file) ? '?view' : ''}` : undefined,
+        color: i.type === 'note' ? i.color || '#fff59d' : undefined,
+        reactions: m.reactions?.[i.id] || {},
+      };
+    })
+    .filter((d) => d.kind !== 'file' && (d.kind !== 'words' || d.text.trim()));
+}
+
 async function blogApi(req, res, url) {
   const db = await loadBlog();
   const [, , , what, id] = url.pathname.split('/'); // /api/blog/<post|images|admin|feeds|posts>/<id>
@@ -3609,6 +3651,48 @@ async function blogApi(req, res, url) {
     const videos = (await Promise.all((db.channels || []).map(readChannel))).flatMap((c) => c.items);
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, { videos: videos.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) });
+  }
+  if (what === 'moodboards') {
+    // The moodboard of the month: the team fills a board through the month (Moodboards > New month... starts one
+    // with the mood lanes), and /cities/moodboard shows it as a wall visitors filter by mood, play and react to.
+    // A month drops out when its board is deleted or its public link is turned off.
+    const live = async (month) => {
+      const m = own(db.moodboards || {}, month);
+      const l = m && (await loadBoardLinks())[m.token];
+      if (!l || l.revoked || (l.expires && Date.parse(l.expires) < Date.now())) return null;
+      const b = await loadBoard(m.board).catch(() => null);
+      return b && { m, b };
+    };
+    if (req.method === 'GET' && !id) {
+      const months = [];
+      for (const month of Object.keys(db.moodboards || {})) {
+        const hit = await live(month);
+        if (hit) months.push({ month, name: hit.b.meta.name, note: hit.m.note });
+      }
+      res.setHeader('cache-control', 'public, max-age=60');
+      return json(res, { months: months.sort((a, b) => b.month.localeCompare(a.month)) });
+    }
+    const { m, b } = (await live(id)) || fail(404, 'No moodboard for that month');
+    if (req.method === 'GET') {
+      res.setHeader('cache-control', 'public, max-age=30');
+      return json(res, { month: id, name: b.meta.name, note: m.note, board: `/b/${m.token}`, drops: moodDrops(b, m) });
+    }
+    if (req.method === 'POST') {
+      // A visitor's reaction: one of the four moods, a few hundred an hour per address at most
+      const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+      const t = moodTaps.get(ip);
+      const taps = t && Date.now() - t.since < 60 * 60_000 ? t : { n: 0, since: Date.now() };
+      if (taps.n >= 300) fail(429, 'Easy there. Try again in a while.');
+      moodTaps.set(ip, { ...taps, n: taps.n + 1 });
+      const q = await jsonBody(req);
+      if (!MOODS.some(([k]) => k === q.mood)) fail(400, 'Unknown mood');
+      if (!b.items.has(q.item)) fail(404, 'No such drop');
+      const counts = ((m.reactions ??= {})[q.item] ??= {});
+      counts[q.mood] = (counts[q.mood] || 0) + 1;
+      saveBlog();
+      return json(res, counts);
+    }
+    fail(404, 'Not found');
   }
   if (req.method === 'GET' && what === 'notes') {
     const byId = new Map((await Promise.all(db.feeds.map(readNotes))).flat().map((n) => [n.id, n])); // a writer on two feeds shows once
@@ -5064,6 +5148,7 @@ const BLOG_SECTIONS = {
   notes: ['Notes', 'Short notes from the writers we follow.'],
   'field-notes': ['Field Notes', 'Straight from the field: shoots, sessions and shows around the Twin Cities.'],
   videos: ['Videos', 'New videos from Twin Cities creators.'],
+  moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
 };
 const metaTags = ({ title, text, image, link }) =>
   [
@@ -5092,7 +5177,10 @@ async function blogPage(req, res, url) {
     image: null,
   };
   if (a && !b && BLOG_SECTIONS[a]) meta = { title: `${BLOG_SECTIONS[a][0]} · CITIES`, text: BLOG_SECTIONS[a][1], image: null };
-  else if (a) {
+  else if (a === 'moodboard' && /^\d{4}-(0[1-9]|1[0-2])$/.test(b)) {
+    const name = new Date(`${b}-15`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    meta = { title: `${name} Moodboard · CITIES`, text: BLOG_SECTIONS.moodboard[1], image: null };
+  } else if (a) {
     const db = await loadBlog();
     const own = !b && Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === a || x.id === a));
     const post = own
@@ -6187,7 +6275,9 @@ async function boardsApi(req, res, url) {
     const items =
       kind === 'kanban'
         ? ['To do', 'Doing', 'Done'].map((title, order) => ({ id: randomUUID().slice(0, 12), type: 'column', title, order }))
-        : [];
+        : input.template === 'month' // a monthly moodboard starts with its mood lanes (see moodDrops)
+          ? MOODS.map(([, text], n) => ({ id: randomUUID().slice(0, 12), type: 'text', x: n * MOOD_LANE, y: 0, w: 480, h: 80, z: 0, text }))
+          : [];
     await mkdir(join(DATA, 'boards', newId, 'assets'), { recursive: true });
     await saveJson(`boards/${newId}/board.json`, { meta, items });
     logActivity(user, kind === 'kanban' ? 'started the plan' : 'started the moodboard', {
@@ -6369,6 +6459,38 @@ async function boardsApi(req, res, url) {
       for (const [conn, c] of b.clients) if (c.link === file) (c.res.end(), b.clients.delete(conn)); // guests on it leave now
       return json(res, boardLinkView(file, l));
     }
+  }
+  if (sub === 'feature' && req.method === 'POST') {
+    // CITIES' moodboard of the month (/cities/moodboard): its pictures and clips are served through its own view-only link, so turning that
+    // link off in "Public link..." takes the month down again. Featuring another board for a month replaces it.
+    if (!user.admin) fail(403, 'Only admins can feature a moodboard');
+    if (b.meta.kind === 'kanban') fail(400, 'Only moodboards can be featured');
+    const q = await jsonBody(req);
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(q.month) ? q.month : fail(400, 'Give the month as YYYY-MM');
+    const all = await loadBoardLinks();
+    const t = randomBytes(24).toString('base64url');
+    all[t] = {
+      board: id,
+      level: 'view',
+      createdBy: user.username,
+      created: new Date().toISOString(),
+      expires: null,
+      password: null,
+      views: 0,
+    };
+    saveBoardLinks();
+    const db = await loadBlog();
+    (db.moodboards ??= {})[month] = {
+      board: id,
+      token: t,
+      note: String(q.note || '')
+        .trim()
+        .slice(0, 300),
+      by: user.username,
+      at: new Date().toISOString(),
+    };
+    saveBlog();
+    return json(res, { month, url: `/cities/moodboard/${month}` });
   }
   fail(404, 'Unknown board action');
 }

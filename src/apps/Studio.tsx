@@ -16,7 +16,7 @@ export type StudioTab = 'songs' | 'calendar' | 'boards' | 'opportunities' | 'out
 const TABS: [StudioTab, string][] = [
   ['songs', 'Songs'],
   ['calendar', 'Calendar'],
-  ['boards', 'Boards'],
+  ['boards', 'Planner'],
   ['opportunities', 'Opportunities'],
   ['outreach', 'Outreach'],
   ['archive', 'Archive'],

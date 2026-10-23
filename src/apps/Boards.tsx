@@ -101,6 +101,25 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
       setStatus((e as Error).message);
     }
   };
+  // CITIES' moodboard of the month: a fresh board with the four mood lanes, public on /cities/moodboard as the team fills it
+  const newMonth = async () => {
+    const month = (
+      await dialog.prompt('Which month is this board for? (YYYY-MM)', new Date().toISOString().slice(0, 7), { title: 'New month' })
+    )?.trim();
+    if (!month) return;
+    const note = await dialog.prompt('A line about this month for visitors (optional):', '', { title: 'New month' });
+    if (note === null) return;
+    try {
+      const name = `Moodboard · ${new Date(`${month}-15`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`;
+      const b = await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, kind, template: 'month' }) });
+      const r = await api(`/api/boards/${b.id}/feature`, { method: 'POST', body: JSON.stringify({ month, note }) });
+      open(b);
+      load();
+      setStatus(`Live on ${r.url}. Drop things into the Hype, Cool, Sad and Beautiful lanes.`);
+    } catch (e) {
+      setStatus((e as Error).message);
+    }
+  };
   const remove = async () => {
     if (
       !pick ||
@@ -139,6 +158,11 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
         {!plans && (
           <button style={button} disabled={!canShare} onClick={() => setLinking(true)} title="A link for people without an account">
             Public link...
+          </button>
+        )}
+        {!plans && me?.admin && (
+          <button style={button} onClick={newMonth} title="Start the CITIES moodboard of the month">
+            New month...
           </button>
         )}
         <button style={button} onClick={load}>

@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -269,6 +269,48 @@ try {
   check('public #general still visible to carol', (await chans('carol')).includes('general'));
   bobFeed.close();
   carolFeed.close();
+
+  // Moodboard of the month: a board started from the month template is sorted into mood lanes on /cities/moodboard,
+  // visitors react, and turning its link off takes the month down
+  const mood = (await call('bob', '/api/boards', 'POST', { name: 'October mood', template: 'month' })).data;
+  const moodFile = join(dir, 'data', 'boards', mood.id, 'board.json');
+  const moodSaved = JSON.parse(readFileSync(moodFile, 'utf8'));
+  check('the template has the four mood lanes', moodSaved.items.map((i) => i.text).join() === '🔥 HYPE,😎 COOL,😢 SAD,✨ BEAUTIFUL');
+  // The team drops a note under SAD and a team file (never public) under HYPE
+  const sadNote = { id: 'note1', type: 'note', x: 2450, y: 200, w: 200, h: 120, z: 1, text: 'rainy bus stop' };
+  const teamFile = { id: 'file1', type: 'file', x: 0, y: 200, w: 200, h: 120, z: 1, src: '/api/files/team/secret.png', name: 'secret.png' };
+  writeFileSync(moodFile, JSON.stringify({ ...moodSaved, items: [...moodSaved.items, sadNote, teamFile] }));
+  check(
+    'a member cannot feature a board',
+    (await call('bob', `/api/boards/${mood.id}/feature`, 'POST', { month: '2026-10' })).status === 403,
+  );
+  check('a bad month is refused', (await call('alice', `/api/boards/${mood.id}/feature`, 'POST', { month: '2026-13' })).status === 400);
+  const feat = await call('alice', `/api/boards/${mood.id}/feature`, 'POST', { month: '2026-10', note: 'Fall in the Cities' });
+  check('an admin features it', feat.status === 200 && feat.data.url === '/cities/moodboard/2026-10', JSON.stringify(feat.data));
+  const months = (await (await fetch(`${B}/api/blog/moodboards`)).json()).months;
+  check(
+    'anyone sees the month',
+    months[0]?.month === '2026-10' && months[0].name === 'October mood' && months[0].note === 'Fall in the Cities',
+  );
+  check('the month has its own page', /October 2026 Moodboard/.test(await (await fetch(`${B}/cities/moodboard/2026-10`)).text()));
+  const wall = await (await fetch(`${B}/api/blog/moodboards/2026-10`)).json();
+  check(
+    'drops land in their lane, team files stay private',
+    wall.drops?.length === 1 && wall.drops[0].id === 'note1' && wall.drops[0].mood === 'sad',
+    JSON.stringify(wall.drops),
+  );
+  const react = (body) =>
+    fetch(`${B}/api/blog/moodboards/2026-10`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  check('a visitor reacts', (await (await react({ item: 'note1', mood: 'sad' })).json()).sad === 1);
+  check('an unknown mood is refused', (await react({ item: 'note1', mood: 'angry' })).status === 400);
+  check('an unknown drop is refused', (await react({ item: 'nope', mood: 'sad' })).status === 404);
+  const token = wall.board?.split('/')[2];
+  await call('alice', `/api/boards/${mood.id}/shares/${token}`, 'DELETE');
+  check('turning the link off takes the month down', !(await (await fetch(`${B}/api/blog/moodboards`)).json()).months.length);
 
   // A store that can't be read (locked, or here a folder in its place) is an error, never an empty list that the
   // next save would write over the real file
