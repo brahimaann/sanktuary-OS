@@ -4113,6 +4113,7 @@ async function listedPeople() {
       ),
       avatar: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)), // the public photo, never the internal avatar
       bookable: p.bookable === true, // "Take bookings through Sanktuary": a Book button on their public card
+      portfolio: p.portfolio?.live === true, // a link to /portfolios/<username> on their card
       credits: credits[username] || [],
     });
   }
@@ -4126,6 +4127,7 @@ async function publicApi(req, res, url) {
   if (req.method === 'GET' && what === 'story') return storyPublic(req, res, url);
   if (req.method === 'GET' && what === 'release') return releasePublic(req, res, url);
   if (req.method === 'GET' && what === 'portfolio') return portfolioPublic(req, res);
+  if (req.method === 'GET' && what === 'portfolios') return portfoliosPublic(req, res, who, ...url.pathname.split('/').slice(5));
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
     const tdb = await publicTracks();
@@ -4168,7 +4170,9 @@ async function publicApi(req, res, url) {
   }
   if (req.method === 'GET' && what === 'avatar') {
     const name = /^[\w.-]{1,64}$/.test(who || '') ? who : fail(404, 'Not found');
-    if (!(await listedPeople()).some((p) => p.username === name && p.avatar)) fail(404, 'Not found');
+    // the public photo of someone in the directory or with a live portfolio
+    if (![...(await listedPeople()), ...(await livePortfolios())].some((p) => p.username === name && (p.avatar || p.photo)))
+      fail(404, 'Not found');
     res.setHeader('cache-control', 'public, max-age=300');
     return stream(req, res, url.searchParams, join(DATA, 'profiles', 'photos', `${name}.webp`));
   }
@@ -5729,6 +5733,128 @@ async function portfolioPublic(req, res) {
     events,
     people: await listedPeople(),
   });
+}
+
+// ── Member portfolios (/portfolios, /portfolios/<username>) ──
+// Each member builds their own in Profile > My portfolio and decides when it goes live. Visitors get the index of
+// every live portfolio; a signed-in member who opens /portfolios lands on their own (a preview if it isn't live yet).
+// /portfolio stays the studio's own, the one grant applications link to.
+const PORTFOLIOS_PAGE = new URL('./portfolios.html', import.meta.url);
+const PORTFOLIO_THEMES = ['paper', 'night', 'bold'];
+// A portfolio is a stack of blocks the member arranges like Lego: their own words, photos, videos and links, plus
+// "about" (their bio) and "music" (public releases credited to them) filled in from the rest of Sanktuary
+const BLOCK_TYPES = ['text', 'photo', 'video', 'link', 'about', 'music'];
+const DEFAULT_BLOCKS = [
+  { id: 'about0', type: 'about', size: 'normal', title: '', text: '', url: '' },
+  { id: 'music0', type: 'music', size: 'wide', title: '', text: '', url: '' },
+];
+const blockFile = (name, id) => join(DATA, 'profiles', 'portfolio', name, `${id}.webp`);
+/** A member's portfolio settings as saved: only known fields, https links only. */
+const cleanPortfolio = (x) => ({
+  live: x.live === true,
+  headline: String(x.headline || '').slice(0, 140),
+  contact: String(x.contact || '').slice(0, 200),
+  theme: PORTFOLIO_THEMES.includes(x.theme) ? x.theme : 'paper',
+  accent: /^#[0-9a-f]{6}$/i.test(x.accent || '') ? x.accent : '',
+  blocks: (Array.isArray(x.blocks) ? x.blocks : DEFAULT_BLOCKS).slice(0, 40).map((b) => ({
+    id: /^[a-z0-9]{4,16}$/.test(b?.id || '') ? b.id : randomBytes(5).toString('hex'),
+    type: BLOCK_TYPES.includes(b?.type) ? b.type : 'text',
+    size: ['normal', 'wide', 'tall'].includes(b?.size) ? b.size : 'normal',
+    title: String(b?.title || '').slice(0, 120),
+    text: String(b?.text || '').slice(0, 3000),
+    url: /^https:\/\/\S+$/.test(b?.url || '') ? String(b.url).slice(0, 400) : '',
+  })),
+});
+/** Who is looking, from our session cookie; null for visitors. */
+const viewerName = async (req) => {
+  const sub = cookieUserId(req);
+  return sub ? usernameOf(sub).catch(() => null) : null;
+};
+/** Current members whose portfolio is live: what the index card needs. */
+async function livePortfolios() {
+  const members = await currentMembers();
+  const files = (await readdir(join(DATA, 'profiles')).catch(() => [])).filter((f) => f.endsWith('.json'));
+  const out = [];
+  for (const f of files) {
+    const username = f.slice(0, -5);
+    if (!members.has(username)) continue;
+    const p = await readJson(`profiles/${f}`, {});
+    if (p.portfolio?.live !== true) continue;
+    out.push({
+      username,
+      displayName: p.displayName || username,
+      role: p.role || '',
+      headline: p.portfolio.headline || '',
+      accent: p.portfolio.accent || '',
+      photo: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)),
+      // the first photo block, for a card without a public photo
+      cover: cleanPortfolio(p.portfolio).blocks.find((b) => b.type === 'photo' && existsSync(blockFile(username, b.id)))?.id || null,
+    });
+  }
+  return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+async function portfoliosPublic(req, res, who, part, id) {
+  if (!who) {
+    res.setHeader('cache-control', 'no-cache');
+    return json(res, { people: await livePortfolios() });
+  }
+  const name = /^[\w.-]{1,64}$/.test(who) ? who : fail(404, 'Not found');
+  const mine = (await viewerName(req)) === name;
+  const p = await readJson(`profiles/${name}.json`, {});
+  // Never live: the owner gets a preview, anyone else a plain 404
+  if (!(await currentMembers()).has(name) || (!mine && p.portfolio?.live !== true)) fail(404, 'Not found');
+  const pf = cleanPortfolio(p.portfolio || {});
+  if (part === 'img') {
+    // /api/public/portfolios/<name>/img/<block>: a photo block's picture
+    if (!pf.blocks.some((b) => b.id === id && b.type === 'photo')) fail(404, 'Not found');
+    res.setHeader('cache-control', mine ? 'no-cache' : 'public, max-age=300');
+    return stream(req, res, new URLSearchParams(), blockFile(name, id));
+  }
+  if (part) fail(404, 'Not found');
+  const shown = p.displayName || name;
+  const credited = new RegExp(`(^|[^\\w])${shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w])`, 'i');
+  const tdb = await publicTracks();
+  const releases = await Promise.all(
+    Object.values(tdb.releases)
+      .filter((r) => publicRelease(r) && credited.test(r.artist || ''))
+      .sort((a, b) => (b.date || '9').localeCompare(a.date || '9'))
+      .map(releaseView),
+  );
+  if (!mine) count('view', `portfolio:${name}`);
+  res.setHeader('cache-control', 'no-cache');
+  return json(res, {
+    username: name,
+    displayName: shown,
+    role: p.role || '',
+    bio: p.bio || '',
+    photo: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${name}.webp`)),
+    links: Object.fromEntries(
+      Object.keys(PROFILE_LINKS)
+        .map((k) => [k, publicLink(k, p[k])])
+        .filter(([, v]) => v),
+    ),
+    ...pf,
+    blocks: pf.blocks.map((b) => (b.type === 'photo' ? { ...b, img: existsSync(blockFile(name, b.id)) } : b)),
+    releases,
+    mine,
+  });
+}
+
+/** /portfolios: visitors see everyone's; a signed-in member is sent to their own (?all shows the index anyway). */
+async function portfoliosPage(req, res, url) {
+  if (!/^\/portfolios(\/[\w.-]{1,64})?\/?$/.test(url.pathname)) fail(404, 'Not found');
+  if (/^\/portfolios\/?$/.test(url.pathname) && !url.searchParams.has('all')) {
+    const me = await viewerName(req);
+    if (me) return res.writeHead(302, { location: `/portfolios/${encodeURIComponent(me)}`, 'cache-control': 'no-store' }).end();
+  }
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-security-policy':
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https://www.youtube-nocookie.com",
+  });
+  return pipeline(createReadStream(PORTFOLIOS_PAGE), res);
 }
 
 function htmlPage(file) {
@@ -7372,7 +7498,7 @@ const PROFILE_FIELDS = {
 async function profiles(req, res, url) {
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
-  const [, , , who, sub] = url.pathname.split('/'); // /api/profiles/<username|me>/<avatar|photo>
+  const [, , , who, sub, blockId] = url.pathname.split('/'); // /api/profiles/<username|me>/<avatar|photo|portfolio/<id>>
 
   if (!who && req.method === 'GET') {
     const r = await clerk('/users?limit=100&order_by=-created_at');
@@ -7397,6 +7523,28 @@ async function profiles(req, res, url) {
   if ((sub === 'avatar' || sub === 'photo') && req.method === 'GET')
     return stream(req, res, url.searchParams, join(DATA, 'profiles', sub === 'avatar' ? 'avatars' : 'photos', `${name}.webp`));
   if (who !== 'me') fail(403, 'You can only change your own profile');
+
+  // A photo block's picture on your portfolio: /api/profiles/me/portfolio/<block id>
+  if (sub === 'portfolio' && req.method === 'PUT') {
+    const id = /^[a-z0-9]{4,16}$/.test(blockId || '') ? blockId : fail(400, 'Bad block');
+    const chunks = [];
+    let size = 0;
+    for await (const c of req) {
+      size += c.length;
+      if (size > 25 * 1024 * 1024) fail(413, 'Picture must be under 25 MB');
+      chunks.push(c);
+    }
+    await mkdir(dirname(blockFile(name, id)), { recursive: true });
+    await writeFile(
+      blockFile(name, id),
+      await sharp(Buffer.concat(chunks))
+        .rotate()
+        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toBuffer(),
+    );
+    return json(res, { ok: true });
+  }
 
   // avatar: the small picture inside Sanktuary; photo: the one on the public profile and portfolio
   if ((sub === 'avatar' || sub === 'photo') && req.method === 'PUT') {
@@ -7426,6 +7574,13 @@ async function profiles(req, res, url) {
     for (const [k, max] of Object.entries(PROFILE_FIELDS)) if (k in input) profile[k] = String(input[k] ?? '').slice(0, max);
     if ('listed' in input) profile.listed = input.listed === true; // shown in the public directory (My Computer)
     if ('bookable' in input) profile.bookable = input.bookable === true;
+    if (input.portfolio && typeof input.portfolio === 'object') {
+      profile.portfolio = cleanPortfolio(input.portfolio);
+      // pictures of photo blocks that were removed
+      const keep = new Set(profile.portfolio.blocks.map((b) => `${b.id}.webp`));
+      for (const f of await readdir(join(DATA, 'profiles', 'portfolio', name)).catch(() => []))
+        if (!keep.has(f)) await rm(join(DATA, 'profiles', 'portfolio', name, f), { force: true });
+    }
     profile.updated = new Date().toISOString();
     await mkdir(join(DATA, 'profiles'), { recursive: true });
     await saveJson(`profiles/${name}.json`, profile);
@@ -8157,6 +8312,7 @@ const routes = [
   ['/write', writePage],
   ['/story/', storyPage],
   ['/release/', htmlPage(RELEASE_PAGE)],
+  ['/portfolios', portfoliosPage], // before /portfolio, which would match it too
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
   ['/magazine', magazinePage],
   ['/api/stories', storiesApi],

@@ -14,6 +14,7 @@ interface Person {
   links: Partial<Record<LinkKey, string>>;
   avatar: boolean;
   bookable: boolean;
+  portfolio: boolean;
 }
 interface Dir {
   intro: string;
@@ -144,6 +145,9 @@ const Directory: React.FC = () => {
         <button style={button} onClick={() => page('Portfolio', '/portfolio', 'my-documents')} title="Work samples, statement and bio">
           Portfolio
         </button>
+        <button style={button} onClick={() => page('Portfolios', '/portfolios', 'my-documents')} title="Every member's portfolio">
+          Portfolios
+        </button>
         <button style={{ ...button, fontWeight: 700 }} onClick={welcome}>
           Join the Team
         </button>
@@ -245,6 +249,11 @@ const Details: React.FC<{ d: Dir; section: Section; i: number }> = ({ d, section
                 ),
             )}
           </div>
+          {p.portfolio && (
+            <a href={`/portfolios/${p.username}`} target="_blank" rel="noopener noreferrer">
+              See {p.displayName}'s portfolio
+            </a>
+          )}
           {p.bookable && <BookForm person={p} />}
         </div>
       </div>

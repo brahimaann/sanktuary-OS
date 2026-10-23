@@ -4,9 +4,10 @@ import AccountButton from '../components/AccountButton';
 import { useWindowManager } from '../wm/manager';
 import { useApi, useMe } from '../utils/api';
 import { liveUser } from '../utils/live';
-import { displayName, linkFor, Profile as P, PROFILE_LINKS, useProfiles } from '../utils/profiles';
+import { displayName, EMPTY_PORTFOLIO, linkFor, Portfolio, Profile as P, PROFILE_LINKS, useProfiles } from '../utils/profiles';
 import { dmId } from './Chat';
 import Avatar from './Avatar';
+import PortfolioEditor from './PortfolioEditor';
 import { formatSize } from './fileTypes';
 import { MyProjects } from './ProjectPanel';
 import PushSettings from '../components/PushSettings';
@@ -61,6 +62,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
           ),
           listed: !!draft.listed,
           bookable: !!draft.bookable,
+          portfolio: pf,
         }),
       });
       setMsg('Saved.');
@@ -78,6 +80,8 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
       setMsg((e as Error).message);
     }
   };
+
+  const pf = { ...EMPTY_PORTFOLIO, ...draft.portfolio };
 
   if (!who) return <div style={{ ...shell, padding: 16 }}>Loading...</div>;
 
@@ -161,6 +165,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   }
 
   const mySpace = me?.spaces.find((s) => s.id === 'me');
+  const setPf = (patch: Partial<Portfolio>) => setDraft((d) => ({ ...d, portfolio: { ...EMPTY_PORTFOLIO, ...d.portfolio, ...patch } }));
   return (
     <div style={shell}>
       <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -303,9 +308,8 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             }}
           />
         </div>
-        <fieldset
-          style={{ border: '2px groove #fff', margin: 0, padding: '2px 8px 8px', display: 'flex', flexDirection: 'column', gap: 6 }}
-        >
+        <PortfolioEditor who={who} value={pf} onChange={setPf} />
+        <fieldset style={group}>
           <legend>Roster (members only, never public)</legend>
           <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: 6 }}>
             PRO / IPI
@@ -373,6 +377,14 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   );
 };
 
+const group: React.CSSProperties = {
+  border: '2px groove #fff',
+  margin: 0,
+  padding: '2px 8px 8px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+};
 const input: React.CSSProperties = { fontFamily: 'inherit', fontSize: 12, padding: '2px 4px', border: '2px inset #808080', minWidth: 0 };
 
 export default Profile;

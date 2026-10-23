@@ -40,7 +40,38 @@ export interface Profile extends Partial<Record<LinkKey, string>> {
   pro?: string; // roster, members only: "BMI · IPI 123456789"
   rates?: string; // roster, members only: rate card and availability
   bookable?: boolean; // a Book button on their public directory card
+  portfolio?: Portfolio; // their own page at /portfolios/<username>
 }
+
+/** A member's portfolio page, customised in Profile > My portfolio. */
+export interface Portfolio {
+  live: boolean;
+  headline: string;
+  contact: string;
+  theme: 'paper' | 'night' | 'bold';
+  accent: string; // '#rrggbb', or '' for the theme's own
+  blocks: Block[]; // arranged like Lego, shown in this order
+}
+/** One piece of a portfolio; about and music fill themselves in from the profile and public releases. */
+export interface Block {
+  id: string;
+  type: 'text' | 'photo' | 'video' | 'link' | 'about' | 'music';
+  size: 'normal' | 'wide' | 'tall';
+  title: string;
+  text: string;
+  url: string;
+}
+export const EMPTY_PORTFOLIO: Portfolio = {
+  live: false,
+  headline: '',
+  contact: '',
+  theme: 'paper',
+  accent: '',
+  blocks: [
+    { id: 'about0', type: 'about', size: 'normal', title: '', text: '', url: '' },
+    { id: 'music0', type: 'music', size: 'wide', title: '', text: '', url: '' },
+  ],
+};
 
 export const displayName = (p?: Profile, fallback = '') => p?.displayName || p?.username || fallback;
 
