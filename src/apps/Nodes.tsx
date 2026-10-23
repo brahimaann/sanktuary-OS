@@ -24,19 +24,22 @@ interface City {
   /** Rivers and shorelines: polyline in ground coordinates, and its width (0 = shoreline) */
   water?: { pts: [number, number][]; width: number; side?: 1 | -1 }[];
   landmarks: Shape[];
+  /** Ten places to highlight: name, a line about it, ground position, and the height of its landmark if it has one */
+  spots: Spot[];
 }
+type Spot = [name: string, note: string, x: number, z: number, top?: number];
 
 // Edge kinds, drawn in this order
 const GROUND = 0,
   WATER = 1,
   BUILDING = 2,
-  LANDMARK = 3;
-const KINDS = 4;
+  LANDMARK = 3,
+  SPOT = 4;
+const KINDS = 5;
 
 class Geo {
   v: number[] = [];
   e: number[] = [];
-  labels: { text: string; at: V3 }[] = [];
   pt(p: V3) {
     this.v.push(...p);
     return this.v.length / 3 - 1;
@@ -56,9 +59,6 @@ class Geo {
       const t = r / (rings + 1);
       this.line(at(y0 + (y1 - y0) * t, 1 + (top - 1) * t), kind, true);
     }
-  }
-  label(text: string, at: V3) {
-    this.labels.push({ text, at });
   }
 }
 
@@ -118,18 +118,28 @@ const CITIES: City[] = [
         width: 7,
       },
     ],
+    spots: [
+      ['IDS Center', "Minneapolis's tallest tower, over the Crystal Court", -18, 0, 80],
+      ['First Avenue', "Prince's club and the Purple Rain stage, stars on the wall", -36, 14],
+      ['Stone Arch Bridge', 'The old rail bridge across the Mississippi at St. Anthony Falls', 18, -26, 7],
+      ['Walker Art Center', 'Modern art and the Spoonbridge and Cherry in the sculpture garden', -66, 24],
+      ['Guthrie Theater', 'The riverfront theater with the Endless Bridge cantilevered over the water', 6, -44],
+      ['Cedar-Riverside', "Riverside Plaza's towers, the Cedar Cultural Center and the city's East African heart", 36, -4],
+      ['Lake Street', 'Midtown Global Market and the corridor that rebuilt itself', -24, 66],
+      ['Paisley Park', "Prince's studio and home, out in Chanhassen", -100, 58],
+      ['Rondo', "St. Paul's historic Black neighborhood, remembered every July at Rondo Days", 34, 62],
+      ['Cathedral of Saint Paul', 'The copper dome on Summit Hill, looking over downtown St. Paul', 52, 44, 28],
+    ],
     landmarks: [
       // IDS Center, the tallest in Minneapolis, with its notched corners
       (g) => {
         g.prism(ngon(8, 7, Math.PI / 8), -18, 0, 0, 80, 1, LANDMARK, 7);
-        g.label('IDS CENTER', [-18, 84, 0]);
       },
       // Cathedral of Saint Paul: a drum and a dome
       (g) => {
         g.prism(ngon(12, 7), 52, 44, 0, 14, 1, LANDMARK);
         g.prism(ngon(12, 7), 52, 44, 14, 24, 0.55, LANDMARK);
         g.prism(ngon(12, 3.8), 52, 44, 24, 28, 0.3, LANDMARK);
-        g.label('CATHEDRAL', [52, 31, 44]);
       },
       // Stone Arch Bridge over the Mississippi
       (g) => {
@@ -141,7 +151,6 @@ const CITIES: City[] = [
             ),
             LANDMARK,
           );
-        g.label('STONE ARCH', [18, 7, -26]);
       },
     ],
   },
@@ -168,6 +177,18 @@ const CITIES: City[] = [
         side: 1,
       },
     ],
+    spots: [
+      ['Space Needle', "The 1962 World's Fair tower over Seattle Center", -15, -62, 70],
+      ['Columbia Center', 'The tallest tower in Seattle, three-lobed and black', 10, 10, 102],
+      ['Pike Place Market', 'The public market on the waterfront since 1907', -28, -12],
+      ['MoPOP', 'The Museum of Pop Culture: Hendrix, Nirvana, sci-fi and games', -4, -74],
+      ['The Crocodile', 'The Belltown club where grunge broke out', -24, -38],
+      ['Capitol Hill', 'Nightlife, record shops and the Pike/Pine venues', 38, -28],
+      ['Central District', "Black Seattle's historic heart, home to Quincy Jones and Jimi Hendrix", 50, 26],
+      ['Pioneer Square', "The city's oldest blocks, galleries and First Thursday art walks", -12, 42],
+      ['International District', 'Chinatown, Japantown and Little Saigon around the Wing Luke Museum', 18, 58],
+      ['Lumen Field', 'Home of the Seahawks and the Sounders', -6, 82],
+    ],
     landmarks: [
       // Space Needle
       (g) => {
@@ -178,13 +199,11 @@ const CITIES: City[] = [
         g.prism(ngon(16, 6), x, z, 52, 56, 1.4, LANDMARK);
         g.prism(ngon(16, 8.4), x, z, 56, 59, 0.45, LANDMARK);
         spire(x, z, 59, 70)(g);
-        g.label('SPACE NEEDLE', [x, 74, z]);
       },
       // Columbia Center, the tall black three-lobed tower
       (g) => {
         g.prism(ngon(3, 9, Math.PI / 6), 10, 10, 0, 92, 1, LANDMARK, 3);
         g.prism(ngon(6, 6.5), 10, 10, 0, 102, 1, LANDMARK, 0);
-        g.label('COLUMBIA CENTER', [10, 106, 10]);
       },
     ],
   },
@@ -217,6 +236,18 @@ const CITIES: City[] = [
         width: 10,
       },
     ],
+    spots: [
+      ['City Hall', 'William Penn on top of the tower at the center of the grid', 0, 0, 56],
+      ['Comcast Technology Center', 'The tallest tower in Philadelphia', 26, -14, 104],
+      ['Liberty Place', 'The Chrysler-style spire that broke the height rule in 1987', -24, -6, 96],
+      ['LOVE Park', 'The LOVE statue and the skate plaza that made it famous', -16, -26],
+      ['Art Museum and Rocky Steps', 'The museum steps everyone runs up, over the Schuylkill', -58, -72],
+      ['Independence Hall', 'The Liberty Bell and where the Declaration was signed', 56, 14],
+      ['Reading Terminal Market', 'The food hall under the old train shed', 22, 12],
+      ['Avenue of the Arts', 'The Kimmel Center and the theaters along South Broad', -4, 34],
+      ['South Street', "Punk, cheesesteaks and Magic Gardens' mosaics", 40, 62],
+      ['The Met Philadelphia', 'The restored opera house on North Broad, now a big concert hall', 4, -84],
+    ],
     landmarks: [
       // City Hall with William Penn on top
       (g) => {
@@ -224,12 +255,10 @@ const CITIES: City[] = [
         g.prism(rect(7, 7), 0, 0, 16, 40, 1, LANDMARK, 2);
         g.prism(ngon(8, 4.2, Math.PI / 8), 0, 0, 40, 50, 0.4, LANDMARK);
         spire(0, 0, 50, 56)(g);
-        g.label('CITY HALL', [0, 60, 0]);
       },
       // Comcast Technology Center
       (g) => {
         g.prism(rect(13, 13), 26, -14, 0, 104, 0.9, LANDMARK, 6);
-        g.label('COMCAST CENTER', [26, 108, -14]);
       },
       // Liberty Place, the Chrysler-style spire
       (g) => {
@@ -263,17 +292,27 @@ const CITIES: City[] = [
         width: 9,
       },
     ],
+    spots: [
+      ['The Shard', 'The glass spire over London Bridge, tallest in the UK', 35, 34, 98],
+      ['Big Ben', 'Elizabeth Tower at Westminster', -72, 40, 40],
+      ['London Eye', 'The big wheel on the South Bank', -48, -14, 34],
+      ['The Gherkin', '30 St Mary Axe in the City', 16, -40, 66],
+      ['Tate Modern', 'The power station turned art museum on Bankside', 12, 14],
+      ['Brixton', 'Windrush Square, Electric Brixton and the heart of Black British culture', -22, 96],
+      ['Notting Hill', 'Home of Carnival every August bank holiday', -106, -52],
+      ['Camden', "Camden Market, the Roundhouse and the city's rock and punk venues", -58, -96],
+      ['Shoreditch', 'Street art, studios and Boxpark', 44, -72],
+      ['Peckham', 'Galleries, rooftop bars and south London Afrobeats', 58, 86],
+    ],
     landmarks: [
       // The Shard
       (g) => {
         g.prism(ngon(4, 11, Math.PI / 4), 35, 34, 0, 98, 0.04, LANDMARK, 6);
-        g.label('THE SHARD', [35, 102, 34]);
       },
       // Elizabeth Tower (Big Ben)
       (g) => {
         g.prism(rect(5, 5), -72, 40, 0, 30, 1, LANDMARK, 3);
         g.prism(rect(5, 5), -72, 40, 30, 40, 0.1, LANDMARK);
-        g.label('BIG BEN', [-72, 44, 40]);
       },
       // London Eye
       (g) => {
@@ -288,13 +327,11 @@ const CITIES: City[] = [
           ],
           LANDMARK,
         );
-        g.label('LONDON EYE', [x, 38, z]);
       },
       // The Gherkin
       (g) => {
         const r = [4, 6, 6.6, 6.2, 5, 3, 0.4];
         for (let i = 0; i < r.length - 1; i++) g.prism(ngon(12, r[i]), 16, -40, i * 11, (i + 1) * 11, r[i + 1] / r[i], LANDMARK);
-        g.label('GHERKIN', [16, 70, -40]);
       },
     ],
   },
@@ -307,6 +344,18 @@ const CITIES: City[] = [
     grid: 0.62,
     peak: 34,
     spread: 48,
+    spots: [
+      ['Kingdom Centre', 'The tower with the sky bridge across its arch', -10, -20, 102],
+      ['Al Faisaliah', 'The pyramid with the golden globe near its tip', 36, 32, 86],
+      ['Tahlia Street', 'Cafés, shops and the late-night drive', -40, 18],
+      ['Masmak Fortress', 'The mud-brick fort where the modern kingdom began', 18, 88],
+      ['National Museum', 'Saudi history from prehistory to today, in the Murabba district', 40, 64],
+      ['Diriyah (At-Turaif)', 'UNESCO-listed mud-brick city, birthplace of the first Saudi state', -104, -34],
+      ['JAX District', "Diriyah's arts district and home of the Diriyah Contemporary Art Biennale", -96, 8],
+      ['Boulevard City', 'Riyadh Season concerts, events and the giant screens', -30, -94],
+      ['KAFD', 'King Abdullah Financial District and its new towers', 62, -72],
+      ['Wadi Hanifah', 'The green valley that runs along the west of the city', -74, 70],
+    ],
     landmarks: [
       // Kingdom Centre: a tower that opens into a parabolic arch with a sky bridge
       (g) => {
@@ -336,14 +385,12 @@ const CITIES: City[] = [
             LANDMARK,
           );
         }
-        g.label('KINGDOM CENTRE', [x, 108, z]);
       },
       // Al Faisaliah: a pyramid holding a golden globe
       (g) => {
         const [x, z] = [36, 32];
         g.prism(ngon(4, 13, Math.PI / 4), x, z, 0, 86, 0.02, LANDMARK, 4);
         for (const t of [0, Math.PI / 3, (2 * Math.PI) / 3]) g.line(hoop(x, 62, z, 5, t, 16), LANDMARK, true);
-        g.label('AL FAISALIAH', [x, 92, z]);
       },
     ],
   },
@@ -370,17 +417,27 @@ const CITIES: City[] = [
         width: 5,
       },
     ],
+    spots: [
+      ['Chase Tower', 'Five-sided, the tallest in Texas', 6, 6, 112],
+      ['Williams Tower', 'The Uptown tower with the rooftop beacon', -80, 40, 96],
+      ['Third Ward', "Emancipation Park, Project Row Houses and Houston's Black cultural heart", 42, 58],
+      ['Screwed Up Records', "DJ Screw's shop on the South Side, home of chopped and screwed", 26, 98],
+      ['Fifth Ward', "Frenchtown, zydeco and the Bloody Nickel's rap history", 56, -64],
+      ['Museum District', 'The MFAH, the Menil and nineteen museums in walking distance', -12, 72],
+      ['Discovery Green', 'The downtown park where the festivals happen', 28, 24],
+      ['Daikin Park', 'The Astros ballpark in the old Union Station', 38, -12],
+      ['Buffalo Bayou', 'The bayou park and trails along the north of downtown', -40, -44],
+      ['NRG Park', 'The Astrodome, NRG Stadium and the Houston Rodeo', -22, 106],
+    ],
     landmarks: [
       // JPMorgan Chase Tower, five-sided
       (g) => {
         g.prism(ngon(5, 11, -Math.PI / 2), 6, 6, 0, 112, 1, LANDMARK, 7);
-        g.label('CHASE TOWER', [6, 116, 6]);
       },
       // Williams Tower out in Uptown
       (g) => {
         g.prism(rect(12, 12, Math.PI / 4), -80, 40, 0, 88, 1, LANDMARK, 5);
         g.prism(rect(12, 12, Math.PI / 4), -80, 40, 88, 96, 0.2, LANDMARK);
-        g.label('WILLIAMS TOWER', [-80, 100, 40]);
       },
       // The 610 Loop
       (g) =>
@@ -401,18 +458,28 @@ const CITIES: City[] = [
     peak: 64,
     spread: 34,
     more: [[10, -70, 48, 18]],
+    spots: [
+      ['Bank of America Plaza', 'The tallest tower in the Southeast, gold-tipped spire', 4, -40, 122],
+      ['Westin Peachtree Plaza', 'The glass cylinder downtown', -6, 4, 76],
+      ['Mercedes-Benz Stadium', 'Falcons and Atlanta United under the pinwheel roof', -72, 34, 16],
+      ['Centennial Olympic Park', 'The 1996 Olympic park, next to the Georgia Aquarium', -36, 8],
+      ['Sweet Auburn', "Dr. King's birthplace, Ebenezer Baptist Church and the old Black Wall Street", 46, 14],
+      ['Atlanta University Center', 'Morehouse, Spelman and Clark Atlanta', -72, 78],
+      ['Fox Theatre', 'The 1929 movie palace on Peachtree', 24, -60],
+      ['Ponce City Market', 'The old Sears building on the BeltLine', 62, -52],
+      ['Little Five Points', 'Vintage stores, murals and the independent music scene', 90, 22],
+      ['Castleberry Hill', 'Lofts, galleries, studios and the Westside art walks', -32, 52],
+    ],
     landmarks: [
       // Bank of America Plaza: pyramid top and gold spire
       (g) => {
         g.prism(rect(14, 14, Math.PI / 4), 4, -40, 0, 96, 1, LANDMARK, 6);
         g.prism(rect(14, 14, Math.PI / 4), 4, -40, 96, 108, 0.3, LANDMARK);
         spire(4, -40, 108, 122)(g);
-        g.label('BOA PLAZA', [4, 126, -40]);
       },
       // Westin Peachtree Plaza, the glass cylinder
       (g) => {
         g.prism(ngon(16, 8), -6, 4, 0, 76, 1, LANDMARK, 5);
-        g.label('WESTIN', [-6, 80, 4]);
       },
       // Mercedes-Benz Stadium and its pinwheel roof
       (g) => {
@@ -428,7 +495,6 @@ const CITIES: City[] = [
             LANDMARK,
           );
         }
-        g.label('MERCEDES-BENZ', [x, 22, z]);
       },
     ],
   },
@@ -539,6 +605,24 @@ const buildCity = (c: City) => {
       );
     }
   c.landmarks.forEach((l) => l(g));
+  // A ring on the ground at each highlighted place, and a floating diamond where there's no landmark to mark it
+  for (const [, , x, z, top] of c.spots) {
+    g.line(
+      ngon(12, top ? 8 : 4).map(([a, b]) => [x + a, 0.3, z + b] as V3),
+      SPOT,
+      true,
+    );
+    if (top) continue;
+    g.line(
+      [
+        [x, 0, z],
+        [x, 11, z],
+      ],
+      SPOT,
+    );
+    g.prism(ngon(4, 2.4), x, z, 14, 17.5, 0, SPOT);
+    g.prism(ngon(4, 2.4), x, z, 14, 11, 0, SPOT);
+  }
   return g;
 };
 
@@ -583,7 +667,7 @@ const buildGlobe = () => {
   return g;
 };
 
-const COLORS = ['#2a8fb8', '#3a7cff', '#5fd8ff', '#bff4ff'];
+const COLORS = ['#2a8fb8', '#3a7cff', '#5fd8ff', '#bff4ff', '#e8fbff'];
 type View = { mode: 'globe' | 'city'; city: number };
 const CAM = {
   globe: { min: 230, max: 700, start: 380, target: 0 },
@@ -598,6 +682,8 @@ const Nodes: React.FC = () => {
   const [, tick] = useState(0);
   const go = useRef<(v: View) => void>(() => {});
   const zoomBy = useRef<(factor: number) => void>(() => {});
+  const pick = useRef<(spot: number) => void>(() => {});
+  const [spot, setSpot] = useState(-1);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -605,7 +691,14 @@ const Nodes: React.FC = () => {
     const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const globe = buildGlobe();
     const cities = new Map<number, Geo>();
-    const cam = { yaw: 0, pitch: 0.35, dist: CAM.globe.start, born: performance.now() };
+    // tx/tz is the point the camera circles, gliding toward gx/gz when a spot is picked
+    const cam = { yaw: 0, pitch: 0.35, dist: CAM.globe.start, born: performance.now(), tx: 0, tz: 0, gx: 0, gz: 0 };
+    let sel = -1;
+    // Dust drifting up through the projection
+    const motes = Array.from({ length: 140 }, () => {
+      const [a, r] = [Math.random() * Math.PI * 2, Math.sqrt(Math.random()) * RADIUS];
+      return [Math.cos(a) * r, Math.random() * 130, Math.sin(a) * r, 4 + Math.random() * 10];
+    });
     let cur: View = { mode: 'globe', city: 0 };
     let touched = 0,
       overscroll = 0,
@@ -620,6 +713,9 @@ const Nodes: React.FC = () => {
       cur = v;
       cam.born = performance.now();
       overscroll = 0;
+      sel = -1;
+      Object.assign(cam, { tx: 0, tz: 0, gx: 0, gz: 0 });
+      setSpot(-1);
       if (v.mode === 'globe') {
         // Come back out facing the city you were in
         const c = CITIES[v.city];
@@ -628,6 +724,16 @@ const Nodes: React.FC = () => {
       setView(v);
     };
     go.current = show;
+
+    const select = (i: number) => {
+      const s = i >= 0 ? CITIES[cur.city].spots[i] : undefined;
+      sel = s ? i : -1;
+      [cam.gx, cam.gz] = s ? [s[2], s[3]] : [0, 0];
+      if (s) cam.dist = Math.min(cam.dist, 220);
+      touched = performance.now();
+      setSpot(sel);
+    };
+    pick.current = select;
 
     const zoom = (factor: number) => {
       const lim = CAM[cur.mode];
@@ -657,6 +763,10 @@ const Nodes: React.FC = () => {
       ctx.globalCompositeOperation = 'source-over';
       ctx.clearRect(0, 0, W, H);
       ctx.globalCompositeOperation = 'lighter';
+      cam.tx += (cam.gx - cam.tx) * Math.min(1, dt * 3);
+      cam.tz += (cam.gz - cam.tz) * Math.min(1, dt * 3);
+      // Now and then the signal slips sideways, like an old transmission
+      if (!calm && now % 5300 < 90) ctx.translate((Math.random() - 0.5) * 8, 0);
 
       const g = cur.mode === 'globe' ? globe : (cities.get(cur.city) ?? cities.set(cur.city, buildCity(CITIES[cur.city])).get(cur.city)!);
       // The hologram builds up from the pad when it appears, and flickers a little
@@ -671,6 +781,8 @@ const Nodes: React.FC = () => {
         py = new Float32Array(n),
         pz = new Float32Array(n);
       const project = (x: number, y: number, z: number, out: number) => {
+        x -= cam.tx;
+        z -= cam.tz;
         y = y * rise - target;
         const x1 = x * cy + z * sy,
           z1 = -x * sy + z * cy;
@@ -684,6 +796,23 @@ const Nodes: React.FC = () => {
         return null;
       };
       for (let i = 0; i < n; i++) project(g.v[i * 3], g.v[i * 3 + 1], g.v[i * 3 + 2], i);
+
+      // The beam from the projector below up to the pad (the pad's outer ring is the city's first 72 points)
+      if (cur.mode === 'city') {
+        let [l, r, top] = [W, 0, H];
+        for (let i = 0; i < 72; i++) [l, r, top] = [Math.min(l, px[i]), Math.max(r, px[i]), Math.min(top, py[i])];
+        const beam = ctx.createLinearGradient(0, H, 0, top);
+        beam.addColorStop(0, 'rgba(95,216,255,0.22)');
+        beam.addColorStop(1, 'rgba(95,216,255,0)');
+        ctx.fillStyle = beam;
+        ctx.globalAlpha = flicker;
+        ctx.beginPath();
+        ctx.moveTo(W / 2 - 30, H);
+        ctx.lineTo(l, top + (H - top) * 0.45);
+        ctx.lineTo(r, top + (H - top) * 0.45);
+        ctx.lineTo(W / 2 + 30, H);
+        ctx.fill();
+      }
 
       // Lines facing away (the far side of the globe, the back of the city) are dimmer
       const back = cur.mode === 'globe' ? 0 : -RADIUS * 0.3;
@@ -701,15 +830,52 @@ const Nodes: React.FC = () => {
           const strength = (near ? 1 : cur.mode === 'globe' ? 0.16 : 0.45) * flicker;
           ctx.strokeStyle = COLORS[k];
           ctx.globalAlpha = strength * 0.22;
-          ctx.lineWidth = k === LANDMARK ? 4 : 3;
+          ctx.lineWidth = k >= LANDMARK ? 4 : 3;
           ctx.stroke();
           ctx.globalAlpha = strength * (k === GROUND ? 0.45 : k === BUILDING ? 0.55 : 0.9);
-          ctx.lineWidth = k === LANDMARK ? 1.3 : 0.8;
+          ctx.lineWidth = k >= LANDMARK ? 1.3 : 0.8;
           ctx.stroke();
         }
 
+      if (cur.mode === 'city') {
+        ctx.fillStyle = '#9fe9ff';
+        for (const m of motes) {
+          m[1] = (m[1] + dt * m[3]) % 130;
+          const [x, y, z] = project(m[0] + cam.tx, m[1], m[2] + cam.tz, -1)!;
+          ctx.globalAlpha = (0.25 + 0.5 * Math.sin((m[1] / 130) * Math.PI)) * flicker;
+          ctx.fillRect(Math.round(x), Math.round(y), z > 0 ? 2 : 1, z > 0 ? 2 : 1);
+        }
+        // The picked spot: a light column and a ring pulsing out from it
+        const s = CITIES[cur.city].spots[sel];
+        if (s) {
+          const r = 6 + ((now / 25) % 18);
+          ctx.strokeStyle = '#e8fbff';
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = (1 - (r - 6) / 18) * flicker;
+          ctx.beginPath();
+          for (let i = 0; i <= 24; i++) {
+            const a = (i / 24) * Math.PI * 2;
+            const [x, y] = project(s[2] + Math.cos(a) * r, 0.5, s[3] + Math.sin(a) * r, -1)!;
+            ctx[i ? 'lineTo' : 'moveTo'](x, y);
+          }
+          ctx.stroke();
+          const [x0, y0] = project(s[2], 0, s[3], -1)!;
+          const [x1, y1] = project(s[2], (s[4] ?? 18) + 40, s[3], -1)!;
+          const col = ctx.createLinearGradient(x0, y0, x1, y1);
+          col.addColorStop(0, 'rgba(232,251,255,0.5)');
+          col.addColorStop(1, 'rgba(232,251,255,0)');
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 6;
+          ctx.globalAlpha = flicker;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+        }
+      }
+
       ctx.globalCompositeOperation = 'source-over';
-      ctx.font = '10px "Courier New", monospace';
+      ctx.font = '12px "Fixedsys Excelsior", "Courier New", monospace';
       ctx.textAlign = 'center';
       hits = [];
       if (cur.mode === 'globe') {
@@ -733,12 +899,21 @@ const Nodes: React.FC = () => {
           ctx.fillText(c.short, x + (c.lng < -90 ? -10 : 10), y + 4);
         });
       } else if (grow === 1) {
-        ctx.fillStyle = '#bff4ff';
-        for (const l of g.labels) {
-          const [x, y, z] = project(...l.at, -1)!;
-          ctx.globalAlpha = (z > back ? 0.95 : 0.35) * flicker;
-          ctx.fillText(l.text, x, y);
-        }
+        CITIES[cur.city].spots.forEach(([name, , sx, sz, top], i) => {
+          const [x, y, z] = project(sx, (top ?? 18) + 5, sz, -1)!;
+          hits.push({ i, x, y });
+          const on = i === sel;
+          ctx.fillStyle = on ? '#ffffff' : '#bff4ff';
+          ctx.globalAlpha = (on ? 1 : sel >= 0 ? 0.35 : z > back ? 0.85 : 0.35) * flicker;
+          // Only the picked spot spells out its name; the others show their number, so the middle of town stays readable
+          if (on) ctx.fillText(`[${i + 1}] ${name.toUpperCase()}`, x, y);
+          else {
+            ctx.strokeStyle = ctx.fillStyle;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(Math.round(x) - 8.5, Math.round(y) - 11.5, 17, 15);
+            ctx.fillText(String(i + 1), x, y);
+          }
+        });
       }
       ctx.globalAlpha = 1;
     };
@@ -747,7 +922,7 @@ const Nodes: React.FC = () => {
     const resize = new ResizeObserver(() => ([W, H] = [canvas.clientWidth, canvas.clientHeight]));
     resize.observe(canvas);
 
-    // One finger or the mouse turns it, two fingers pinch to zoom, a tap on the globe opens that city
+    // One finger or the mouse turns it, two fingers pinch to zoom, a tap opens a city on the globe or picks a spot in one
     const pointers = new Map<number, { x: number; y: number }>();
     let pinch = 0,
       moved = 0;
@@ -778,9 +953,10 @@ const Nodes: React.FC = () => {
     const up = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
       pinch = 0;
-      if (moved > 8 || cur.mode !== 'globe') return;
+      if (moved > 8) return;
       const hit = hits.find((h) => Math.hypot(h.x - e.offsetX, h.y - e.offsetY) < 22);
-      if (hit) show({ mode: 'city', city: hit.i });
+      if (cur.mode === 'city') select(hit ? hit.i : -1);
+      else if (hit) show({ mode: 'city', city: hit.i });
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -806,20 +982,32 @@ const Nodes: React.FC = () => {
 
   return (
     <div
-      className="relative w-full h-full overflow-hidden bg-[#020a12] font-mono text-[11px] text-[#bff4ff] select-none outline-none"
+      className="nodes relative w-full h-full overflow-hidden bg-[#020a12] text-[14px] leading-tight text-[#bff4ff] select-none outline-none"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'ArrowRight') step(1);
         else if (e.key === 'ArrowLeft') step(-1);
-        else if (e.key === 'Escape') go.current({ mode: 'globe', city: view.city });
+        else if (e.key === 'Escape') spot >= 0 ? pick.current(-1) : go.current({ mode: 'globe', city: view.city });
         else if (e.key === '+' || e.key === '=') zoomBy.current(0.85);
         else if (e.key === '-') zoomBy.current(1.18);
       }}
     >
+      <style>{`
+        @font-face {
+          font-family: 'Fixedsys Excelsior';
+          src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
+        }
+        .nodes, .nodes button { font-family: 'Fixedsys Excelsior', 'Courier New', monospace; -webkit-font-smoothing: none; }
+        .nodes .roll { animation: nodes-roll 7s linear infinite; }
+        @keyframes nodes-roll { from { transform: translateY(-20%); } to { transform: translateY(520%); } }
+        @media (prefers-reduced-motion: reduce) { .nodes .roll { display: none; } }
+      `}</style>
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_70%,rgba(40,140,200,0.25),transparent_65%)]" />
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full touch-none cursor-grab active:cursor-grabbing" />
-      {/* Scanlines */}
-      <div className="absolute inset-0 pointer-events-none opacity-30 bg-[repeating-linear-gradient(0deg,transparent_0,transparent_2px,rgba(0,0,0,0.6)_3px)]" />
+      {/* Old-screen look: scanlines, a bright band rolling down, dark corners */}
+      <div className="absolute inset-0 pointer-events-none opacity-40 bg-[repeating-linear-gradient(0deg,transparent_0,transparent_2px,rgba(0,0,0,0.6)_3px)]" />
+      <div className="roll absolute inset-x-0 top-0 h-1/5 pointer-events-none bg-[linear-gradient(transparent,rgba(95,216,255,0.06),transparent)]" />
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(0,0,0,0.55))]" />
 
       <div className="absolute top-2 left-3 right-3 flex items-start justify-between gap-2 pointer-events-none">
         <div>
@@ -846,27 +1034,50 @@ const Nodes: React.FC = () => {
         </div>
       </div>
 
-      <div className="absolute bottom-2 left-2 right-2 flex items-center gap-1">
-        <button className={btn} onClick={() => go.current({ mode: 'globe', city: view.city })} aria-label="Globe">
-          ◎
-        </button>
-        <button className={btn} onClick={() => step(-1)} aria-label="Previous city">
-          ‹
-        </button>
-        <div className="flex-1 flex gap-1 overflow-x-auto [scrollbar-width:none]">
-          {CITIES.map((c, i) => (
-            <button
-              key={c.short}
-              className={`${btn} shrink-0 ${view.mode === 'city' && view.city === i ? 'bg-[#5fd8ff]/25 border-[#bff4ff]' : ''}`}
-              onClick={() => go.current({ mode: 'city', city: i })}
-            >
-              {c.name}
-            </button>
-          ))}
+      <div className="absolute bottom-2 left-2 right-2 flex flex-col gap-1">
+        {view.mode === 'city' && spot >= 0 && (
+          <div className="self-start max-w-[340px] border border-[#5fd8ff]/50 bg-[#020a12]/80 px-2 py-1">
+            <div className="text-white">
+              [{spot + 1}] {city.spots[spot][0].toUpperCase()}
+            </div>
+            <div className="opacity-80">{city.spots[spot][1]}</div>
+          </div>
+        )}
+        {view.mode === 'city' && (
+          <div className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
+            {city.spots.map(([name], i) => (
+              <button
+                key={name}
+                className={`${btn} shrink-0 py-0.5 ${spot === i ? 'bg-[#5fd8ff]/25 border-[#bff4ff] text-white' : 'opacity-80'}`}
+                onClick={() => pick.current(spot === i ? -1 : i)}
+              >
+                {i + 1} {name}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-1">
+          <button className={btn} onClick={() => go.current({ mode: 'globe', city: view.city })} aria-label="Globe">
+            ◎
+          </button>
+          <button className={btn} onClick={() => step(-1)} aria-label="Previous city">
+            ‹
+          </button>
+          <div className="flex-1 flex gap-1 overflow-x-auto [scrollbar-width:none]">
+            {CITIES.map((c, i) => (
+              <button
+                key={c.short}
+                className={`${btn} shrink-0 ${view.mode === 'city' && view.city === i ? 'bg-[#5fd8ff]/25 border-[#bff4ff]' : ''}`}
+                onClick={() => go.current({ mode: 'city', city: i })}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+          <button className={btn} onClick={() => step(1)} aria-label="Next city">
+            ›
+          </button>
         </div>
-        <button className={btn} onClick={() => step(1)} aria-label="Next city">
-          ›
-        </button>
       </div>
     </div>
   );
