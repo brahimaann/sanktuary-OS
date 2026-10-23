@@ -34,10 +34,10 @@ const RECIPES: Record<number, Recipe> = {
     pivot: 0.42,
     lift: [0.035, 0.03, 0.03],
     roll: 0.04,
-    sat: 0.9,
+    sat: 0.95,
     hiSat: 0.5,
     hues: [
-      { h: 60, w: 35, c: 1.08, l: 0.01 },
+      { h: 60, w: 35, c: 1.3, l: 0.015 },
       { h: 140, w: 45, dh: -18, c: 0.78 },
       { h: 250, w: 45, dh: -15, c: 0.95 },
     ],
@@ -46,15 +46,15 @@ const RECIPES: Record<number, Recipe> = {
   25: {
     wb: [1.03, 1.0, 0.95],
     cross: -0.08,
-    contrast: [1.3, 1.25, 1.35],
-    pivot: 0.45,
+    contrast: [1.22, 1.18, 1.28],
+    pivot: 0.38,
     lift: [0.0, 0.0, 0.01],
     roll: 0.03,
     sat: 1.1,
     hiSat: 0.6,
     hues: [
       { h: 25, w: 30, dh: -4, c: 1.25, l: -0.02 },
-      { h: 60, w: 30, c: 0.88 },
+      { h: 60, w: 30, c: 0.78 },
       { h: 95, w: 30, dh: -8, c: 1.15 },
       { h: 140, w: 40, dh: 10, c: 0.95 },
       { h: 265, w: 45, c: 1.2, l: -0.06 },
@@ -89,6 +89,7 @@ const RECIPES: Record<number, Recipe> = {
     hiSat: 0.5,
     hues: [
       { h: 28, w: 30, c: 1.25 },
+      { h: 60, w: 25, c: 1.15 },
       { h: 95, w: 30, dh: -6, c: 0.85 },
       { h: 140, w: 45, dh: -15, c: 0.65 },
       { h: 250, w: 45, dh: -20, c: 0.88, l: -0.03 },
@@ -98,15 +99,15 @@ const RECIPES: Record<number, Recipe> = {
   28: {
     wb: [1.0, 0.98, 1.02],
     cross: -0.12,
-    contrast: [1.3, 1.3, 1.25],
-    pivot: 0.45,
+    contrast: [1.25, 1.25, 1.2],
+    pivot: 0.38,
     lift: [0.008, 0.0, 0.01],
     roll: 0.03,
     sat: 1.35,
     hiSat: 0.7,
     hues: [
-      { h: 25, w: 30, dh: -6, c: 1.1 },
-      { h: 60, w: 30, c: 0.82 },
+      { h: 25, w: 30, dh: -4, c: 1.1 },
+      { h: 60, w: 30, c: 0.7 },
       { h: 140, w: 50, dh: 6, c: 1.2, l: -0.02 },
       { h: 265, w: 45, dh: 5, c: 1.15, l: -0.04 },
     ],
@@ -148,6 +149,7 @@ const sCurve = (x: number, k: number, p: number) => {
 };
 
 function grade(rgb: V3, r: Recipe): V3 {
+  const [L0, a0, b0] = linToOklab(rgb.map(toLin) as V3);
   // 1. Light: white balance and dye crosstalk
   let lin = rgb.map((v, i) => toLin(v) * r.wb[i]) as V3;
   const avg = (lin[0] + lin[1] + lin[2]) / 3;
@@ -167,6 +169,11 @@ function grade(rgb: V3, r: Recipe): V3 {
     C *= 1 + ((m.c ?? 1) - 1) * wgt;
     dL += (m.l || 0) * wgt;
   }
+  // Skin guard: contrast curves pull the lower mids down, which is where deep skin sits. Skin tones may not end up
+  // more than a touch darker than they started, whatever the stock does to everything else.
+  const d0 = (((Math.atan2(b0, a0) * 180) / Math.PI - 60 + 540) % 360) - 180;
+  const skin = Math.exp(-(d0 * d0) / (2 * 22 * 22)) * Math.min(1, Math.hypot(a0, b0) / 0.03);
+  dL += Math.max(0, L0 - 0.01 - (L + dL)) * skin;
   const hi = Math.min(Math.max((L - 0.75) / 0.25, 0), 1);
   C *= 1 - hi * hi * (1 - r.hiSat);
   // Too much colour for the screen: lower the chroma (keeping hue and lightness) instead of clipping each channel,

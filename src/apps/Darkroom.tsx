@@ -406,7 +406,7 @@ vec3 halation(vec2 st, float big) {
   vec3 h = vec3(0.0);
   for (int i = 0; i < 12; i++) {
     float t = a + float(i) * 0.5236;
-    float r = (1.0 + mod(float(i), 3.0)) * big / 300.0;
+    float r = (1.0 + mod(float(i), 3.0)) * big / 400.0;
     vec3 s = texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb;
     h += srgb2lin(s) * smoothstep(0.7, 1.0, luma(s));
   }
@@ -816,7 +816,7 @@ void main() {
   else if (uLut > 0.5) graded = lut3d(c);
   if (preset == 26) { // the fringe shows around lights, not on top of them
     float glowOn = 1.0 - 0.85 * smoothstep(0.6, 1.0, luma(c));
-    graded = lin2srgb(srgb2lin(graded) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 1.4 * glowOn);
+    graded = lin2srgb(srgb2lin(graded) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 0.8 * glowOn);
   }
 
   c = mix(c, graded, amount);
