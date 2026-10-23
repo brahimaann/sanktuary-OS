@@ -58,8 +58,6 @@ export interface WindowInstance {
   focused: boolean;
 }
 
-export type ScreensaverType = 'starfield' | 'none';
-
 interface WindowManagerState {
   windows: WindowInstance[];
   maxZIndex: number;
@@ -80,19 +78,15 @@ interface WindowManagerState {
   bgColor: string;
   setWallpaper: (wp: string) => void;
   setBgColor: (color: string) => void;
-  screensaver: ScreensaverType;
-  screensaverTimeout: number;
-  isScreensaverActive: boolean;
-  setScreensaver: (s: ScreensaverType) => void;
-  setScreensaverTimeout: (mins: number) => void;
-  setScreensaverActive: (active: boolean) => void;
 }
 
-// Each app's last size and place on this device, so it reopens where it was left
+// Each app's last size and place on this device, so it reopens where it was left.
+// Pages in an iframe (the magazine, CITIES, Write...) each keep their own, by window id.
 type Place = { x: number; y: number; width: number; height: number };
-function lastPlace(appType: AppType): Place | null {
+const placeKey = (w: { id: string; appType: AppType }) => `sk_win_${w.appType === 'iframe' ? w.id : w.appType}`;
+function lastPlace(w: { id: string; appType: AppType }): Place | null {
   try {
-    const p = JSON.parse(localStorage.getItem(`sk_win_${appType}`) || 'null');
+    const p = JSON.parse(localStorage.getItem(placeKey(w)) || 'null');
     return p && [p.x, p.y, p.width, p.height].every(Number.isFinite) && p.width > 100 && p.height > 60 ? p : null;
   } catch {
     return null;
@@ -104,7 +98,7 @@ function rememberPlace(w?: WindowInstance) {
   clearTimeout(placeTimer); // drags report every move: save once they settle
   placeTimer = window.setTimeout(() => {
     try {
-      localStorage.setItem(`sk_win_${w.appType}`, JSON.stringify({ x: w.x, y: w.y, width: w.width, height: w.height }));
+      localStorage.setItem(placeKey(w), JSON.stringify({ x: w.x, y: w.y, width: w.width, height: w.height }));
     } catch {}
   }, 300);
 }
@@ -200,7 +194,7 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
 
       // Where this app was last left on this device (size and place), kept on screen; else centred, and later
       // windows step down-right from the centre so they don't hide each other
-      const saved = spec.x === undefined ? lastPlace(spec.appType) : null;
+      const saved = spec.x === undefined ? lastPlace(spec) : null;
       if (saved) {
         computedWidth = Math.min(saved.width, desktopWidth);
         computedHeight = Math.min(saved.height, desktopHeight);
@@ -289,26 +283,4 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
   bgColor: '#008080',
   setWallpaper: (wp) => set({ wallpaper: wp }),
   setBgColor: (color) => set({ bgColor: color }),
-  // 3D Pipes was retired: anyone who had it gets the starfield
-  screensaver: (typeof localStorage !== 'undefined' && localStorage.getItem('hq_os_screensaver') === 'none'
-    ? 'none'
-    : 'starfield') as ScreensaverType,
-  screensaverTimeout:
-    typeof localStorage !== 'undefined' && localStorage.getItem('hq_os_screensaver_timeout')
-      ? Number(localStorage.getItem('hq_os_screensaver_timeout'))
-      : 2,
-  isScreensaverActive: false,
-  setScreensaver: (s) => {
-    try {
-      localStorage.setItem('hq_os_screensaver', s);
-    } catch (_) {}
-    set({ screensaver: s });
-  },
-  setScreensaverTimeout: (mins) => {
-    try {
-      localStorage.setItem('hq_os_screensaver_timeout', String(mins));
-    } catch (_) {}
-    set({ screensaverTimeout: mins });
-  },
-  setScreensaverActive: (active) => set({ isScreensaverActive: active }),
 }));

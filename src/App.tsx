@@ -4,7 +4,6 @@ import Desktop, { Folder } from './components/Desktop';
 import Taskbar from './components/Taskbar';
 import Window from './components/Window';
 import BootScreen from './components/BootScreen';
-import Screensaver from './components/Screensaver';
 import { DialogHost } from './utils/dialog';
 
 // Code-split applications for fast initial boot and minimal bundle
@@ -91,7 +90,7 @@ class WindowErrorBoundary extends React.Component<{ children: React.ReactNode },
 }
 
 export const App: React.FC = () => {
-  const { windows, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive } = useWindowManager();
+  const { windows } = useWindowManager();
   const [isBooting, setIsBooting] = useState(true);
 
   useEffect(() => {
@@ -100,40 +99,6 @@ export const App: React.FC = () => {
     window.addEventListener('focusout', settle);
     return () => window.removeEventListener('focusout', settle);
   }, []);
-
-  // Screensaver idle detection
-  useEffect(() => {
-    if (isBooting || screensaver === 'none') return;
-
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const resetTimer = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(
-        () => {
-          setScreensaverActive(true);
-        },
-        screensaverTimeout * 60 * 1000,
-      );
-    };
-
-    const handleActivity = () => {
-      if (!isScreensaverActive) {
-        resetTimer();
-      }
-    };
-
-    resetTimer();
-    window.addEventListener('mousemove', handleActivity);
-    window.addEventListener('keydown', handleActivity);
-    window.addEventListener('pointerdown', handleActivity);
-
-    return () => {
-      clearTimeout(timeoutId);
-      window.removeEventListener('mousemove', handleActivity);
-      window.removeEventListener('keydown', handleActivity);
-      window.removeEventListener('pointerdown', handleActivity);
-    };
-  }, [isBooting, screensaver, screensaverTimeout, isScreensaverActive, setScreensaverActive]);
 
   const renderAppContent = (win: any) => {
     let content: React.ReactNode;
@@ -292,8 +257,6 @@ export const App: React.FC = () => {
   return (
     <div className="crt-wrapper">
       <div className="crt-screen-content">
-        {isScreensaverActive && <Screensaver type={screensaver} onDismiss={() => setScreensaverActive(false)} />}
-
         {isBooting ? (
           /* BIOS boot terminal */
           <BootScreen onComplete={handleBootComplete} />
