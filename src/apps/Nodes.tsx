@@ -24,10 +24,12 @@ interface City {
   /** Rivers and shorelines: polyline in ground coordinates, and its width (0 = shoreline) */
   water?: { pts: [number, number][]; width: number; side?: 1 | -1 }[];
   landmarks: Shape[];
-  /** Ten places to highlight: name, a line about it, ground position, and the height of its landmark if it has one */
+  /** Ten places that matter to the crew: name, a line about it, ground position */
   spots: Spot[];
+  /** Labels for the modelled landmarks: name and where the label sits */
+  marks: [name: string, x: number, y: number, z: number][];
 }
-type Spot = [name: string, note: string, x: number, z: number, top?: number];
+type Spot = [name: string, note: string, x: number, z: number];
 
 // Edge kinds, drawn in this order
 const GROUND = 0,
@@ -119,16 +121,21 @@ const CITIES: City[] = [
       },
     ],
     spots: [
-      ['IDS Center', "Minneapolis's tallest tower, over the Crystal Court", -18, 0, 80],
-      ['First Avenue', "Prince's club and the Purple Rain stage, stars on the wall", -36, 14],
-      ['Stone Arch Bridge', 'The old rail bridge across the Mississippi at St. Anthony Falls', 18, -26, 7],
-      ['Walker Art Center', 'Modern art and the Spoonbridge and Cherry in the sculpture garden', -66, 24],
-      ['Guthrie Theater', 'The riverfront theater with the Endless Bridge cantilevered over the water', 6, -44],
-      ['Cedar-Riverside', "Riverside Plaza's towers, the Cedar Cultural Center and the city's East African heart", 36, -4],
-      ['Lake Street', 'Midtown Global Market and the corridor that rebuilt itself', -24, 66],
+      ['First Avenue', "Prince's club: the Purple Rain stage, Rhymesayers shows, stars on the wall", -36, 14],
+      ['Cedar-Riverside', 'The heart of Somali Minneapolis and The Cedar, the global roots venue', 36, -4],
+      ['Walker Art Center', 'Contemporary art and the Spoonbridge and Cherry in the sculpture garden', -66, 24],
+      ['North Loop', 'Old brick warehouses full of streetwear shops, studios and galleries', -40, -40],
+      ['Midtown Global Market', 'The old Sears building on Lake Street, now East African, Latino and Native makers', -24, 66],
+      ['Mia and MCAD', 'The art museum next door to the art and design college', -46, 86],
+      ['George Floyd Square', 'The memorial at 38th and Chicago, murals and community art', 4, 100],
+      ['Penumbra Theatre', "St. Paul's Black theater since 1976, where August Wilson got his start, in historic Rondo", 34, 62],
+      ['Lowertown', "St. Paul's warehouse lofts, the Art Crawl and Union Depot", 76, 14],
       ['Paisley Park', "Prince's studio and home, out in Chanhassen", -100, 58],
-      ['Rondo', "St. Paul's historic Black neighborhood, remembered every July at Rondo Days", 34, 62],
-      ['Cathedral of Saint Paul', 'The copper dome on Summit Hill, looking over downtown St. Paul', 52, 44, 28],
+    ],
+    marks: [
+      ['IDS CENTER', -18, 84, 0],
+      ['STONE ARCH', 18, 8, -26],
+      ['CATHEDRAL', 52, 32, 44],
     ],
     landmarks: [
       // IDS Center, the tallest in Minneapolis, with its notched corners
@@ -178,16 +185,20 @@ const CITIES: City[] = [
       },
     ],
     spots: [
-      ['Space Needle', "The 1962 World's Fair tower over Seattle Center", -15, -62, 70],
-      ['Columbia Center', 'The tallest tower in Seattle, three-lobed and black', 10, 10, 102],
-      ['Pike Place Market', 'The public market on the waterfront since 1907', -28, -12],
-      ['MoPOP', 'The Museum of Pop Culture: Hendrix, Nirvana, sci-fi and games', -4, -74],
       ['The Crocodile', 'The Belltown club where grunge broke out', -24, -38],
-      ['Capitol Hill', 'Nightlife, record shops and the Pike/Pine venues', 38, -28],
-      ['Central District', "Black Seattle's historic heart, home to Quincy Jones and Jimi Hendrix", 50, 26],
-      ['Pioneer Square', "The city's oldest blocks, galleries and First Thursday art walks", -12, 42],
-      ['International District', 'Chinatown, Japantown and Little Saigon around the Wing Luke Museum', 18, 58],
-      ['Lumen Field', 'Home of the Seahawks and the Sounders', -6, 82],
+      ['Central District', "Black Seattle's historic heart: Quincy Jones and Hendrix grew up here; Wa Na Wari gallery", 50, 26],
+      ['International District', 'Chinatown, Japantown and Little Saigon, and the Wing Luke Museum', 18, 58],
+      ['KEXP', 'The listener-powered radio station, with a live room at Seattle Center', -24, -70],
+      ['Capitol Hill', 'Pike/Pine nightlife: Neumos, Chop Suey and the record shops', 38, -28],
+      ['Pike Place Market', 'The public market over the bay since 1907: artisans, printmakers, buskers', -28, -12],
+      ['MoPOP', 'The Museum of Pop Culture: Hendrix, Northwest hip-hop, Afrofuturism', -4, -78],
+      ['Pioneer Square', "The city's oldest blocks and the First Thursday gallery walk", -12, 42],
+      ['Olympic Sculpture Park', "The Seattle Art Museum's park stepping down to the bay", -48, -52],
+      ['Columbia City', 'Little Ethiopia along Rainier Ave and the old Columbia City Theater', 64, 92],
+    ],
+    marks: [
+      ['SPACE NEEDLE', -15, 74, -62],
+      ['COLUMBIA CENTER', 10, 106, 10],
     ],
     landmarks: [
       // Space Needle
@@ -237,16 +248,21 @@ const CITIES: City[] = [
       },
     ],
     spots: [
-      ['City Hall', 'William Penn on top of the tower at the center of the grid', 0, 0, 56],
-      ['Comcast Technology Center', 'The tallest tower in Philadelphia', 26, -14, 104],
-      ['Liberty Place', 'The Chrysler-style spire that broke the height rule in 1987', -24, -6, 96],
-      ['LOVE Park', 'The LOVE statue and the skate plaza that made it famous', -16, -26],
-      ['Art Museum and Rocky Steps', 'The museum steps everyone runs up, over the Schuylkill', -58, -72],
-      ['Independence Hall', 'The Liberty Bell and where the Declaration was signed', 56, 14],
-      ['Reading Terminal Market', 'The food hall under the old train shed', 22, 12],
-      ['Avenue of the Arts', 'The Kimmel Center and the theaters along South Broad', -4, 34],
-      ['South Street', "Punk, cheesesteaks and Magic Gardens' mosaics", 40, 62],
-      ['The Met Philadelphia', 'The restored opera house on North Broad, now a big concert hall', 4, -84],
+      ['Sigma Sound', "Where Gamble and Huff made the Sound of Philadelphia: the O'Jays, Teddy Pendergrass, Patti LaBelle", 18, -24],
+      ['Clef Club of Jazz', "The jazz home started by the Black musicians' union, Local 274", -4, 38],
+      ['South Street', 'Vintage, streetwear and the Magic Gardens mosaics', 40, 62],
+      ['Franklin Music Hall', 'The old Electric Factory, home of the neo-soul and club nights', 44, -60],
+      ['African American Museum', 'The first city-funded museum of Black life in the US, near Mother Bethel AME', 50, -6],
+      ['Barnes Foundation', 'Modern art and African sculpture on the Parkway', -40, -48],
+      ['Village of Arts and Humanities', 'Community-built sculpture parks and studios in North Philly', 10, -100],
+      ['ICA', 'Contemporary art at Penn, where Warhol had his first museum show', -100, 10],
+      ['Reading Terminal Market', 'The food hall under the old train shed, by the Chinatown Friendship Gate', 22, 10],
+      ['Bok Building', 'A 1938 trade school turned into studios for designers, makers and filmmakers', 20, 98],
+    ],
+    marks: [
+      ['CITY HALL', 0, 60, 0],
+      ['COMCAST CENTER', 26, 108, -14],
+      ['LIBERTY PLACE', -24, 100, -6],
     ],
     landmarks: [
       // City Hall with William Penn on top
@@ -293,16 +309,22 @@ const CITIES: City[] = [
       },
     ],
     spots: [
-      ['The Shard', 'The glass spire over London Bridge, tallest in the UK', 35, 34, 98],
-      ['Big Ben', 'Elizabeth Tower at Westminster', -72, 40, 40],
-      ['London Eye', 'The big wheel on the South Bank', -48, -14, 34],
-      ['The Gherkin', '30 St Mary Axe in the City', 16, -40, 66],
-      ['Tate Modern', 'The power station turned art museum on Bankside', 12, 14],
-      ['Brixton', 'Windrush Square, Electric Brixton and the heart of Black British culture', -22, 96],
-      ['Notting Hill', 'Home of Carnival every August bank holiday', -106, -52],
-      ['Camden', "Camden Market, the Roundhouse and the city's rock and punk venues", -58, -96],
-      ['Shoreditch', 'Street art, studios and Boxpark', 44, -72],
-      ['Peckham', 'Galleries, rooftop bars and south London Afrobeats', 58, 86],
+      ['Soho', "Ronnie Scott's, the record shops on Berwick Street and the old studios", -86, -40],
+      ['Brixton', 'Windrush Square, the Black Cultural Archives and the sound-system lineage', -22, 96],
+      ['Brick Lane', 'Banglatown, street art, and the roots of garage, grime and jungle', 56, -64],
+      ['Barbican', 'The Brutalist arts centre: experimental music, film and exhibitions', 4, -66],
+      ['Tate Modern', 'The power station turned museum; the Tanks show live and sound art', 12, 14],
+      ['Somerset House', 'London Fashion Week shows and the 1-54 Contemporary African Art Fair', -50, -22],
+      ['Fabric', 'The club in the old Smithfield cold stores that shaped drum and bass and dubstep', -16, -50],
+      ['Peckham', 'Rye Lane, "Little Lagos", the Bussey Building and rooftop nights', 58, 86],
+      ['Central Saint Martins', "The fashion school at King's Cross: McQueen, Wales Bonner, Mowalola", -40, -100],
+      ['Camden', 'Camden Market, the canal and the Roundhouse', -80, -90],
+    ],
+    marks: [
+      ['THE SHARD', 35, 102, 34],
+      ['BIG BEN', -72, 44, 40],
+      ['LONDON EYE', -48, 38, -14],
+      ['GHERKIN', 16, 70, -40],
     ],
     landmarks: [
       // The Shard
@@ -345,16 +367,20 @@ const CITIES: City[] = [
     peak: 34,
     spread: 48,
     spots: [
-      ['Kingdom Centre', 'The tower with the sky bridge across its arch', -10, -20, 102],
-      ['Al Faisaliah', 'The pyramid with the golden globe near its tip', 36, 32, 86],
-      ['Tahlia Street', 'Cafés, shops and the late-night drive', -40, 18],
-      ['Masmak Fortress', 'The mud-brick fort where the modern kingdom began', 18, 88],
-      ['National Museum', 'Saudi history from prehistory to today, in the Murabba district', 40, 64],
-      ['Diriyah (At-Turaif)', 'UNESCO-listed mud-brick city, birthplace of the first Saudi state', -104, -34],
-      ['JAX District', "Diriyah's arts district and home of the Diriyah Contemporary Art Biennale", -96, 8],
-      ['Boulevard City', 'Riyadh Season concerts, events and the giant screens', -30, -94],
-      ['KAFD', 'King Abdullah Financial District and its new towers', 62, -72],
-      ['Wadi Hanifah', 'The green valley that runs along the west of the city', -74, 70],
+      ['JAX District', "Diriyah's warehouse arts district and home of the Diriyah Contemporary Art Biennale", -96, 8],
+      ['XP Music Futures', "MDLBEAST's music conference and studios in JAX: Arab hip-hop and electronic", -88, -16],
+      ['SAMoCA', 'The Saudi Arabia Museum of Contemporary Art, in JAX', -104, 30],
+      ['National Museum', 'Saudi history from prehistory to today, by Murabba Palace', 40, 64],
+      ['Al-Batha', 'Markets shaped by Sudanese, Yemeni, Egyptian and South Asian communities', 44, 96],
+      ['Souq Al-Zal', 'The old market by Masmak Fortress: Sadu weaving, bishts, ouds', 14, 86],
+      ['Noor Riyadh', 'The yearly light-art festival that takes over towers, wadis and courtyards', 0, 10],
+      ['At-Turaif', 'The UNESCO mud-brick city in Diriyah, birthplace of the first Saudi state', -100, -48],
+      ['KAFD', 'The King Abdullah Financial District, its plazas and new towers', 62, -72],
+      ['Tuwaiq Palace', "Frei Otto's long stone wall and white tents over the cliffs of Wadi Hanifah", -72, 70],
+    ],
+    marks: [
+      ['KINGDOM CENTRE', -10, 108, -20],
+      ['AL FAISALIAH', 36, 92, 32],
     ],
     landmarks: [
       // Kingdom Centre: a tower that opens into a parabolic arch with a sky bridge
@@ -418,16 +444,20 @@ const CITIES: City[] = [
       },
     ],
     spots: [
-      ['Chase Tower', 'Five-sided, the tallest in Texas', 6, 6, 112],
-      ['Williams Tower', 'The Uptown tower with the rooftop beacon', -80, 40, 96],
-      ['Third Ward', "Emancipation Park, Project Row Houses and Houston's Black cultural heart", 42, 58],
-      ['Screwed Up Records', "DJ Screw's shop on the South Side, home of chopped and screwed", 26, 98],
-      ['Fifth Ward', "Frenchtown, zydeco and the Bloody Nickel's rap history", 56, -64],
-      ['Museum District', 'The MFAH, the Menil and nineteen museums in walking distance', -12, 72],
-      ['Discovery Green', 'The downtown park where the festivals happen', 28, 24],
-      ['Daikin Park', 'The Astros ballpark in the old Union Station', 38, -12],
-      ['Buffalo Bayou', 'The bayou park and trails along the north of downtown', -40, -44],
-      ['NRG Park', 'The Astrodome, NRG Stadium and the Houston Rodeo', -22, 106],
+      ['Project Row Houses', "Rick Lowe and fellow artists' Third Ward shotgun houses, art and community since 1993", 42, 58],
+      ['Screwed Up Records', "DJ Screw's shop on the South Side, home of chopped and screwed and the S.U.C.", 26, 98],
+      ['Emancipation Park', 'Bought by freed Texans in 1872 for Juneteenth, across from the Eldorado Ballroom', 58, 40],
+      ['Menil and Rothko Chapel', 'The Menil Collection and the Rothko Chapel', -40, 64],
+      ['TSU and S.H.A.P.E.', "Texas Southern's John Biggers murals and the S.H.A.P.E. Community Center", 72, 74],
+      ['Museum District', 'The MFAH and the Contemporary Arts Museum', -12, 80],
+      ['POST Houston', 'The old post office on the bayou, now 713 Music Hall and a rooftop park', -10, -30],
+      ['Fifth Ward', 'The DeLuxe Theater on Lyons Ave, Peacock Records and the Geto Boys', 56, -64],
+      ["Freedmen's Town", 'Brick streets laid by freed Black craftsmen after 1865, just west of downtown', -46, 6],
+      ['Southwest Houston', 'Alief and Asiatown: Nigerian, Vietnamese and Latin American Houston', -100, 70],
+    ],
+    marks: [
+      ['CHASE TOWER', 6, 116, 6],
+      ['WILLIAMS TOWER', -80, 100, 40],
     ],
     landmarks: [
       // JPMorgan Chase Tower, five-sided
@@ -459,16 +489,21 @@ const CITIES: City[] = [
     spread: 34,
     more: [[10, -70, 48, 18]],
     spots: [
-      ['Bank of America Plaza', 'The tallest tower in the Southeast, gold-tipped spire', 4, -40, 122],
-      ['Westin Peachtree Plaza', 'The glass cylinder downtown', -6, 4, 76],
-      ['Mercedes-Benz Stadium', 'Falcons and Atlanta United under the pinwheel roof', -72, 34, 16],
-      ['Centennial Olympic Park', 'The 1996 Olympic park, next to the Georgia Aquarium', -36, 8],
-      ['Sweet Auburn', "Dr. King's birthplace, Ebenezer Baptist Church and the old Black Wall Street", 46, 14],
-      ['Atlanta University Center', 'Morehouse, Spelman and Clark Atlanta', -72, 78],
-      ['Fox Theatre', 'The 1929 movie palace on Peachtree', 24, -60],
-      ['Ponce City Market', 'The old Sears building on the BeltLine', 62, -52],
-      ['Little Five Points', 'Vintage stores, murals and the independent music scene', 90, 22],
-      ['Castleberry Hill', 'Lofts, galleries, studios and the Westside art walks', -32, 52],
+      ['Sweet Auburn', "Dr. King's street: the APEX Museum, the Curb Market and WERD, the first Black-owned radio station", 46, 14],
+      ['Trap Music Museum', "T.I.'s museum to trap music on the Westside", -60, -40],
+      ['Atlanta University Center', 'Morehouse, Spelman and Clark Atlanta, and the Spelman College Museum of Fine Art', -72, 78],
+      ['Hammonds House', 'African American and diaspora art in a West End house museum', -50, 100],
+      ['SCAD FASH', 'The fashion and film museum in Midtown', 14, -96],
+      ['High Museum', "The Southeast's big art museum, on Peachtree", 2, -80],
+      ['Castleberry Hill', 'Lofts, galleries and studios on the edge of downtown', -30, 52],
+      ['Little Five Points', 'Criminal Records, the Variety Playhouse, vintage shops and murals', 90, 22],
+      ['Patchwerk Studios', 'Where OutKast, TLC, Goodie Mob and Young Thug cut records', -40, -86],
+      ['Cascade', "Cascade Family Skating in Southwest Atlanta, a home of the city's music and dance", -96, 50],
+    ],
+    marks: [
+      ['BOA PLAZA', 4, 126, -40],
+      ['WESTIN', -6, 80, 4],
+      ['MERCEDES-BENZ', -72, 22, 34],
     ],
     landmarks: [
       // Bank of America Plaza: pyramid top and gold spire
@@ -605,14 +640,13 @@ const buildCity = (c: City) => {
       );
     }
   c.landmarks.forEach((l) => l(g));
-  // A ring on the ground at each highlighted place, and a floating diamond where there's no landmark to mark it
-  for (const [, , x, z, top] of c.spots) {
+  // A ring on the ground at each highlighted place and a diamond floating over it
+  for (const [, , x, z] of c.spots) {
     g.line(
-      ngon(12, top ? 8 : 4).map(([a, b]) => [x + a, 0.3, z + b] as V3),
+      ngon(12, 4).map(([a, b]) => [x + a, 0.3, z + b] as V3),
       SPOT,
       true,
     );
-    if (top) continue;
     g.line(
       [
         [x, 0, z],
@@ -860,7 +894,7 @@ const Nodes: React.FC = () => {
           }
           ctx.stroke();
           const [x0, y0] = project(s[2], 0, s[3], -1)!;
-          const [x1, y1] = project(s[2], (s[4] ?? 18) + 40, s[3], -1)!;
+          const [x1, y1] = project(s[2], 58, s[3], -1)!;
           const col = ctx.createLinearGradient(x0, y0, x1, y1);
           col.addColorStop(0, 'rgba(232,251,255,0.5)');
           col.addColorStop(1, 'rgba(232,251,255,0)');
@@ -899,8 +933,15 @@ const Nodes: React.FC = () => {
           ctx.fillText(c.short, x + (c.lng < -90 ? -10 : 10), y + 4);
         });
       } else if (grow === 1) {
-        CITIES[cur.city].spots.forEach(([name, , sx, sz, top], i) => {
-          const [x, y, z] = project(sx, (top ?? 18) + 5, sz, -1)!;
+        // Landmark names stay faint so the spots lead
+        for (const [name, mx, my, mz] of CITIES[cur.city].marks) {
+          const [x, y, z] = project(mx, my, mz, -1)!;
+          ctx.fillStyle = '#5fd8ff';
+          ctx.globalAlpha = (sel >= 0 ? 0.25 : z > back ? 0.55 : 0.25) * flicker;
+          ctx.fillText(name, x, y);
+        }
+        CITIES[cur.city].spots.forEach(([name, , sx, sz], i) => {
+          const [x, y, z] = project(sx, 23, sz, -1)!;
           hits.push({ i, x, y });
           const on = i === sel;
           ctx.fillStyle = on ? '#ffffff' : '#bff4ff';
