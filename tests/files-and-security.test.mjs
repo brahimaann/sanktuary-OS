@@ -1735,6 +1735,24 @@ try {
     'directory: public events only',
     dirData.events.some((e) => e.title === 'Listening party') && !dirData.events.some((e) => e.title === 'Secret shoot'),
   );
+  // Public calendar: upcoming events plus a recap of the last one only
+  for (const [title, d, recap] of [
+    ['Old show', day(-20), 'should not show'],
+    ['Last show', day(-3), 'Packed room, thank you'],
+  ]) {
+    const e = JSON.parse((await call('bob', '/api/timeline', 'POST', { title, kind: 'Event', start: d, public: true })).text);
+    await call('bob', `/api/timeline/${e.id}`, 'PATCH', { recap });
+  }
+  const cal = (await (await fetch(B + '/api/public/directory')).json()).events;
+  check(
+    'public calendar: upcoming plus a recap of the last event only',
+    cal.filter((e) => e.past).length === 1 &&
+      cal.find((e) => e.past).title === 'Last show' &&
+      cal.find((e) => e.past).recap === 'Packed room, thank you' &&
+      cal.some((e) => e.title === 'Listening party' && !e.past),
+    JSON.stringify(cal),
+  );
+  check('the calendar page is served', (await fetch(B + '/welcome/events')).status === 200);
   check('directory never shows folders or owners', !/folder|owner|members/.test(JSON.stringify(dirData.releases)));
   check('avatar of someone not listed is not public', (await fetch(B + '/api/public/avatar/carol')).status === 404);
   check('avatar name cannot climb', (await fetch(B + '/api/public/avatar/..%2F..%2Fconfig')).status === 404);

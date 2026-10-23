@@ -2477,7 +2477,7 @@ setInterval(() => trackDeadlines().catch(console.error), 3.6e6).unref();
 // Entries are open to every member unless `members` lists who may see them (owner + admins always can).
 const TIMELINE_KINDS = ['Shoot', 'Artwork', 'Video', 'Event', 'Drop', 'Other'];
 const TIMELINE_STATUSES = ['Planned', 'In progress', 'Done', 'Cancelled'];
-const TIMELINE_TEXT = { title: 100, location: 200, notes: 4000 };
+const TIMELINE_TEXT = { title: 100, location: 200, notes: 4000, recap: 1000 }; // recap: how it went, shown to visitors once it's over
 let timelineDb = null;
 let timelineSaved = Promise.resolve();
 const loadTimeline = async () => (timelineDb ??= await readJson('timeline.json', { items: {} }));
@@ -3977,6 +3977,7 @@ async function publicApi(req, res, url) {
         location: i.location,
         link: i.link || null,
         past: (i.end || i.start) < today,
+        recap: i.recap || '',
       }));
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, {
@@ -3986,13 +3987,8 @@ async function publicApi(req, res, url) {
         .filter((r) => r.public && !r.deleted && !r.members)
         .map((r) => ({ title: r.title, kind: r.kind, date: r.date, tracks: count(r), slug: r.slug || null }))
         .sort((a, b) => (b.date || '9').localeCompare(a.date || '9')),
-      events: [
-        ...events.filter((e) => !e.past),
-        ...events
-          .filter((e) => e.past)
-          .reverse()
-          .slice(0, 10),
-      ],
+      // Visitors see what's coming plus a recap of the last one, not the whole history
+      events: [...events.filter((e) => !e.past), ...events.filter((e) => e.past).slice(-1)],
       posts: await latestPosts(12),
       products: Object.values((await loadShop()).products)
         .filter((p) => p.active && !p.deleted)
@@ -5403,10 +5399,10 @@ function storyPage(req, res, url) {
   return pipeline(createReadStream(STORY_PAGE), res);
 }
 
-// ── /welcome: the landing page (Home, MRND, MHOTC; Shop is /shop). Visitors see it full screen on the desktop. ──
+// ── /welcome: the landing page (Home, MRND, MHOTC, Events; Shop is /shop). Visitors see it full screen on the desktop. ──
 const WELCOME_PAGE = new URL('./welcome.html', import.meta.url);
 function welcomePage(req, res, url) {
-  if (!/^\/welcome(\/(mrnd|mhotc))?\/?$/i.test(url.pathname)) fail(404, 'Not found');
+  if (!/^\/welcome(\/(mrnd|mhotc|events))?\/?$/i.test(url.pathname)) fail(404, 'Not found');
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
