@@ -543,16 +543,25 @@ precision mediump float;
 in vec2 v_uv;
 uniform sampler2D u_scene, u_bloom;
 uniform vec2 u_res;
-uniform float u_time, u_glitch, u_calm;
+uniform float u_time, u_glitch, u_calm, u_warp;
 out vec4 o;
 float hash(float n) { return fract(sin(n) * 43758.5453); }
+// The picture at one point, with the colour fringe pulling wider as you travel
+vec3 look(vec2 uv) {
+  vec2 sh = (uv - 0.5) * (0.004 + 0.018 * u_warp);
+  vec3 mid = texture(u_scene, uv).rgb;
+  vec3 c = vec3(texture(u_scene, uv - sh).r * 0.6 + mid.r * 0.4, mid.g, max(texture(u_scene, uv - sh).b, texture(u_scene, uv + sh).b));
+  return (c + texture(u_bloom, uv).rgb) / HEADROOM;
+}
 void main() {
   vec2 uv = v_uv;
   uv.x += u_glitch * step(0.8, hash(floor(uv.y * 28.0) + floor(u_time * 16.0))) * 0.012;
-  vec2 sh = (uv - 0.5) * 0.004;
-  vec3 mid = texture(u_scene, uv).rgb;
-  vec3 c = vec3(texture(u_scene, uv - sh).r * 0.6 + mid.r * 0.4, mid.g, max(texture(u_scene, uv - sh).b, texture(u_scene, uv + sh).b));
-  c = (c + texture(u_bloom, uv).rgb) / HEADROOM;
+  vec3 c = vec3(0.0);
+  if (u_warp > 0.01) {
+    // Travelling: smear everything outward from the middle of the screen
+    for (int i = 0; i < 12; i++) c += look(uv - (uv - 0.5) * (float(i) / 11.0) * 0.24 * u_warp);
+    c *= (1.0 + 0.5 * u_warp) / 12.0;
+  } else c = look(uv);
   // Soft knee: dense downtowns stay blue instead of burning out to white, with a little white in the hottest spots
   float m = max(c.b, max(c.g, c.r));
   if (m > 0.7) c *= (0.7 + 0.3 * (1.0 - exp((0.7 - m) / 0.3))) / m;
@@ -715,6 +724,14 @@ const Nodes: React.FC = () => {
     };
 
     const cam = { yaw: 0, pitch: 0.35, dist: CAM.globe.start, born: performance.now(), tx: 0, tz: 0, gx: 0, gz: 0 };
+    // Where the camera is heading; it eases there every frame, so nothing jumps
+    const aim = { yaw: 0, pitch: 0.35, dist: CAM.globe.start };
+    let spin = 0; // yaw speed left over from a drag, fading out
+    // Warp: the motion blur when travelling, rising to `blur` and fading over `blurFor` ms from `blurAt`
+    let blur = 0,
+      blurAt = 0,
+      blurFor = 1,
+      trip: { to: View; at: number } | undefined;
     let cur: View = { mode: 'globe', city: 0 };
     let sel = -1,
       touched = 0,
@@ -736,12 +753,17 @@ const Nodes: React.FC = () => {
       Object.assign(cam, { tx: 0, tz: 0, gx: 0, gz: 0 });
       setSpot(-1);
       if (v.mode === 'globe') {
-        // Come back out facing the city you were in
+        // Pull back out of the city you were in, still facing it
         const c = CITIES[v.city];
-        Object.assign(cam, { yaw: (-c.lng * Math.PI) / 180, pitch: (c.lat * Math.PI) / 180, dist: CAM.globe.start });
+        Object.assign(aim, { yaw: (-c.lng * Math.PI) / 180, pitch: (c.lat * Math.PI) / 180, dist: CAM.globe.start });
+        Object.assign(cam, { yaw: aim.yaw, pitch: aim.pitch, dist: from.mode === 'city' ? GLOBE_R * 1.3 : cam.dist });
+        if (from.mode === 'city') [blur, blurAt, blurFor] = [0.6, performance.now(), 900];
         setStatus('ready');
       } else {
-        Object.assign(cam, { yaw: from.mode === 'city' ? cam.yaw : -0.5, pitch: 0.5, dist: CAM.city.start * (W < H ? 0.8 : 1) });
+        // Arrive from high above and dive in through the blur
+        Object.assign(aim, { yaw: from.mode === 'city' ? aim.yaw + 0.6 : -0.5, pitch: 0.5, dist: CAM.city.start * (W < H ? 0.8 : 1) });
+        Object.assign(cam, { yaw: aim.yaw - 0.5, pitch: 1.25, dist: aim.dist * 3.2 });
+        [blur, blurAt, blurFor] = [1, performance.now(), 1300];
         const s = scenes.get(v.city);
         setStatus(s ? 'ready' : 'loading');
         setAway(s ? s.spots.map((p) => p.away) : []);
@@ -749,13 +771,27 @@ const Nodes: React.FC = () => {
       }
       setView(v);
     };
-    go.current = show;
+    // Flying from the globe into a city: turn to face it and rush in, then the city takes over
+    const travel = (v: View) => {
+      if (trip) return;
+      if (cur.mode === 'globe' && v.mode === 'city' && !calm) {
+        const c = CITIES[v.city];
+        const yaw = (-c.lng * Math.PI) / 180;
+        aim.yaw = cam.yaw + ((((yaw - cam.yaw) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+        Object.assign(aim, { pitch: (c.lat * Math.PI) / 180, dist: GLOBE_R * 1.08 });
+        trip = { to: v, at: performance.now() };
+        load(v.city);
+        return;
+      }
+      show(v);
+    };
+    go.current = travel;
 
     const select = (i: number) => {
       const p = scenes.get(cur.city)?.spots[i];
       sel = p ? i : -1;
       [cam.gx, cam.gz] = p ? [p.x, p.z] : [0, 0];
-      if (p) cam.dist = Math.min(cam.dist, 200);
+      if (p) aim.dist = Math.min(aim.dist, 200);
       touched = performance.now();
       setSpot(sel);
     };
@@ -763,18 +799,18 @@ const Nodes: React.FC = () => {
 
     const zoom = (factor: number) => {
       const lim = CAM[cur.mode];
-      const want = cam.dist * factor;
-      cam.dist = Math.max(lim.min, Math.min(lim.max, want));
+      const want = aim.dist * factor;
+      aim.dist = Math.max(lim.min, Math.min(lim.max, want));
       touched = performance.now();
       // Keep zooming past the limit to move between the globe and a city
       if (want > lim.max && cur.mode === 'city') overscroll += want - lim.max;
       else if (want < lim.min && cur.mode === 'globe') overscroll += lim.min - want;
       else overscroll = 0;
       if (overscroll < 90) return;
-      if (cur.mode === 'city') show({ mode: 'globe', city: cur.city });
+      if (cur.mode === 'city') travel({ mode: 'globe', city: cur.city });
       else {
         const near = [...hits].sort((a, b) => Math.hypot(a.x - W / 2, a.y - H / 2) - Math.hypot(b.x - W / 2, b.y - H / 2))[0];
-        if (near) show({ mode: 'city', city: near.i });
+        if (near) travel({ mode: 'city', city: near.i });
       }
     };
     zoomBy.current = zoom;
@@ -835,7 +871,20 @@ const Nodes: React.FC = () => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      if (!calm && now - touched > 2500) cam.yaw += dt * (cur.mode === 'globe' ? 0.12 : 0.1);
+      if (!calm && !trip && now - touched > 2500) aim.yaw += dt * (cur.mode === 'globe' ? 0.12 : 0.1);
+      if (!pointers.size) aim.yaw += spin * dt;
+      spin *= Math.exp(-dt * 3);
+      if (trip && now - trip.at > 700) {
+        show(trip.to);
+        trip = undefined;
+      }
+      // Ease toward the aim; slower while arriving, so the dive into a city settles gently
+      const settle = cur.mode === 'city' && now - cam.born < 1600 ? 2.2 : 7;
+      const ease = (k: number) => 1 - Math.exp(-dt * k);
+      cam.yaw += (aim.yaw - cam.yaw) * ease(trip ? 5 : settle + 3);
+      cam.pitch += (aim.pitch - cam.pitch) * ease(trip ? 5 : settle);
+      cam.dist += (aim.dist - cam.dist) * ease(trip ? 3.5 : settle);
+      const warp = trip ? ((now - trip.at) / 700) ** 2 : blur * Math.max(0, 1 - (now - blurAt) / blurFor) ** 2;
       // Left alone in a city, the camera drifts from one hidden spot to the next as it circles
       const idle = cur.mode === 'city' && sel < 0 && !calm ? now - touched - 6000 : -1;
       const near = scenes.get(cur.city)?.spots.filter((p) => !p.away) ?? [];
@@ -973,6 +1022,7 @@ const Nodes: React.FC = () => {
       gl.uniform1f(screenP.u('u_time'), now / 1000);
       gl.uniform1f(screenP.u('u_glitch'), glitch);
       gl.uniform1f(screenP.u('u_calm'), calm ? 1 : 0);
+      gl.uniform1f(screenP.u('u_warp'), warp);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // Labels, beacons and the projector beam on the 2D layer above
@@ -984,6 +1034,7 @@ const Nodes: React.FC = () => {
       hits = [];
       if (cur.mode === 'globe') {
         CITIES.forEach((c, i) => {
+          if (trip) return; // the labels drop away as you fly in
           const p = sphere(c.lat, c.lng);
           if (p[0] * R[2][0] + p[1] * R[2][1] + p[2] * R[2][2] < 0) return;
           const [x, y] = project(...p);
@@ -1082,13 +1133,14 @@ const Nodes: React.FC = () => {
 
     // One finger or the mouse turns it, a quick swipe sideways moves to the next city, two fingers pinch
     // to zoom, and a tap opens a city on the globe or finds a spot in one
-    const pointers = new Map<number, { x: number; y: number }>();
+    const pointers = new Map<number, { x: number; y: number; t: number }>();
     let pinch = 0,
       moved = 0,
       start = { x: 0, y: 0, t: 0 };
     const down = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
-      pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+      pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY, t: e.timeStamp });
+      spin = 0;
       start = { x: e.offsetX, y: e.offsetY, t: performance.now() };
       moved = pointers.size > 1 ? 99 : 0;
       touched = performance.now();
@@ -1108,23 +1160,28 @@ const Nodes: React.FC = () => {
         return;
       }
       moved += Math.abs(dx) + Math.abs(dy);
-      cam.yaw += dx * 0.008;
-      cam.pitch = Math.max(cur.mode === 'globe' ? -1.2 : 0.12, Math.min(cur.mode === 'globe' ? 1.2 : 1.35, cam.pitch + dy * 0.006));
+      aim.yaw += dx * 0.008;
+      aim.pitch = Math.max(cur.mode === 'globe' ? -1.2 : 0.12, Math.min(cur.mode === 'globe' ? 1.2 : 1.35, aim.pitch + dy * 0.006));
+      const gap = Math.max(8, e.timeStamp - p.t) / 1000;
+      spin = Math.max(-4, Math.min(4, (dx * 0.008) / gap));
+      p.t = e.timeStamp;
     };
     const up = (e: PointerEvent) => {
       const single = pointers.size === 1 && moved < 99;
+      // Let go after holding still and it stays still; let go mid-drag and it glides on
+      if (e.timeStamp - (pointers.get(e.pointerId)?.t ?? 0) > 80) spin = 0;
       pointers.delete(e.pointerId);
       pinch = 0;
       const [dx, dy] = [e.offsetX - start.x, e.offsetY - start.y];
       if (single && Math.abs(dx) > 70 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - start.t < 350) {
         const next = cur.mode === 'city' ? cur.city + (dx < 0 ? 1 : -1) : cur.city;
-        show({ mode: 'city', city: (next + CITIES.length) % CITIES.length });
+        travel({ mode: 'city', city: (next + CITIES.length) % CITIES.length });
         return;
       }
       if (moved > 8) return;
       const hit = hits.find((h) => Math.hypot(h.x - e.offsetX, h.y - e.offsetY) < 22);
       if (cur.mode === 'city') select(hit ? hit.i : -1);
-      else if (hit) show({ mode: 'city', city: hit.i });
+      else if (hit) travel({ mode: 'city', city: hit.i });
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
