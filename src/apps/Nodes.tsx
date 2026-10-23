@@ -543,7 +543,7 @@ precision mediump float;
 in vec2 v_uv;
 uniform sampler2D u_scene, u_bloom;
 uniform vec2 u_res;
-uniform float u_time, u_glitch, u_calm, u_warp;
+uniform float u_time, u_glitch, u_calm, u_warp, u_slide, u_crush;
 out vec4 o;
 float hash(float n) { return fract(sin(n) * 43758.5453); }
 // The picture at one point, with the colour fringe pulling wider as you travel
@@ -556,12 +556,21 @@ vec3 look(vec2 uv) {
 void main() {
   vec2 uv = v_uv;
   uv.x += u_glitch * step(0.8, hash(floor(uv.y * 28.0) + floor(u_time * 16.0))) * 0.012;
+  // Switching off like an old set: the picture squeezes down to a bright line
+  float k = u_crush;
+  uv = vec2(0.5 + (uv.x - 0.5) / (1.0 - 0.6 * k * k), 0.5 + (uv.y - 0.5) / max(1.0 - k, 0.015));
   vec3 c = vec3(0.0);
   if (u_warp > 0.01) {
-    // Travelling: smear everything outward from the middle of the screen
+    // Flying in: smear everything outward from the middle of the screen
     for (int i = 0; i < 12; i++) c += look(uv - (uv - 0.5) * (float(i) / 11.0) * 0.24 * u_warp);
     c *= (1.0 + 0.5 * u_warp) / 12.0;
+  } else if (abs(u_slide) > 0.01) {
+    // Whipping across to the next city: streak sideways
+    for (int i = 0; i < 12; i++) c += look(uv + vec2((float(i) / 11.0 - 0.5) * 0.18 * u_slide, 0.0));
+    c *= (1.0 + 0.4 * abs(u_slide)) / 12.0;
   } else c = look(uv);
+  c *= (1.0 + 2.5 * k) * step(abs(uv.y - 0.5), 0.5) * step(abs(uv.x - 0.5), 0.5);
+  c += vec3(0.6, 0.9, 1.0) * smoothstep(0.8, 1.0, k) * exp(-abs(v_uv.y - 0.5) * u_res.y * 0.25);
   // Soft knee: dense downtowns stay blue instead of burning out to white, with a little white in the hottest spots
   float m = max(c.b, max(c.g, c.r));
   if (m > 0.7) c *= (0.7 + 0.3 * (1.0 - exp((0.7 - m) / 0.3))) / m;
@@ -628,7 +637,7 @@ const Nodes: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState<View>({ mode: 'globe', city: 0 });
   const [, tick] = useState(0);
-  const go = useRef<(v: View) => void>(() => {});
+  const go = useRef<(v: View, dir?: number) => void>(() => {});
   const zoomBy = useRef<(factor: number) => void>(() => {});
   const pick = useRef<(spot: number) => void>(() => {});
   const [spot, setSpot] = useState(-1);
@@ -727,11 +736,12 @@ const Nodes: React.FC = () => {
     // Where the camera is heading; it eases there every frame, so nothing jumps
     const aim = { yaw: 0, pitch: 0.35, dist: CAM.globe.start };
     let spin = 0; // yaw speed left over from a drag, fading out
-    // Warp: the motion blur when travelling, rising to `blur` and fading over `blurFor` ms from `blurAt`
-    let blur = 0,
-      blurAt = 0,
-      blurFor = 1,
-      trip: { to: View; at: number } | undefined;
+    // Each way of moving has its own transition: a warp from the globe into a city, a sideways whip from
+    // city to city, and an old-TV switch-off from a city back out to the globe. `trip` is the way out of
+    // where you are, `fx` the way into where you land; `dir` is which way a whip goes.
+    type Fx = { kind: 'warp' | 'slide' | 'crush'; at: number; len: number; dir: number };
+    let trip: (Fx & { to: View }) | undefined;
+    let fx: Fx | undefined;
     let cur: View = { mode: 'globe', city: 0 };
     let sel = -1,
       touched = 0,
@@ -744,8 +754,9 @@ const Nodes: React.FC = () => {
     let tour: Scene['spots'][number] | undefined;
     let fbs: ReturnType<typeof target>[] = [];
 
-    const show = (v: View) => {
+    const show = (v: View, dir = 1) => {
       const from = cur;
+      const now = performance.now();
       cur = v;
       cam.born = performance.now();
       overscroll = 0;
@@ -756,14 +767,19 @@ const Nodes: React.FC = () => {
         // Pull back out of the city you were in, still facing it
         const c = CITIES[v.city];
         Object.assign(aim, { yaw: (-c.lng * Math.PI) / 180, pitch: (c.lat * Math.PI) / 180, dist: CAM.globe.start });
-        Object.assign(cam, { yaw: aim.yaw, pitch: aim.pitch, dist: from.mode === 'city' ? GLOBE_R * 1.3 : cam.dist });
-        if (from.mode === 'city') [blur, blurAt, blurFor] = [0.6, performance.now(), 900];
+        Object.assign(cam, { yaw: aim.yaw, pitch: aim.pitch, dist: from.mode === 'city' ? GLOBE_R * 1.6 : cam.dist });
+        if (from.mode === 'city') fx = { kind: 'crush', at: now, len: 600, dir };
         setStatus('ready');
+      } else if (from.mode === 'city') {
+        // The next city swings in from the side you're heading
+        Object.assign(aim, { yaw: cam.yaw, pitch: 0.5, dist: CAM.city.start * (W < H ? 1.15 : 1) });
+        Object.assign(cam, { yaw: aim.yaw - dir * 1.1, pitch: 0.5, dist: aim.dist * 1.15 });
+        fx = { kind: 'slide', at: now, len: 550, dir };
       } else {
         // Arrive from high above and dive in through the blur
-        Object.assign(aim, { yaw: from.mode === 'city' ? aim.yaw + 0.6 : -0.5, pitch: 0.5, dist: CAM.city.start * (W < H ? 0.8 : 1) });
+        Object.assign(aim, { yaw: -0.5, pitch: 0.5, dist: CAM.city.start * (W < H ? 1.15 : 1) });
         Object.assign(cam, { yaw: aim.yaw - 0.5, pitch: 1.25, dist: aim.dist * 3.2 });
-        [blur, blurAt, blurFor] = [1, performance.now(), 1300];
+        fx = { kind: 'warp', at: now, len: 1300, dir };
         const s = scenes.get(v.city);
         setStatus(s ? 'ready' : 'loading');
         setAway(s ? s.spots.map((p) => p.away) : []);
@@ -771,19 +787,24 @@ const Nodes: React.FC = () => {
       }
       setView(v);
     };
-    // Flying from the globe into a city: turn to face it and rush in, then the city takes over
-    const travel = (v: View) => {
+    const travel = (v: View, dir = 1) => {
       if (trip) return;
-      if (cur.mode === 'globe' && v.mode === 'city' && !calm) {
+      if (calm || (v.mode === cur.mode && v.city === cur.city)) return show(v, dir);
+      const at = performance.now();
+      if (v.mode === 'city') load(v.city);
+      if (cur.mode === 'globe') {
+        // Turn the globe to face the city and rush in
         const c = CITIES[v.city];
         const yaw = (-c.lng * Math.PI) / 180;
         aim.yaw = cam.yaw + ((((yaw - cam.yaw) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
         Object.assign(aim, { pitch: (c.lat * Math.PI) / 180, dist: GLOBE_R * 1.08 });
-        trip = { to: v, at: performance.now() };
-        load(v.city);
-        return;
-      }
-      show(v);
+        trip = { kind: 'warp', at, len: 700, dir, to: v };
+      } else if (v.mode === 'city') {
+        // Whip the camera round and away
+        aim.yaw += dir * 1.1;
+        spin = 0;
+        trip = { kind: 'slide', at, len: 300, dir, to: v };
+      } else trip = { kind: 'crush', at, len: 380, dir, to: v };
     };
     go.current = travel;
 
@@ -874,8 +895,8 @@ const Nodes: React.FC = () => {
       if (!calm && !trip && now - touched > 2500) aim.yaw += dt * (cur.mode === 'globe' ? 0.12 : 0.1);
       if (!pointers.size) aim.yaw += spin * dt;
       spin *= Math.exp(-dt * 3);
-      if (trip && now - trip.at > 700) {
-        show(trip.to);
+      if (trip && now - trip.at > trip.len) {
+        show(trip.to, trip.dir);
         trip = undefined;
       }
       // Ease toward the aim; slower while arriving, so the dive into a city settles gently
@@ -884,12 +905,18 @@ const Nodes: React.FC = () => {
       cam.yaw += (aim.yaw - cam.yaw) * ease(trip ? 5 : settle + 3);
       cam.pitch += (aim.pitch - cam.pitch) * ease(trip ? 5 : settle);
       cam.dist += (aim.dist - cam.dist) * ease(trip ? 3.5 : settle);
-      const warp = trip ? ((now - trip.at) / 700) ** 2 : blur * Math.max(0, 1 - (now - blurAt) / blurFor) ** 2;
+      // How far into the current transition: rising on the way out, falling on the way in
+      const fxNow = trip ?? fx;
+      const amount = !fxNow ? 0 : trip ? Math.min(1, (now - trip.at) / trip.len) ** 2 : Math.max(0, 1 - (now - fxNow.at) / fxNow.len) ** 2;
+      const [warp, slide, crush] = (['warp', 'slide', 'crush'] as const).map((k) =>
+        fxNow?.kind === k ? amount * (k === 'slide' ? -fxNow.dir : 1) : 0,
+      );
+      canvas.style.opacity = String(1 - Math.min(1, Math.max(crush, Math.abs(slide)) * 1.5));
       // Left alone in a city, the camera drifts from one hidden spot to the next as it circles
       const idle = cur.mode === 'city' && sel < 0 && !calm ? now - touched - 6000 : -1;
       const near = scenes.get(cur.city)?.spots.filter((p) => !p.away) ?? [];
       tour = idle > 0 && near.length ? near[Math.floor(idle / 9000) % near.length] : undefined;
-      const [gx, gz, rate] = tour ? [tour.x * 0.6, tour.z * 0.6, 0.5] : [cam.gx, cam.gz, 3];
+      const [gx, gz, rate] = tour ? [tour.x * 0.35, tour.z * 0.35, 0.5] : [cam.gx, cam.gz, 3];
       cam.tx += (gx - cam.tx) * Math.min(1, dt * rate);
       cam.tz += (gz - cam.tz) * Math.min(1, dt * rate);
       const dpr = Math.min(2, devicePixelRatio || 1);
@@ -1023,6 +1050,8 @@ const Nodes: React.FC = () => {
       gl.uniform1f(screenP.u('u_glitch'), glitch);
       gl.uniform1f(screenP.u('u_calm'), calm ? 1 : 0);
       gl.uniform1f(screenP.u('u_warp'), warp);
+      gl.uniform1f(screenP.u('u_slide'), slide);
+      gl.uniform1f(screenP.u('u_crush'), crush);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // Labels, beacons and the projector beam on the 2D layer above
@@ -1175,7 +1204,7 @@ const Nodes: React.FC = () => {
       const [dx, dy] = [e.offsetX - start.x, e.offsetY - start.y];
       if (single && Math.abs(dx) > 70 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - start.t < 350) {
         const next = cur.mode === 'city' ? cur.city + (dx < 0 ? 1 : -1) : cur.city;
-        travel({ mode: 'city', city: (next + CITIES.length) % CITIES.length });
+        travel({ mode: 'city', city: (next + CITIES.length) % CITIES.length }, dx < 0 ? 1 : -1);
         return;
       }
       if (moved > 8) return;
@@ -1202,8 +1231,8 @@ const Nodes: React.FC = () => {
   }, []);
 
   const city = CITIES[view.city];
-  const step = (d: number) => go.current({ mode: 'city', city: (view.city + d + CITIES.length) % CITIES.length });
-  const btn = 'px-2 py-1 border border-[#5fd8ff]/50 text-[#bff4ff] hover:bg-[#5fd8ff]/15 active:bg-[#5fd8ff]/30';
+  const step = (d: number) => go.current({ mode: 'city', city: (view.city + d + CITIES.length) % CITIES.length }, d);
+  const btn = 'lightweight w-8 h-8 grid place-items-center';
 
   return (
     <div
@@ -1223,6 +1252,10 @@ const Nodes: React.FC = () => {
           src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
         }
         .nodes, .nodes button { font-family: 'Fixedsys Excelsior', 'Courier New', monospace; -webkit-font-smoothing: none; }
+        /* The desktop's Win98 button style would turn these into grey boxes */
+        .nodes button.lightweight { background: transparent; color: #bff4ff; border: 1px solid rgba(95, 216, 255, 0.5); min-width: 0; min-height: 0; line-height: 1; }
+        .nodes button.lightweight:enabled:hover, .nodes button.lightweight:enabled:active { background: rgba(95, 216, 255, 0.2); border-color: #bff4ff; }
+        .nodes button.nodes-arrow, .nodes button.nodes-arrow:enabled:hover, .nodes button.nodes-arrow:enabled:active { border-color: transparent; background: transparent; }
       `}</style>
       <canvas ref={glRef} className="absolute inset-0 w-full h-full" />
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full touch-none cursor-grab active:cursor-grabbing" />
@@ -1235,10 +1268,11 @@ const Nodes: React.FC = () => {
           {view.mode === 'globe' ? (
             <div className="text-lg tracking-widest">{CITIES.length} CITIES</div>
           ) : (
-            <div className="opacity-80">
+            <div className="opacity-80 text-[12px] sm:text-[14px]">
               <div>
-                NODE {String(view.city + 1).padStart(2, '0')}/{String(CITIES.length).padStart(2, '0')} · {city.area}
+                NODE {String(view.city + 1).padStart(2, '0')}/{String(CITIES.length).padStart(2, '0')}
               </div>
+              <div>{city.area}</div>
               <div>
                 {Math.abs(city.lat).toFixed(2)}°{city.lat < 0 ? 'S' : 'N'} {Math.abs(city.lng).toFixed(2)}°{city.lng < 0 ? 'W' : 'E'} ·{' '}
                 {time(city.tz)}
@@ -1275,7 +1309,7 @@ const Nodes: React.FC = () => {
       {(['‹', '›'] as const).map((a, i) => (
         <button
           key={a}
-          className="absolute top-1/2 -translate-y-1/2 px-3 py-6 text-6xl text-[#bff4ff] opacity-60 hover:opacity-100 active:opacity-100 [text-shadow:0_0_12px_#5fd8ff]"
+          className="lightweight nodes-arrow absolute top-1/2 -translate-y-1/2 px-2 py-6 text-5xl opacity-60 hover:opacity-100 active:opacity-100 [text-shadow:0_0_12px_#5fd8ff]"
           style={{ [i ? 'right' : 'left']: 0 }}
           onClick={() => step(i ? 1 : -1)}
           aria-label={i ? 'Next city' : 'Previous city'}
