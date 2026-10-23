@@ -3949,6 +3949,7 @@ async function listedPeople() {
       ),
       avatar: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)), // the public photo, never the internal avatar
       bookable: p.bookable === true, // "Take bookings through Sanktuary": a Book button on their public card
+      portfolio: p.portfolio?.live === true, // a link to /portfolios/<username> on their card
     });
   }
   return people.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -3961,6 +3962,7 @@ async function publicApi(req, res, url) {
   if (req.method === 'GET' && what === 'story') return storyPublic(req, res, url);
   if (req.method === 'GET' && what === 'release') return releasePublic(req, res, url);
   if (req.method === 'GET' && what === 'portfolio') return portfolioPublic(req, res);
+  if (req.method === 'GET' && what === 'portfolios') return portfoliosPublic(req, res, who);
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
     const tdb = await publicTracks();
@@ -4007,7 +4009,9 @@ async function publicApi(req, res, url) {
   }
   if (req.method === 'GET' && what === 'avatar') {
     const name = /^[\w.-]{1,64}$/.test(who || '') ? who : fail(404, 'Not found');
-    if (!(await listedPeople()).some((p) => p.username === name && p.avatar)) fail(404, 'Not found');
+    // the public photo of someone in the directory or with a live portfolio
+    if (![...(await listedPeople()), ...(await livePortfolios())].some((p) => p.username === name && (p.avatar || p.photo)))
+      fail(404, 'Not found');
     res.setHeader('cache-control', 'public, max-age=300');
     return stream(req, res, url.searchParams, join(DATA, 'profiles', 'photos', `${name}.webp`));
   }
@@ -5567,6 +5571,111 @@ async function portfolioPublic(req, res) {
   });
 }
 
+// ── Member portfolios (/portfolios, /portfolios/<username>) ──
+// Each member builds their own in Profile > My portfolio and decides when it goes live. Visitors get the index of
+// every live portfolio; a signed-in member who opens /portfolios lands on their own (a preview if it isn't live yet).
+// /portfolio stays the studio's own, the one grant applications link to.
+const PORTFOLIOS_PAGE = new URL('./portfolios.html', import.meta.url);
+const PORTFOLIO_THEMES = ['paper', 'night', 'bold'];
+/** A member's portfolio settings as saved: only known fields, https links only. */
+const cleanPortfolio = (x) => ({
+  live: x.live === true,
+  headline: String(x.headline || '').slice(0, 140),
+  statement: String(x.statement || '').slice(0, 4000),
+  contact: String(x.contact || '').slice(0, 200),
+  theme: PORTFOLIO_THEMES.includes(x.theme) ? x.theme : 'paper',
+  accent: /^#[0-9a-f]{6}$/i.test(x.accent || '') ? x.accent : '',
+  work: (Array.isArray(x.work) ? x.work : [])
+    .slice(0, 12)
+    .map((w) => ({
+      title: String(w?.title || '').slice(0, 100),
+      url: /^https:\/\/\S+$/.test(w?.url || '') ? String(w.url).slice(0, 400) : '',
+      note: String(w?.note || '').slice(0, 400),
+    }))
+    .filter((w) => w.title || w.url),
+});
+/** Who is looking, from our session cookie; null for visitors. */
+const viewerName = async (req) => {
+  const sub = cookieUserId(req);
+  return sub ? usernameOf(sub).catch(() => null) : null;
+};
+/** Current members whose portfolio is live: what the index card needs. */
+async function livePortfolios() {
+  const members = await currentMembers();
+  const files = (await readdir(join(DATA, 'profiles')).catch(() => [])).filter((f) => f.endsWith('.json'));
+  const out = [];
+  for (const f of files) {
+    const username = f.slice(0, -5);
+    if (!members.has(username)) continue;
+    const p = await readJson(`profiles/${f}`, {});
+    if (p.portfolio?.live !== true) continue;
+    out.push({
+      username,
+      displayName: p.displayName || username,
+      role: p.role || '',
+      headline: p.portfolio.headline || '',
+      accent: p.portfolio.accent || '',
+      photo: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)),
+    });
+  }
+  return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+async function portfoliosPublic(req, res, who) {
+  if (!who) {
+    res.setHeader('cache-control', 'no-cache');
+    return json(res, { people: await livePortfolios() });
+  }
+  const name = /^[\w.-]{1,64}$/.test(who) ? who : fail(404, 'Not found');
+  const mine = (await viewerName(req)) === name;
+  const p = await readJson(`profiles/${name}.json`, {});
+  // Never live: the owner gets a preview, anyone else a plain 404
+  if (!(await currentMembers()).has(name) || (!mine && p.portfolio?.live !== true)) fail(404, 'Not found');
+  const pf = cleanPortfolio(p.portfolio || {});
+  const shown = p.displayName || name;
+  const credited = new RegExp(`(^|[^\\w])${shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w])`, 'i');
+  const tdb = await publicTracks();
+  const releases = await Promise.all(
+    Object.values(tdb.releases)
+      .filter((r) => publicRelease(r) && credited.test(r.artist || ''))
+      .sort((a, b) => (b.date || '9').localeCompare(a.date || '9'))
+      .map(releaseView),
+  );
+  if (!mine) count('view', `portfolio:${name}`);
+  res.setHeader('cache-control', 'no-cache');
+  return json(res, {
+    username: name,
+    displayName: shown,
+    role: p.role || '',
+    bio: p.bio || '',
+    photo: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${name}.webp`)),
+    links: Object.fromEntries(
+      Object.keys(PROFILE_LINKS)
+        .map((k) => [k, publicLink(k, p[k])])
+        .filter(([, v]) => v),
+    ),
+    ...pf,
+    releases,
+    mine,
+  });
+}
+
+/** /portfolios: visitors see everyone's; a signed-in member is sent to their own (?all shows the index anyway). */
+async function portfoliosPage(req, res, url) {
+  if (!/^\/portfolios(\/[\w.-]{1,64})?\/?$/.test(url.pathname)) fail(404, 'Not found');
+  if (/^\/portfolios\/?$/.test(url.pathname) && !url.searchParams.has('all')) {
+    const me = await viewerName(req);
+    if (me) return res.writeHead(302, { location: `/portfolios/${encodeURIComponent(me)}`, 'cache-control': 'no-store' }).end();
+  }
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-security-policy':
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https://www.youtube-nocookie.com",
+  });
+  return pipeline(createReadStream(PORTFOLIOS_PAGE), res);
+}
+
 function htmlPage(file) {
   return (req, res, url) => {
     if (!/^\/(release|portfolio)(\/[\w-]{1,80}){0,2}\/?$/.test(url.pathname)) fail(404, 'Not found');
@@ -6037,7 +6146,7 @@ async function rawPreview(file, size) {
     if ((le && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) {
       const seen = new Set();
       const walk = (ifd, depth) => {
-        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8;) {
+        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8; ) {
           seen.add(ifd);
           const n = u16(ifd);
           if (ifd + 2 + n * 12 + 4 > b.length) return;
@@ -7262,6 +7371,7 @@ async function profiles(req, res, url) {
     for (const [k, max] of Object.entries(PROFILE_FIELDS)) if (k in input) profile[k] = String(input[k] ?? '').slice(0, max);
     if ('listed' in input) profile.listed = input.listed === true; // shown in the public directory (My Computer)
     if ('bookable' in input) profile.bookable = input.bookable === true;
+    if (input.portfolio && typeof input.portfolio === 'object') profile.portfolio = cleanPortfolio(input.portfolio);
     profile.updated = new Date().toISOString();
     await mkdir(join(DATA, 'profiles'), { recursive: true });
     await saveJson(`profiles/${name}.json`, profile);
@@ -7993,6 +8103,7 @@ const routes = [
   ['/write', writePage],
   ['/story/', storyPage],
   ['/release/', htmlPage(RELEASE_PAGE)],
+  ['/portfolios', portfoliosPage], // before /portfolio, which would match it too
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
   ['/magazine', magazinePage],
   ['/api/stories', storiesApi],

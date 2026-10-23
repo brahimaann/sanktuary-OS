@@ -40,7 +40,20 @@ export interface Profile extends Partial<Record<LinkKey, string>> {
   pro?: string; // roster, members only: "BMI · IPI 123456789"
   rates?: string; // roster, members only: rate card and availability
   bookable?: boolean; // a Book button on their public directory card
+  portfolio?: Portfolio; // their own page at /portfolios/<username>
 }
+
+/** A member's portfolio page, customised in Profile > My portfolio. */
+export interface Portfolio {
+  live: boolean;
+  headline: string;
+  statement: string;
+  contact: string;
+  theme: 'paper' | 'night' | 'bold';
+  accent: string; // '#rrggbb', or '' for the theme's own
+  work: { title: string; url: string; note: string }[];
+}
+export const EMPTY_PORTFOLIO: Portfolio = { live: false, headline: '', statement: '', contact: '', theme: 'paper', accent: '', work: [] };
 
 export const displayName = (p?: Profile, fallback = '') => p?.displayName || p?.username || fallback;
 

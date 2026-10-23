@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portfolios · Sanktuary</title>
+    <style>
+      /* Member portfolios: the index of every live one, or one member's, in the look they picked in Profile. */
+      :root,
+      [data-theme='paper'] {
+        --bg: #f7f4ee;
+        --ink: #1b1a17;
+        --dim: #5f5a51;
+        --accent: #8a5a12;
+        --line: #d9d2c4;
+        --card: #fffdf8;
+        --head: 400 clamp(40px, 7vw, 64px) / 1.02 Georgia, 'Times New Roman', serif;
+        --body: 17px/1.6 Georgia, 'Times New Roman', serif;
+      }
+      [data-theme='night'] {
+        --bg: #0b0b0f;
+        --ink: #f3efe8;
+        --dim: #b9b2a6;
+        --accent: #d9a441;
+        --line: #2a2a31;
+        --card: #15151b;
+      }
+      [data-theme='bold'] {
+        --bg: #ffffff;
+        --ink: #0a0a0a;
+        --dim: #555;
+        --accent: #e5484d;
+        --line: #0a0a0a;
+        --card: #f2f2f2;
+        --head: 800 clamp(44px, 9vw, 84px) / 0.95 system-ui, sans-serif;
+        --body: 16px/1.55 system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: var(--body);
+      }
+      a {
+        color: var(--accent);
+      }
+      .wrap {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 40px 22px 70px;
+      }
+      header {
+        display: flex;
+        gap: 22px;
+        align-items: center;
+        border-bottom: 2px solid var(--ink);
+        padding-bottom: 18px;
+        margin-bottom: 28px;
+      }
+      header img {
+        width: 120px;
+        height: 120px;
+        object-fit: cover;
+        flex-shrink: 0;
+      }
+      h1 {
+        font: var(--head);
+        margin: 0;
+      }
+      .headline {
+        color: var(--dim);
+        font-size: 20px;
+        margin: 8px 0 0;
+      }
+      .contact {
+        font:
+          14px system-ui,
+          sans-serif;
+        color: var(--dim);
+        margin-top: 12px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      h2 {
+        font:
+          600 13px/1 system-ui,
+          sans-serif;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin: 38px 0 14px;
+      }
+      .prose {
+        white-space: pre-wrap;
+        margin: 0;
+      }
+      .item {
+        padding: 16px 0;
+        border-top: 1px solid var(--line);
+      }
+      .item h3 {
+        margin: 0 0 4px;
+        font-size: 22px;
+        font-weight: 400;
+      }
+      .meta {
+        font:
+          13px system-ui,
+          sans-serif;
+        color: var(--dim);
+        margin: 2px 0 8px;
+      }
+      .video {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border: 0;
+        margin-top: 8px;
+        background: #000;
+      }
+      .release {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 16px;
+      }
+      .release img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 16px;
+        padding: 0;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 14px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-top: 4px solid var(--c, var(--accent));
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .card:hover {
+        border-color: var(--c, var(--accent));
+      }
+      .card img,
+      .card .ph {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        background: var(--line);
+      }
+      .card b {
+        font-size: 19px;
+        font-weight: 400;
+      }
+      .card span {
+        font:
+          13px system-ui,
+          sans-serif;
+        color: var(--dim);
+      }
+      .bar {
+        font:
+          14px system-ui,
+          sans-serif;
+        background: var(--card);
+        border: 1px solid var(--line);
+        padding: 10px 14px;
+        margin-bottom: 22px;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        justify-content: space-between;
+      }
+      .notice {
+        color: var(--dim);
+        text-align: center;
+        padding: 60px 0;
+      }
+      @media (max-width: 560px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .release {
+          grid-template-columns: 80px 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap" id="page"><p class="notice">Loading...</p></div>
+    <script>
+      (() => {
+        const page = document.getElementById('page');
+        const el = (tag, cls, text) => {
+          const e = document.createElement(tag);
+          if (cls) e.className = cls;
+          if (text) e.textContent = text; // always text, never HTML
+          return e;
+        };
+        const link = (href, text, cls) => {
+          const a = el('a', cls, text);
+          a.href = href;
+          if (/^https?:/.test(href)) ((a.target = '_blank'), (a.rel = 'noopener noreferrer'));
+          return a;
+        };
+        const day = (d) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const youtube = (u) => u.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/)([\w-]{11})/)?.[1];
+        const LINKS = {
+          spotify: 'Spotify',
+          appleMusic: 'Apple Music',
+          youtube: 'YouTube',
+          soundcloud: 'SoundCloud',
+          bandcamp: 'Bandcamp',
+          audiomack: 'Audiomack',
+          bandlab: 'BandLab',
+          tiktok: 'TikTok',
+          instagram: 'Instagram',
+          x: 'X',
+          website: 'Website',
+        };
+        const who = decodeURIComponent(location.pathname.split('/')[2] || '');
+        const offline = () => page.replaceChildren(el('p', 'notice', 'Portfolios are offline right now. Try again soon.'));
+
+        if (!who)
+          fetch('/api/public/portfolios')
+            .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+            .then(index, offline);
+        else
+          fetch(`/api/public/portfolios/${encodeURIComponent(who)}`)
+            .then((r) => (r.status === 404 ? null : r.ok ? r.json() : Promise.reject(r.status)))
+            .then(member, offline);
+
+        function index({ people }) {
+          page.replaceChildren();
+          const head = el('header');
+          const t = el('div');
+          t.append(el('h1', '', 'Portfolios'), el('p', 'headline', 'The artists, producers and makers of Sanktuary.'));
+          head.append(t);
+          page.append(head);
+          if (!people.length) return page.append(el('p', 'notice', 'No portfolios are live yet.'));
+          const grid = el('div', 'grid');
+          people.forEach((p) => {
+            const a = link(`/portfolios/${encodeURIComponent(p.username)}`, '', 'card');
+            if (p.accent) a.style.setProperty('--c', p.accent);
+            if (p.photo) {
+              const img = el('img');
+              img.alt = '';
+              img.src = `/api/public/avatar/${encodeURIComponent(p.username)}`;
+              a.append(img);
+            } else a.append(el('div', 'ph'));
+            a.append(el('b', '', p.displayName));
+            if (p.role || p.headline) a.append(el('span', '', p.headline || p.role));
+            grid.append(a);
+          });
+          page.append(grid);
+          const studio = el('p', 'meta');
+          studio.append('The studio’s own portfolio: ', link('/portfolio', 'sanktuary.studio/portfolio'));
+          page.append(studio);
+        }
+
+        function member(p) {
+          page.replaceChildren();
+          if (!p) return page.append(el('p', 'notice', 'This portfolio isn’t live.'), link('/portfolios?all', 'See every portfolio'));
+          document.title = `${p.displayName} · Portfolio`;
+          document.documentElement.dataset.theme = p.theme;
+          if (p.accent) document.documentElement.style.setProperty('--accent', p.accent);
+
+          if (p.mine) {
+            const bar = el('div', 'bar');
+            bar.append(
+              el(
+                'span',
+                '',
+                p.live
+                  ? 'This is your portfolio as visitors see it. Change it in Sanktuary > Profile > My portfolio.'
+                  : 'Preview: only you can see this. Turn on "Live" in Sanktuary > Profile > My portfolio to publish it.',
+              ),
+              link('/portfolios?all', 'All portfolios'),
+            );
+            page.append(bar);
+          }
+
+          const head = el('header');
+          if (p.photo) {
+            const img = el('img');
+            img.alt = '';
+            img.src =
+              p.mine && !p.live
+                ? `/api/profiles/${encodeURIComponent(p.username)}/photo`
+                : `/api/public/avatar/${encodeURIComponent(p.username)}`;
+            head.append(img);
+          }
+          const t = el('div');
+          t.append(el('h1', '', p.displayName));
+          if (p.headline || p.role) t.append(el('p', 'headline', p.headline || p.role));
+          const contact = el('div', 'contact');
+          if (p.contact)
+            contact.append(
+              /@/.test(p.contact) && !/\s/.test(p.contact) ? link(`mailto:${p.contact}`, p.contact) : el('span', '', p.contact),
+            );
+          Object.entries(p.links).forEach(([k, u]) => contact.append(link(u, LINKS[k] || k)));
+          t.append(contact);
+          head.append(t);
+          page.append(head);
+
+          if (p.statement) page.append(el('h2', '', 'Statement'), el('p', 'prose', p.statement));
+          if (p.bio) page.append(el('h2', '', 'About'), el('p', 'prose', p.bio));
+
+          if (p.work.length) {
+            page.append(el('h2', '', 'Work'));
+            p.work.forEach((w) => {
+              const item = el('div', 'item');
+              const h = el('h3');
+              h.append(w.url ? link(w.url, w.title || w.url.replace(/^https:\/\/(www\.)?/, '')) : w.title);
+              item.append(h);
+              if (w.note) item.append(el('p', 'prose', w.note));
+              const id = w.url && youtube(w.url);
+              if (id) {
+                const f = el('iframe', 'video');
+                f.src = `https://www.youtube-nocookie.com/embed/${id}`;
+                f.title = w.title || 'Video';
+                f.allow = 'encrypted-media; picture-in-picture; fullscreen';
+                f.loading = 'lazy';
+                item.append(f);
+              }
+              page.append(item);
+            });
+          }
+
+          if (p.releases.length) {
+            page.append(el('h2', '', 'Music'));
+            p.releases.forEach((r) => {
+              const item = el('div', 'item release');
+              const img = el('img');
+              img.alt = `${r.title} cover`;
+              if (r.cover) img.src = `/api/public/release/${r.slug}/cover?w=400`;
+              else img.style.background = 'var(--line)';
+              const t = el('div');
+              const h = el('h3');
+              h.append(link(`/release/${r.slug}`, r.title));
+              t.append(h, el('div', 'meta', `${r.kind}${r.date ? ` · ${day(r.date)}` : ''}`));
+              if (r.blurb) t.append(el('p', 'prose', r.blurb));
+              item.append(img, t);
+              page.append(item);
+            });
+          }
+          if (!p.statement && !p.bio && !p.work.length && !p.releases.length && p.mine)
+            page.append(el('p', 'notice', 'Add a statement and some work in Profile > My portfolio.'));
+        }
+      })();
+    </script>
+  </body>
+</html>
