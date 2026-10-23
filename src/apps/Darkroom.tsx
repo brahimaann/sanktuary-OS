@@ -59,7 +59,7 @@ export const PRESETS: FilterPreset[] = [
   { id: 22, name: 'Tungsten Cam', category: 'camera', desc: 'Dark, warm, soft camcorder under one bare bulb' },
   { id: 23, name: 'Cold VHS', category: 'goth', desc: 'Blue-cyan tape, washed blacks, soft and cold' },
   { id: 21, name: 'Faded IG', category: 'swag', desc: 'Old Instagram fade: creamy lifted blacks, soft warm highlights' },
-  // Film stocks (3D LUTs built in filmLuts.ts)
+  // Film stocks (3D LUTs built in filmLuts.ts); picking one also sets its grain (FILM_GRAIN)
   { id: 24, name: 'Portra 400', category: 'film', desc: 'Warm, soft colour negative: glowing skin, olive greens, cyan-leaning blues' },
   { id: 25, name: 'Kodachrome', category: 'film', desc: 'Dense slide film: deep reds and yellows, dark blues, black blacks' },
   { id: 26, name: 'Cinestill 800T', category: 'film', desc: 'Tungsten cine film: cool, teal shadows, red halation around lights' },
@@ -217,12 +217,8 @@ const FITS: [Fit, string, string][] = [
 type Source = HTMLImageElement | HTMLCanvasElement;
 const dims = (s: Source) => (s instanceof HTMLImageElement ? [s.naturalWidth, s.naturalHeight] : [s.width, s.height]);
 
-/**
- * Match look: the average and spread of a picture's light (L) and colour (a, b) in Oklab, from a small copy.
- * The same maths as srgb_to_oklab in the shader, so the shader can move one picture's numbers onto another's
- * (Reinhard-style colour transfer).
- */
-function labStats(img: Source): [number[], number[]] {
+/** A small copy of the picture in Oklab (L, a, b per pixel), with the same maths as srgb_to_oklab in the shader. */
+function oklabPixels(img: Source): Float32Array {
   const [w, h] = dims(img);
   const k = Math.min(1, 256 / Math.max(w, h, 1));
   const c = document.createElement('canvas');
@@ -231,27 +227,96 @@ function labStats(img: Source): [number[], number[]] {
   const x = c.getContext('2d', { willReadFrequently: true })!;
   x.drawImage(img, 0, 0, c.width, c.height);
   const d = x.getImageData(0, 0, c.width, c.height).data;
-  const sum = [0, 0, 0];
-  const sq = [0, 0, 0];
+  const out = new Float32Array((d.length / 4) * 3);
   const lin = (v: number) => ((v /= 255) <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); // exact sRGB, as in the shader
   for (let i = 0; i < d.length; i += 4) {
     const [r, g, b] = [lin(d[i]), lin(d[i + 1]), lin(d[i + 2])];
     const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
     const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
     const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    const lab = [
-      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
-      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
-      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-    ];
-    for (let j = 0; j < 3; j++) {
-      sum[j] += lab[j];
-      sq[j] += lab[j] * lab[j];
-    }
+    out.set(
+      [
+        0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+      ],
+      (i / 4) * 3,
+    );
   }
-  const n = d.length / 4;
+  return out;
+}
+
+/**
+ * Match look: the average and spread of a picture's light (L) and colour (a, b) in Oklab, so the shader can move one
+ * picture's numbers onto another's (Reinhard-style colour transfer).
+ */
+function labStats(img: Source): [number[], number[]] {
+  const px = oklabPixels(img);
+  const sum = [0, 0, 0];
+  const sq = [0, 0, 0];
+  for (let i = 0; i < px.length; i += 3)
+    for (let j = 0; j < 3; j++) {
+      sum[j] += px[i + j];
+      sq[j] += px[i + j] * px[i + j];
+    }
+  const n = px.length / 3;
   const mean = sum.map((v) => v / n);
   return [mean, sq.map((v, j) => Math.max(0.0001, Math.sqrt(Math.max(0, v / n - mean[j] * mean[j]))))];
+}
+
+// Skin, as a soft region in OkLCh (the same one the film stocks protect): around a hue, low chroma (a red jacket is too
+// saturated to be skin), and not hair-black or specular white. dh is the distance from the centre hue in radians.
+const ramp = (x: number, a: number, b: number) => Math.min(Math.max((x - a) / (b - a), 0), 1);
+const SKIN_WIDTH = 0.384; // 22 degrees
+const skinWeight = (L: number, C: number, dh: number) =>
+  Math.exp(-(dh * dh) / (2 * SKIN_WIDTH * SKIN_WIDTH)) *
+  ramp(C, 0.015, 0.035) *
+  (1 - ramp(C, 0.15, 0.2)) *
+  ramp(L, 0.12, 0.2) *
+  (1 - ramp(L, 0.82, 0.92));
+const angle = (d: number) => Math.atan2(Math.sin(d), Math.cos(d)); // wrap to -pi..pi
+
+/** Skin uniformity: this photo's own skin tone (hue in radians, chroma), or null when there's hardly any skin in it. */
+function skinCentre(img: Source): [number, number] | null {
+  const px = oklabPixels(img);
+  // Start from typical skin, then centre on this person's: deep, golden, olive and pink undertones all differ
+  let hue = (50 * Math.PI) / 180;
+  let res: [number, number] | null = null;
+  for (let pass = 0; pass < 2; pass++) {
+    let [sw, sa, sb, sc] = [0, 0, 0, 0];
+    for (let i = 0; i < px.length; i += 3) {
+      const C = Math.hypot(px[i + 1], px[i + 2]);
+      // Only clear skin sets the target: near-greys (a beige wall, a grey-lit cheek) would drag it toward grey
+      const w = skinWeight(px[i], C, angle(Math.atan2(px[i + 2], px[i + 1]) - hue)) * ramp(C, 0.025, 0.045);
+      sw += w;
+      sa += w * px[i + 1];
+      sb += w * px[i + 2];
+      sc += w * C;
+    }
+    if (sw < (px.length / 3) * 0.01) return null;
+    hue = Math.atan2(sb, sa);
+    res = [hue, sc / sw];
+  }
+  return res;
+}
+
+/** The colour of a small patch of the picture at (u, v), 0..1 from the top left, as [hue in radians, chroma]. */
+function pickColour(img: Source, u: number, v: number): [number, number] {
+  const px = oklabPixels(img);
+  const [w0, h0] = dims(img);
+  const k = Math.min(1, 256 / Math.max(w0, h0, 1));
+  const [w, h] = [Math.max(1, Math.round(w0 * k)), Math.max(1, Math.round(h0 * k))];
+  const [cx, cy] = [Math.round(u * (w - 1)), Math.round(v * (h - 1))];
+  let [sa, sb, sc, n] = [0, 0, 0, 0];
+  for (let y = Math.max(0, cy - 3); y <= Math.min(h - 1, cy + 3); y++)
+    for (let x = Math.max(0, cx - 3); x <= Math.min(w - 1, cx + 3); x++) {
+      const i = (y * w + x) * 3;
+      sa += px[i + 1];
+      sb += px[i + 2];
+      sc += Math.hypot(px[i + 1], px[i + 2]);
+      n++;
+    }
+  return [Math.atan2(sb, sa), sc / n];
 }
 
 // crop: fill the slot and trim the overflow; fit: whole photo inside the slot; stretch: fill it, distorting
@@ -268,6 +333,15 @@ function drawImageIn(ctx: CanvasRenderingContext2D, img: Source, dx: number, dy:
   ctx.restore();
 }
 
+// Each stock's own grain: slow slide film is fine and quiet, fast film is coarse. Cinestill's halation is in the shader.
+const FILM_GRAIN: Record<number, Pick<DarkroomParams, 'grain' | 'grainSize'>> = {
+  24: { grain: 0.22, grainSize: 0.45 }, // Portra 400
+  25: { grain: 0.15, grainSize: 0.2 }, // Kodachrome 64
+  26: { grain: 0.3, grainSize: 0.6 }, // Cinestill 800T
+  27: { grain: 0.15, grainSize: 0.35 }, // Classic Chrome
+  28: { grain: 0.1, grainSize: 0.1 }, // Velvia 50
+};
+
 export interface DarkroomParams {
   preset: number;
   amount: number;
@@ -276,7 +350,10 @@ export interface DarkroomParams {
   fade: number;
   vignette: number;
   grain: number;
+  grainSize: number; // 0 (fine, slow film) to 1 (coarse, fast film)
   iphone6Grain: boolean;
+  halation: number; // 0 to 1: red-orange glow around lights
+  clarity: number; // -1 to 1: local contrast that stops at edges (no halos)
   // JPEG Degradation
   jpegQuality: number; // 0-100
   resolution: number; // 0.1 to 1.0 (downsampling)
@@ -298,7 +375,28 @@ export interface DarkroomParams {
   // Match look: how far the photo moves to the reference photo's colours (0 = off), and whether light moves too
   match: number;
   matchTone: boolean;
+  // Colour mixer: per hue band (MIX_BANDS), -1 to 1 each. Hue moves up to 30 degrees, lightness up to 0.1 in OkLCh
+  mixHue: number[];
+  mixSat: number[];
+  mixLum: number[];
+  skinUniform: number; // 0 to 1: pulls every bit of skin toward the photo's own average skin tone
+  skinPick: number[]; // [hue in radians, chroma] of skin tapped on the photo; empty = work it out from the photo
 }
+
+// Colour mixer bands: name and centre hue in OkLCh degrees (skin sits between red and orange)
+const MIX_BANDS = [
+  ['Red', 25],
+  ['Orange', 55],
+  ['Yellow', 100],
+  ['Green', 140],
+  ['Aqua', 195],
+  ['Blue', 255],
+  ['Purple', 300],
+  ['Magenta', 340],
+] as const;
+// Each band is a bell as wide as its gaps to the neighbours, so the bands share out every hue between them
+const MIX_C = MIX_BANDS.map(([, h]) => (h * Math.PI) / 180);
+const MIX_W = MIX_C.map((h, i) => (angle(h - MIX_C[(i + 7) % 8]) + angle(MIX_C[(i + 1) % 8] - h)) / 4);
 
 const DEFAULT_PARAMS: DarkroomParams = {
   preset: 0,
@@ -308,7 +406,10 @@ const DEFAULT_PARAMS: DarkroomParams = {
   fade: 0,
   vignette: 0,
   grain: 0,
+  grainSize: 0.4,
   iphone6Grain: false,
+  halation: 0,
+  clarity: 0,
   jpegQuality: 100,
   resolution: 1.0,
   jpegNoise: false,
@@ -325,6 +426,11 @@ const DEFAULT_PARAMS: DarkroomParams = {
   glitchThreshold: 0,
   match: 0,
   matchTone: true,
+  mixHue: [0, 0, 0, 0, 0, 0, 0, 0],
+  mixSat: [0, 0, 0, 0, 0, 0, 0, 0],
+  mixLum: [0, 0, 0, 0, 0, 0, 0, 0],
+  skinUniform: 0,
+  skinPick: [],
 };
 
 const VERT = `attribute vec2 p; varying vec2 uv; void main() { uv = (p + 1.0) / 2.0; gl_Position = vec4(p, 0.0, 1.0); }`;
@@ -346,12 +452,16 @@ uniform int glitchMode;
 uniform float glitchAmount, glitchThreshold;
 uniform float uMatch, uMatchTone;
 uniform vec3 uSrcMean, uSrcStd, uRefMean, uRefStd;
+uniform float uMixC[8], uMixW[8], uMixH[8], uMixS[8], uMixL[8];
+uniform float uMixOn, uSkinU, uSkinH, uSkinC;
 uniform float uNoise;
 uniform float uSharpen;
 uniform float uPixel2x;
 uniform float uTime;
 uniform sampler2D lut;
 uniform float uLut;
+uniform float uGrainSize, uHalation, uClarity, uDigitalGrain;
+uniform sampler2D fx; // quarter-size, blurred: r = light energy (for halation), g = local mean tone, b = its square
 
 varying vec2 uv;
 
@@ -397,20 +507,6 @@ vec3 lut3d(vec3 c) {
   vec3 s0 = texture2D(lut, rg + vec2(b0 / N, 0.0)).rgb;
   vec3 s1 = texture2D(lut, rg + vec2(min(b0 + 1.0, N - 1.0) / N, 0.0)).rgb;
   return mix(s0, s1, c.b - b0);
-}
-
-// Halation: light from bright spots bounces off the film base back into the red layer, so lights get a red-orange
-// fringe. A ring of samples around the pixel, rotated per pixel so it reads as a glow, not copies.
-vec3 halation(vec2 st, float big) {
-  float a = hash12(gl_FragCoord.xy) * 6.2831853;
-  vec3 h = vec3(0.0);
-  for (int i = 0; i < 12; i++) {
-    float t = a + float(i) * 0.5236;
-    float r = (1.0 + mod(float(i), 3.0)) * big / 400.0;
-    vec3 s = texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb;
-    h += srgb2lin(s) * smoothstep(0.7, 1.0, luma(s));
-  }
-  return h / 12.0;
 }
 
 // Interleaved gradient noise: half a code value of dither so gradients and vignettes don't band in 8 bits
@@ -465,7 +561,26 @@ vec3 apply_ccd_smear(vec2 uvCoord, float stepY) {
   return smear * 0.18;
 }
 
-// ── Physical Degradation Module 3: Photographic Grain (Poisson / sqrt variance) ──
+// Smooth value noise: one random value per cell, blended between cells, so grains have soft round edges
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + 1.0), f.x), f.y) - 0.5;
+}
+
+// Film grain: clumps of two sizes (fine grains bunch into larger blotches), mostly the same in each layer with a
+// little colour of its own (most in blue), strongest in the midtones and fading in deep shadows and clean highlights, like a print.
+vec3 film_grain(vec3 c, vec2 px, float size, float amt) {
+  vec2 p = px / size;
+  float mono = vnoise(p) * 0.65 + vnoise(p * 2.3 + 17.0) * 0.35;
+  vec3 tint = vec3(vnoise(p * 1.7 + 3.1), vnoise(p * 1.7 + 41.3), vnoise(p * 1.7 + 77.9));
+  vec3 n = mono * vec3(0.95, 1.0, 1.15) + tint * vec3(0.15, 0.15, 0.3); // the blue layer has the biggest grains
+  float Y = luma(c);
+  return c + n * amt * (0.25 + 3.0 * Y * (1.0 - Y));
+}
+
+// ── Digital grain (iPhone 6): hard per-cell noise, Poisson-like (sqrt variance) ──
 vec3 apply_film_grain(vec3 c, vec2 cell, float timeVal, float grainAmt) {
   float Y = luma(c);
   float variance = sqrt(max(0.0, Y * (1.0 - Y)));
@@ -770,6 +885,38 @@ void main() {
     c = texture2D(img, st).rgb;
   }
 
+  // Skin uniformity and colour mixer, in OkLCh on the photo's own colours (before any look)
+  if (uSkinU > 0.001 || uMixOn > 0.5) {
+    vec3 lab = srgb_to_oklab(c);
+    float L = lab.x;
+    float C = length(lab.yz);
+    float h = atan(lab.z, lab.y);
+    // Skin: blotches and casts (red patches, a green spill) move toward this person's own skin tone; light stays
+    if (uSkinU > 0.001) {
+      float d = mod(uSkinH - h + 9.424778, 6.283185) - 3.141593;
+      float w = exp(-d * d / 0.294912) * clamp((C - 0.015) / 0.02, 0.0, 1.0) * (1.0 - clamp((C - 0.15) / 0.05, 0.0, 1.0))
+        * clamp((L - 0.12) / 0.08, 0.0, 1.0) * (1.0 - clamp((L - 0.82) / 0.1, 0.0, 1.0));
+      h += d * uSkinU * w;
+      C = mix(C, uSkinC, 0.35 * uSkinU * w);
+    }
+    if (uMixOn > 0.5) {
+      float sum = 0.0, dh = 0.0, ds = 0.0, dl = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float d = mod(h - uMixC[i] + 9.424778, 6.283185) - 3.141593;
+        float w = exp(-d * d / (2.0 * uMixW[i] * uMixW[i]));
+        sum += w;
+        dh += w * uMixH[i];
+        ds += w * uMixS[i];
+        dl += w * uMixL[i];
+      }
+      float colourful = smoothstep(0.02, 0.06, C) / sum; // greys have no hue to pick a band by, so they stay put
+      h += dh * colourful * 0.5236;
+      C *= max(0.0, 1.0 + ds * colourful);
+      L += dl * colourful * 0.1;
+    }
+    c = oklab_to_srgb(vec3(L, C * cos(h), C * sin(h)));
+  }
+
   // Match look: move the colours (and light) statistics to the reference photo's, in Oklab
   if (uMatch > 0.001) {
     vec3 lab = srgb_to_oklab(c);
@@ -814,12 +961,27 @@ void main() {
   else if (preset == 22) graded = tungsten_grade(c, st, big);
   else if (preset == 23) graded = cold_vhs_grade(c, st, big);
   else if (uLut > 0.5) graded = lut3d(c);
-  if (preset == 26) { // the fringe shows around lights, not on top of them
-    float glowOn = 1.0 - 0.85 * smoothstep(0.6, 1.0, luma(c));
-    graded = lin2srgb(srgb2lin(graded) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 0.8 * glowOn);
-  }
 
   c = mix(c, graded, amount);
+
+  // Halation (Cinestill brings its own): light scattered back off the film base, so its spread follows how much
+  // light there is (no cutoff); it shows most around lights, a little on top of them.
+  vec3 local = texture2D(fx, st).rgb;
+  float hal = uHalation + (preset == 26 ? 0.6 * amount : 0.0);
+  if (hal > 0.01) {
+    float glowOn = 1.0 - 0.7 * smoothstep(0.6, 1.0, luma(c));
+    c = lin2srgb(srgb2lin(c) + local.r * vec3(1.0, 0.28, 0.08) * 2.5 * hal * glowOn);
+  }
+
+  // Clarity (guided filter): where the neighbourhood is flat the local mean is the base and detail is lifted; at an
+  // edge the variance is high, the base follows the pixel itself, and nothing is added, so there is no halo.
+  if (abs(uClarity) > 0.01) {
+    float Y0 = luma(texture2D(img, st).rgb);
+    float a = max(local.b - local.g * local.g, 0.0);
+    a /= a + 0.003;
+    float Y = luma(c);
+    c += (Y0 - mix(local.g, Y0, a)) * uClarity * 2.0 * (4.0 * Y * (1.0 - Y));
+  }
 
   // 5. Contrast and fade work on the picture as seen (pivot on mid-grey)
   c = (c - 0.5) * contrast + 0.5;
@@ -839,8 +1001,10 @@ void main() {
   c = lin2srgb(shoulder(c));
 
   // 7. Sensor Degradation Module 3: grain in film-grain-sized cells, CCD colour noise per pixel
-  if (grain > 0.01) {
+  if (grain > 0.01 && uDigitalGrain > 0.5) {
     c = apply_film_grain(c, floor(gl_FragCoord.xy / max(1.0, big / 1500.0)), uTime, grain * 0.35);
+  } else if (grain > 0.01) {
+    c = film_grain(c, gl_FragCoord.xy + uTime * 997.0, max(0.7, mix(0.8, 2.8, uGrainSize) * big / 1500.0), grain * 0.7);
   }
   if (ccdNoise > 0.01) {
     vec3 cnoise = vec3(hash12(gl_FragCoord.xy + 1.7), hash12(gl_FragCoord.xy + 11.3), hash12(gl_FragCoord.xy + 23.9)) - 0.5;
@@ -874,11 +1038,116 @@ void main() {
   gl_FragColor = vec4(clamp(c + (ign(gl_FragCoord.xy) - 0.5) / 255.0, 0.0, 1.0), 1.0);
 }`;
 
+// Pre-pass for halation and clarity, run once per photo on a quarter-size copy: mode 0 writes light energy, tone and
+// tone squared; mode 1 is one direction of a Gaussian blur (25 taps, sigma 4 taps). The main shader reads the result.
+const FX_FRAG = `precision mediump float;
+uniform sampler2D img, src;
+uniform int mode;
+uniform vec2 dir;
+varying vec2 uv;
+void main() {
+  if (mode == 0) {
+    vec3 c = texture2D(img, uv).rgb;
+    vec3 l = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+    float E = dot(l, vec3(0.2126, 0.7152, 0.0722));
+    float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    gl_FragColor = vec4(E * E * E * E, Y, Y * Y, 1.0); // E^4: bright light dominates without a hard threshold
+  } else {
+    vec4 s = vec4(0.0);
+    float w = 0.0;
+    for (int i = -12; i <= 12; i++) {
+      float x = float(i);
+      float g = exp(-x * x / 32.0);
+      s += texture2D(src, uv + dir * x) * g;
+      w += g;
+    }
+    gl_FragColor = s / w;
+  }
+}`;
+
+interface Fx {
+  prog: WebGLProgram;
+  tex: [WebGLTexture, WebGLTexture];
+  fbo: [WebGLFramebuffer, WebGLFramebuffer];
+  half: number; // HALF_FLOAT_OES when the phone can render to it, else 0 (8-bit)
+}
+
+/** Build the blurred quarter-size copy of whatever is on texture unit 0, leave it on unit 2, restore the main pass. */
+function buildFx(ctx: WebGLRenderingContext, prog: WebGLProgram, fx: Fx | undefined, w: number, h: number): Fx | undefined {
+  if (!fx) {
+    const p = ctx.createProgram()!;
+    for (const [type, src] of [
+      [ctx.VERTEX_SHADER, VERT],
+      [ctx.FRAGMENT_SHADER, FX_FRAG],
+    ] as const) {
+      const sh = ctx.createShader(type)!;
+      ctx.shaderSource(sh, src);
+      ctx.compileShader(sh);
+      ctx.attachShader(p, sh);
+    }
+    ctx.bindAttribLocation(p, 0, 'p');
+    ctx.linkProgram(p);
+    if (!ctx.getProgramParameter(p, ctx.LINK_STATUS)) return undefined;
+    const hf = ctx.getExtension('OES_texture_half_float');
+    ctx.getExtension('EXT_color_buffer_half_float');
+    ctx.getExtension('OES_texture_half_float_linear');
+    fx = {
+      prog: p,
+      tex: [ctx.createTexture()!, ctx.createTexture()!],
+      fbo: [ctx.createFramebuffer()!, ctx.createFramebuffer()!],
+      half: hf ? hf.HALF_FLOAT_OES : 0,
+    };
+  }
+  const qw = Math.max(1, Math.round(w / 4));
+  const qh = Math.max(1, Math.round(h / 4));
+  ctx.activeTexture(ctx.TEXTURE3);
+  for (let i = 0; i < 2; i++) {
+    ctx.bindTexture(ctx.TEXTURE_2D, fx.tex[i]);
+    for (const k of [ctx.TEXTURE_WRAP_S, ctx.TEXTURE_WRAP_T]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.CLAMP_TO_EDGE);
+    for (const k of [ctx.TEXTURE_MIN_FILTER, ctx.TEXTURE_MAG_FILTER]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.LINEAR);
+    ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, qw, qh, 0, ctx.RGBA, fx.half || ctx.UNSIGNED_BYTE, null);
+    ctx.bindFramebuffer(ctx.FRAMEBUFFER, fx.fbo[i]);
+    ctx.framebufferTexture2D(ctx.FRAMEBUFFER, ctx.COLOR_ATTACHMENT0, ctx.TEXTURE_2D, fx.tex[i], 0);
+    if (fx.half && ctx.checkFramebufferStatus(ctx.FRAMEBUFFER) !== ctx.FRAMEBUFFER_COMPLETE) {
+      fx.half = 0; // this phone can't render to half floats: start again in 8 bits
+      ctx.bindFramebuffer(ctx.FRAMEBUFFER, null);
+      return buildFx(ctx, prog, fx, w, h);
+    }
+  }
+  ctx.useProgram(fx.prog);
+  ctx.viewport(0, 0, qw, qh);
+  const u = (n: string) => ctx.getUniformLocation(fx!.prog, n);
+  ctx.uniform1i(u('img'), 0);
+  ctx.uniform1i(u('src'), 3);
+  const tap = Math.max(w, h) / 2400; // quarter-size px per tap: sigma = 4 taps = long side / 150 at full size
+  const passes: [number, number, number, number, number][] = [
+    [0, 0, 0, 0, 0], // mode, from, to, dx, dy: energy and tone into tex 0
+    [1, 0, 1, tap / qw, 0], // blur across into tex 1
+    [1, 1, 0, 0, tap / qh], // blur down into tex 0
+  ];
+  passes.forEach(([mode, from, to, dx, dy]) => {
+    ctx.bindTexture(ctx.TEXTURE_2D, mode ? fx!.tex[from] : null);
+    ctx.bindFramebuffer(ctx.FRAMEBUFFER, fx!.fbo[to]);
+    ctx.uniform1i(u('mode'), mode);
+    ctx.uniform2f(u('dir'), dx, dy);
+    ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
+  });
+  ctx.bindTexture(ctx.TEXTURE_2D, null);
+  ctx.bindFramebuffer(ctx.FRAMEBUFFER, null);
+  ctx.activeTexture(ctx.TEXTURE2);
+  ctx.bindTexture(ctx.TEXTURE_2D, fx.tex[0]);
+  ctx.activeTexture(ctx.TEXTURE0);
+  ctx.useProgram(prog);
+  ctx.viewport(0, 0, w, h);
+  return fx;
+}
+
 const TABS = [
   ['collage', 'Collage'],
   ['swag', 'Swag Filters'],
   ['goth', 'Goth Filters'],
   ['film', 'Film Stocks'],
+  ['mixer', 'Colour Mixer'],
   ['jpeg', 'JPEG Degradation'],
   ['ccd', 'CCD Bloom'],
   ['camera', '1-Click Cameras'],
@@ -903,7 +1172,7 @@ const forget = (vs: Version[]) => vs.forEach((v) => v.img.src.startsWith('blob:'
 const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const { getToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram; lut: number } | null>(null);
+  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram; lut: number; fx?: Fx } | null>(null);
 
   const [history, setHistory] = useState<Version[]>([]);
   const [pos, setPos] = useState(0);
@@ -918,6 +1187,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   // what the server picker is for: opening a photo, the Match look reference, or carousel slides
   const [showServerPicker, setShowServerPicker] = useState<false | 'open' | 'ref' | 'slides'>(false);
   const [matchRef, setMatchRef] = useState<{ img: HTMLImageElement; name: string } | null>(null);
+  const [mixBand, setMixBand] = useState(1); // Colour mixer: the band being edited (Orange, where most skin sits)
   const [refStats, setRefStats] = useState<[number[], number[]] | null>(null);
   const pickReference = (img: HTMLImageElement, name: string) => {
     setMatchRef({ img, name });
@@ -1016,7 +1286,16 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     () => (refStats && source ? ([...labStats(source), ...refStats] as [number[], number[], number[], number[]]) : null),
     [refStats, source],
   );
-  const dirty = isCollageActive || (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => params[k] !== DEFAULT_PARAMS[k]);
+  const skinUsed = params.skinUniform > 0;
+  const [picking, setPicking] = useState(false); // Colour Mixer: the next tap on the photo picks the skin tone
+  const skinPick = params.skinPick;
+  const skin = useMemo(
+    () => (skinUsed && source ? (skinPick.length ? (skinPick as [number, number]) : skinCentre(source)) : null),
+    [skinUsed, source, skinPick],
+  );
+  const dirty =
+    isCollageActive ||
+    (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => String(params[k]) !== String(DEFAULT_PARAMS[k]));
   const canUndo = dirty || pos > 0;
   const canRedo = pos < history.length - 1;
 
@@ -1419,6 +1698,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       for (const k of [ctx.TEXTURE_MIN_FILTER, ctx.TEXTURE_MAG_FILTER]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.LINEAR);
       ctx.activeTexture(ctx.TEXTURE0);
       ctx.uniform1i(ctx.getUniformLocation(prog, 'lut'), 1);
+      ctx.uniform1i(ctx.getUniformLocation(prog, 'fx'), 2);
       glRef.current = { ctx, prog, lut: 0 };
     }
     const { ctx } = glRef.current;
@@ -1430,6 +1710,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     // the canvas keeps the picture's full size; a smaller JPEG'd copy is stretched back up smoothly
     ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, crushed && !compare ? crushed : source);
     ctx.viewport(0, 0, cv.width, cv.height);
+    glRef.current.fx = buildFx(ctx, glRef.current.prog, glRef.current.fx, cv.width, cv.height);
     if (scale < 1) setStatus(`Preview scaled to ${cv.width}×${cv.height} (max GPU limit).`);
   }, [source, crushed, compare, redraw]);
 
@@ -1451,6 +1732,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         cv.height = 1350;
         ctx.viewport(0, 0, 1080, 1350);
         ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, slideCanvas(i, 1));
+        g.fx = buildFx(ctx, prog, g.fx, 1080, 1350);
         ctx.uniform2f(ctx.getUniformLocation(prog, 'res'), 1080, 1350);
         ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
         const blob = await new Promise<Blob>((ok, no) =>
@@ -1510,6 +1792,10 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.uniform1f(u('fade'), p.fade);
     ctx.uniform1f(u('vignette'), p.vignette);
     ctx.uniform1f(u('grain'), p.iphone6Grain ? Math.max(p.grain, 0.45) : p.grain);
+    ctx.uniform1f(u('uDigitalGrain'), p.iphone6Grain ? 1 : 0);
+    ctx.uniform1f(u('uGrainSize'), p.grainSize);
+    ctx.uniform1f(u('uHalation'), p.halation);
+    ctx.uniform1f(u('uClarity'), p.clarity);
     ctx.uniform1f(u('bloomAmount'), p.bloomAmount);
     ctx.uniform1f(u('bloomTint'), p.bloomTint);
     ctx.uniform1f(u('lensReflection'), p.lensReflection);
@@ -1531,13 +1817,22 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.uniform3fv(u('uSrcStd'), ss);
     ctx.uniform3fv(u('uRefMean'), rm);
     ctx.uniform3fv(u('uRefStd'), rs);
+    ctx.uniform1fv(u('uMixC'), MIX_C);
+    ctx.uniform1fv(u('uMixW'), MIX_W);
+    ctx.uniform1fv(u('uMixH'), p.mixHue);
+    ctx.uniform1fv(u('uMixS'), p.mixSat);
+    ctx.uniform1fv(u('uMixL'), p.mixLum);
+    ctx.uniform1f(u('uMixOn'), [...p.mixHue, ...p.mixSat, ...p.mixLum].some((v) => v) ? 1 : 0);
+    ctx.uniform1f(u('uSkinU'), skin ? p.skinUniform : 0);
+    ctx.uniform1f(u('uSkinH'), skin?.[0] ?? 0);
+    ctx.uniform1f(u('uSkinC'), skin?.[1] ?? 0);
     ctx.uniform1f(u('uNoise'), p.jpegNoise ? 1.0 : 0.0);
     ctx.uniform1f(u('uSharpen'), p.jpegSharpen ? 1.0 : 0.0);
     ctx.uniform1f(u('uPixel2x'), p.pixelate2x ? 1.0 : 0.0);
     ctx.uniform1f(u('uTime'), (Date.now() % 100000) / 1000.0);
 
     ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
-  }, [source, crushed, params, compare, matchStats, redraw]);
+  }, [source, crushed, params, compare, matchStats, skin, redraw]);
 
   const toJpeg = () =>
     new Promise<Blob>((ok, no) => canvasRef.current!.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94));
@@ -1593,7 +1888,15 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       {PRESETS.filter((p) => p.category === category).map((p) => (
         <button
           key={p.id}
-          onClick={() => setParam('preset', p.id)}
+          onClick={() =>
+            setParams((prev) => ({
+              ...prev,
+              preset: p.id,
+              // A stock brings its own grain; leaving the stocks takes it away again
+              ...(FILM_GRAIN[p.id] ??
+                (FILM_GRAIN[prev.preset] ? { grain: DEFAULT_PARAMS.grain, grainSize: DEFAULT_PARAMS.grainSize } : {})),
+            }))
+          }
           style={{
             ...button,
             fontSize: 11,
@@ -1696,8 +1999,20 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             margin: 2,
             position: 'relative',
             overflow: 'hidden',
+            cursor: picking ? 'crosshair' : undefined,
           }}
           onPointerDown={(e) => {
+            if (picking) {
+              const r = canvasRef.current?.getBoundingClientRect();
+              setPicking(false);
+              if (!r || !source) return;
+              const [u, v] = [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+              if (u < 0 || u > 1 || v < 0 || v > 1) return;
+              const [hue, C] = pickColour(source, u, v);
+              if (C < 0.015) return setStatus('That spot is almost grey, so it has no skin tone to work from. Tap on skin.');
+              setParams((prev) => ({ ...prev, skinPick: [hue, C], skinUniform: prev.skinUniform || 0.5 }));
+              return;
+            }
             // Long press / click-hold on photo also compares (not on a collage: that swaps the whole picture; use the button)
             if (e.button === 0 && activeTab !== 'collage') setCompare(true);
           }}
@@ -2363,8 +2678,104 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
                   {strength}
                   {slider('Grain', 'grain', 0, 1, 0.01, pct(params.grain))}
+                  {slider(
+                    'Grain size',
+                    'grainSize',
+                    0,
+                    1,
+                    0.01,
+                    params.grainSize < 0.34 ? 'Fine' : params.grainSize < 0.67 ? 'Medium' : 'Coarse',
+                  )}
+                  {slider('Halation', 'halation', 0, 1, 0.01, pct(params.halation))}
+                  {slider('Clarity', 'clarity', -0.5, 1, 0.01, pct(params.clarity))}
                   {slider('Contrast', 'contrast', 0.5, 2, 0.01, `${params.contrast.toFixed(2)}x`)}
                   {slider('Warmth', 'warmth', -1, 1, 0.02, params.warmth.toFixed(2))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Colour Mixer ── */}
+            {activeTab === 'mixer' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {MIX_BANDS.map(([name, hue], i) => (
+                    <button
+                      key={name}
+                      onClick={() => setMixBand(i)}
+                      style={{ ...button, fontSize: 11, padding: '2px 8px', fontWeight: mixBand === i ? 700 : 400 }}
+                    >
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: 9,
+                          height: 9,
+                          marginRight: 4,
+                          border: '1px solid #000',
+                          background: `oklch(0.7 0.14 ${hue})`,
+                          outline: mixBand === i ? '1px dotted #000' : undefined,
+                        }}
+                      />
+                      {name}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
+                  {(
+                    [
+                      ['Hue', 'mixHue', (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 30)}°`],
+                      ['Saturation', 'mixSat', (v: number) => `${v > 0 ? '+' : ''}${pct(v)}`],
+                      ['Lightness', 'mixLum', (v: number) => `${v > 0 ? '+' : ''}${pct(v)}`],
+                    ] as const
+                  ).map(([label, key, shown]) => (
+                    <label key={key}>
+                      {MIX_BANDS[mixBand][0]} {label.toLowerCase()}: {shown(params[key][mixBand])}
+                      <input
+                        type="range"
+                        min={-1}
+                        max={1}
+                        step={0.01}
+                        value={params[key][mixBand]}
+                        onChange={(e) =>
+                          setParams((prev) => ({ ...prev, [key]: prev[key].map((v, i) => (i === mixBand ? +e.target.value : v)) }))
+                        }
+                        onDoubleClick={() => setParams((prev) => ({ ...prev, [key]: prev[key].map((v, i) => (i === mixBand ? 0 : v)) }))}
+                        style={{ width: '100%' }}
+                      />
+                    </label>
+                  ))}
+                  {slider('Skin uniformity', 'skinUniform', 0, 1, 0.01, pct(params.skinUniform))}
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b>Skin tone:</b>
+                  <button
+                    style={{ ...button, fontSize: 11, background: picking ? '#000080' : '#c0c0c0', color: picking ? '#fff' : '#000' }}
+                    onClick={() => setPicking(!picking)}
+                  >
+                    {picking ? 'Now tap skin on the photo...' : 'Tap to pick'}
+                  </button>
+                  {skinPick.length ? (
+                    <>
+                      <span
+                        title="The skin tone you picked"
+                        style={{
+                          width: 16,
+                          height: 16,
+                          border: '1px solid #000',
+                          background: `oklch(0.6 ${skinPick[1]} ${(skinPick[0] * 180) / Math.PI})`,
+                        }}
+                      />
+                      <button style={{ ...button, fontSize: 11 }} onClick={() => setParam('skinPick', [])}>
+                        Auto
+                      </button>
+                    </>
+                  ) : (
+                    <span>Auto (worked out from the photo)</span>
+                  )}
+                </div>
+                <div style={{ color: '#444' }}>
+                  {skinUsed && !skin
+                    ? "Skin uniformity didn't find enough skin in this photo to work from. Tap to pick it instead."
+                    : "Skin uniformity evens out blotchy or colour-cast patches by pulling them toward the photo's own skin tone (or the one you tap), without changing how light or dark the skin is. In a group shot, tap the face you want it to follow. Double-click a slider to reset it."}
                 </div>
               </div>
             )}
