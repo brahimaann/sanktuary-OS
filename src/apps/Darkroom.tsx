@@ -59,7 +59,7 @@ export const PRESETS: FilterPreset[] = [
   { id: 22, name: 'Tungsten Cam', category: 'camera', desc: 'Dark, warm, soft camcorder under one bare bulb' },
   { id: 23, name: 'Cold VHS', category: 'goth', desc: 'Blue-cyan tape, washed blacks, soft and cold' },
   { id: 21, name: 'Faded IG', category: 'swag', desc: 'Old Instagram fade: creamy lifted blacks, soft warm highlights' },
-  // Film stocks (3D LUTs built in filmLuts.ts)
+  // Film stocks (3D LUTs built in filmLuts.ts); picking one also sets its grain (FILM_GRAIN)
   { id: 24, name: 'Portra 400', category: 'film', desc: 'Warm, soft colour negative: glowing skin, olive greens, cyan-leaning blues' },
   { id: 25, name: 'Kodachrome', category: 'film', desc: 'Dense slide film: deep reds and yellows, dark blues, black blacks' },
   { id: 26, name: 'Cinestill 800T', category: 'film', desc: 'Tungsten cine film: cool, teal shadows, red halation around lights' },
@@ -300,6 +300,25 @@ function skinCentre(img: Source): [number, number] | null {
   return res;
 }
 
+/** The colour of a small patch of the picture at (u, v), 0..1 from the top left, as [hue in radians, chroma]. */
+function pickColour(img: Source, u: number, v: number): [number, number] {
+  const px = oklabPixels(img);
+  const [w0, h0] = dims(img);
+  const k = Math.min(1, 256 / Math.max(w0, h0, 1));
+  const [w, h] = [Math.max(1, Math.round(w0 * k)), Math.max(1, Math.round(h0 * k))];
+  const [cx, cy] = [Math.round(u * (w - 1)), Math.round(v * (h - 1))];
+  let [sa, sb, sc, n] = [0, 0, 0, 0];
+  for (let y = Math.max(0, cy - 3); y <= Math.min(h - 1, cy + 3); y++)
+    for (let x = Math.max(0, cx - 3); x <= Math.min(w - 1, cx + 3); x++) {
+      const i = (y * w + x) * 3;
+      sa += px[i + 1];
+      sb += px[i + 2];
+      sc += Math.hypot(px[i + 1], px[i + 2]);
+      n++;
+    }
+  return [Math.atan2(sb, sa), sc / n];
+}
+
 // crop: fill the slot and trim the overflow; fit: whole photo inside the slot; stretch: fill it, distorting
 function drawImageIn(ctx: CanvasRenderingContext2D, img: Source, dx: number, dy: number, dw: number, dh: number, fit: Fit) {
   const [iw, ih] = dims(img);
@@ -313,6 +332,15 @@ function drawImageIn(ctx: CanvasRenderingContext2D, img: Source, dx: number, dy:
   ctx.drawImage(img, dx + (dw - w) / 2, dy + (dh - h) / 2, w, h);
   ctx.restore();
 }
+
+// Each stock's own grain: slow slide film is fine and quiet, fast film is coarse. Cinestill's halation is in the shader.
+const FILM_GRAIN: Record<number, Pick<DarkroomParams, 'grain' | 'grainSize'>> = {
+  24: { grain: 0.22, grainSize: 0.45 }, // Portra 400
+  25: { grain: 0.15, grainSize: 0.2 }, // Kodachrome 64
+  26: { grain: 0.3, grainSize: 0.6 }, // Cinestill 800T
+  27: { grain: 0.15, grainSize: 0.35 }, // Classic Chrome
+  28: { grain: 0.1, grainSize: 0.1 }, // Velvia 50
+};
 
 export interface DarkroomParams {
   preset: number;
@@ -352,6 +380,7 @@ export interface DarkroomParams {
   mixSat: number[];
   mixLum: number[];
   skinUniform: number; // 0 to 1: pulls every bit of skin toward the photo's own average skin tone
+  skinPick: number[]; // [hue in radians, chroma] of skin tapped on the photo; empty = work it out from the photo
 }
 
 // Colour mixer bands: name and centre hue in OkLCh degrees (skin sits between red and orange)
@@ -401,6 +430,7 @@ const DEFAULT_PARAMS: DarkroomParams = {
   mixSat: [0, 0, 0, 0, 0, 0, 0, 0],
   mixLum: [0, 0, 0, 0, 0, 0, 0, 0],
   skinUniform: 0,
+  skinPick: [],
 };
 
 const VERT = `attribute vec2 p; varying vec2 uv; void main() { uv = (p + 1.0) / 2.0; gl_Position = vec4(p, 0.0, 1.0); }`;
@@ -1257,7 +1287,12 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     [refStats, source],
   );
   const skinUsed = params.skinUniform > 0;
-  const skin = useMemo(() => (skinUsed && source ? skinCentre(source) : null), [skinUsed, source]);
+  const [picking, setPicking] = useState(false); // Colour Mixer: the next tap on the photo picks the skin tone
+  const skinPick = params.skinPick;
+  const skin = useMemo(
+    () => (skinUsed && source ? (skinPick.length ? (skinPick as [number, number]) : skinCentre(source)) : null),
+    [skinUsed, source, skinPick],
+  );
   const dirty =
     isCollageActive ||
     (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => String(params[k]) !== String(DEFAULT_PARAMS[k]));
@@ -1853,7 +1888,15 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       {PRESETS.filter((p) => p.category === category).map((p) => (
         <button
           key={p.id}
-          onClick={() => setParam('preset', p.id)}
+          onClick={() =>
+            setParams((prev) => ({
+              ...prev,
+              preset: p.id,
+              // A stock brings its own grain; leaving the stocks takes it away again
+              ...(FILM_GRAIN[p.id] ??
+                (FILM_GRAIN[prev.preset] ? { grain: DEFAULT_PARAMS.grain, grainSize: DEFAULT_PARAMS.grainSize } : {})),
+            }))
+          }
           style={{
             ...button,
             fontSize: 11,
@@ -1956,8 +1999,20 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             margin: 2,
             position: 'relative',
             overflow: 'hidden',
+            cursor: picking ? 'crosshair' : undefined,
           }}
           onPointerDown={(e) => {
+            if (picking) {
+              const r = canvasRef.current?.getBoundingClientRect();
+              setPicking(false);
+              if (!r || !source) return;
+              const [u, v] = [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+              if (u < 0 || u > 1 || v < 0 || v > 1) return;
+              const [hue, C] = pickColour(source, u, v);
+              if (C < 0.015) return setStatus('That spot is almost grey, so it has no skin tone to work from. Tap on skin.');
+              setParams((prev) => ({ ...prev, skinPick: [hue, C], skinUniform: prev.skinUniform || 0.5 }));
+              return;
+            }
             // Long press / click-hold on photo also compares (not on a collage: that swaps the whole picture; use the button)
             if (e.button === 0 && activeTab !== 'collage') setCompare(true);
           }}
@@ -2690,10 +2745,37 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   ))}
                   {slider('Skin uniformity', 'skinUniform', 0, 1, 0.01, pct(params.skinUniform))}
                 </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b>Skin tone:</b>
+                  <button
+                    style={{ ...button, fontSize: 11, background: picking ? '#000080' : '#c0c0c0', color: picking ? '#fff' : '#000' }}
+                    onClick={() => setPicking(!picking)}
+                  >
+                    {picking ? 'Now tap skin on the photo...' : 'Tap to pick'}
+                  </button>
+                  {skinPick.length ? (
+                    <>
+                      <span
+                        title="The skin tone you picked"
+                        style={{
+                          width: 16,
+                          height: 16,
+                          border: '1px solid #000',
+                          background: `oklch(0.6 ${skinPick[1]} ${(skinPick[0] * 180) / Math.PI})`,
+                        }}
+                      />
+                      <button style={{ ...button, fontSize: 11 }} onClick={() => setParam('skinPick', [])}>
+                        Auto
+                      </button>
+                    </>
+                  ) : (
+                    <span>Auto (worked out from the photo)</span>
+                  )}
+                </div>
                 <div style={{ color: '#444' }}>
                   {skinUsed && !skin
-                    ? "Skin uniformity didn't find enough skin in this photo to work from."
-                    : "Skin uniformity evens out blotchy or colour-cast patches by pulling them toward the photo's own skin tone, without changing how light or dark the skin is. Double-click a slider to reset it."}
+                    ? "Skin uniformity didn't find enough skin in this photo to work from. Tap to pick it instead."
+                    : "Skin uniformity evens out blotchy or colour-cast patches by pulling them toward the photo's own skin tone (or the one you tap), without changing how light or dark the skin is. In a group shot, tap the face you want it to follow. Double-click a slider to reset it."}
                 </div>
               </div>
             )}
