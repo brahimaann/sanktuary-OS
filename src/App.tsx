@@ -40,6 +40,7 @@ const Welcome = lazy(() => import('./apps/Welcome'));
 const NewThing = lazy(() => import('./apps/NewThing'));
 const ShareIn = lazy(() => import('./apps/ShareIn'));
 const Directory = lazy(() => import('./apps/Directory'));
+const Nodes = lazy(() => import('./apps/Nodes'));
 const Producer = lazy(() => import('./apps/Producer'));
 const Studio = lazy(() => import('./apps/Studio'));
 const Darkroom = lazy(() => import('./apps/Darkroom'));
@@ -219,6 +220,9 @@ export const App: React.FC = () => {
         break;
       case 'directory':
         content = <Directory />;
+        break;
+      case 'nodes':
+        content = <Nodes />;
         break;
       case 'share-in':
         content = <ShareIn missed={win.appProps?.missed} />;

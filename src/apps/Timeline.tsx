@@ -23,6 +23,7 @@ interface Entry {
   people?: string[];
   location?: string;
   notes?: string;
+  recap?: string;
   link?: string;
   folder?: FileRef | null;
   release?: string | null;
@@ -256,7 +257,7 @@ const EntryPanel: React.FC<{
       setMsg((err as Error).message);
     }
   };
-  const text = (k: 'title' | 'location' | 'notes' | 'link') => ({
+  const text = (k: 'title' | 'location' | 'notes' | 'recap' | 'link') => ({
     value: draft[k] || '',
     onChange: (ev: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft({ ...draft, [k]: ev.target.value }),
     onBlur: () => (draft[k] || '') !== (e[k] || '') && save({ [k]: draft[k] || '' }),
@@ -317,7 +318,7 @@ const EntryPanel: React.FC<{
         </label>
         <label
           style={{ display: 'flex', gap: 3, alignItems: 'center' }}
-          title="Show it in the Welcome window visitors see (title, kind, date, place, link)"
+          title="Show it on the public calendar visitors see (title, kind, date, place, link, and the recap once it's over)"
         >
           <input type="checkbox" checked={!!e.public} disabled={!!e.members} onChange={(ev) => save({ public: ev.target.checked })} />
           Show publicly
@@ -395,6 +396,17 @@ const EntryPanel: React.FC<{
           {...text('notes')}
         />
       </fieldset>
+      {e.public && (
+        <fieldset style={fieldset}>
+          <legend>Recap for visitors</legend>
+          <textarea
+            rows={3}
+            style={{ ...input, width: '100%', resize: 'vertical' }}
+            placeholder="How it went. Visitors see this on the public calendar once it's over, until the next event passes."
+            {...text('recap')}
+          />
+        </fieldset>
+      )}
       {canManage && (
         <div style={{ display: 'flex', gap: 6 }}>
           <button style={button} onClick={() => setChoosing('members')}>

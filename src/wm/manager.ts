@@ -36,6 +36,7 @@ export type AppType =
   | 'new'
   | 'share-in'
   | 'directory'
+  | 'nodes'
   | 'producer'
   | 'studio'
   | 'folder'
