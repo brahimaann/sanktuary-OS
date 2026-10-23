@@ -276,7 +276,10 @@ export interface DarkroomParams {
   fade: number;
   vignette: number;
   grain: number;
+  grainSize: number; // 0 (fine, slow film) to 1 (coarse, fast film)
   iphone6Grain: boolean;
+  halation: number; // 0 to 1: red-orange glow around lights
+  clarity: number; // -1 to 1: local contrast that stops at edges (no halos)
   // JPEG Degradation
   jpegQuality: number; // 0-100
   resolution: number; // 0.1 to 1.0 (downsampling)
@@ -308,7 +311,10 @@ const DEFAULT_PARAMS: DarkroomParams = {
   fade: 0,
   vignette: 0,
   grain: 0,
+  grainSize: 0.4,
   iphone6Grain: false,
+  halation: 0,
+  clarity: 0,
   jpegQuality: 100,
   resolution: 1.0,
   jpegNoise: false,
@@ -352,6 +358,7 @@ uniform float uPixel2x;
 uniform float uTime;
 uniform sampler2D lut;
 uniform float uLut;
+uniform float uGrainSize, uHalation, uClarity, uDigitalGrain;
 
 varying vec2 uv;
 
@@ -408,7 +415,7 @@ vec3 halation(vec2 st, float big) {
     float t = a + float(i) * 0.5236;
     float r = (1.0 + mod(float(i), 3.0)) * big / 400.0;
     vec3 s = texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb;
-    h += srgb2lin(s) * smoothstep(0.7, 1.0, luma(s));
+    h += srgb2lin(s) * smoothstep(0.8, 1.0, luma(s)); // only lights and near-white highlights
   }
   return h / 12.0;
 }
@@ -465,7 +472,26 @@ vec3 apply_ccd_smear(vec2 uvCoord, float stepY) {
   return smear * 0.18;
 }
 
-// ── Physical Degradation Module 3: Photographic Grain (Poisson / sqrt variance) ──
+// Smooth value noise: one random value per cell, blended between cells, so grains have soft round edges
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x), mix(hash12(i + vec2(0.0, 1.0)), hash12(i + 1.0), f.x), f.y) - 0.5;
+}
+
+// Film grain: clumps of two sizes (fine grains bunch into larger blotches), mostly the same in each layer with a
+// little colour of its own, strongest in the midtones and fading in deep shadows and clean highlights, like a print.
+vec3 film_grain(vec3 c, vec2 px, float size, float amt) {
+  vec2 p = px / size;
+  float mono = vnoise(p) * 0.65 + vnoise(p * 2.3 + 17.0) * 0.35;
+  vec3 tint = vec3(vnoise(p * 1.7 + 3.1), vnoise(p * 1.7 + 41.3), vnoise(p * 1.7 + 77.9));
+  vec3 n = mono + tint * 0.2;
+  float Y = luma(c);
+  return c + n * amt * (0.25 + 3.0 * Y * (1.0 - Y));
+}
+
+// ── Digital grain (iPhone 6): hard per-cell noise, Poisson-like (sqrt variance) ──
 vec3 apply_film_grain(vec3 c, vec2 cell, float timeVal, float grainAmt) {
   float Y = luma(c);
   float variance = sqrt(max(0.0, Y * (1.0 - Y)));
@@ -814,12 +840,31 @@ void main() {
   else if (preset == 22) graded = tungsten_grade(c, st, big);
   else if (preset == 23) graded = cold_vhs_grade(c, st, big);
   else if (uLut > 0.5) graded = lut3d(c);
-  if (preset == 26) { // the fringe shows around lights, not on top of them
-    float glowOn = 1.0 - 0.85 * smoothstep(0.6, 1.0, luma(c));
-    graded = lin2srgb(srgb2lin(graded) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 0.8 * glowOn);
-  }
 
   c = mix(c, graded, amount);
+
+  // Halation (Cinestill brings its own): the fringe shows around lights, not on top of them
+  float hal = uHalation + (preset == 26 ? 0.6 * amount : 0.0);
+  if (hal > 0.01) {
+    float glowOn = 1.0 - smoothstep(0.5, 0.9, luma(c));
+    c = lin2srgb(srgb2lin(c) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 1.3 * hal * glowOn);
+  }
+
+  // Clarity: midtone contrast against a local average that only takes in similar tones, so edges get no halo
+  if (abs(uClarity) > 0.01) {
+    float Y = luma(c);
+    float a = hash12(gl_FragCoord.yx) * 6.2831853;
+    float sum = 0.0, wsum = 0.0;
+    for (int i = 0; i < 24; i++) {
+      float t = a + float(i) * 2.39996; // golden angle: an even spread at any count
+      float r = sqrt((float(i) + 0.5) / 24.0) * big / 60.0;
+      float s = luma(texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb);
+      float w = exp(-(s - Y) * (s - Y) * 40.0);
+      sum += s * w;
+      wsum += w;
+    }
+    c += (Y - sum / wsum) * uClarity * 1.5 * (4.0 * Y * (1.0 - Y));
+  }
 
   // 5. Contrast and fade work on the picture as seen (pivot on mid-grey)
   c = (c - 0.5) * contrast + 0.5;
@@ -839,8 +884,10 @@ void main() {
   c = lin2srgb(shoulder(c));
 
   // 7. Sensor Degradation Module 3: grain in film-grain-sized cells, CCD colour noise per pixel
-  if (grain > 0.01) {
+  if (grain > 0.01 && uDigitalGrain > 0.5) {
     c = apply_film_grain(c, floor(gl_FragCoord.xy / max(1.0, big / 1500.0)), uTime, grain * 0.35);
+  } else if (grain > 0.01) {
+    c = film_grain(c, gl_FragCoord.xy + uTime * 997.0, max(0.7, mix(0.8, 2.8, uGrainSize) * big / 1500.0), grain * 0.7);
   }
   if (ccdNoise > 0.01) {
     vec3 cnoise = vec3(hash12(gl_FragCoord.xy + 1.7), hash12(gl_FragCoord.xy + 11.3), hash12(gl_FragCoord.xy + 23.9)) - 0.5;
@@ -1510,6 +1557,10 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.uniform1f(u('fade'), p.fade);
     ctx.uniform1f(u('vignette'), p.vignette);
     ctx.uniform1f(u('grain'), p.iphone6Grain ? Math.max(p.grain, 0.45) : p.grain);
+    ctx.uniform1f(u('uDigitalGrain'), p.iphone6Grain ? 1 : 0);
+    ctx.uniform1f(u('uGrainSize'), p.grainSize);
+    ctx.uniform1f(u('uHalation'), p.halation);
+    ctx.uniform1f(u('uClarity'), p.clarity);
     ctx.uniform1f(u('bloomAmount'), p.bloomAmount);
     ctx.uniform1f(u('bloomTint'), p.bloomTint);
     ctx.uniform1f(u('lensReflection'), p.lensReflection);
@@ -2363,6 +2414,16 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
                   {strength}
                   {slider('Grain', 'grain', 0, 1, 0.01, pct(params.grain))}
+                  {slider(
+                    'Grain size',
+                    'grainSize',
+                    0,
+                    1,
+                    0.01,
+                    params.grainSize < 0.34 ? 'Fine' : params.grainSize < 0.67 ? 'Medium' : 'Coarse',
+                  )}
+                  {slider('Halation', 'halation', 0, 1, 0.01, pct(params.halation))}
+                  {slider('Clarity', 'clarity', -0.5, 1, 0.01, pct(params.clarity))}
                   {slider('Contrast', 'contrast', 0.5, 2, 0.01, `${params.contrast.toFixed(2)}x`)}
                   {slider('Warmth', 'warmth', -1, 1, 0.02, params.warmth.toFixed(2))}
                 </div>
