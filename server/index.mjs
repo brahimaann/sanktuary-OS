@@ -3285,7 +3285,7 @@ const feedCache = new Map(); // feed url -> { at, items, error }
 const BLOG_LINES = ['heart', 'essays', 'field-notes'];
 const HEART_KINDS = ['profile', 'case-study', 'spotlight'];
 // Section pages (/cities/heart ...) and the writing page: no post may take these addresses
-const BLOG_RESERVED = ['notes', 'videos', 'write', ...BLOG_LINES];
+const BLOG_RESERVED = ['notes', 'videos', 'moodboard', 'write', ...BLOG_LINES];
 const FEED_MINUTES = 10;
 
 /** "hima", "hima.substack.com" or any Substack / RSS URL -> the feed URL. */
@@ -3609,6 +3609,20 @@ async function blogApi(req, res, url) {
     const videos = (await Promise.all((db.channels || []).map(readChannel))).flatMap((c) => c.items);
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, { videos: videos.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) });
+  }
+  if (req.method === 'GET' && what === 'moodboards') {
+    // One featured moodboard a month (admins pick it in Moodboards > Feature...), newest first. A month drops out
+    // when its board is deleted or its public link is turned off.
+    const links = await loadBoardLinks();
+    const months = [];
+    for (const [month, m] of Object.entries(db.moodboards || {})) {
+      const l = links[m.token];
+      if (!l || l.revoked || (l.expires && Date.parse(l.expires) < Date.now())) continue;
+      const b = await loadBoard(m.board).catch(() => null);
+      if (b) months.push({ month, name: b.meta.name, note: m.note, url: `/b/${m.token}` });
+    }
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, { months: months.sort((a, b) => b.month.localeCompare(a.month)) });
   }
   if (req.method === 'GET' && what === 'notes') {
     const byId = new Map((await Promise.all(db.feeds.map(readNotes))).flat().map((n) => [n.id, n])); // a writer on two feeds shows once
@@ -5064,6 +5078,7 @@ const BLOG_SECTIONS = {
   notes: ['Notes', 'Short notes from the writers we follow.'],
   'field-notes': ['Field Notes', 'Straight from the field: shoots, sessions and shows around the Twin Cities.'],
   videos: ['Videos', 'New videos from Twin Cities creators.'],
+  moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
 };
 const metaTags = ({ title, text, image, link }) =>
   [
@@ -5092,7 +5107,10 @@ async function blogPage(req, res, url) {
     image: null,
   };
   if (a && !b && BLOG_SECTIONS[a]) meta = { title: `${BLOG_SECTIONS[a][0]} · CITIES`, text: BLOG_SECTIONS[a][1], image: null };
-  else if (a) {
+  else if (a === 'moodboard' && /^\d{4}-(0[1-9]|1[0-2])$/.test(b)) {
+    const name = new Date(`${b}-15`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    meta = { title: `${name} Moodboard · CITIES`, text: BLOG_SECTIONS.moodboard[1], image: null };
+  } else if (a) {
     const db = await loadBlog();
     const own = !b && Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === a || x.id === a));
     const post = own
@@ -5106,7 +5124,7 @@ async function blogPage(req, res, url) {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
     'content-security-policy':
-      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:; frame-src https://www.youtube-nocookie.com",
+      "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' https: data:; frame-src 'self' https://www.youtube-nocookie.com",
   });
   res.end(html);
 }
@@ -5949,7 +5967,7 @@ async function rawPreview(file, size) {
     if ((le && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) {
       const seen = new Set();
       const walk = (ifd, depth) => {
-        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8;) {
+        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8; ) {
           seen.add(ifd);
           const n = u16(ifd);
           if (ifd + 2 + n * 12 + 4 > b.length) return;
@@ -6369,6 +6387,38 @@ async function boardsApi(req, res, url) {
       for (const [conn, c] of b.clients) if (c.link === file) (c.res.end(), b.clients.delete(conn)); // guests on it leave now
       return json(res, boardLinkView(file, l));
     }
+  }
+  if (sub === 'feature' && req.method === 'POST') {
+    // CITIES' moodboard of the month (/cities/moodboard): shown through its own view-only link, so turning that
+    // link off in "Public link..." takes the month down again. Featuring another board for a month replaces it.
+    if (!user.admin) fail(403, 'Only admins can feature a moodboard');
+    if (b.meta.kind === 'kanban') fail(400, 'Only moodboards can be featured');
+    const q = await jsonBody(req);
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(q.month) ? q.month : fail(400, 'Give the month as YYYY-MM');
+    const all = await loadBoardLinks();
+    const t = randomBytes(24).toString('base64url');
+    all[t] = {
+      board: id,
+      level: 'view',
+      createdBy: user.username,
+      created: new Date().toISOString(),
+      expires: null,
+      password: null,
+      views: 0,
+    };
+    saveBoardLinks();
+    const db = await loadBlog();
+    (db.moodboards ??= {})[month] = {
+      board: id,
+      token: t,
+      note: String(q.note || '')
+        .trim()
+        .slice(0, 300),
+      by: user.username,
+      at: new Date().toISOString(),
+    };
+    saveBlog();
+    return json(res, { month, url: `/cities/moodboard/${month}` });
   }
   fail(404, 'Unknown board action');
 }

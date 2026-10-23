@@ -358,6 +358,14 @@
         margin-left: 8px;
         font-size: 12px;
       }
+      .mood {
+        display: block;
+        width: 100%;
+        height: min(70vh, 640px);
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        background: #fafafa;
+      }
       .videos {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -426,6 +434,7 @@
         ['essays', 'Essays'],
         ['field-notes', 'Field Notes'],
         ['videos', 'Videos'],
+        ['moodboard', 'Moodboard'],
       ];
       const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spotlight' };
       const LINE_CHIP = { heart: ['#b00020', 'Heart'], essays: ['#000080', 'Essay'], 'field-notes': ['#2e7d32', 'Field note'] };
@@ -540,6 +549,42 @@
         if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
       }
 
+      // The moodboard of the month: one board a month, shown live and view only; visitors drag, scroll and pinch around it
+      let allMonths = null;
+      const monthName = (m) => new Date(`${m}-15`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      async function moodboard(month) {
+        sectionTabs('moodboard');
+        if (!allMonths) {
+          app.textContent = 'Loading...';
+          try {
+            allMonths = (await (await fetch('/api/blog/moodboards')).json()).months;
+          } catch {
+            app.innerHTML = '<div class="empty">The moodboard could not load. Try again in a minute.</div>';
+            return;
+          }
+        }
+        const i = month ? allMonths.findIndex((m) => m.month === month) : 0;
+        const m = allMonths[i];
+        document.title = m ? `${monthName(m.month)} Moodboard · CITIES` : 'Moodboard · CITIES';
+        if (!m) {
+          bar.innerHTML = allMonths.length ? '<a class="btn" href="/cities/moodboard" data-nav>Latest moodboard</a>' : '';
+          app.innerHTML = `<div class="empty">${allMonths.length ? 'There is no moodboard for that month.' : 'The first moodboard is on its way. Check back soon.'}</div>`;
+          return;
+        }
+        const older = allMonths[i + 1];
+        const newer = allMonths[i - 1];
+        bar.innerHTML =
+          `${older ? `<a class="btn" href="/cities/moodboard/${older.month}" data-nav>&larr; ${esc(monthName(older.month))}</a>` : ''}` +
+          `<select class="btn" id="month" aria-label="Month">${allMonths.map((x) => `<option value="${x.month}" ${x === m ? 'selected' : ''}>${esc(monthName(x.month))}</option>`).join('')}</select>` +
+          `${newer ? `<a class="btn" href="/cities/moodboard/${newer.month}" data-nav>${esc(monthName(newer.month))} &rarr;</a>` : ''}` +
+          `<span style="flex:1"></span><a class="btn" href="${esc(m.url)}" target="_blank" rel="noopener">Full screen</a>`;
+        bar.querySelector('#month').onchange = (e) => go(`/cities/moodboard/${e.target.value}`);
+        app.innerHTML = `<h2 style="margin:0 0 4px">${esc(monthName(m.month))}: ${esc(m.name)}</h2>
+          ${m.note ? `<p style="margin:0 0 8px">${esc(m.note)}</p>` : ''}
+          <iframe class="mood" src="${esc(m.url)}?embed" title="${esc(m.name)}"></iframe>
+          <p style="margin:6px 0 0;font-size:11px">Drag or scroll to look around. Pinch, Ctrl + scroll or the + and − buttons zoom.</p>`;
+      }
+
       let allVideos = null;
       async function videos() {
         sectionTabs('videos');
@@ -646,6 +691,7 @@
         const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
         if (path === 'notes') return notes();
         if (path === 'videos') return videos();
+        if (path.split('/')[0] === 'moodboard') return moodboard(path.split('/')[1]);
         const section = path === '' ? 'heart' : ['heart', 'essays', 'field-notes'].includes(path) ? path : null;
         if (!section) return read(path);
         document.title = section === 'heart' ? 'CITIES' : `${SECTIONS.find(([k]) => k === section)[1]} · CITIES`;

@@ -101,6 +101,25 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
       setStatus((e as Error).message);
     }
   };
+  // CITIES' moodboard of the month, on the public /cities/moodboard page
+  const feature = async () => {
+    const month =
+      pick &&
+      (
+        await dialog.prompt('Feature this board on CITIES for which month? (YYYY-MM)', new Date().toISOString().slice(0, 7), {
+          title: 'Moodboard of the month',
+        })
+      )?.trim();
+    if (!pick || !month) return;
+    const note = await dialog.prompt('A line about this month for visitors (optional):', '', { title: 'Moodboard of the month' });
+    if (note === null) return;
+    try {
+      const r = await api(`/api/boards/${pick.id}/feature`, { method: 'POST', body: JSON.stringify({ month, note }) });
+      setStatus(`Featured on ${r.url}. Turn its link off in Public link... to take it down.`);
+    } catch (e) {
+      setStatus((e as Error).message);
+    }
+  };
   const remove = async () => {
     if (
       !pick ||
@@ -139,6 +158,11 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
         {!plans && (
           <button style={button} disabled={!canShare} onClick={() => setLinking(true)} title="A link for people without an account">
             Public link...
+          </button>
+        )}
+        {!plans && me?.admin && (
+          <button style={button} disabled={!pick} onClick={feature} title="Make it the CITIES moodboard of the month">
+            Feature...
           </button>
         )}
         <button style={button} onClick={load}>

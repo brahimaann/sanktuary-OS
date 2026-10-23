@@ -88,7 +88,7 @@ const MEMBER_TOUR: Step[] = [
   },
   {
     title: 'Moodboards',
-    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Boards.',
+    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Planner.',
     open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png', 560, 420),
   },
   {

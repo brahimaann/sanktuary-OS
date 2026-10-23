@@ -270,6 +270,27 @@ try {
   bobFeed.close();
   carolFeed.close();
 
+  // Moodboard of the month: admins feature a board for a month; anyone reads it on /cities/moodboard; turning its
+  // link off takes the month down
+  const mood = (await call('bob', '/api/boards', 'POST', { name: 'October mood' })).data;
+  check(
+    'a member cannot feature a board',
+    (await call('bob', `/api/boards/${mood.id}/feature`, 'POST', { month: '2026-10' })).status === 403,
+  );
+  check('a bad month is refused', (await call('alice', `/api/boards/${mood.id}/feature`, 'POST', { month: '2026-13' })).status === 400);
+  const feat = await call('alice', `/api/boards/${mood.id}/feature`, 'POST', { month: '2026-10', note: 'Fall in the Cities' });
+  check('an admin features it', feat.status === 200 && feat.data.url === '/cities/moodboard/2026-10', JSON.stringify(feat.data));
+  const months = (await (await fetch(`${B}/api/blog/moodboards`)).json()).months;
+  check(
+    'anyone sees the month',
+    months[0]?.month === '2026-10' && months[0].name === 'October mood' && months[0].note === 'Fall in the Cities',
+  );
+  const token = months[0]?.url.split('/')[2];
+  check('its link opens the board, no account', (await (await fetch(`${B}/b/${token}/info`)).json()).name === 'October mood');
+  check('the month has its own page', /October 2026 Moodboard/.test(await (await fetch(`${B}/cities/moodboard/2026-10`)).text()));
+  await call('alice', `/api/boards/${mood.id}/shares/${token}`, 'DELETE');
+  check('turning the link off takes the month down', !(await (await fetch(`${B}/api/blog/moodboards`)).json()).months.length);
+
   // A store that can't be read (locked, or here a folder in its place) is an error, never an empty list that the
   // next save would write over the real file
   mkdirSync(join(dir, 'data', 'outreach.json'));

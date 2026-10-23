@@ -178,6 +178,11 @@
       .err {
         color: #a00000;
       }
+      /* ?embed: inside the CITIES moodboard page, which has its own title and links */
+      .embed .title,
+      .embed #ask {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -242,6 +247,7 @@
 
     <script>
       const token = location.pathname.split('/')[2] || '';
+      if (new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');
       const base = `/b/${token}`;
       const $ = (id) => document.getElementById(id);
       const port = $('port');
