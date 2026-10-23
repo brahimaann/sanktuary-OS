@@ -1300,8 +1300,16 @@ try {
   check('but drafts need a sign-in', (await call(null, '/api/blog/mine')).status === 401);
   const bobDraft = JSON.parse((await call('bob', '/api/blog/posts', 'POST', { title: 'Lyric', line: 'heart', kind: 'profile' })).text);
   check('members can start a draft', bobDraft.owner === 'bob' && bobDraft.kind === 'profile' && !bobDraft.published);
-  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { published: true, preface: 'Singing since she was two.', line: 'nope' });
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', {
+    published: true,
+    preface: 'Singing since she was two.',
+    line: 'nope',
+    product: '<script>',
+  });
   const bobMine = JSON.parse((await call('bob', '/api/blog/mine')).text);
+  check('a post only features a Shop item by its address', bobMine[0].product === null);
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { product: 'tee-black' });
+  check('a post can feature a Shop item', JSON.parse((await call('bob', '/api/blog/mine')).text)[0].product === 'tee-black');
   check(
     'members cannot publish, and a bad section falls back to Heart',
     bobMine.length === 1 && !bobMine[0].published && bobMine[0].line === 'heart' && bobMine[0].preface === 'Singing since she was two.',

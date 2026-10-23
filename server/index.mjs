@@ -3728,6 +3728,7 @@ const ownPostView = (p, full) => ({
   author: p.author,
   publication: 'CITIES',
   release: p.release || null,
+  product: p.product || null,
   date: p.published || p.created,
   ...(full ? { body: p.body } : {}),
 });
@@ -3959,6 +3960,8 @@ async function blogApi(req, res, url) {
           .slice(0, 300);
       // A public release's streaming links, shown as a "Listen" card under the post
       if (input.release !== undefined) p.release = /^[\w-]{1,80}$/.test(input.release || '') ? input.release : null;
+      // A Shop item featured in the post (a garment in a vlog or a lookbook), shown as a card with a buy link
+      if (input.product !== undefined) p.product = /^[\w-]{1,80}$/.test(input.product || '') ? input.product : null;
       if (input.published !== undefined && user.admin) p.published = input.published ? p.published || new Date().toISOString() : null;
       // A readable address, fixed once published so shared links keep working: /cities/why-culture-matters
       if (p.published && !p.slug) {
