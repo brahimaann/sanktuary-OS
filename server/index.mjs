@@ -3962,7 +3962,7 @@ async function publicApi(req, res, url) {
   if (req.method === 'GET' && what === 'story') return storyPublic(req, res, url);
   if (req.method === 'GET' && what === 'release') return releasePublic(req, res, url);
   if (req.method === 'GET' && what === 'portfolio') return portfolioPublic(req, res);
-  if (req.method === 'GET' && what === 'portfolios') return portfoliosPublic(req, res, who);
+  if (req.method === 'GET' && what === 'portfolios') return portfoliosPublic(req, res, who, ...url.pathname.split('/').slice(5));
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
     const tdb = await publicTracks();
@@ -5577,22 +5577,29 @@ async function portfolioPublic(req, res) {
 // /portfolio stays the studio's own, the one grant applications link to.
 const PORTFOLIOS_PAGE = new URL('./portfolios.html', import.meta.url);
 const PORTFOLIO_THEMES = ['paper', 'night', 'bold'];
+// A portfolio is a stack of blocks the member arranges like Lego: their own words, photos, videos and links, plus
+// "about" (their bio) and "music" (public releases credited to them) filled in from the rest of Sanktuary
+const BLOCK_TYPES = ['text', 'photo', 'video', 'link', 'about', 'music'];
+const DEFAULT_BLOCKS = [
+  { id: 'about0', type: 'about', size: 'normal', title: '', text: '', url: '' },
+  { id: 'music0', type: 'music', size: 'wide', title: '', text: '', url: '' },
+];
+const blockFile = (name, id) => join(DATA, 'profiles', 'portfolio', name, `${id}.webp`);
 /** A member's portfolio settings as saved: only known fields, https links only. */
 const cleanPortfolio = (x) => ({
   live: x.live === true,
   headline: String(x.headline || '').slice(0, 140),
-  statement: String(x.statement || '').slice(0, 4000),
   contact: String(x.contact || '').slice(0, 200),
   theme: PORTFOLIO_THEMES.includes(x.theme) ? x.theme : 'paper',
   accent: /^#[0-9a-f]{6}$/i.test(x.accent || '') ? x.accent : '',
-  work: (Array.isArray(x.work) ? x.work : [])
-    .slice(0, 12)
-    .map((w) => ({
-      title: String(w?.title || '').slice(0, 100),
-      url: /^https:\/\/\S+$/.test(w?.url || '') ? String(w.url).slice(0, 400) : '',
-      note: String(w?.note || '').slice(0, 400),
-    }))
-    .filter((w) => w.title || w.url),
+  blocks: (Array.isArray(x.blocks) ? x.blocks : DEFAULT_BLOCKS).slice(0, 40).map((b) => ({
+    id: /^[a-z0-9]{4,16}$/.test(b?.id || '') ? b.id : randomBytes(5).toString('hex'),
+    type: BLOCK_TYPES.includes(b?.type) ? b.type : 'text',
+    size: ['normal', 'wide', 'tall'].includes(b?.size) ? b.size : 'normal',
+    title: String(b?.title || '').slice(0, 120),
+    text: String(b?.text || '').slice(0, 3000),
+    url: /^https:\/\/\S+$/.test(b?.url || '') ? String(b.url).slice(0, 400) : '',
+  })),
 });
 /** Who is looking, from our session cookie; null for visitors. */
 const viewerName = async (req) => {
@@ -5616,12 +5623,14 @@ async function livePortfolios() {
       headline: p.portfolio.headline || '',
       accent: p.portfolio.accent || '',
       photo: !!p.photo && existsSync(join(DATA, 'profiles', 'photos', `${username}.webp`)),
+      // the first photo block, for a card without a public photo
+      cover: cleanPortfolio(p.portfolio).blocks.find((b) => b.type === 'photo' && existsSync(blockFile(username, b.id)))?.id || null,
     });
   }
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
-async function portfoliosPublic(req, res, who) {
+async function portfoliosPublic(req, res, who, part, id) {
   if (!who) {
     res.setHeader('cache-control', 'no-cache');
     return json(res, { people: await livePortfolios() });
@@ -5632,6 +5641,13 @@ async function portfoliosPublic(req, res, who) {
   // Never live: the owner gets a preview, anyone else a plain 404
   if (!(await currentMembers()).has(name) || (!mine && p.portfolio?.live !== true)) fail(404, 'Not found');
   const pf = cleanPortfolio(p.portfolio || {});
+  if (part === 'img') {
+    // /api/public/portfolios/<name>/img/<block>: a photo block's picture
+    if (!pf.blocks.some((b) => b.id === id && b.type === 'photo')) fail(404, 'Not found');
+    res.setHeader('cache-control', mine ? 'no-cache' : 'public, max-age=300');
+    return stream(req, res, new URLSearchParams(), blockFile(name, id));
+  }
+  if (part) fail(404, 'Not found');
   const shown = p.displayName || name;
   const credited = new RegExp(`(^|[^\\w])${shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w])`, 'i');
   const tdb = await publicTracks();
@@ -5655,6 +5671,7 @@ async function portfoliosPublic(req, res, who) {
         .filter(([, v]) => v),
     ),
     ...pf,
+    blocks: pf.blocks.map((b) => (b.type === 'photo' ? { ...b, img: existsSync(blockFile(name, b.id)) } : b)),
     releases,
     mine,
   });
@@ -7317,7 +7334,7 @@ const PROFILE_FIELDS = {
 async function profiles(req, res, url) {
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
-  const [, , , who, sub] = url.pathname.split('/'); // /api/profiles/<username|me>/<avatar|photo>
+  const [, , , who, sub, blockId] = url.pathname.split('/'); // /api/profiles/<username|me>/<avatar|photo|portfolio/<id>>
 
   if (!who && req.method === 'GET') {
     const r = await clerk('/users?limit=100&order_by=-created_at');
@@ -7342,6 +7359,28 @@ async function profiles(req, res, url) {
   if ((sub === 'avatar' || sub === 'photo') && req.method === 'GET')
     return stream(req, res, url.searchParams, join(DATA, 'profiles', sub === 'avatar' ? 'avatars' : 'photos', `${name}.webp`));
   if (who !== 'me') fail(403, 'You can only change your own profile');
+
+  // A photo block's picture on your portfolio: /api/profiles/me/portfolio/<block id>
+  if (sub === 'portfolio' && req.method === 'PUT') {
+    const id = /^[a-z0-9]{4,16}$/.test(blockId || '') ? blockId : fail(400, 'Bad block');
+    const chunks = [];
+    let size = 0;
+    for await (const c of req) {
+      size += c.length;
+      if (size > 25 * 1024 * 1024) fail(413, 'Picture must be under 25 MB');
+      chunks.push(c);
+    }
+    await mkdir(dirname(blockFile(name, id)), { recursive: true });
+    await writeFile(
+      blockFile(name, id),
+      await sharp(Buffer.concat(chunks))
+        .rotate()
+        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toBuffer(),
+    );
+    return json(res, { ok: true });
+  }
 
   // avatar: the small picture inside Sanktuary; photo: the one on the public profile and portfolio
   if ((sub === 'avatar' || sub === 'photo') && req.method === 'PUT') {
@@ -7371,7 +7410,13 @@ async function profiles(req, res, url) {
     for (const [k, max] of Object.entries(PROFILE_FIELDS)) if (k in input) profile[k] = String(input[k] ?? '').slice(0, max);
     if ('listed' in input) profile.listed = input.listed === true; // shown in the public directory (My Computer)
     if ('bookable' in input) profile.bookable = input.bookable === true;
-    if (input.portfolio && typeof input.portfolio === 'object') profile.portfolio = cleanPortfolio(input.portfolio);
+    if (input.portfolio && typeof input.portfolio === 'object') {
+      profile.portfolio = cleanPortfolio(input.portfolio);
+      // pictures of photo blocks that were removed
+      const keep = new Set(profile.portfolio.blocks.map((b) => `${b.id}.webp`));
+      for (const f of await readdir(join(DATA, 'profiles', 'portfolio', name)).catch(() => []))
+        if (!keep.has(f)) await rm(join(DATA, 'profiles', 'portfolio', name, f), { force: true });
+    }
     profile.updated = new Date().toISOString();
     await mkdir(join(DATA, 'profiles'), { recursive: true });
     await saveJson(`profiles/${name}.json`, profile);

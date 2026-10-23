@@ -47,13 +47,31 @@ export interface Profile extends Partial<Record<LinkKey, string>> {
 export interface Portfolio {
   live: boolean;
   headline: string;
-  statement: string;
   contact: string;
   theme: 'paper' | 'night' | 'bold';
   accent: string; // '#rrggbb', or '' for the theme's own
-  work: { title: string; url: string; note: string }[];
+  blocks: Block[]; // arranged like Lego, shown in this order
 }
-export const EMPTY_PORTFOLIO: Portfolio = { live: false, headline: '', statement: '', contact: '', theme: 'paper', accent: '', work: [] };
+/** One piece of a portfolio; about and music fill themselves in from the profile and public releases. */
+export interface Block {
+  id: string;
+  type: 'text' | 'photo' | 'video' | 'link' | 'about' | 'music';
+  size: 'normal' | 'wide' | 'tall';
+  title: string;
+  text: string;
+  url: string;
+}
+export const EMPTY_PORTFOLIO: Portfolio = {
+  live: false,
+  headline: '',
+  contact: '',
+  theme: 'paper',
+  accent: '',
+  blocks: [
+    { id: 'about0', type: 'about', size: 'normal', title: '', text: '', url: '' },
+    { id: 'music0', type: 'music', size: 'wide', title: '', text: '', url: '' },
+  ],
+};
 
 export const displayName = (p?: Profile, fallback = '') => p?.displayName || p?.username || fallback;
 

@@ -7,11 +7,11 @@ import { liveUser } from '../utils/live';
 import { displayName, EMPTY_PORTFOLIO, linkFor, Portfolio, Profile as P, PROFILE_LINKS, useProfiles } from '../utils/profiles';
 import { dmId } from './Chat';
 import Avatar from './Avatar';
+import PortfolioEditor from './PortfolioEditor';
 import { formatSize } from './fileTypes';
 import { MyProjects } from './ProjectPanel';
 import PushSettings from '../components/PushSettings';
 import { useOpenRef } from '../utils/refs';
-import { dialog } from '../utils/dialog';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 import BrandIcon from '../components/BrandIcon';
 
@@ -165,9 +165,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
   }
 
   const mySpace = me?.spaces.find((s) => s.id === 'me');
-  const setPf = (patch: Partial<Portfolio>) => setDraft({ ...draft, portfolio: { ...pf, ...patch } });
-  const setWork = (i: number, patch: Partial<Portfolio['work'][number]>) =>
-    setPf({ work: pf.work.map((w, j) => (j === i ? { ...w, ...patch } : w)) });
+  const setPf = (patch: Partial<Portfolio>) => setDraft((d) => ({ ...d, portfolio: { ...EMPTY_PORTFOLIO, ...d.portfolio, ...patch } }));
   return (
     <div style={shell}>
       <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -310,97 +308,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             }}
           />
         </div>
-        <fieldset style={group}>
-          <legend>My portfolio</legend>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} title="Visitors find it on sanktuary.studio/portfolios">
-            <input type="checkbox" checked={pf.live} onChange={(e) => setPf({ live: e.target.checked })} />
-            Live (shown to everyone on the portfolios page; uses your display name, role, about me, links and public photo)
-          </label>
-          <label style={row}>
-            Headline
-            <input
-              value={pf.headline}
-              placeholder="e.g. Producer and engineer from North Minneapolis"
-              onChange={(e) => setPf({ headline: e.target.value })}
-              style={input}
-            />
-          </label>
-          <label style={{ ...row, alignItems: 'start' }}>
-            Statement
-            <textarea
-              value={pf.statement}
-              rows={4}
-              placeholder="What you make and why"
-              onChange={(e) => setPf({ statement: e.target.value })}
-              style={{ ...input, resize: 'vertical' }}
-            />
-          </label>
-          <label style={row}>
-            Contact
-            <input
-              value={pf.contact}
-              placeholder="email for bookings and press (shown publicly)"
-              onChange={(e) => setPf({ contact: e.target.value })}
-              style={input}
-            />
-          </label>
-          <label style={row}>
-            Look
-            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <select value={pf.theme} onChange={(e) => setPf({ theme: e.target.value as Portfolio['theme'] })} style={input}>
-                <option value="paper">Paper (light, serif)</option>
-                <option value="night">Night (dark gallery)</option>
-                <option value="bold">Bold (white, heavy type)</option>
-              </select>
-              Accent
-              <input type="color" value={pf.accent || '#8a5a12'} onChange={(e) => setPf({ accent: e.target.value })} />
-              {pf.accent && (
-                <button style={button} onClick={() => setPf({ accent: '' })}>
-                  Theme colour
-                </button>
-              )}
-            </span>
-          </label>
-          <div style={{ fontWeight: 700 }}>Work (YouTube links play on the page)</div>
-          {pf.work.map((w, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto auto auto', gap: 4 }}>
-              <input value={w.title} placeholder="Title" onChange={(e) => setWork(i, { title: e.target.value })} style={input} />
-              <input value={w.url} placeholder="https://..." onChange={(e) => setWork(i, { url: e.target.value })} style={input} />
-              <button
-                style={button}
-                disabled={!i}
-                title="Move up"
-                onClick={() => setPf({ work: pf.work.map((x, j) => (j === i - 1 ? w : j === i ? pf.work[i - 1] : x)) })}
-              >
-                ↑
-              </button>
-              <button
-                style={button}
-                title={w.note ? 'Edit note' : 'Add a note'}
-                onClick={async () => {
-                  const note = await dialog.prompt('A line or two about this piece:', w.note, { title: w.title || 'Work' });
-                  if (note !== null) setWork(i, { note });
-                }}
-              >
-                Note{w.note ? ' ✓' : ''}
-              </button>
-              <button style={button} title="Remove" onClick={() => setPf({ work: pf.work.filter((_, j) => j !== i) })}>
-                ✕
-              </button>
-            </div>
-          ))}
-          <div style={{ display: 'flex', gap: 6 }}>
-            {pf.work.length < 12 && (
-              <button style={button} onClick={() => setPf({ work: [...pf.work, { title: '', url: '', note: '' }] })}>
-                Add work
-              </button>
-            )}
-            <a href={`/portfolios/${who}`} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 'auto' }}>
-              {pf.live ? 'View my portfolio' : 'Preview my portfolio'}
-            </a>
-          </div>
-          <span style={{ color: '#444' }}>Save below, then open it. Public releases credited to your display name show up on it too.</span>
-        </fieldset>
+        <PortfolioEditor who={who} value={pf} onChange={setPf} />
         <fieldset style={group}>
           <legend>Roster (members only, never public)</legend>
           <label style={{ display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: 6 }}>
@@ -477,7 +385,6 @@ const group: React.CSSProperties = {
   flexDirection: 'column',
   gap: 6,
 };
-const row: React.CSSProperties = { display: 'grid', gridTemplateColumns: '130px 1fr', alignItems: 'center', gap: 6 };
 const input: React.CSSProperties = { fontFamily: 'inherit', fontSize: 12, padding: '2px 4px', border: '2px inset #808080', minWidth: 0 };
 
 export default Profile;

@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -315,17 +315,42 @@ try {
   // ── Member portfolios: visitors see every live one, a signed-in member lands on their own ──
   await call('bob', '/api/profiles/me', 'PUT', {
     displayName: 'Bobby',
-    portfolio: { live: true, headline: 'Beats', theme: 'night', accent: 'red', work: [{ title: 'Clip', url: 'javascript:alert(1)' }] },
+    portfolio: {
+      live: true,
+      headline: 'Beats',
+      theme: 'night',
+      accent: 'red',
+      blocks: [
+        { id: 'pic1', type: 'photo', size: 'tall', title: 'Shoot' },
+        { id: 'lnk1', type: 'link', size: 'huge', title: 'Clip', url: 'javascript:alert(1)' },
+        { type: 'nope', text: 'Hi' },
+      ],
+    },
   });
   await call('carol', '/api/profiles/me', 'PUT', { portfolio: { live: false, headline: 'Secret' } });
+  // a photo block's picture: uploaded by its owner, public once the portfolio is live, gone when the block is
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const up = await fetch(`${B}/api/profiles/me/portfolio/pic1`, { method: 'PUT', headers: { cookie: cookie('bob') }, body: png });
+  check('a member uploads a photo block picture', up.status === 200);
+  check('anyone sees it on a live portfolio', (await fetch(`${B}/api/public/portfolios/bob/img/pic1`)).status === 200);
+  check('a picture of no block is not served', (await fetch(`${B}/api/public/portfolios/bob/img/nope99`)).status === 404);
   const index = await (await fetch(`${B}/api/public/portfolios`)).json();
   check('the index lists live portfolios only', index.people.map((p) => p.username).join() === 'bob', JSON.stringify(index));
   const bobPf = await (await fetch(`${B}/api/public/portfolios/bob`)).json();
   check(
     'a live portfolio is public, cleaned on save',
-    bobPf.displayName === 'Bobby' && bobPf.theme === 'night' && bobPf.accent === '' && bobPf.work[0].url === '' && !bobPf.mine,
+    bobPf.displayName === 'Bobby' &&
+      bobPf.theme === 'night' &&
+      bobPf.accent === '' &&
+      bobPf.blocks.map((b) => `${b.type}:${b.size}`).join() === 'photo:tall,link:normal,text:normal' &&
+      bobPf.blocks[1].url === '' &&
+      !bobPf.mine,
     JSON.stringify(bobPf),
   );
+  check('the picture shows as present', bobPf.blocks[0].img === true);
+  await call('bob', '/api/profiles/me', 'PUT', { portfolio: { ...bobPf, blocks: bobPf.blocks.slice(1) } });
+  check('removing the block removes its picture', (await fetch(`${B}/api/public/portfolios/bob/img/pic1`)).status === 404);
+  check('and the file', !existsSync(join(dir, 'data', 'profiles', 'portfolio', 'bob', 'pic1.webp')));
   check("a portfolio that isn't live is hidden from visitors", (await fetch(`${B}/api/public/portfolios/carol`)).status === 404);
   const carolPf = await call('carol', '/api/public/portfolios/carol');
   check(
