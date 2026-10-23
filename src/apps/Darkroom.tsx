@@ -481,12 +481,12 @@ float vnoise(vec2 p) {
 }
 
 // Film grain: clumps of two sizes (fine grains bunch into larger blotches), mostly the same in each layer with a
-// little colour of its own, strongest in the midtones and fading in deep shadows and clean highlights, like a print.
+// little colour of its own (most in blue), strongest in the midtones and fading in deep shadows and clean highlights, like a print.
 vec3 film_grain(vec3 c, vec2 px, float size, float amt) {
   vec2 p = px / size;
   float mono = vnoise(p) * 0.65 + vnoise(p * 2.3 + 17.0) * 0.35;
   vec3 tint = vec3(vnoise(p * 1.7 + 3.1), vnoise(p * 1.7 + 41.3), vnoise(p * 1.7 + 77.9));
-  vec3 n = mono + tint * 0.2;
+  vec3 n = mono * vec3(0.95, 1.0, 1.15) + tint * vec3(0.15, 0.15, 0.3); // the blue layer has the biggest grains
   float Y = luma(c);
   return c + n * amt * (0.25 + 3.0 * Y * (1.0 - Y));
 }

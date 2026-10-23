@@ -174,8 +174,16 @@ function grade(rgb: V3, r: Recipe): V3 {
   // more saturated or off its own hue than it started.
   const h0 = (Math.atan2(b0, a0) * 180) / Math.PI;
   const C0 = Math.hypot(a0, b0);
-  const d0 = ((h0 - 60 + 540) % 360) - 180;
-  const skin = Math.exp(-(d0 * d0) / (2 * 22 * 22)) * Math.min(1, C0 / 0.03);
+  // Skin is a soft region, not a box: red/mahogany (~25-35), golden (~40-55) and olive (~60-75) undertones, low
+  // chroma (an orange bag or a red jacket is too saturated to be skin), and not hair-black or specular white.
+  const d0 = ((h0 - 50 + 540) % 360) - 180;
+  const ramp = (x: number, a: number, b: number) => Math.min(Math.max((x - a) / (b - a), 0), 1);
+  const skin =
+    Math.exp(-(d0 * d0) / (2 * 22 * 22)) *
+    ramp(C0, 0.015, 0.035) *
+    (1 - ramp(C0, 0.15, 0.2)) *
+    ramp(L0, 0.12, 0.2) *
+    (1 - ramp(L0, 0.82, 0.92));
   dL += Math.max(0, L0 - 0.01 - (L + dL)) * skin;
   C -= Math.max(0, C - C0 * 1.04) * skin;
   h -= (((h - h0 + 540) % 360) - 180) * 0.8 * skin;
