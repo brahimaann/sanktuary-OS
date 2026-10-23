@@ -68,7 +68,8 @@ const app = {
     icon: I('help'),
     appType: 'iframe',
     appProps: { src: '/magazine' },
-    width: 1000,
+    // Shaped like an open spread plus the page controls, so the pages fill it
+    width: 840,
     height: 700,
   },
   write: {
@@ -176,7 +177,7 @@ export const Folder: React.FC<{ items: DesktopIconDef[] }> = ({ items }) => {
       {items.map((d) => (
         <button
           key={d.id}
-          className="w-[75px] p-1 flex flex-col items-center gap-1 text-center text-xs"
+          className="w-[80px] p-1 flex flex-col items-center gap-1 text-center text-[11px] leading-tight [overflow-wrap:anywhere]"
           onClick={() => openWindow(windowFor(d))}
         >
           <img src={d.icon} alt="" className="w-[32px] h-[32px] image-render-pixelated" />
@@ -695,7 +696,7 @@ export const Desktop: React.FC = () => {
               />
             </div>
             <span
-              className="title text-xs mt-1 px-1 text-white select-none break-all"
+              className="title text-xs mt-1 px-1 text-white select-none"
               style={{
                 backgroundColor: isSelected ? '#000080' : 'transparent',
                 border: isSelected ? '1px dotted #ffffff' : '1px solid transparent',

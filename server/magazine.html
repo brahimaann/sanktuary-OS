@@ -56,11 +56,6 @@
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
-      header p {
-        margin: 4px 0 0;
-        color: var(--dim);
-        font-size: 14px;
-      }
       #stage {
         flex: 1;
         min-height: 0;
@@ -131,7 +126,13 @@
         min-width: 7ch;
         text-align: center;
       }
-      /* Small screens and fullscreen: just the magazine and a slim control bar */
+      /* Small screens, fullscreen and the desktop window (its title bar names the issue): just the magazine and a slim control bar */
+      .embedded header {
+        display: none;
+      }
+      .embedded body {
+        padding: 0;
+      }
       @media (max-width: 600px), (max-height: 600px) {
         header {
           display: none;
@@ -151,7 +152,6 @@
   <body>
     <header>
       <h1>CITIES Vol. 1</h1>
-      <p>Swipe, drag a page edge or use the arrows.</p>
     </header>
     <div id="stage"><div id="book"></div></div>
     <nav>
@@ -163,6 +163,7 @@
 
     <script src="/magazine/page-flip.js"></script>
     <script>
+      if (top !== self) document.documentElement.classList.add('embedded');
       // Spreads in reading order: each name is a pair of pages, /magazine/pages/<name>-1.webp (left) and -2 (right). Reorder to reorder the issue.
       const SPREADS = [
         'adrian',

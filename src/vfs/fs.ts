@@ -347,7 +347,7 @@ export class MemoryFileSystem {
 
     parseIndexNode(fsIndex, sourceCodeFolder, 'C:/Program Files/Source Code');
 
-    // Populate notes and files on Desktop and in Recycled folder
+    // Populate notes and files on Desktop
     this.writeFile(
       'C:/Desktop/NOTES.txt',
       `Research outline for Ppls Library entries:\n\n` +
@@ -356,12 +356,8 @@ export class MemoryFileSystem {
         `- Trace the 1945 Manchester Congress back to earlier pan-African conferences.\n\n` +
         `also — new burna boy album is insane. track 7 especially. need to connect that rhythm pattern back to the yoruba talking drum lineage for the piece im writing.`,
     );
-    this.writeFile(
-      'C:/Recycled/Wakanda_draft.txt',
-      `Title: Speculative Sovereignty: Wakanda and the African Imagination\n` +
-        `Draft Status: SCRAPPED (Do not publish)\n\n` +
-        `Note: I'm deleting this draft. While Black Panther's Wakanda has captured global attention, analyzing a fictional narrative in a library dedicated to material decolonization feels counterproductive. We need to focus on real historical precedents of self-determination, like King Piye, the Kingdom of Kush, and Thomas Sankara's Burkina Faso. Speculative fiction is a powerful cultural tool, but it shouldn't replace or overshadow the actual, documented, and hard-fought struggles of real societies.`,
-    );
+    // Earlier visits saved this draft to the browser; it was taken out
+    deletePersistedFile('C:/Recycled/Wakanda_draft.txt');
     this.writeFile(
       'C:/My Documents/readme.txt',
       `Welcome to My Documents.\n\nYou can edit files in Notepad and save them directly back to the virtual disk.`,
