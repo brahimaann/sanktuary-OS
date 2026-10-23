@@ -5967,7 +5967,7 @@ async function rawPreview(file, size) {
     if ((le && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) {
       const seen = new Set();
       const walk = (ifd, depth) => {
-        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8; ) {
+        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8;) {
           seen.add(ifd);
           const n = u16(ifd);
           if (ifd + 2 + n * 12 + 4 > b.length) return;
