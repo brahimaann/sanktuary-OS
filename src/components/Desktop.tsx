@@ -190,6 +190,8 @@ export const Folder: React.FC<{ items: DesktopIconDef[] }> = ({ items }) => {
 
 export const Desktop: React.FC = () => {
   const { openWindow, wallpaper, bgColor } = useWindowManager();
+  // Sky wallpapers get the live sky: the photo drifts slowly and soft clouds float across (styles in system.css)
+  const liveSky = /custom-wallpaper|clouds/.test(wallpaper);
   const { me } = useMe();
   const { isLoaded, isSignedIn } = useAuth();
   // Visitors without an account land on the landing page, full screen over the desktop (once per visit)
@@ -636,10 +638,10 @@ export const Desktop: React.FC = () => {
       onContextMenu={handleContextMenu}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="desktop folder-view absolute left-0 top-0 w-full h-[calc(100%-30px)] select-none overflow-hidden"
+      className="desktop folder-view absolute left-0 top-0 w-full h-[calc(100%-30px)] select-none overflow-hidden isolate"
       style={{
         backgroundColor: bgColor,
-        backgroundImage: wallpaper ? `url(${wallpaper})` : 'none',
+        backgroundImage: wallpaper && !liveSky ? `url(${wallpaper})` : 'none',
         backgroundSize: 'cover', // fills the whole screen at every size (phones used to get bars)
         backgroundRepeat: 'no-repeat',
         backgroundPosition: 'center',
@@ -647,6 +649,16 @@ export const Desktop: React.FC = () => {
       }}
       data-view-mode="DESKTOP"
     >
+      {liveSky && (
+        <div className="live-sky" aria-hidden="true">
+          <div className="live-sky-photo" style={{ backgroundImage: `url(${wallpaper})` }} />
+          <i />
+          <i />
+          <i />
+          <i />
+          <i />
+        </div>
+      )}
       {isLoaded && !isSignedIn && <LeadOffer />}
       {allIcons.map((icon) => {
         const isSelected = selectedIds.includes(icon.id);

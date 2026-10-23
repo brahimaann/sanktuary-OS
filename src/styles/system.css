@@ -237,3 +237,98 @@ button:disabled {
   animation: sk-ring 2.5s ease-in-out infinite;
   transform-origin: 50% 10%;
 }
+
+/* Live sky behind the desktop icons (src/components/Desktop.tsx). Transform/opacity only, so it stays on the GPU and cheap on phones;
+   browsers pause CSS animations in hidden tabs on their own. */
+.live-sky {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.live-sky-photo {
+  position: absolute;
+  inset: -4%;
+  background-size: cover;
+  background-position: center;
+  animation: sky-breathe 60s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes sky-breathe {
+  from {
+    transform: scale(1) translate3d(-1%, 0, 0);
+  }
+  to {
+    transform: scale(1.06) translate3d(1.5%, -1%, 0);
+  }
+}
+.live-sky i {
+  position: absolute;
+  left: 0;
+  width: var(--w, 34vmax);
+  aspect-ratio: 2.6;
+  /* a cloud is six soft puffs: position / size of each */
+  --puff: radial-gradient(closest-side, #fff 30%, #fff0);
+  background:
+    var(--puff) 0% 85% / 36% 55% no-repeat,
+    var(--puff) 22% 40% / 34% 80% no-repeat,
+    var(--puff) 48% 0% / 38% 100% no-repeat,
+    var(--puff) 76% 35% / 32% 80% no-repeat,
+    var(--puff) 100% 85% / 34% 55% no-repeat,
+    var(--puff) 50% 100% / 92% 50% no-repeat;
+  opacity: var(--o, 0.6);
+  animation: sky-drift var(--t, 160s) linear infinite;
+  animation-delay: var(--d, 0s);
+  will-change: transform;
+}
+.live-sky i:nth-of-type(1) {
+  top: 4%;
+  --w: 40vmax;
+  --t: 190s;
+  --d: -40s;
+}
+.live-sky i:nth-of-type(2) {
+  top: 30%;
+  --w: 26vmax;
+  --t: 140s;
+  --d: -110s;
+  --o: 0.4;
+}
+.live-sky i:nth-of-type(3) {
+  top: 58%;
+  --w: 46vmax;
+  --t: 220s;
+  --d: -150s;
+}
+.live-sky i:nth-of-type(4) {
+  top: 16%;
+  --w: 20vmax;
+  --t: 120s;
+  --d: -20s;
+  --o: 0.35;
+}
+.live-sky i:nth-of-type(5) {
+  top: 76%;
+  --w: 32vmax;
+  --t: 170s;
+  --d: -85s;
+  --o: 0.45;
+}
+@keyframes sky-drift {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(100vw, 0, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-sky-photo,
+  .live-sky i {
+    animation: none;
+  }
+  .live-sky i {
+    display: none;
+  }
+}
