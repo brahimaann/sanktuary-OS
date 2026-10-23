@@ -1444,10 +1444,143 @@ function cleanMaster(list) {
   return { splits, hash: createHash('sha1').update(JSON.stringify(splits)).digest('hex').slice(0, 16) };
 }
 /** Members on the master split who haven't signed off on the splits as they are now. */
-const unsigned = (t) =>
-  (t.master?.splits || []).filter(
-    (x) => x.member && !(t.master.signoffs || []).some((s) => s.user === x.member && s.hash === t.master.hash),
+const unsigned = (t) => (t.master?.splits || []).filter((x) => x.member && !signatureOf(t, 'master', x));
+
+// ── Agreements: a song's split sheet (songwriters) and master agreement, one page to print or to sign by link ──
+// A sign link is for one person on the sheet as it is now: it carries an HMAC of the song, the sheet, their name and
+// the sheet's hash, so editing the shares turns every link off and leaves earlier signatures visibly out of date.
+// Signing is never required: nothing waits on it.
+const SHEETS = { bmi: (t) => (t.bmi?.writers || []).filter((w) => w.name), master: (t) => t.master?.splits || [] };
+const sheetHash = (t, kind) =>
+  kind === 'master'
+    ? t.master?.hash
+    : createHash('sha1')
+        .update(JSON.stringify(SHEETS.bmi(t)))
+        .digest('hex')
+        .slice(0, 16);
+const signToken = (t, kind, name) =>
+  createHmac('sha256', process.env.CLERK_SECRET_KEY)
+    .update(`sign|${t.id}|${kind}|${name}|${sheetHash(t, kind)}`)
+    .digest('base64url')
+    .slice(0, 24);
+/** This person's signature on the sheet as it is now: in the app (members on the master split) or by link. */
+const signatureOf = (t, kind, row) => {
+  const h = sheetHash(t, kind);
+  return ((kind === 'master' ? t.master : t.bmi)?.signoffs || []).find(
+    (s) => s.hash === h && (s.party === row.name || (row.member && s.user === row.member)),
   );
+};
+const signLinks = (t, kind, origin) =>
+  SHEETS[kind](t).map((row) => {
+    const s = signatureOf(t, kind, row);
+    return { name: row.name, url: `${origin}/sign/${t.id}/${kind}/${signToken(t, kind, row.name)}`, signed: s ? s.at : null };
+  });
+
+/** The sheet as a printable page; `signer` (a row) adds the form that person signs with. */
+function agreementPage(t, r, kind, signer = null) {
+  const e = (v) => escAttr(String(v ?? ''));
+  const sig = (row) => {
+    const s = signatureOf(t, kind, row);
+    return s
+      ? `Signed by ${e(s.name || `@${s.user}`)}<br><small>${e(new Date(s.at).toLocaleString('en-US', { timeZoneName: 'short' }))}</small>`
+      : '';
+  };
+  const head = (title) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} - ${e(t.title)}</title>
+<style>body{font:14px Georgia,serif;margin:24px auto;padding:0 16px;max-width:760px}h1{font-size:22px;margin:0 0 4px}
+h2{font-size:15px;margin:18px 0 4px}p{margin:4px 0}table{border-collapse:collapse;width:100%;margin-top:8px}
+td,th{border:1px solid #000;padding:6px;text-align:left;vertical-align:top}.sig{width:170px;height:44px}
+.note{color:#555;font:12px Arial,sans-serif;border:1px solid #999;padding:8px;margin-top:24px}
+form{font:15px Arial,sans-serif;border:2px solid #000;padding:12px;margin-top:24px}input{font:inherit;padding:6px;width:100%;box-sizing:border-box;margin:6px 0}
+button{font:inherit;padding:8px 16px}@media print{form{display:none}}</style>`;
+  const b = t.bmi || {};
+  const body =
+    kind === 'bmi'
+      ? `${head('Split sheet')}<h1>Split sheet</h1><p><b>Song:</b> ${e(t.title)}${b.altTitle ? ` (${e(b.altTitle)})` : ''}</p>
+${b.artist ? `<p><b>Artist:</b> ${e(b.artist)}</p>` : ''}${b.duration ? `<p><b>Duration:</b> ${e(b.duration)}</p>` : ''}
+${b.isrc ? `<p><b>ISRC:</b> ${e(b.isrc)}</p>` : ''}${b.iswc ? `<p><b>ISWC:</b> ${e(b.iswc)}</p>` : ''}
+<table><tr><th>Writer</th><th>PRO</th><th>IPI/CAE</th><th>Share</th><th>Publisher</th><th>Signature</th></tr>${SHEETS.bmi(t)
+          .map(
+            (w) =>
+              `<tr><td>${e(w.name)}</td><td>${e(w.pro)}</td><td>${e(w.ipi)}</td><td>${w.share}%</td><td>${e(w.publisher || '-')}${
+                w.publisherIpi ? `<br><small>IPI ${e(w.publisherIpi)}</small>` : ''
+              }</td><td class="sig">${sig(w)}</td></tr>`,
+          )
+          .join('')}
+<tr><th colspan="3">Total</th><th>${shareSum(SHEETS.bmi(t))}%</th><th colspan="2"></th></tr></table>
+${b.samples ? `<p style="margin-top:12px"><b>Samples / interpolations:</b> ${e(b.samples)}</p>` : ''}
+<p style="margin-top:24px;color:#555">Everyone signing agrees to these writer shares of the composition.</p>`
+      : `${head('Master agreement')}<h1>Master Recording &amp; Net Profit Agreement</h1>
+<p><b>Recording:</b> "${e(t.title)}"${r.artist ? ` by ${e(r.artist)}` : ''}${r.title ? ` (from ${e(r.title)})` : ''}</p>
+<h2>1. Ownership of the master</h2>
+<p>${e(
+          t.master.splits
+            .filter((x) => x.role === 'Label')
+            .map((x) => x.name)
+            .join(' and ') || 'Sanktuary',
+        )} ("the Owner") owns the master recording above and keeps all rights in it, including the copyright in the sound
+recording. The other parties do not own the master; they share in its net profits as set out below.</p>
+<h2>2. Net profit shares</h2>
+<p>Net profits from the recording are paid to the parties in these shares:</p>
+<table><tr><th>Name</th><th>Role</th><th>Share of net profits</th><th>Signature</th></tr>${t.master.splits
+          .map((x) => `<tr><td>${e(x.name)}</td><td>${e(x.role)}</td><td>${x.share}%</td><td class="sig">${sig(x)}</td></tr>`)
+          .join('')}</table>
+<h2>3. What "net profits" means</h2>
+<p>All money actually received for the recording (streaming, downloads, physical, sync and licensing), less the documented
+costs of making and releasing it that the parties agreed to in writing (recording, mixing, mastering, artwork, video,
+marketing and distribution). Costs are recovered once, from the recording's income only; nobody owes money out of pocket.</p>
+<h2>4. Statements and payment</h2>
+<p>The Owner sends every party a statement of income, costs and shares at least every six months, and pays each share within
+30 days of the statement. Any party may ask to see the records behind a statement.</p>
+<h2>5. Credit</h2>
+<p>Each party is credited for their role, as listed above, wherever credits for the recording appear.</p>
+<h2>6. Songwriting is separate</h2>
+<p>This agreement covers the sound recording only. Songwriting and publishing shares are on the song's split sheet.</p>
+<p class="note">Template only, not legal advice. Before relying on it, have a music lawyer review it for your situation
+(term, territory, advances, sync approvals and what happens if the recording is sold).</p>`;
+  if (!signer) return body;
+  const done = signatureOf(t, kind, signer);
+  return `${body}<form method="post">${
+    done
+      ? `<b>Signed.</b> ${e(done.name || signer.name)} signed this on ${e(new Date(done.at).toLocaleString('en-US', { timeZoneName: 'short' }))}. You can print or save this page for your records.`
+      : `<b>${e(signer.name)}</b>, type your full legal name to sign. Signing records your name, the time and the shares above.
+<input name="name" required maxlength="80" autocomplete="name" placeholder="Full name"><button>I agree and sign</button>`
+  }</form>`;
+}
+const SIGN_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
+
+/** /sign/<track>/<bmi|master>/<token>: the sheet with a sign form for the one person the link was made for. No account needed. */
+async function signPage(req, res, url) {
+  res.setHeader('x-robots-tag', 'noindex, nofollow');
+  res.setHeader('referrer-policy', 'no-referrer'); // the token is in the URL
+  const [, , id, kind, token] = url.pathname.split('/');
+  const [cfg, db] = await Promise.all([loadConfig(), loadTracks()]);
+  const t = own(db.tracks, id);
+  const r = t && !t.deleted && own(db.releases, t.release);
+  const row = r && !r.deleted && Object.hasOwn(SHEETS, kind) && SHEETS[kind](t).find((x) => signToken(t, kind, x.name) === token);
+  if (!row) fail(410, 'This sign link is out of date: the shares changed since it was made, or the song was removed. Ask for a new link.');
+  if (req.method === 'POST') {
+    const name = String(new URLSearchParams(await body(req)).get('name') || '')
+      .trim()
+      .slice(0, 80);
+    if (!name) fail(400, 'Type your name to sign');
+    if (!signatureOf(t, kind, row)) {
+      const at = new Date().toISOString();
+      const sheet = kind === 'master' ? t.master : t.bmi;
+      sheet.signoffs = [
+        ...(sheet.signoffs || []).filter((s) => s.party !== row.name),
+        { party: row.name, name, at, hash: sheetHash(t, kind) },
+      ];
+      const what = kind === 'master' ? 'the master agreement' : 'the split sheet';
+      t.history = [{ at, user: name, action: `signed ${what} by link` }, ...t.history].slice(0, 100);
+      saveTracks();
+      emit('tracks', { release: r.id }, (u) => canSeeRelease({ username: u.username, admin: cfg.admins.includes(u.username) }, r));
+    }
+    return res.writeHead(303, { location: url.pathname }).end();
+  }
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': SIGN_CSP });
+  res.end(agreementPage(t, r, kind, row));
+}
 
 /** Everything a release needs before it goes to the distributor, and the registrations to do once it's out. */
 async function releaseReadiness(db, r) {
@@ -1768,6 +1901,13 @@ async function tracksApi(req, res, url) {
     const r =
       (t && !t.deleted && own(db.releases, t.release) && canSeeRelease(user, db.releases[t.release]) && db.releases[t.release]) ||
       fail(404, 'No such track');
+    const sheet = url.searchParams.get('sheet') || url.searchParams.get('signlinks');
+    if (req.method === 'GET' && Object.hasOwn(SHEETS, sheet)) {
+      if (!SHEETS[sheet](t).length) fail(400, sheet === 'master' ? 'Add the master splits first' : 'Add the songwriters first');
+      if (url.searchParams.has('signlinks')) return json(res, signLinks(t, sheet, siteOrigin(req)));
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': SIGN_CSP });
+      return res.end(agreementPage(t, r, sheet));
+    }
     if (req.method === 'POST' && url.searchParams.has('signoff')) {
       // "I agree to these master splits": only the members on the split, only for splits that add up
       if (!t.master?.splits?.some((x) => x.member === me)) fail(403, "You're not on this song's master split");
@@ -1784,7 +1924,8 @@ async function tracksApi(req, res, url) {
       const news = [];
       for (const [k, max] of Object.entries(TRACK_TEXT)) if (input[k] !== undefined) t[k] = String(input[k] ?? '').slice(0, max);
       if (input.bmi !== undefined) {
-        t.bmi = cleanBmi(input.bmi);
+        const b = cleanBmi(input.bmi);
+        t.bmi = b && { ...b, signoffs: t.bmi?.signoffs || [] }; // like the master's: kept, out of date once the writers change
         log('updated the BMI sheet');
       }
       if (input.explicit !== undefined) t.explicit = input.explicit === null ? null : !!input.explicit;
@@ -7997,6 +8138,7 @@ const routes = [
   ['/magazine', magazinePage],
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
+  ['/sign/', signPage],
   ['/b/', publicBoard],
   // Normally the service worker answers the phone's "Share to Sanktuary"; if it wasn't running, say so instead of 404
   ['/share-target', (req, res) => (req.resume(), res.writeHead(303, { location: '/?share=missed' }).end())],

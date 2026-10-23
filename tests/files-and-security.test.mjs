@@ -583,6 +583,36 @@ try {
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
 
+  // Sign links: anyone on a sheet signs from a link without an account; changing the shares turns the links off
+  const splits = (a) => [
+    { name: 'Ada Writer', role: 'Producer', share: a },
+    { name: 'Sanktuary', role: 'Label', share: 100 - a },
+  ];
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { master: splits(50) });
+  const signLinks = async (kind = 'master') => JSON.parse((await call('alice', `/api/tracks/track/${song.id}?signlinks=${kind}`)).text);
+  const link = new URL((await signLinks())[0].url).pathname;
+  check(
+    'no sign links for someone who can’t see the release',
+    (await call('carol', `/api/tracks/track/${song.id}?signlinks=master`)).status === 404,
+  );
+  check('a sign link opens without an account', (await call(null, link)).text.includes('type your full legal name'));
+  check('a made-up sign link is refused', (await call(null, link.slice(0, -4) + 'abcd')).status === 410);
+  await call(null, link, 'POST', 'name=Ada+Q.+Writer', true);
+  const afterSign = await signLinks();
+  check('signing by link shows as signed, for that person only', !!afterSign[0].signed && !afterSign[1].signed);
+  check(
+    'the agreement shows the signature',
+    (await call('alice', `/api/tracks/track/${song.id}?sheet=master`)).text.includes('Signed by Ada Q. Writer'),
+  );
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { master: splits(60) });
+  check('changing the shares turns old sign links off', (await call(null, link)).status === 410);
+  check('…and the old signature no longer counts', !(await signLinks())[0].signed);
+  const bmi = (isrc) => ({ isrc, writers: [{ name: 'Ada Writer', pro: 'BMI', share: 100 }] });
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('') });
+  await call(null, new URL((await signLinks('bmi'))[0].url).pathname, 'POST', 'name=Ada', true);
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('USABC2600001') });
+  check('split sheet signatures survive saving other fields', !!(await signLinks('bmi'))[0].signed);
+
   // Release folders: files fill Tracks in
   const albumDir = join(drive, 'team', 'Albums', 'Folder Album');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
