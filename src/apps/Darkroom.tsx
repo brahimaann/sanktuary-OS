@@ -359,6 +359,7 @@ uniform float uTime;
 uniform sampler2D lut;
 uniform float uLut;
 uniform float uGrainSize, uHalation, uClarity, uDigitalGrain;
+uniform sampler2D fx; // quarter-size, blurred: r = light energy (for halation), g = local mean tone, b = its square
 
 varying vec2 uv;
 
@@ -404,20 +405,6 @@ vec3 lut3d(vec3 c) {
   vec3 s0 = texture2D(lut, rg + vec2(b0 / N, 0.0)).rgb;
   vec3 s1 = texture2D(lut, rg + vec2(min(b0 + 1.0, N - 1.0) / N, 0.0)).rgb;
   return mix(s0, s1, c.b - b0);
-}
-
-// Halation: light from bright spots bounces off the film base back into the red layer, so lights get a red-orange
-// fringe. A ring of samples around the pixel, rotated per pixel so it reads as a glow, not copies.
-vec3 halation(vec2 st, float big) {
-  float a = hash12(gl_FragCoord.xy) * 6.2831853;
-  vec3 h = vec3(0.0);
-  for (int i = 0; i < 12; i++) {
-    float t = a + float(i) * 0.5236;
-    float r = (1.0 + mod(float(i), 3.0)) * big / 400.0;
-    vec3 s = texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb;
-    h += srgb2lin(s) * smoothstep(0.8, 1.0, luma(s)); // only lights and near-white highlights
-  }
-  return h / 12.0;
 }
 
 // Interleaved gradient noise: half a code value of dither so gradients and vignettes don't band in 8 bits
@@ -843,27 +830,23 @@ void main() {
 
   c = mix(c, graded, amount);
 
-  // Halation (Cinestill brings its own): the fringe shows around lights, not on top of them
+  // Halation (Cinestill brings its own): light scattered back off the film base, so its spread follows how much
+  // light there is (no cutoff); it shows most around lights, a little on top of them.
+  vec3 local = texture2D(fx, st).rgb;
   float hal = uHalation + (preset == 26 ? 0.6 * amount : 0.0);
   if (hal > 0.01) {
-    float glowOn = 1.0 - smoothstep(0.5, 0.9, luma(c));
-    c = lin2srgb(srgb2lin(c) + halation(st, big) * vec3(1.0, 0.28, 0.08) * 1.3 * hal * glowOn);
+    float glowOn = 1.0 - 0.7 * smoothstep(0.6, 1.0, luma(c));
+    c = lin2srgb(srgb2lin(c) + local.r * vec3(1.0, 0.28, 0.08) * 2.5 * hal * glowOn);
   }
 
-  // Clarity: midtone contrast against a local average that only takes in similar tones, so edges get no halo
+  // Clarity (guided filter): where the neighbourhood is flat the local mean is the base and detail is lifted; at an
+  // edge the variance is high, the base follows the pixel itself, and nothing is added, so there is no halo.
   if (abs(uClarity) > 0.01) {
+    float Y0 = luma(texture2D(img, st).rgb);
+    float a = max(local.b - local.g * local.g, 0.0);
+    a /= a + 0.003;
     float Y = luma(c);
-    float a = hash12(gl_FragCoord.yx) * 6.2831853;
-    float sum = 0.0, wsum = 0.0;
-    for (int i = 0; i < 24; i++) {
-      float t = a + float(i) * 2.39996; // golden angle: an even spread at any count
-      float r = sqrt((float(i) + 0.5) / 24.0) * big / 60.0;
-      float s = luma(texture2D(img, st + vec2(cos(t), sin(t)) * r / res).rgb);
-      float w = exp(-(s - Y) * (s - Y) * 40.0);
-      sum += s * w;
-      wsum += w;
-    }
-    c += (Y - sum / wsum) * uClarity * 1.5 * (4.0 * Y * (1.0 - Y));
+    c += (Y0 - mix(local.g, Y0, a)) * uClarity * 2.0 * (4.0 * Y * (1.0 - Y));
   }
 
   // 5. Contrast and fade work on the picture as seen (pivot on mid-grey)
@@ -921,6 +904,110 @@ void main() {
   gl_FragColor = vec4(clamp(c + (ign(gl_FragCoord.xy) - 0.5) / 255.0, 0.0, 1.0), 1.0);
 }`;
 
+// Pre-pass for halation and clarity, run once per photo on a quarter-size copy: mode 0 writes light energy, tone and
+// tone squared; mode 1 is one direction of a Gaussian blur (25 taps, sigma 4 taps). The main shader reads the result.
+const FX_FRAG = `precision mediump float;
+uniform sampler2D img, src;
+uniform int mode;
+uniform vec2 dir;
+varying vec2 uv;
+void main() {
+  if (mode == 0) {
+    vec3 c = texture2D(img, uv).rgb;
+    vec3 l = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+    float E = dot(l, vec3(0.2126, 0.7152, 0.0722));
+    float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    gl_FragColor = vec4(E * E * E * E, Y, Y * Y, 1.0); // E^4: bright light dominates without a hard threshold
+  } else {
+    vec4 s = vec4(0.0);
+    float w = 0.0;
+    for (int i = -12; i <= 12; i++) {
+      float x = float(i);
+      float g = exp(-x * x / 32.0);
+      s += texture2D(src, uv + dir * x) * g;
+      w += g;
+    }
+    gl_FragColor = s / w;
+  }
+}`;
+
+interface Fx {
+  prog: WebGLProgram;
+  tex: [WebGLTexture, WebGLTexture];
+  fbo: [WebGLFramebuffer, WebGLFramebuffer];
+  half: number; // HALF_FLOAT_OES when the phone can render to it, else 0 (8-bit)
+}
+
+/** Build the blurred quarter-size copy of whatever is on texture unit 0, leave it on unit 2, restore the main pass. */
+function buildFx(ctx: WebGLRenderingContext, prog: WebGLProgram, fx: Fx | undefined, w: number, h: number): Fx | undefined {
+  if (!fx) {
+    const p = ctx.createProgram()!;
+    for (const [type, src] of [
+      [ctx.VERTEX_SHADER, VERT],
+      [ctx.FRAGMENT_SHADER, FX_FRAG],
+    ] as const) {
+      const sh = ctx.createShader(type)!;
+      ctx.shaderSource(sh, src);
+      ctx.compileShader(sh);
+      ctx.attachShader(p, sh);
+    }
+    ctx.bindAttribLocation(p, 0, 'p');
+    ctx.linkProgram(p);
+    if (!ctx.getProgramParameter(p, ctx.LINK_STATUS)) return undefined;
+    const hf = ctx.getExtension('OES_texture_half_float');
+    ctx.getExtension('EXT_color_buffer_half_float');
+    ctx.getExtension('OES_texture_half_float_linear');
+    fx = {
+      prog: p,
+      tex: [ctx.createTexture()!, ctx.createTexture()!],
+      fbo: [ctx.createFramebuffer()!, ctx.createFramebuffer()!],
+      half: hf ? hf.HALF_FLOAT_OES : 0,
+    };
+  }
+  const qw = Math.max(1, Math.round(w / 4));
+  const qh = Math.max(1, Math.round(h / 4));
+  ctx.activeTexture(ctx.TEXTURE3);
+  for (let i = 0; i < 2; i++) {
+    ctx.bindTexture(ctx.TEXTURE_2D, fx.tex[i]);
+    for (const k of [ctx.TEXTURE_WRAP_S, ctx.TEXTURE_WRAP_T]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.CLAMP_TO_EDGE);
+    for (const k of [ctx.TEXTURE_MIN_FILTER, ctx.TEXTURE_MAG_FILTER]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.LINEAR);
+    ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, qw, qh, 0, ctx.RGBA, fx.half || ctx.UNSIGNED_BYTE, null);
+    ctx.bindFramebuffer(ctx.FRAMEBUFFER, fx.fbo[i]);
+    ctx.framebufferTexture2D(ctx.FRAMEBUFFER, ctx.COLOR_ATTACHMENT0, ctx.TEXTURE_2D, fx.tex[i], 0);
+    if (fx.half && ctx.checkFramebufferStatus(ctx.FRAMEBUFFER) !== ctx.FRAMEBUFFER_COMPLETE) {
+      fx.half = 0; // this phone can't render to half floats: start again in 8 bits
+      ctx.bindFramebuffer(ctx.FRAMEBUFFER, null);
+      return buildFx(ctx, prog, fx, w, h);
+    }
+  }
+  ctx.useProgram(fx.prog);
+  ctx.viewport(0, 0, qw, qh);
+  const u = (n: string) => ctx.getUniformLocation(fx!.prog, n);
+  ctx.uniform1i(u('img'), 0);
+  ctx.uniform1i(u('src'), 3);
+  const tap = Math.max(w, h) / 2400; // quarter-size px per tap: sigma = 4 taps = long side / 150 at full size
+  const passes: [number, number, number, number, number][] = [
+    [0, 0, 0, 0, 0], // mode, from, to, dx, dy: energy and tone into tex 0
+    [1, 0, 1, tap / qw, 0], // blur across into tex 1
+    [1, 1, 0, 0, tap / qh], // blur down into tex 0
+  ];
+  passes.forEach(([mode, from, to, dx, dy]) => {
+    ctx.bindTexture(ctx.TEXTURE_2D, mode ? fx!.tex[from] : null);
+    ctx.bindFramebuffer(ctx.FRAMEBUFFER, fx!.fbo[to]);
+    ctx.uniform1i(u('mode'), mode);
+    ctx.uniform2f(u('dir'), dx, dy);
+    ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
+  });
+  ctx.bindTexture(ctx.TEXTURE_2D, null);
+  ctx.bindFramebuffer(ctx.FRAMEBUFFER, null);
+  ctx.activeTexture(ctx.TEXTURE2);
+  ctx.bindTexture(ctx.TEXTURE_2D, fx.tex[0]);
+  ctx.activeTexture(ctx.TEXTURE0);
+  ctx.useProgram(prog);
+  ctx.viewport(0, 0, w, h);
+  return fx;
+}
+
 const TABS = [
   ['collage', 'Collage'],
   ['swag', 'Swag Filters'],
@@ -950,7 +1037,7 @@ const forget = (vs: Version[]) => vs.forEach((v) => v.img.src.startsWith('blob:'
 const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   const { getToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram; lut: number } | null>(null);
+  const glRef = useRef<{ ctx: WebGLRenderingContext; prog: WebGLProgram; lut: number; fx?: Fx } | null>(null);
 
   const [history, setHistory] = useState<Version[]>([]);
   const [pos, setPos] = useState(0);
@@ -1466,6 +1553,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       for (const k of [ctx.TEXTURE_MIN_FILTER, ctx.TEXTURE_MAG_FILTER]) ctx.texParameteri(ctx.TEXTURE_2D, k, ctx.LINEAR);
       ctx.activeTexture(ctx.TEXTURE0);
       ctx.uniform1i(ctx.getUniformLocation(prog, 'lut'), 1);
+      ctx.uniform1i(ctx.getUniformLocation(prog, 'fx'), 2);
       glRef.current = { ctx, prog, lut: 0 };
     }
     const { ctx } = glRef.current;
@@ -1477,6 +1565,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     // the canvas keeps the picture's full size; a smaller JPEG'd copy is stretched back up smoothly
     ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, crushed && !compare ? crushed : source);
     ctx.viewport(0, 0, cv.width, cv.height);
+    glRef.current.fx = buildFx(ctx, glRef.current.prog, glRef.current.fx, cv.width, cv.height);
     if (scale < 1) setStatus(`Preview scaled to ${cv.width}×${cv.height} (max GPU limit).`);
   }, [source, crushed, compare, redraw]);
 
@@ -1498,6 +1587,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         cv.height = 1350;
         ctx.viewport(0, 0, 1080, 1350);
         ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, slideCanvas(i, 1));
+        g.fx = buildFx(ctx, prog, g.fx, 1080, 1350);
         ctx.uniform2f(ctx.getUniformLocation(prog, 'res'), 1080, 1350);
         ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
         const blob = await new Promise<Blob>((ok, no) =>
