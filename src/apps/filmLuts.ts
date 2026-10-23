@@ -57,7 +57,7 @@ const RECIPES: Record<number, Recipe> = {
       { h: 60, w: 30, c: 0.78 },
       { h: 95, w: 30, dh: -8, c: 1.15 },
       { h: 140, w: 40, dh: 10, c: 0.95 },
-      { h: 265, w: 45, c: 1.2, l: -0.06 },
+      { h: 265, w: 45, dh: -8, c: 1.08, l: -0.05 },
     ],
   },
   // Cinestill 800T: tungsten stock in mixed light: cool, teal shadows, reds that stay red (halation is in the shader)
@@ -97,7 +97,7 @@ const RECIPES: Record<number, Recipe> = {
   },
   // Velvia 50: punchy slide film: very saturated, deep blacks, magenta-leaning reds, lush greens
   28: {
-    wb: [1.0, 0.98, 1.02],
+    wb: [1.0, 1.0, 1.0],
     cross: -0.12,
     contrast: [1.25, 1.25, 1.2],
     pivot: 0.38,
@@ -106,10 +106,10 @@ const RECIPES: Record<number, Recipe> = {
     sat: 1.35,
     hiSat: 0.7,
     hues: [
-      { h: 25, w: 30, dh: -4, c: 1.1 },
+      { h: 25, w: 30, c: 1.1 },
       { h: 60, w: 30, c: 0.7 },
       { h: 140, w: 50, dh: 6, c: 1.2, l: -0.02 },
-      { h: 265, w: 45, dh: 5, c: 1.15, l: -0.04 },
+      { h: 265, w: 45, dh: -10, c: 1.0, l: -0.04 },
     ],
   },
 };
