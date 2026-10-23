@@ -358,13 +358,106 @@
         margin-left: 8px;
         font-size: 12px;
       }
-      .mood {
+      .moodwall {
+        column-width: 220px;
+        column-gap: 10px;
+      }
+      .drop {
+        break-inside: avoid;
+        margin-bottom: 10px;
+        background: #fff;
+        border: 1px solid #808080;
+      }
+      .drop img,
+      .drop video {
         display: block;
         width: 100%;
-        height: min(70vh, 640px);
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        background: #fafafa;
+      }
+      .words {
+        padding: 12px;
+        font-size: 15px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+      .song {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+        color: #000;
+        text-decoration: none;
+      }
+      .song audio {
+        width: 100%;
+      }
+      .reacts {
+        display: flex;
+        border-top: 1px solid #c0c0c0;
+      }
+      .reacts button {
+        flex: 1;
+        font: inherit;
+        padding: 4px 0;
+        background: none;
+        border: 0;
+        cursor: pointer;
+        filter: grayscale(0.7);
+      }
+      .reacts button.on {
+        filter: none;
+        background: #ffffe1;
+      }
+      .shuffle {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: #000;
+        color: #fff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+        user-select: none;
+      }
+      .shuffle .stage {
+        max-width: min(900px, 100%);
+        max-height: 75vh;
+        display: flex;
+        justify-content: center;
+      }
+      .shuffle img,
+      .shuffle video {
+        max-width: 100%;
+        max-height: 75vh;
+        object-fit: contain;
+      }
+      .shuffle .words {
+        font-size: clamp(18px, 4vw, 32px);
+        color: #000;
+        max-width: 640px;
+      }
+      .shuffle .song {
+        color: #fff;
+        font-size: 18px;
+        min-width: min(420px, 90vw);
+      }
+      .shuffle .reacts {
+        border: 0;
+        gap: 6px;
+      }
+      .shuffle .reacts button {
+        font-size: 22px;
+        color: #fff;
+      }
+      .shuffle .reacts button.on {
+        background: #333;
+      }
+      .shuffle .x {
+        position: absolute;
+        top: 12px;
+        right: 12px;
       }
       .videos {
         display: grid;
@@ -549,40 +642,127 @@
         if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
       }
 
-      // The moodboard of the month: one board a month, shown live and view only; visitors drag, scroll and pinch around it
+      // The moodboard of the month: whatever the team dropped on its board this month, as a wall sorted into four
+      // moods. Visitors filter by mood, play clips and songs, react, or hit Shuffle to watch it full screen.
+      const MOODS = [
+        ['hype', '🔥', 'Hype'],
+        ['cool', '😎', 'Cool'],
+        ['sad', '😢', 'Sad'],
+        ['beautiful', '✨', 'Beautiful'],
+      ];
       let allMonths = null;
+      let mood = null; // { month, drops, ... } on screen
+      let moodFilter = '';
       const monthName = (m) => new Date(`${m}-15`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+      const tapped = (id, k) => {
+        try {
+          return localStorage.getItem(`sk_mood_${id}_${k}`);
+        } catch {}
+      };
+      function dropBody(d, big) {
+        if (d.kind === 'image') return `<img src="${esc(d.src)}" alt="${esc(d.name || '')}" loading="lazy">`;
+        if (d.kind === 'video')
+          return `<video src="${esc(d.src)}" controls playsinline preload="metadata" ${big ? 'autoplay' : ''}></video>`;
+        if (d.kind === 'audio')
+          return `<div class="song"><b>♪ ${esc(d.name || 'Track')}</b><audio src="${esc(d.src)}" controls preload="none" ${big ? 'autoplay' : ''}></audio></div>`;
+        if (d.kind === 'link')
+          return `<a class="song" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(d.name || d.text || new URL(d.url).hostname)}</b><span>${esc(new URL(d.url).hostname)} &nearr;</span></a>`;
+        return `<div class="words" style="background:${esc(d.color || '#fff')}">${esc(d.text)}</div>`;
+      }
+      const reactBar = (d) =>
+        `<div class="reacts">${MOODS.map(([k, e]) => `<button class="${tapped(d.id, k) ? 'on' : ''}" data-r="${k}" data-id="${d.id}" title="${k}">${e} <span>${d.reactions[k] || ''}</span></button>`).join('')}</div>`;
+      async function react(btn) {
+        const { id, r } = btn.dataset;
+        if (tapped(id, r)) return;
+        try {
+          localStorage.setItem(`sk_mood_${id}_${r}`, '1');
+        } catch {}
+        btn.classList.add('on');
+        const d = mood.drops.find((x) => x.id === id);
+        d.reactions[r] = (d.reactions[r] || 0) + 1;
+        btn.querySelector('span').textContent = d.reactions[r];
+        fetch(`/api/blog/moodboards/${mood.month}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ item: id, mood: r }),
+        }).catch(() => {});
+      }
       async function moodboard(month) {
         sectionTabs('moodboard');
-        if (!allMonths) {
-          app.textContent = 'Loading...';
-          try {
-            allMonths = (await (await fetch('/api/blog/moodboards')).json()).months;
-          } catch {
-            app.innerHTML = '<div class="empty">The moodboard could not load. Try again in a minute.</div>';
-            return;
+        try {
+          allMonths ??= (await (await fetch('/api/blog/moodboards')).json()).months;
+          month ||= allMonths[0]?.month;
+          if (month && mood?.month !== month) {
+            app.textContent = 'Loading...';
+            const r = await fetch(`/api/blog/moodboards/${month}`);
+            mood = r.ok ? await r.json() : null;
           }
+        } catch {
+          app.innerHTML = '<div class="empty">The moodboard could not load. Try again in a minute.</div>';
+          return;
         }
-        const i = month ? allMonths.findIndex((m) => m.month === month) : 0;
-        const m = allMonths[i];
-        document.title = m ? `${monthName(m.month)} Moodboard · CITIES` : 'Moodboard · CITIES';
-        if (!m) {
-          bar.innerHTML = allMonths.length ? '<a class="btn" href="/cities/moodboard" data-nav>Latest moodboard</a>' : '';
+        const i = allMonths.findIndex((m) => m.month === month);
+        if (!mood || i < 0) {
+          document.title = 'Moodboard · CITIES';
+          bar.innerHTML = allMonths.length ? '<a class="btn" href="/cities/moodboard" data-nav>This month</a>' : '';
           app.innerHTML = `<div class="empty">${allMonths.length ? 'There is no moodboard for that month.' : 'The first moodboard is on its way. Check back soon.'}</div>`;
           return;
         }
+        document.title = `${monthName(month)} Moodboard · CITIES`;
         const older = allMonths[i + 1];
         const newer = allMonths[i - 1];
         bar.innerHTML =
           `${older ? `<a class="btn" href="/cities/moodboard/${older.month}" data-nav>&larr; ${esc(monthName(older.month))}</a>` : ''}` +
-          `<select class="btn" id="month" aria-label="Month">${allMonths.map((x) => `<option value="${x.month}" ${x === m ? 'selected' : ''}>${esc(monthName(x.month))}</option>`).join('')}</select>` +
+          `<select class="btn" id="month" aria-label="Month">${allMonths.map((x) => `<option value="${x.month}" ${x.month === month ? 'selected' : ''}>${esc(monthName(x.month))}</option>`).join('')}</select>` +
           `${newer ? `<a class="btn" href="/cities/moodboard/${newer.month}" data-nav>${esc(monthName(newer.month))} &rarr;</a>` : ''}` +
-          `<span style="flex:1"></span><a class="btn" href="${esc(m.url)}" target="_blank" rel="noopener">Full screen</a>`;
+          `<span style="flex:1"></span><button class="btn" id="shuffle"><b>&#9654; Shuffle</b></button>`;
         bar.querySelector('#month').onchange = (e) => go(`/cities/moodboard/${e.target.value}`);
-        app.innerHTML = `<h2 style="margin:0 0 4px">${esc(monthName(m.month))}: ${esc(m.name)}</h2>
-          ${m.note ? `<p style="margin:0 0 8px">${esc(m.note)}</p>` : ''}
-          <iframe class="mood" src="${esc(m.url)}?embed" title="${esc(m.name)}"></iframe>
-          <p style="margin:6px 0 0;font-size:11px">Drag or scroll to look around. Pinch, Ctrl + scroll or the + and − buttons zoom.</p>`;
+        bar.querySelector('#shuffle').onclick = shuffle;
+        const count = (k) => mood.drops.filter((d) => !k || d.mood === k).length;
+        const shown = mood.drops.filter((d) => !moodFilter || d.mood === moodFilter);
+        app.innerHTML = `<h2 style="margin:0 0 4px">${esc(mood.name.includes(monthName(month)) ? mood.name : `${monthName(month)}: ${mood.name}`)}</h2>
+          ${mood.note ? `<p style="margin:0 0 8px">${esc(mood.note)}</p>` : ''}
+          <div class="bar" style="padding:0 0 8px;border:0">${[['', '', 'Everything'], ...MOODS]
+            .map(([k, e, name]) => `<button class="btn ${moodFilter === k ? 'on' : ''}" data-m="${k}">${e} ${name} (${count(k)})</button>`)
+            .join('')}</div>
+          <div class="moodwall">${
+            shown.map((d) => `<div class="drop">${dropBody(d)}${reactBar(d)}</div>`).join('') ||
+            '<div class="empty">Nothing in this mood yet. The team is still dropping things in.</div>'
+          }</div>
+          <p style="font-size:11px;margin:8px 0 0">Tap a mood to react. <a href="${esc(mood.board)}" target="_blank" rel="noopener">See the whole board</a>, laid out the way the team made it.</p>`;
+        app.querySelectorAll('[data-m]').forEach((b) => (b.onclick = () => ((moodFilter = b.dataset.m), moodboard(month))));
+        app.querySelectorAll('[data-r]').forEach((b) => (b.onclick = () => react(b)));
+      }
+      // Shuffle: the month's drops full screen in random order. Pictures and words stay 6 seconds, clips and songs
+      // play to the end. Tap the right side (or →) for next, the left (or ←) for back, Esc to leave.
+      function shuffle() {
+        const list = mood.drops.filter((d) => !moodFilter || d.mood === moodFilter).sort(() => Math.random() - 0.5);
+        if (!list.length) return;
+        const box = document.createElement('div');
+        box.className = 'shuffle';
+        document.body.appendChild(box);
+        let n = 0;
+        let timer;
+        const show = () => {
+          clearTimeout(timer);
+          const d = list[(n = (n + list.length) % list.length)];
+          const tag = MOODS.find(([k]) => k === d.mood);
+          box.innerHTML = `<div class="stage">${dropBody(d, true)}</div><div class="cap">${tag ? `${tag[1]} ${tag[2]} · ` : ''}${n + 1} / ${list.length}</div>${reactBar(d)}<button class="btn x" aria-label="Close">&times;</button>`;
+          box.querySelectorAll('[data-r]').forEach((b) => (b.onclick = (e) => (e.stopPropagation(), react(b))));
+          box.querySelector('.x').onclick = (e) => (e.stopPropagation(), close());
+          const media = box.querySelector('video,audio');
+          if (media) media.onended = () => (n++, show());
+          else timer = setTimeout(() => (n++, show()), 6000);
+        };
+        const key = (e) => (e.key === 'Escape' ? close() : e.key === 'ArrowRight' ? (n++, show()) : e.key === 'ArrowLeft' && (n--, show()));
+        const close = () => (clearTimeout(timer), box.remove(), removeEventListener('keydown', key), moodboard(mood.month)); // fresh counts
+        box.onclick = (e) => {
+          if (e.target.closest('a,video,audio')) return;
+          e.clientX > innerWidth / 2 ? n++ : n--;
+          show();
+        };
+        addEventListener('keydown', key);
+        show();
       }
 
       let allVideos = null;

@@ -101,21 +101,21 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
       setStatus((e as Error).message);
     }
   };
-  // CITIES' moodboard of the month, on the public /cities/moodboard page
-  const feature = async () => {
-    const month =
-      pick &&
-      (
-        await dialog.prompt('Feature this board on CITIES for which month? (YYYY-MM)', new Date().toISOString().slice(0, 7), {
-          title: 'Moodboard of the month',
-        })
-      )?.trim();
-    if (!pick || !month) return;
-    const note = await dialog.prompt('A line about this month for visitors (optional):', '', { title: 'Moodboard of the month' });
+  // CITIES' moodboard of the month: a fresh board with the four mood lanes, public on /cities/moodboard as the team fills it
+  const newMonth = async () => {
+    const month = (
+      await dialog.prompt('Which month is this board for? (YYYY-MM)', new Date().toISOString().slice(0, 7), { title: 'New month' })
+    )?.trim();
+    if (!month) return;
+    const note = await dialog.prompt('A line about this month for visitors (optional):', '', { title: 'New month' });
     if (note === null) return;
     try {
-      const r = await api(`/api/boards/${pick.id}/feature`, { method: 'POST', body: JSON.stringify({ month, note }) });
-      setStatus(`Featured on ${r.url}. Turn its link off in Public link... to take it down.`);
+      const name = `Moodboard · ${new Date(`${month}-15`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`;
+      const b = await api('/api/boards', { method: 'POST', body: JSON.stringify({ name, kind, template: 'month' }) });
+      const r = await api(`/api/boards/${b.id}/feature`, { method: 'POST', body: JSON.stringify({ month, note }) });
+      open(b);
+      load();
+      setStatus(`Live on ${r.url}. Drop things into the Hype, Cool, Sad and Beautiful lanes.`);
     } catch (e) {
       setStatus((e as Error).message);
     }
@@ -161,8 +161,8 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
           </button>
         )}
         {!plans && me?.admin && (
-          <button style={button} disabled={!pick} onClick={feature} title="Make it the CITIES moodboard of the month">
-            Feature...
+          <button style={button} onClick={newMonth} title="Start the CITIES moodboard of the month">
+            New month...
           </button>
         )}
         <button style={button} onClick={load}>
