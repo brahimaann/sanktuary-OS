@@ -28,7 +28,7 @@ interface Recipe {
 const RECIPES: Record<number, Recipe> = {
   // Portra 400: warm, soft, forgiving; skin glows, greens go yellow-olive, blues lean cyan
   24: {
-    wb: [1.04, 1.0, 0.95],
+    wb: [1.1, 1.0, 0.86],
     cross: 0.06,
     contrast: [0.92, 0.9, 0.84],
     pivot: 0.42,
@@ -37,7 +37,7 @@ const RECIPES: Record<number, Recipe> = {
     sat: 0.95,
     hiSat: 0.5,
     hues: [
-      { h: 60, w: 35, c: 1.3, l: 0.015 },
+      { h: 60, w: 35, l: 0.015 },
       { h: 140, w: 45, dh: -18, c: 0.78 },
       { h: 250, w: 45, dh: -15, c: 0.95 },
     ],
@@ -169,11 +169,16 @@ function grade(rgb: V3, r: Recipe): V3 {
     C *= 1 + ((m.c ?? 1) - 1) * wgt;
     dL += (m.l || 0) * wgt;
   }
-  // Skin guard: contrast curves pull the lower mids down, which is where deep skin sits. Skin tones may not end up
-  // more than a touch darker than they started, whatever the stock does to everything else.
-  const d0 = (((Math.atan2(b0, a0) * 180) / Math.PI - 60 + 540) % 360) - 180;
-  const skin = Math.exp(-(d0 * d0) / (2 * 22 * 22)) * Math.min(1, Math.hypot(a0, b0) / 0.03);
+  // Skin guard: whatever the stock does to everything else, skin stays true. Contrast curves pull the lower mids
+  // down (where deep skin sits) and warm stocks push skin orange, so skin may not end up more than a touch darker,
+  // more saturated or off its own hue than it started.
+  const h0 = (Math.atan2(b0, a0) * 180) / Math.PI;
+  const C0 = Math.hypot(a0, b0);
+  const d0 = ((h0 - 60 + 540) % 360) - 180;
+  const skin = Math.exp(-(d0 * d0) / (2 * 22 * 22)) * Math.min(1, C0 / 0.03);
   dL += Math.max(0, L0 - 0.01 - (L + dL)) * skin;
+  C -= Math.max(0, C - C0 * 1.04) * skin;
+  h -= (((h - h0 + 540) % 360) - 180) * 0.8 * skin;
   const hi = Math.min(Math.max((L - 0.75) / 0.25, 0), 1);
   C *= 1 - hi * hi * (1 - r.hiSat);
   // Too much colour for the screen: lower the chroma (keeping hue and lightness) instead of clipping each channel,
