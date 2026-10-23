@@ -191,6 +191,35 @@
         align-items: baseline;
         flex-wrap: wrap;
       }
+      .cal {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .cal .date {
+        flex: none;
+        width: 56px;
+        text-align: center;
+        background: #fff;
+        border: 2px solid;
+        border-color: #808080 #fff #fff #808080;
+        line-height: 1.1;
+        padding: 4px 0;
+      }
+      .cal .date b {
+        display: block;
+        font-size: 22px;
+      }
+      .cal > div:last-child {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .recap {
+        white-space: pre-wrap;
+        line-height: 1.5;
+      }
       .pill {
         font-size: 11px;
         border: 1px solid #808080;
@@ -257,6 +286,7 @@
         <a href="/welcome" data-tab="">Home</a>
         <a href="/welcome/mrnd" data-tab="mrnd">MRND</a>
         <a href="/welcome/mhotc" data-tab="mhotc">MHOTC</a>
+        <a href="/welcome/events" data-tab="events">Events</a>
         <a href="/shop">Shop</a>
         <span class="grow"></span>
         <a href="/welcome#join" data-tab="" data-join>Join</a>
@@ -305,6 +335,23 @@
               )
               .join('')}</div></fieldset>`
           : '';
+      // The public calendar: what's coming, by month, then a recap of the last event
+      const calendar = () => {
+        const upcoming = d.events.filter((e) => !e.past);
+        const last = d.events.find((e) => e.past);
+        const entry = (e) =>
+          `<div class="cal"><div class="date">${esc(new Date(`${e.start}T12:00:00`).toLocaleDateString([], { weekday: 'short' }))}<b>${esc(Number(e.start.slice(8)))}</b></div><div><span>${e.link ? `<a ${href(e.link)}><b>${esc(e.title)}</b></a>` : `<b>${esc(e.title)}</b>`} <span class="pill">${esc(e.kind)}</span></span><span class="muted">${[e.end && e.end !== e.start ? `until ${day(e.end)}` : '', e.time, e.location].filter(Boolean).map(esc).join(' · ')}</span></div></div>`;
+        const months = new Map();
+        for (const e of upcoming) {
+          const m = new Date(`${e.start}T12:00:00`).toLocaleDateString([], { month: 'long', year: 'numeric' });
+          months.set(m, [...(months.get(m) || []), e]);
+        }
+        return `${
+          upcoming.length
+            ? [...months].map(([m, list]) => `<fieldset><legend>${esc(m)}</legend>${list.map(entry).join('')}</fieldset>`).join('')
+            : `<fieldset><legend>Coming up</legend><div>New dates go up here as soon as they are set. <a href="/welcome#join" data-tab="" data-join>Join</a> to hear first.</div></fieldset>`
+        }${last ? `<fieldset><legend>Last time</legend>${entry(last)}${last.recap ? `<div class="recap">${esc(last.recap)}</div>` : ''}</fieldset>` : ''}`;
+      };
       const posts = (list) =>
         `<div class="grid">${list
           .map(
@@ -334,7 +381,7 @@
             <a class="card door" href="/welcome/mhotc" data-tab="mhotc"><b>MHOTC</b><span>Community</span><span class="muted">CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span></a>
             <a class="card door" href="/shop"><b>SHOP</b><span>Apparel</span><span class="muted">SOTG, Merakaiya and the rest of our apparel and releases.</span></a>
           </div>
-          ${events('Coming up', d.events.filter((e) => !e.past).slice(0, 5))}
+          ${events('<a href="/welcome/events" data-tab="events">Coming up</a>', d.events.filter((e) => !e.past).slice(0, 5))}
           ${d.posts.length ? `<fieldset><legend>Latest from CITIES</legend>${posts(d.posts.slice(0, 3))}</fieldset>` : ''}
           ${join()}`,
         mrnd: () => `
@@ -344,11 +391,17 @@
               ? `<fieldset><legend>Talent</legend><div class="grid">${d.people
                   .map(
                     (p) =>
-                      `<div class="card">${p.avatar ? `<img src="/api/public/avatar/${esc(p.username)}" alt="" loading="lazy">` : ''}<b>${esc(p.displayName)}</b>${p.role ? `<span class="muted">${esc(p.role)}</span>` : ''}${p.bio ? `<span>${esc(p.bio.slice(0, 220))}</span>` : ''}<span class="links">${Object.entries(
+                      `<div class="card" id="p-${esc(p.username)}">${p.avatar ? `<img src="/api/public/avatar/${esc(p.username)}" alt="" loading="lazy">` : ''}<b>${esc(p.displayName)}</b>${p.role ? `<span class="muted">${esc(p.role)}</span>` : ''}${p.bio ? `<span>${esc(p.bio.slice(0, 220))}</span>` : ''}<span class="links">${Object.entries(
                         p.links,
                       )
                         .map(([k, u]) => `<a ${href(u)}>${esc(k)}</a>`)
-                        .join('')}</span></div>`,
+                        .join('')}</span>${
+                        p.credits.length
+                          ? `<span class="muted">Credited on</span><span class="links">${p.credits
+                              .map((c) => `<a href="${esc(c.url)}" title="${esc(`${c.role} · ${c.release}`)}">${esc(c.song)}</a>`)
+                              .join('')}</span>`
+                          : ''
+                      }</div>`,
                   )
                   .join('')}</div></fieldset>`
               : ''
@@ -367,7 +420,7 @@
           <fieldset><legend>MHOTC: community</legend><div>The people, places and nights of the Twin Cities arts scene. <a href="/cities">Read CITIES</a> · <a href="/cities/videos">Watch vlogs</a></div></fieldset>
           ${d.posts.length ? `<fieldset><legend>CITIES</legend>${posts(d.posts.slice(0, 9))}</fieldset>` : ''}
           ${events(
-            'Events',
+            '<a href="/welcome/events" data-tab="events">Events</a>',
             d.events.filter((e) => !e.past),
           )}
           ${
@@ -386,8 +439,9 @@
                   .join('')}</div></fieldset>`
               : ''
           }`,
+        events: calendar,
       };
-      const TITLES = { '': 'Welcome to Sanktuary', mrnd: 'MRND · Sanktuary', mhotc: 'MHOTC · Sanktuary' };
+      const TITLES = { '': 'Welcome to Sanktuary', mrnd: 'MRND · Sanktuary', mhotc: 'MHOTC · Sanktuary', events: 'Events · Sanktuary' };
       const tabOf = () => (location.pathname.split('/')[2] || '').toLowerCase();
       function show() {
         const tab = pages[tabOf()] ? tabOf() : '';
@@ -396,7 +450,7 @@
         app.innerHTML = pages[tab]();
         const form = document.getElementById('joinForm');
         if (form) form.onsubmit = joinUs;
-        if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+        if (location.hash) document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
       }
       async function joinUs(e) {
         e.preventDefault();

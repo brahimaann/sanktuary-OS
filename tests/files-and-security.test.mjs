@@ -583,6 +583,36 @@ try {
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
 
+  // Sign links: anyone on a sheet signs from a link without an account; changing the shares turns the links off
+  const splits = (a) => [
+    { name: 'Ada Writer', role: 'Producer', share: a },
+    { name: 'Sanktuary', role: 'Label', share: 100 - a },
+  ];
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { master: splits(50) });
+  const signLinks = async (kind = 'master') => JSON.parse((await call('alice', `/api/tracks/track/${song.id}?signlinks=${kind}`)).text);
+  const link = new URL((await signLinks())[0].url).pathname;
+  check(
+    'no sign links for someone who can’t see the release',
+    (await call('carol', `/api/tracks/track/${song.id}?signlinks=master`)).status === 404,
+  );
+  check('a sign link opens without an account', (await call(null, link)).text.includes('type your full legal name'));
+  check('a made-up sign link is refused', (await call(null, link.slice(0, -4) + 'abcd')).status === 410);
+  await call(null, link, 'POST', 'name=Ada+Q.+Writer', true);
+  const afterSign = await signLinks();
+  check('signing by link shows as signed, for that person only', !!afterSign[0].signed && !afterSign[1].signed);
+  check(
+    'the agreement shows the signature',
+    (await call('alice', `/api/tracks/track/${song.id}?sheet=master`)).text.includes('Signed by Ada Q. Writer'),
+  );
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { master: splits(60) });
+  check('changing the shares turns old sign links off', (await call(null, link)).status === 410);
+  check('…and the old signature no longer counts', !(await signLinks())[0].signed);
+  const bmi = (isrc) => ({ isrc, writers: [{ name: 'Ada Writer', pro: 'BMI', share: 100 }] });
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('') });
+  await call(null, new URL((await signLinks('bmi'))[0].url).pathname, 'POST', 'name=Ada', true);
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('USXYZ2699999') });
+  check('split sheet signatures survive saving other fields', !!(await signLinks('bmi'))[0].signed);
+
   // Release folders: files fill Tracks in
   const albumDir = join(drive, 'team', 'Albums', 'Folder Album');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1270,8 +1300,16 @@ try {
   check('but drafts need a sign-in', (await call(null, '/api/blog/mine')).status === 401);
   const bobDraft = JSON.parse((await call('bob', '/api/blog/posts', 'POST', { title: 'Lyric', line: 'heart', kind: 'profile' })).text);
   check('members can start a draft', bobDraft.owner === 'bob' && bobDraft.kind === 'profile' && !bobDraft.published);
-  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { published: true, preface: 'Singing since she was two.', line: 'nope' });
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', {
+    published: true,
+    preface: 'Singing since she was two.',
+    line: 'nope',
+    product: '<script>',
+  });
   const bobMine = JSON.parse((await call('bob', '/api/blog/mine')).text);
+  check('a post only features a Shop item by its address', bobMine[0].product === null);
+  await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', { product: 'tee-black' });
+  check('a post can feature a Shop item', JSON.parse((await call('bob', '/api/blog/mine')).text)[0].product === 'tee-black');
   check(
     'members cannot publish, and a bad section falls back to Heart',
     bobMine.length === 1 && !bobMine[0].published && bobMine[0].line === 'heart' && bobMine[0].preface === 'Singing since she was two.',
@@ -1735,6 +1773,24 @@ try {
     'directory: public events only',
     dirData.events.some((e) => e.title === 'Listening party') && !dirData.events.some((e) => e.title === 'Secret shoot'),
   );
+  // Public calendar: upcoming events plus a recap of the last one only
+  for (const [title, d, recap] of [
+    ['Old show', day(-20), 'should not show'],
+    ['Last show', day(-3), 'Packed room, thank you'],
+  ]) {
+    const e = JSON.parse((await call('bob', '/api/timeline', 'POST', { title, kind: 'Event', start: d, public: true })).text);
+    await call('bob', `/api/timeline/${e.id}`, 'PATCH', { recap });
+  }
+  const cal = (await (await fetch(B + '/api/public/directory')).json()).events;
+  check(
+    'public calendar: upcoming plus a recap of the last event only',
+    cal.filter((e) => e.past).length === 1 &&
+      cal.find((e) => e.past).title === 'Last show' &&
+      cal.find((e) => e.past).recap === 'Packed room, thank you' &&
+      cal.some((e) => e.title === 'Listening party' && !e.past),
+    JSON.stringify(cal),
+  );
+  check('the calendar page is served', (await fetch(B + '/welcome/events')).status === 200);
   check('directory never shows folders or owners', !/folder|owner|members/.test(JSON.stringify(dirData.releases)));
   check('avatar of someone not listed is not public', (await fetch(B + '/api/public/avatar/carol')).status === 404);
   check('avatar name cannot climb', (await fetch(B + '/api/public/avatar/..%2F..%2Fconfig')).status === 404);
@@ -1803,6 +1859,26 @@ try {
     JSON.stringify(epPage2.tracks),
   );
   check('bounce paths never reach the page', !JSON.stringify(epPage2).includes('master.wav') && !JSON.stringify(epPage2).includes('team'));
+  // Credits that link to people: listed members on the master split show (no shares); their card lists the song
+  await call('alice', `/api/tracks/track/${opening.id}`, 'PATCH', {
+    master: [
+      { name: 'Bob B', role: 'Producer', share: 40, member: 'bob' },
+      { name: 'Carol', role: 'Artist', share: 40, member: 'carol' },
+      { name: 'Outside Engineer', role: 'Engineer', share: 20 },
+    ],
+  });
+  const onSong = (await (await fetch(B + rp)).json()).tracks[0].people;
+  check(
+    'a song lists only the credited members who are in the public directory, without shares',
+    onSong.length === 1 && onSong[0].username === 'bob' && onSong[0].role === 'Producer' && !('share' in onSong[0]),
+    JSON.stringify(onSong),
+  );
+  const bobCredits = (await (await fetch(B + '/api/public/directory')).json()).people.find((p) => p.username === 'bob').credits;
+  check(
+    'a member’s public card lists the songs they’re credited on',
+    bobCredits.length === 1 && bobCredits[0].song === 'Opening' && bobCredits[0].url === '/release/open-ep/opening',
+    JSON.stringify(bobCredits),
+  );
   const clipRes = await fetch(B + `${rp}/preview/${opening.id}`);
   const clipBytes = Buffer.from(await clipRes.arrayBuffer());
   check(

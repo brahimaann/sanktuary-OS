@@ -29,6 +29,7 @@ interface Dir {
     location: string;
     link: string | null;
     past: boolean;
+    recap: string;
   }[];
   posts: { id: string; title: string; excerpt: string; url: string; publication: string; date: string }[];
   products: { slug: string; title: string; price: number; kind: string; soldOut: boolean }[];
@@ -91,7 +92,11 @@ const Directory: React.FC = () => {
             'media-player',
           ])
         : section === 'events'
-          ? d.events.map((e) => [e.title, `${e.kind} · ${day(e.start)}${e.time ? ` ${e.time}` : ''}${e.past ? ' (past)' : ''}`, 'task'])
+          ? d.events.map((e) => [
+              e.title,
+              `${e.kind} · ${day(e.start)}${e.time ? ` ${e.time}` : ''}${e.past ? ' (last time)' : ''}`,
+              'task',
+            ])
           : section === 'posts'
             ? d.posts.map((p) => [p.title, `${p.publication} · ${day(p.date.slice(0, 10))}`, 'news'])
             : section === 'products'
@@ -276,6 +281,7 @@ const Details: React.FC<{ d: Dir; section: Section; i: number }> = ({ d, section
         {e.time ? ` at ${e.time}` : ''}
       </div>
       {e.location && <div>{e.location}</div>}
+      {e.past && e.recap && <div style={{ whiteSpace: 'pre-wrap' }}>{e.recap}</div>}
       {e.link && (
         <a href={e.link} target="_blank" rel="noopener noreferrer nofollow">
           More info / tickets
