@@ -2,18 +2,19 @@
 """
 Builds the real skylines for Nodes: public/nodes/<city>.bin
 
-Pulls buildings, building parts, water and major roads around each city centre from
-Overture Maps (OpenStreetMap, Microsoft, Google Open Buildings and LiDAR heights,
-ODbL) and packs them small enough to ship: towers keep their own outlines and parts,
-everything else is merged into blocks by height band.
+Pulls buildings, building parts, water and major roads around each city from Overture Maps
+(OpenStreetMap, Microsoft, Google Open Buildings and LiDAR heights, ODbL) and packs them small
+enough to ship. The tallest towers keep their own outlines and parts; every other building is
+summed into a grid of cells, drawn as one block per cell sized by how built-up it is.
 
     python -m venv .venv && .venv/bin/pip install overturemaps shapely numpy
     .venv/bin/python ops/nodes/build_cities.py [MSP SEA ...]
 
-File format (little-endian), coordinates in 0.5 m units, x east and z south of the centre:
-    'HOLO' u8 version, f32 centre lat, f32 centre lng, u16 radius in metres
+File format (little-endian), x east and z south of the centre, in 1/q metre units:
+    'HOLO' u8 version 2, f32 centre lat, f32 centre lng, u16 radius in metres,
+        f32 q (units per metre), f32 height exaggeration
     u16 shape count, then per shape: u8 vertex count, u8 tier (1 tower, 0 block),
-        u16 base height, u16 top height (0.5 m units), i16 x,z of the first vertex, then i16 deltas
+        u16 base height, u16 top height, i16 x,z of the first vertex, then i16 deltas
     u16 line count, then per line: u8 kind (1 water, 2 road), u16 vertex count, i16 x,z then i16 deltas
 """
 import math
@@ -29,26 +30,30 @@ from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, P
 RELEASE = os.environ.get('OVERTURE_RELEASE', '2026-10-21.0')
 OUT = os.path.join(os.path.dirname(__file__), '..', '..', 'public', 'nodes')
 
-# Centre, radius in metres, default height for buildings with no height or floors
+# Centre, radius in metres, default height for buildings with no height or floors.
+# The radius takes in a slice of each metro, not just downtown.
 CITIES = {
-    'MSP': (44.9780, -93.2640, 1900, 9),
-    'SEA': (47.6080, -122.3380, 2200, 9),
-    'PHL': (39.9524, -75.1636, 2300, 10),
-    'LDN': (51.5080, -0.0990, 2500, 12),
-    'RUH': (24.7000, 46.6800, 2200, 9),
-    'HOU': (29.7580, -95.3660, 1800, 8),
-    'ATL': (33.7700, -84.3870, 2200, 9),
+    # Maple Grove and Brooklyn Park across to downtown St Paul
+    'MSP': (45.0000, -93.2750, 18000, 7),
+    # Downtown Seattle and Bellevue down through Kent to Tacoma
+    'SEA': (47.4300, -122.3300, 23000, 7),
+    'PHL': (39.9600, -75.1650, 8000, 8),
+    'LDN': (51.5080, -0.1100, 9000, 11),
+    'RUH': (24.7200, 46.6800, 12000, 8),
+    # Downtown Houston out west along I-10 to Katy
+    'HOU': (29.7700, -95.5900, 25000, 6),
+    'ATL': (33.7700, -84.3900, 10000, 7),
 }
-TOWER = 40  # metres; the tallest buildings above this keep their own outline
-MAX_BLOCKS = 900
-MAX_TOWERS = 250
-Q = 2  # quantisation: units per metre
+TOWER = 35  # metres; the tallest buildings above this keep their own outline
+MAX_TOWERS = 400
+MAX_CELLS = 2600
 
 
 def fetch(kind, lat, lng, r):
     dlat, dlng = r / 110540, r / (111320 * math.cos(math.radians(lat)))
     reader = core.record_batch_reader(kind, bbox=(lng - dlng, lat - dlat, lng + dlng, lat + dlat), release=RELEASE)
-    return reader.read_all().to_pylist() if reader else []
+    if reader:
+        yield from reader
 
 
 def local(lat0, lng0):
@@ -68,11 +73,10 @@ def lines(g):
     return [g] if isinstance(g, LineString) and not g.is_empty else []
 
 
-def height(row, default):
-    h = row.get('height')
-    if h and h > 0:
-        return min(float(h), 600.0)
-    return (row.get('num_floors') or 0) * 3.6 or default
+def heights(batch, default):
+    h = np.nan_to_num(batch.column('height').to_numpy(zero_copy_only=False).astype(float))
+    floors = np.nan_to_num(batch.column('num_floors').to_numpy(zero_copy_only=False).astype(float))
+    return np.minimum(np.where(h > 0, h, np.where(floors > 0, floors * 3.6, default)), 600)
 
 
 def tidy(p, tol):
@@ -86,92 +90,131 @@ def tidy(p, tol):
 def build(code):
     lat, lng, r, default = CITIES[code]
     to_local = local(lat, lng)
-    disc = Point(0, 0).buffer(r, 64)
+    disc = Point(0, 0).buffer(r, 128)
+    cell = r / 55
+    n = int(2 * r / cell) + 1
+    built = np.zeros((n, n))  # footprint area per cell
+    volume = np.zeros((n, n))  # footprint area x height per cell
+    tall = []  # (height, id, local geometry, min height)
+
+    for batch in fetch('building', lat, lng, r):
+        geoms = to_local(shapely.from_wkb(batch.column('geometry').to_numpy(zero_copy_only=False)))
+        h = heights(batch, default)
+        under = np.array(batch.column('is_underground').to_pylist(), dtype=bool)
+        area = shapely.area(geoms)
+        c = shapely.get_coordinates(shapely.centroid(geoms))
+        keep = ~under & (np.hypot(c[:, 0], c[:, 1]) < r) & (area > 20)
+        for k in np.flatnonzero(keep & (h >= TOWER)):
+            tall.append((h[k], batch.column('id')[k].as_py(), geoms[k], batch.column('min_height')[k].as_py() or 0))
+        low = keep & (h < TOWER)
+        ix = ((c[low, 0] + r) // cell).astype(int)
+        iz = ((c[low, 1] + r) // cell).astype(int)
+        np.add.at(built, (ix, iz), area[low])
+        np.add.at(volume, (ix, iz), area[low] * h[low])
+
+    # Towers beyond the cap are counted in their cell like any other building
+    tall.sort(key=lambda t: -t[0])
+    for h, _, g, _ in tall[MAX_TOWERS:]:
+        x, z = g.centroid.x, g.centroid.y
+        built[int((x + r) // cell), int((z + r) // cell)] += g.area
+        volume[int((x + r) // cell), int((z + r) // cell)] += g.area * h
+    tall = tall[:MAX_TOWERS]
+    tall_ids = {t[1] for t in tall}
+
     shapes = []  # (polygon, base, top, tier)
-
-    buildings = [row for row in fetch('building', lat, lng, r) if not row.get('is_underground')]
-    # Only the tallest buildings in each city keep their own outline and parts, so a dense
-    # downtown still reads as a skyline instead of a wall
-    tall = sorted((row for row in buildings if height(row, default) >= TOWER), key=lambda row: -height(row, default))
-    tall = {row['id'] for row in tall[:MAX_TOWERS]}
-
     has_parts = set()
-    for row in fetch('building_part', lat, lng, r):
-        if row.get('building_id') not in tall:
+    for batch in fetch('building_part', lat, lng, r):
+        ids = batch.column('building_id').to_pylist()
+        rows = [k for k, i in enumerate(ids) if i in tall_ids]
+        if not rows:
             continue
-        has_parts.add(row.get('building_id'))
-        for p in polys(to_local(shapely.from_wkb(row['geometry'])).intersection(disc)):
-            p = tidy(p, 0.8)
-            if p:
-                shapes.append((p, row.get('min_height') or 0, height(row, default), 1))
-
-    blocks = {}
-    for row in buildings:
-        if row['id'] in has_parts:
-            continue
-        h = height(row, default)
-        for p in polys(to_local(shapely.from_wkb(row['geometry'])).intersection(disc)):
-            if row['id'] in tall:
+        geoms = to_local(shapely.from_wkb(batch.column('geometry').to_numpy(zero_copy_only=False)[rows]))
+        h = heights(batch, default)[rows]
+        base = batch.column('min_height').to_pylist()
+        for g, k, hk in zip(geoms, rows, h):
+            for p in polys(g.intersection(disc)):
+                p = tidy(p, 0.8)
+                if p:
+                    has_parts.add(ids[k])
+                    shapes.append((p, base[k] or 0, hk, 1))
+    for h, i, g, base in tall:
+        if i not in has_parts:
+            for p in polys(g.intersection(disc)):
                 p = tidy(p, 1.0)
                 if p:
-                    shapes.append((p, row.get('min_height') or 0, h, 1))
-            elif p.area >= 45:
-                blocks.setdefault(min(64, max(8, round(h / 8) * 8)), []).append(p)
+                    shapes.append((p, base, h, 1))
 
-    # Lower buildings: close the gaps between neighbours of similar height into city blocks
-    merged = []
-    for band, group in blocks.items():
-        union = shapely.union_all([p.buffer(2.5, join_style='mitre') for p in group]).buffer(-2.5, join_style='mitre')
-        for p in polys(union):
-            p = tidy(Polygon(p.exterior), 1.6)
-            if p and p.area >= 90:
-                weight = 1 - 0.5 * p.centroid.distance(Point(0, 0)) / r
-                merged.append((p.area * band * weight, p, band))
-    merged.sort(key=lambda m: -m[0])
-    shapes += [(p, 0, band, 0) for _, p, band in merged[:MAX_BLOCKS]]
+    # Everything else: one block per cell, wider the more of the cell is built on
+    blocks = []
+    for ix, iz in zip(*np.nonzero(built)):
+        cover = built[ix, iz] / cell**2
+        x, z = (ix + 0.5) * cell - r, (iz + 0.5) * cell - r
+        if cover < 0.06 or math.hypot(x, z) > r - cell:
+            continue
+        h = volume[ix, iz] / built[ix, iz]
+        side = cell * min(0.9, 0.25 + math.sqrt(cover))
+        blocks.append((cover * h, Polygon.from_bounds(x - side / 2, z - side / 2, x + side / 2, z + side / 2), h))
+    blocks.sort(key=lambda b: -b[0])
+    shapes += [(p, 0, h, 0) for _, p, h in blocks[:MAX_CELLS]]
 
     out, runs = [], []
-    for row in fetch('water', lat, lng, r):
-        for line in lines(to_local(shapely.from_wkb(row['geometry'])).intersection(disc)):
-            # Drop the stretches that only trace the edge of the disc, and the long straight edges
-            # of bay and harbour areas drawn out over open water
-            run = []
-            for c in line.simplify(3).coords:
-                if math.hypot(*c) >= r * 0.995 or (run and math.dist(run[-1], c) > 500):
-                    runs.append(run)
-                    run = []
-                if math.hypot(*c) < r * 0.995:
-                    run.append(c)
-            runs.append(run)
+    for batch in fetch('water', lat, lng, r):
+        geoms = to_local(shapely.from_wkb(batch.column('geometry').to_numpy(zero_copy_only=False)))
+        subtype = batch.column('subtype').to_pylist()
+        for g, sub in zip(geoms, subtype):
+            if isinstance(g, (LineString, MultiLineString)) and sub not in ('river', 'canal'):
+                continue
+            if isinstance(g, (Polygon, MultiPolygon)) and g.area < (r / 90) ** 2:
+                continue
+            for line in lines(g.intersection(disc)):
+                # Drop the stretches that only trace the edge of the disc, and the long straight edges
+                # of bay and harbour areas drawn out over open water
+                run = []
+                for c in line.simplify(r / 900).coords:
+                    if math.hypot(*c) >= r * 0.995 or (run and math.dist(run[-1], c) > r / 4.4):
+                        runs.append(run)
+                        run = []
+                    if math.hypot(*c) < r * 0.995:
+                        run.append(c)
+                runs.append(run)
     for run in runs:
-        if len(run) > 1 and LineString(run).length > 60:
+        if len(run) > 1 and LineString(run).length > r / 40:
             out.append((1, run))
-    for row in fetch('segment', lat, lng, r):
-        if row.get('subtype') == 'road' and row.get('class') in ('motorway', 'trunk', 'primary'):
-            for line in lines(to_local(shapely.from_wkb(row['geometry'])).intersection(disc)):
-                pts = list(line.simplify(4).coords)
+    roads = ('motorway', 'trunk') if r > 11000 else ('motorway', 'trunk', 'primary')
+    for batch in fetch('segment', lat, lng, r):
+        cls = batch.column('class').to_pylist()
+        sub = batch.column('subtype').to_pylist()
+        rows = [k for k in range(len(cls)) if sub[k] == 'road' and cls[k] in roads]
+        if not rows:
+            continue
+        geoms = to_local(shapely.from_wkb(batch.column('geometry').to_numpy(zero_copy_only=False)[rows]))
+        for g in geoms:
+            for line in lines(g.intersection(disc)):
+                pts = list(line.simplify(r / 600).coords)
                 if len(pts) > 1:
                     out.append((2, pts))
 
-    buf = bytearray(b'HOLO\x01') + struct.pack('<ffH', lat, lng, r)
+    q = min(2.0, 30000 / r)
+    lift = 3 * (r / 2000) ** 0.6
+    buf = bytearray(b'HOLO\x02') + struct.pack('<ffHff', lat, lng, r, q, lift)
     kept = [s for s in shapes if 3 <= len(s[0].exterior.coords) - 1 <= 255]
     buf += struct.pack('<H', len(kept))
     segs = 0
     for p, base, top, tier in kept:
-        pts = [(round(x * Q), round(z * Q)) for x, z in list(p.exterior.coords)[:-1]]
-        buf += struct.pack('<BBHH', len(pts), tier, round(base * Q), round(top * Q))
+        pts = [(round(x * q), round(z * q)) for x, z in list(p.exterior.coords)[:-1]]
+        buf += struct.pack('<BBHH', len(pts), tier, round(base * q), round(top * q))
         buf += vertices(pts)
         segs += len(pts) * (3 if tier else 2)
     buf += struct.pack('<H', len(out))
     for kind, pts in out:
-        q = [(round(x * Q), round(z * Q)) for x, z in pts][:65535]
-        buf += struct.pack('<BH', kind, len(q)) + vertices(q)
-        segs += len(q) - 1
+        v = [(round(x * q), round(z * q)) for x, z in pts][:65535]
+        buf += struct.pack('<BH', kind, len(v)) + vertices(v)
+        segs += len(v) - 1
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, f'{code.lower()}.bin'), 'wb') as f:
         f.write(buf)
     towers = sum(1 for s in kept if s[3])
-    print(f'{code}: {towers} towers/parts, {len(kept) - towers} blocks, {len(out)} lines, ~{segs} segments, {len(buf) / 1024:.0f} kB')
+    print(f'{code}: {towers} towers/parts, {len(kept) - towers} cells, {len(out)} lines, ~{segs} segments, {len(buf) / 1024:.0f} kB')
 
 
 def vertices(pts):

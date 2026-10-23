@@ -17,9 +17,11 @@ interface City {
   lat: number;
   lng: number;
   tz: string;
+  /** The stretch of the metro the hologram covers */
+  area: string;
   /** Ten places that matter to the crew */
   spots: Spot[];
-  /** Landmarks to label: name, latitude, longitude */
+  /** Districts and landmarks to label: name, latitude, longitude */
   marks: [name: string, lat: number, lng: number][];
 }
 
@@ -30,6 +32,7 @@ const CITIES: City[] = [
     lat: 44.9778,
     lng: -93.265,
     tz: 'America/Chicago',
+    area: 'NW METRO TO ST PAUL',
     spots: [
       ['First Avenue', "Prince's club: the Purple Rain stage, Rhymesayers shows, stars on the wall", 44.9785, -93.276],
       ['Cedar-Riverside', 'The heart of Somali Minneapolis and The Cedar, the global roots venue', 44.969, -93.2475],
@@ -43,10 +46,11 @@ const CITIES: City[] = [
       ['Paisley Park', "Prince's studio and home, out in Chanhassen", 44.8617, -93.5592],
     ],
     marks: [
-      ['IDS CENTER', 44.9759, -93.2723],
-      ['CAPELLA TOWER', 44.9761, -93.2694],
-      ['STONE ARCH BRIDGE', 44.9808, -93.253],
-      ['U.S. BANK STADIUM', 44.9737, -93.2575],
+      ['MINNEAPOLIS', 44.977, -93.268],
+      ['ST PAUL', 44.946, -93.093],
+      ['BROOKLYN PARK', 45.094, -93.356],
+      ['MAPLE GROVE', 45.072, -93.456],
+      ['ROSEVILLE', 45.006, -93.156],
     ],
   },
   {
@@ -55,6 +59,7 @@ const CITIES: City[] = [
     lat: 47.6062,
     lng: -122.3321,
     tz: 'America/Los_Angeles',
+    area: 'SEATTLE TO TACOMA',
     spots: [
       ['The Crocodile', 'The Belltown club where grunge broke out', 47.6145, -122.348],
       ['Central District', "Black Seattle's historic heart: Quincy Jones and Hendrix grew up here; Wa Na Wari gallery", 47.6098, -122.3013],
@@ -68,10 +73,13 @@ const CITIES: City[] = [
       ['Columbia City', 'Little Ethiopia along Rainier Ave and the old Columbia City Theater', 47.5596, -122.2866],
     ],
     marks: [
-      ['SPACE NEEDLE', 47.6205, -122.3493],
-      ['COLUMBIA CENTER', 47.6045, -122.3305],
-      ['SMITH TOWER', 47.6018, -122.3319],
-      ['LUMEN FIELD', 47.5952, -122.3316],
+      ['SEATTLE', 47.6062, -122.3321],
+      ['BELLEVUE', 47.6101, -122.2015],
+      ['SEA-TAC', 47.4502, -122.3088],
+      ['RENTON', 47.4829, -122.2171],
+      ['KENT', 47.3809, -122.2348],
+      ['FEDERAL WAY', 47.3223, -122.3126],
+      ['TACOMA', 47.2529, -122.4443],
     ],
   },
   {
@@ -80,6 +88,7 @@ const CITIES: City[] = [
     lat: 39.9526,
     lng: -75.1652,
     tz: 'America/New_York',
+    area: 'PHILADELPHIA AND CAMDEN',
     spots: [
       [
         'Sigma Sound',
@@ -98,10 +107,12 @@ const CITIES: City[] = [
       ['Bok Building', 'A 1938 trade school turned into studios for designers, makers and filmmakers', 39.9265, -75.1593],
     ],
     marks: [
-      ['CITY HALL', 39.9524, -75.1636],
-      ['COMCAST TECHNOLOGY CENTER', 39.9551, -75.17],
-      ['ONE LIBERTY PLACE', 39.9526, -75.168],
-      ['ART MUSEUM', 39.9656, -75.181],
+      ['CENTER CITY', 39.9524, -75.1636],
+      ['NORTH PHILLY', 39.99, -75.155],
+      ['SOUTH PHILLY', 39.925, -75.17],
+      ['WEST PHILLY', 39.957, -75.21],
+      ['FISHTOWN', 39.9725, -75.1335],
+      ['CAMDEN', 39.9259, -75.1196],
     ],
   },
   {
@@ -110,6 +121,7 @@ const CITIES: City[] = [
     lat: 51.5074,
     lng: -0.1278,
     tz: 'Europe/London',
+    area: 'CENTRAL LONDON',
     spots: [
       ['Soho', "Ronnie Scott's, the record shops on Berwick Street and the old studios", 51.5136, -0.1355],
       ['Brixton', 'Windrush Square, the Black Cultural Archives and the sound-system lineage', 51.4612, -0.115],
@@ -123,11 +135,12 @@ const CITIES: City[] = [
       ['Camden', 'Camden Market, the canal and the Roundhouse', 51.5432, -0.1519],
     ],
     marks: [
+      ['THE CITY', 51.5155, -0.0922],
+      ['WEST END', 51.5115, -0.134],
+      ["KING'S CROSS", 51.5308, -0.1238],
+      ['SHOREDITCH', 51.5255, -0.0786],
+      ['CANARY WHARF', 51.5054, -0.0235],
       ['THE SHARD', 51.5045, -0.0865],
-      ["ST PAUL'S", 51.5138, -0.0984],
-      ['GHERKIN', 51.5145, -0.0803],
-      ['BIG BEN', 51.5007, -0.1246],
-      ['TOWER BRIDGE', 51.5055, -0.0754],
     ],
   },
   {
@@ -136,6 +149,7 @@ const CITIES: City[] = [
     lat: 24.7136,
     lng: 46.6753,
     tz: 'Asia/Riyadh',
+    area: 'CENTRAL RIYADH',
     spots: [
       ['JAX District', "Diriyah's warehouse arts district and home of the Diriyah Contemporary Art Biennale", 24.74, 46.577],
       ['XP Music Futures', "MDLBEAST's music conference and studios in JAX: Arab hip-hop and electronic", 24.739, 46.579],
@@ -150,7 +164,10 @@ const CITIES: City[] = [
     ],
     marks: [
       ['KINGDOM CENTRE', 24.7114, 46.6744],
-      ['AL FAISALIAH', 24.6904, 46.6853],
+      ['OLD RIYADH', 24.631, 46.713],
+      ['AL MALAZ', 24.664, 46.733],
+      ['KING SAUD UNIVERSITY', 24.7166, 46.6198],
+      ['AL YASMIN', 24.82, 46.64],
     ],
   },
   {
@@ -159,6 +176,7 @@ const CITIES: City[] = [
     lat: 29.7604,
     lng: -95.3698,
     tz: 'America/Chicago',
+    area: 'DOWNTOWN TO KATY',
     spots: [
       ['Project Row Houses', "Rick Lowe and fellow artists' Third Ward shotgun houses, art and community since 1993", 29.734, -95.36],
       ['Screwed Up Records', "DJ Screw's shop on the South Side, home of chopped and screwed and the S.U.C.", 29.69, -95.338],
@@ -172,9 +190,11 @@ const CITIES: City[] = [
       ['Southwest Houston', 'Alief and Asiatown: Nigerian, Vietnamese and Latin American Houston', 29.705, -95.545],
     ],
     marks: [
-      ['CHASE TOWER', 29.7601, -95.364],
-      ['WELLS FARGO PLAZA', 29.7577, -95.3687],
-      ['DAIKIN PARK', 29.7573, -95.3555],
+      ['DOWNTOWN', 29.7604, -95.3698],
+      ['GALLERIA', 29.739, -95.463],
+      ['ENERGY CORRIDOR', 29.7835, -95.6316],
+      ['KATY', 29.7858, -95.8245],
+      ['SUGAR LAND', 29.6197, -95.6349],
     ],
   },
   {
@@ -183,6 +203,7 @@ const CITIES: City[] = [
     lat: 33.749,
     lng: -84.388,
     tz: 'America/New_York',
+    area: 'DOWNTOWN TO BUCKHEAD',
     spots: [
       [
         'Sweet Auburn',
@@ -201,10 +222,11 @@ const CITIES: City[] = [
       ['Cascade', "Cascade Family Skating in Southwest Atlanta, a home of the city's music and dance", 33.723, -84.503],
     ],
     marks: [
-      ['BANK OF AMERICA PLAZA', 33.771, -84.386],
-      ['WESTIN PEACHTREE', 33.7594, -84.3876],
-      ['MERCEDES-BENZ STADIUM', 33.7554, -84.4008],
-      ['ONE ATLANTIC CENTER', 33.7864, -84.3875],
+      ['DOWNTOWN', 33.7537, -84.3901],
+      ['MIDTOWN', 33.7838, -84.383],
+      ['BUCKHEAD', 33.8384, -84.3797],
+      ['WEST END', 33.7366, -84.4155],
+      ['DECATUR', 33.7748, -84.2963],
     ],
   },
 ];
@@ -217,8 +239,6 @@ const GROUND = 0,
   SPOT = 4,
   ROAD = 5;
 const RADIUS = 120;
-/** Real heights look flat from across a city; stretch them so the skyline reads */
-const LIFT = 3;
 
 /** Segments as [x0, y0, z0, x1, y1, z1, kind] runs */
 class Lines {
@@ -288,8 +308,10 @@ type Scene = {
 const decodeCity = (buf: ArrayBuffer, c: City): Scene => {
   const v = new DataView(buf);
   const [lat0, lng0, r] = [v.getFloat32(5, true), v.getFloat32(9, true), v.getUint16(13, true)];
-  let o = 15;
-  const s = RADIUS / r / 2; // file units are half metres
+  // Units per metre, and how much to stretch heights so a metro-wide view still has a skyline
+  const [q, lift] = [v.getFloat32(15, true), v.getFloat32(19, true)];
+  let o = 23;
+  const s = RADIUS / r / q;
   const g = new Lines();
   const hull: number[] = [];
   const tops: V3[] = [];
@@ -307,7 +329,7 @@ const decodeCity = (buf: ArrayBuffer, c: City): Scene => {
     const [count, tier, b, t] = [v.getUint8(o), v.getUint8(o + 1), v.getUint16(o + 2, true), v.getUint16(o + 4, true)];
     o += 6;
     const pts = read(count);
-    const [y0, y1] = [b * s * LIFT, Math.max(t * s * LIFT, 0.6)];
+    const [y0, y1] = [b * s * lift, Math.max(t * s * lift, 0.6)];
     const kind = tier ? TOWER : BLOCK;
     let convex = true;
     pts.forEach(([x, z], k) => {
@@ -702,6 +724,7 @@ const Nodes: React.FC = () => {
       raf = 0,
       last = performance.now();
     let hits: { i: number; x: number; y: number }[] = [];
+    let tour: Scene['spots'][number] | undefined;
     let fbs: ReturnType<typeof target>[] = [];
 
     const show = (v: View) => {
@@ -718,7 +741,7 @@ const Nodes: React.FC = () => {
         Object.assign(cam, { yaw: (-c.lng * Math.PI) / 180, pitch: (c.lat * Math.PI) / 180, dist: CAM.globe.start });
         setStatus('ready');
       } else {
-        Object.assign(cam, { yaw: from.mode === 'city' ? cam.yaw : -0.5, pitch: 0.5, dist: CAM.city.start });
+        Object.assign(cam, { yaw: from.mode === 'city' ? cam.yaw : -0.5, pitch: 0.5, dist: CAM.city.start * (W < H ? 0.8 : 1) });
         const s = scenes.get(v.city);
         setStatus(s ? 'ready' : 'loading');
         setAway(s ? s.spots.map((p) => p.away) : []);
@@ -756,14 +779,70 @@ const Nodes: React.FC = () => {
     };
     zoomBy.current = zoom;
 
+    // The city's name floats over it as a hologram of its own: a sign in the scene that turns with
+    // the city, always facing the side you're on so it reads left to right
+    const stripes = document.createElement('canvas');
+    [stripes.width, stripes.height] = [1, 4];
+    const sc = stripes.getContext('2d')!;
+    sc.fillStyle = '#e8fbff';
+    sc.fillRect(0, 0, 1, 3);
+    sc.fillStyle = 'rgba(95,216,255,0.45)';
+    sc.fillRect(0, 3, 1, 1);
+    const ink = ctx.createPattern(stripes, 'repeat')!;
+    const sign = (
+      text: string,
+      now: number,
+      alpha: number,
+      dpr: number,
+      eye: number[],
+      project: (x: number, y: number, z: number) => readonly [number, number, number],
+    ) => {
+      const px = 40;
+      ctx.font = `${px}px "Fixedsys Excelsior", "Courier New", monospace`;
+      const tw = ctx.measureText(text).width;
+      const tall = Math.min(17, (130 * px) / tw);
+      const half = (tall * tw) / px / 2;
+      const y = 72 + Math.sin(now / 900) * 1.5;
+      const d = eye[2] >= 0 ? 1 : -1;
+      const [o, r, t] = [project(-half * d, y, 0), project(half * d, y, 0), project(-half * d, y + tall, 0)];
+      if (o[2] <= 1 || r[2] <= 1 || t[2] <= 1) return;
+      ctx.save();
+      ctx.setTransform(
+        ((r[0] - o[0]) / tw) * dpr,
+        ((r[1] - o[1]) / tw) * dpr,
+        ((o[0] - t[0]) / px) * dpr,
+        ((o[1] - t[1]) / px) * dpr,
+        o[0] * dpr,
+        o[1] * dpr,
+      );
+      ctx.textAlign = 'left';
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = alpha * (0.85 + 0.15 * Math.sin(now / 70));
+      ctx.shadowColor = '#5fd8ff';
+      ctx.shadowBlur = 18 * dpr;
+      ctx.fillStyle = ink;
+      ctx.fillText(text, 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha *= 0.5;
+      ctx.strokeStyle = '#5fd8ff';
+      ctx.lineWidth = 1;
+      ctx.strokeText(text, 0, 0);
+      ctx.restore();
+    };
+
     const mvp = new Float32Array(16);
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       if (!calm && now - touched > 2500) cam.yaw += dt * (cur.mode === 'globe' ? 0.12 : 0.1);
-      cam.tx += (cam.gx - cam.tx) * Math.min(1, dt * 3);
-      cam.tz += (cam.gz - cam.tz) * Math.min(1, dt * 3);
+      // Left alone in a city, the camera drifts from one hidden spot to the next as it circles
+      const idle = cur.mode === 'city' && sel < 0 && !calm ? now - touched - 6000 : -1;
+      const near = scenes.get(cur.city)?.spots.filter((p) => !p.away) ?? [];
+      tour = idle > 0 && near.length ? near[Math.floor(idle / 9000) % near.length] : undefined;
+      const [gx, gz, rate] = tour ? [tour.x * 0.6, tour.z * 0.6, 0.5] : [cam.gx, cam.gz, 3];
+      cam.tx += (gx - cam.tx) * Math.min(1, dt * rate);
+      cam.tz += (gz - cam.tz) * Math.min(1, dt * rate);
       const dpr = Math.min(2, devicePixelRatio || 1);
       // The hologram renders at a little under screen resolution: lighter on phones, and softer like an old tube
       const [gw, gh] = [Math.max(1, Math.round(W * dpr * 0.75)), Math.max(1, Math.round(H * dpr * 0.75))];
@@ -944,8 +1023,8 @@ const Nodes: React.FC = () => {
         ctx.lineTo(r, top + (H - top) * 0.45);
         ctx.lineTo(W / 2 + 30, H);
         ctx.fill();
-        // The picked spot: a light column and a ring pulsing out from it
-        const s = scene?.spots[sel];
+        // The picked spot, or the one the camera is drifting past: a light column and a ring pulsing out from it
+        const s = scene?.spots[sel] ?? tour;
         if (s) {
           const rr = 6 + ((now / 25) % 18);
           ctx.strokeStyle = '#e8fbff';
@@ -973,31 +1052,26 @@ const Nodes: React.FC = () => {
         }
         ctx.globalCompositeOperation = 'source-over';
         if (scene && grow === 1) {
-          // Landmark names stay faint so the spots lead
+          // District and landmark names stay faint
           ctx.fillStyle = '#5fd8ff';
           for (const m of scene.marks) {
             const [x, y, w] = project(...m.at);
             if (w <= 1) continue;
-            ctx.globalAlpha = (sel >= 0 ? 0.25 : 0.6) * flicker;
+            ctx.globalAlpha = (sel >= 0 ? 0.25 : 0.55) * flicker;
             ctx.fillText(m.name, x, y);
           }
+          // The spots are easter eggs: only a beacon until you find one
           scene.spots.forEach((p, i) => {
-            const [x, y, w] = project(p.x, 23, p.z);
+            const [x, y, w] = project(p.x, 16, p.z);
             if (w <= 1) return;
             hits.push({ i, x, y });
-            const on = i === sel;
-            ctx.fillStyle = on ? '#ffffff' : '#bff4ff';
-            ctx.globalAlpha = (on ? 1 : sel >= 0 ? 0.35 : 0.85) * flicker;
-            // Only the picked spot spells out its name; the others show their number, so the middle of town stays readable
-            if (on) ctx.fillText(`[${i + 1}] ${CITIES[cur.city].spots[i][0].toUpperCase()}`, x, y);
-            else {
-              ctx.strokeStyle = ctx.fillStyle;
-              ctx.lineWidth = 1;
-              ctx.strokeRect(Math.round(x) - 8.5, Math.round(y) - 11.5, 17, 15);
-              ctx.fillText(String(i + 1), x, y);
-            }
+            if (i !== sel && p !== tour) return;
+            ctx.fillStyle = '#ffffff';
+            ctx.globalAlpha = (i === sel ? 1 : 0.7) * flicker;
+            ctx.fillText(CITIES[cur.city].spots[i][0].toUpperCase(), x, y - 14);
           });
         }
+        if (scene) sign(CITIES[cur.city].name.toUpperCase(), now, rise * flicker, dpr, R[2], project);
       }
       ctx.globalAlpha = 1;
     };
@@ -1006,13 +1080,16 @@ const Nodes: React.FC = () => {
     const resize = new ResizeObserver(() => ([W, H] = [canvas.clientWidth, canvas.clientHeight]));
     resize.observe(canvas);
 
-    // One finger or the mouse turns it, two fingers pinch to zoom, a tap opens a city on the globe or picks a spot in one
+    // One finger or the mouse turns it, a quick swipe sideways moves to the next city, two fingers pinch
+    // to zoom, and a tap opens a city on the globe or finds a spot in one
     const pointers = new Map<number, { x: number; y: number }>();
     let pinch = 0,
-      moved = 0;
+      moved = 0,
+      start = { x: 0, y: 0, t: 0 };
     const down = (e: PointerEvent) => {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+      start = { x: e.offsetX, y: e.offsetY, t: performance.now() };
       moved = pointers.size > 1 ? 99 : 0;
       touched = performance.now();
     };
@@ -1035,8 +1112,15 @@ const Nodes: React.FC = () => {
       cam.pitch = Math.max(cur.mode === 'globe' ? -1.2 : 0.12, Math.min(cur.mode === 'globe' ? 1.2 : 1.35, cam.pitch + dy * 0.006));
     };
     const up = (e: PointerEvent) => {
+      const single = pointers.size === 1 && moved < 99;
       pointers.delete(e.pointerId);
       pinch = 0;
+      const [dx, dy] = [e.offsetX - start.x, e.offsetY - start.y];
+      if (single && Math.abs(dx) > 70 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - start.t < 350) {
+        const next = cur.mode === 'city' ? cur.city + (dx < 0 ? 1 : -1) : cur.city;
+        show({ mode: 'city', city: (next + CITIES.length) % CITIES.length });
+        return;
+      }
       if (moved > 8) return;
       const hit = hits.find((h) => Math.hypot(h.x - e.offsetX, h.y - e.offsetY) < 22);
       if (cur.mode === 'city') select(hit ? hit.i : -1);
@@ -1094,19 +1178,33 @@ const Nodes: React.FC = () => {
           {view.mode === 'globe' ? (
             <div className="text-lg tracking-widest">{CITIES.length} CITIES</div>
           ) : (
-            <>
-              <div className="text-lg tracking-widest">{city.name.toUpperCase()}</div>
-              <div className="opacity-70">
-                NODE {String(view.city + 1).padStart(2, '0')}/{String(CITIES.length).padStart(2, '0')} · {Math.abs(city.lat).toFixed(2)}°
-                {city.lat < 0 ? 'S' : 'N'} {Math.abs(city.lng).toFixed(2)}°{city.lng < 0 ? 'W' : 'E'} · {time(city.tz)}
+            <div className="opacity-80">
+              <div>
+                NODE {String(view.city + 1).padStart(2, '0')}/{String(CITIES.length).padStart(2, '0')} · {city.area}
+              </div>
+              <div>
+                {Math.abs(city.lat).toFixed(2)}°{city.lat < 0 ? 'S' : 'N'} {Math.abs(city.lng).toFixed(2)}°{city.lng < 0 ? 'W' : 'E'} ·{' '}
+                {time(city.tz)}
               </div>
               {status === 'loading' && <div className="mt-1 animate-pulse">RECEIVING TRANSMISSION...</div>}
               {status === 'lost' && <div className="mt-1">SIGNAL LOST. CHECK YOUR CONNECTION.</div>}
-            </>
+            </div>
           )}
           {status === 'no-webgl' && <div className="mt-1">This device can't show the hologram (no WebGL2).</div>}
+          {view.mode === 'city' && spot >= 0 && (
+            <div className="mt-2 max-w-[300px] border border-[#5fd8ff]/50 bg-[#020a12]/80 px-2 py-1">
+              <div className="text-white">FOUND: {city.spots[spot][0].toUpperCase()}</div>
+              <div className="opacity-80">{city.spots[spot][1]}</div>
+              {away[spot] && <div className="opacity-60">Off the map: {away[spot]}</div>}
+            </div>
+          )}
         </div>
         <div className="flex gap-1 pointer-events-auto">
+          {view.mode === 'city' && (
+            <button className={btn} onClick={() => go.current({ mode: 'globe', city: view.city })} aria-label="Globe">
+              ◎
+            </button>
+          )}
           <button className={btn} onClick={() => zoomBy.current(0.8)} aria-label="Zoom in">
             +
           </button>
@@ -1116,57 +1214,23 @@ const Nodes: React.FC = () => {
         </div>
       </div>
 
-      <div className="absolute bottom-2 left-2 right-2 flex flex-col gap-1">
-        {view.mode === 'city' && spot >= 0 && (
-          <div className="self-start max-w-[340px] border border-[#5fd8ff]/50 bg-[#020a12]/80 px-2 py-1">
-            <div className="text-white">
-              [{spot + 1}] {city.spots[spot][0].toUpperCase()}
-            </div>
-            <div className="opacity-80">{city.spots[spot][1]}</div>
-            {away[spot] && <div className="opacity-60">Off the map: {away[spot]}</div>}
-          </div>
-        )}
-        {view.mode === 'city' && (
-          <div className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
-            {city.spots.map(([name], i) => (
-              <button
-                key={name}
-                className={`${btn} shrink-0 py-0.5 ${spot === i ? 'bg-[#5fd8ff]/25 border-[#bff4ff] text-white' : 'opacity-80'}`}
-                onClick={() => pick.current(spot === i ? -1 : i)}
-              >
-                {i + 1} {name}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-1">
-          <button className={btn} onClick={() => go.current({ mode: 'globe', city: view.city })} aria-label="Globe">
-            ◎
-          </button>
-          <button className={btn} onClick={() => step(-1)} aria-label="Previous city">
-            ‹
-          </button>
-          <div className="flex-1 flex gap-1 overflow-x-auto [scrollbar-width:none]">
-            {CITIES.map((c, i) => (
-              <button
-                key={c.short}
-                className={`${btn} shrink-0 ${view.mode === 'city' && view.city === i ? 'bg-[#5fd8ff]/25 border-[#bff4ff]' : ''}`}
-                onClick={() => go.current({ mode: 'city', city: i })}
-              >
-                {c.name}
-              </button>
-            ))}
-          </div>
-          <button className={btn} onClick={() => step(1)} aria-label="Next city">
-            ›
-          </button>
+      {/* Arrows to swipe between the cities */}
+      {(['‹', '›'] as const).map((a, i) => (
+        <button
+          key={a}
+          className="absolute top-1/2 -translate-y-1/2 px-3 py-6 text-6xl text-[#bff4ff] opacity-60 hover:opacity-100 active:opacity-100 [text-shadow:0_0_12px_#5fd8ff]"
+          style={{ [i ? 'right' : 'left']: 0 }}
+          onClick={() => step(i ? 1 : -1)}
+          aria-label={i ? 'Next city' : 'Previous city'}
+        >
+          {a}
+        </button>
+      ))}
+      {view.mode === 'city' && (
+        <div className="absolute bottom-1 left-2 right-2 text-[10px] opacity-40 pointer-events-none">
+          Buildings © OpenStreetMap contributors, Overture Maps Foundation (ODbL), Google Open Buildings (CC BY 4.0)
         </div>
-        {view.mode === 'city' && (
-          <div className="text-[10px] opacity-50">
-            Buildings © OpenStreetMap contributors, Overture Maps Foundation (ODbL), Google Open Buildings (CC BY 4.0)
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };
