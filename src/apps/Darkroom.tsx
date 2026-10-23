@@ -226,7 +226,7 @@ function labStats(img: Source): [number[], number[]] {
   const d = x.getImageData(0, 0, c.width, c.height).data;
   const sum = [0, 0, 0];
   const sq = [0, 0, 0];
-  const lin = (v: number) => Math.pow(v / 255, 2.2);
+  const lin = (v: number) => ((v /= 255) <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); // exact sRGB, as in the shader
   for (let i = 0; i < d.length; i += 4) {
     const [r, g, b] = [lin(d[i]), lin(d[i + 1]), lin(d[i + 2])];
     const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
@@ -359,9 +359,32 @@ float hash12(vec2 p) {
 }
 vec2 snap(vec2 st, vec2 grid) { return (floor(st * grid) + 0.5) / grid; }
 
+// Exact sRGB curve (the linear toe matters in the shadows; pow 2.2 crushes them). Light adds and blurs in linear.
+vec3 srgb2lin(vec3 c) {
+  c = max(c, 0.0);
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 lin2srgb(vec3 c) {
+  c = max(c, 0.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+
+// Highlight shoulder with a path to white: light more than a stop past the top spills into the other channels (so
+// blown-out colours walk toward white, like film, while punchy saturated colours stay punchy), then each channel
+// rolls off instead of clipping.
+vec3 shoulder(vec3 c) {
+  vec3 over = max(c - 2.0, 0.0);
+  c += (vec3(over.r + over.g + over.b) - over) * 0.15;
+  vec3 x = max(c - 0.95, 0.0);
+  return min(c, 0.95 + 0.05 * x / (x + 0.0125)); // 1.0 lands on 0.99, anything brighter approaches 1.0
+}
+
+// Interleaved gradient noise: half a code value of dither so gradients and vignettes don't band in 8 bits
+float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+
 // ── Oklab Transformations (Ottosson) ──
 vec3 srgb_to_oklab(vec3 c) {
-  vec3 lrgb = pow(clamp(c, 0.0, 1.0), vec3(2.2));
+  vec3 lrgb = srgb2lin(clamp(c, 0.0, 1.0));
   float l = 0.4122214708 * lrgb.r + 0.5363325363 * lrgb.g + 0.0514459929 * lrgb.b;
   float m = 0.2119034982 * lrgb.r + 0.6806995451 * lrgb.g + 0.1073969566 * lrgb.b;
   float s = 0.0883024619 * lrgb.r + 0.2817188376 * lrgb.g + 0.6299787005 * lrgb.b;
@@ -384,7 +407,7 @@ vec3 oklab_to_srgb(vec3 lab) {
   rgb.r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
   rgb.g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   rgb.b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-  return pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / 2.2));
+  return lin2srgb(clamp(rgb, 0.0, 1.0));
 }
 
 // 7x7 box blur over +-off. Each pixel jitters the grid, so big radii come out smooth instead of as ghost copies.
@@ -392,18 +415,18 @@ vec3 box_blur(vec2 st, vec2 off) {
   vec3 s = vec3(0.0);
   vec2 j = vec2(hash12(gl_FragCoord.xy), hash12(gl_FragCoord.yx + 3.1)) - 0.5;
   for (int i = -3; i <= 3; i++) {
-    for (int k = -3; k <= 3; k++) s += texture2D(img, st + (vec2(float(i), float(k)) + j) * off / 3.0).rgb;
+    for (int k = -3; k <= 3; k++) s += srgb2lin(texture2D(img, st + (vec2(float(i), float(k)) + j) * off / 3.0).rgb);
   }
-  return s / 49.0;
+  return lin2srgb(s / 49.0); // averaged as light, so bright spots stay bright instead of going grey
 }
 
-// ── Physical Degradation Module 1: CCD Bloom & Vertical Smear ──
+// ── Physical Degradation Module 1: CCD Bloom & Vertical Smear (returns linear light) ──
 vec3 apply_ccd_smear(vec2 uvCoord, float stepY) {
   vec3 smear = vec3(0.0);
   for (float i = -12.0; i <= 12.0; i += 1.0) {
     vec3 sampleColor = texture2D(img, uvCoord + vec2(0.0, i * stepY)).rgb;
     float bloom = smoothstep(0.9, 1.0, luma(sampleColor));
-    smear += sampleColor * bloom * (1.0 - abs(i) / 12.0);
+    smear += srgb2lin(sampleColor) * bloom * (1.0 - abs(i) / 12.0);
   }
   return smear * 0.18;
 }
@@ -759,22 +782,22 @@ void main() {
 
   c = mix(c, graded, amount);
 
-  // 5. Sensor Degradation Module 1: CCD Bloom & Vertical Smear
-  if (bloomAmount > 0.01) {
+  // 5. Contrast and fade work on the picture as seen (pivot on mid-grey)
+  c = (c - 0.5) * contrast + 0.5;
+  c = c * (1.0 - fade * 0.32) + fade * 0.14;
+
+  // 6. Light: bloom, flare, white balance and vignette in linear light, then the highlight shoulder
+  float flare = smoothstep(0.85, 1.0, luma(c)) * lensReflection; // picked by how bright it looks
+  c = srgb2lin(c);
+  if (bloomAmount > 0.01) { // CCD Bloom & Vertical Smear
     vec3 smear = apply_ccd_smear(st, max(3.0, res.y / 300.0) / res.y) * bloomAmount;
     vec3 bColor = vec3(1.0 + bloomTint * 0.3, 1.0, 1.0 - bloomTint * 0.3);
     c += smear * bColor * 1.5;
   }
-  if (lensReflection > 0.01) {
-    float flare = smoothstep(0.85, 1.0, luma(c)) * lensReflection;
-    c += flare * vec3(0.4, 0.7, 1.0) * 0.5;
-  }
-
-  // 6. Contrast, Warmth, Fade, Vignette
-  c = (c - 0.5) * contrast + 0.5;
-  c *= vec3(1.0 + warmth * 0.12, 1.0, 1.0 - warmth * 0.12);
-  c = c * (1.0 - fade * 0.32) + fade * 0.14;
-  c *= 1.0 - vignette * smoothstep(0.3, 0.8, length(st - 0.5) * 1.25);
+  c += flare * vec3(0.4, 0.7, 1.0) * 0.5;
+  c *= vec3(1.0 + warmth * 0.25, 1.0, 1.0 - warmth * 0.25);
+  c *= pow(1.0 - vignette * smoothstep(0.3, 0.8, length(st - 0.5) * 1.25), 2.2); // same strength as before, as light
+  c = lin2srgb(shoulder(c));
 
   // 7. Sensor Degradation Module 3: grain in film-grain-sized cells, CCD colour noise per pixel
   if (grain > 0.01) {
@@ -809,7 +832,7 @@ void main() {
     if (mod(floor(st.y * res.y / px), 3.0) < 1.0) c *= 1.0 - glitchAmount * 0.3;
   }
 
-  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+  gl_FragColor = vec4(clamp(c + (ign(gl_FragCoord.xy) - 0.5) / 255.0, 0.0, 1.0), 1.0);
 }`;
 
 const TABS = [
