@@ -16,7 +16,7 @@ interface HueMove {
 interface Recipe {
   wb: V3; // white balance gains (linear)
   cross: number; // dye crosstalk: how much each channel bleeds into the others (negative = purer colours)
-  contrast: V3; // per-layer contrast (1 = unchanged)
+  contrast: V3; // per-layer contrast of the stock itself, on a flattened (camera curve undone) image
   pivot: number; // mid-grey the contrast turns around
   lift: V3; // black point (the base fog of the film)
   roll: number; // highlight roll-off: how far white is pulled down (0 = none)
@@ -30,7 +30,7 @@ const RECIPES: Record<number, Recipe> = {
   24: {
     wb: [1.1, 1.0, 0.86],
     cross: 0.06,
-    contrast: [0.92, 0.9, 0.84],
+    contrast: [1.15, 1.12, 1.05],
     pivot: 0.42,
     lift: [0.035, 0.03, 0.03],
     roll: 0.04,
@@ -46,7 +46,7 @@ const RECIPES: Record<number, Recipe> = {
   25: {
     wb: [1.03, 1.0, 0.95],
     cross: -0.08,
-    contrast: [1.22, 1.18, 1.28],
+    contrast: [1.52, 1.48, 1.6],
     pivot: 0.38,
     lift: [0.0, 0.0, 0.01],
     roll: 0.03,
@@ -64,7 +64,7 @@ const RECIPES: Record<number, Recipe> = {
   26: {
     wb: [0.88, 1.0, 1.14],
     cross: 0.04,
-    contrast: [1.08, 1.0, 0.9],
+    contrast: [1.35, 1.25, 1.12],
     pivot: 0.42,
     lift: [0.02, 0.04, 0.05],
     roll: 0.02,
@@ -81,7 +81,7 @@ const RECIPES: Record<number, Recipe> = {
   27: {
     wb: [1.0, 1.0, 0.98],
     cross: 0.1,
-    contrast: [1.18, 1.15, 1.1],
+    contrast: [1.48, 1.44, 1.38],
     pivot: 0.5,
     lift: [0.01, 0.012, 0.015],
     roll: 0.05,
@@ -99,7 +99,7 @@ const RECIPES: Record<number, Recipe> = {
   28: {
     wb: [1.0, 1.0, 1.0],
     cross: -0.12,
-    contrast: [1.25, 1.25, 1.2],
+    contrast: [1.56, 1.56, 1.5],
     pivot: 0.38,
     lift: [0.008, 0.0, 0.01],
     roll: 0.03,
@@ -140,6 +140,11 @@ function oklabToLin([L, a, b]: V3): V3 {
   ];
 }
 
+// Phone and camera JPEGs already carry an S-curve. Undo a typical one first (sCurve with 1/k is its exact inverse), so
+// each stock's own curve, toe and shoulder shape the picture instead of stacking on top of the camera's.
+const CAMERA_K = 1.25;
+const CAMERA_PIVOT = 0.45;
+
 // Contrast around a pivot that keeps black at black and white at white (a smooth S, steeper as k grows)
 const sCurve = (x: number, k: number, p: number) => {
   x = Math.min(Math.max(x, 0), 1);
@@ -151,7 +156,7 @@ const sCurve = (x: number, k: number, p: number) => {
 function grade(rgb: V3, r: Recipe): V3 {
   const [L0, a0, b0] = linToOklab(rgb.map(toLin) as V3);
   // 1. Light: white balance and dye crosstalk
-  let lin = rgb.map((v, i) => toLin(v) * r.wb[i]) as V3;
+  let lin = rgb.map((v, i) => toLin(sCurve(v, 1 / CAMERA_K, CAMERA_PIVOT)) * r.wb[i]) as V3;
   const avg = (lin[0] + lin[1] + lin[2]) / 3;
   lin = lin.map((v) => v + (avg - v) * r.cross) as V3;
   // 2. Each dye layer has its own curve (on the display-encoded value, where a curve reads as contrast)
