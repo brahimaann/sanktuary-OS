@@ -1084,25 +1084,84 @@ const Nodes: React.FC = () => {
           ctx.fillText(c.short, x + (c.lng < -90 ? -10 : 10), y + 4);
         });
       } else {
-        // The beam from the projector below up to the pad
-        let [l, r, top] = [W, 0, H];
-        for (let i = 0; i < 48; i++) {
+        // The projector: a lens below the pad throwing light up into the city, brightest at its source
+        // and fading as it spreads, with a few rays flickering through it
+        const rim = Array.from({ length: 48 }, (_, i) => {
           const ang = (i / 48) * Math.PI * 2;
-          const [x, y] = project(Math.cos(ang) * RADIUS, 0, Math.sin(ang) * RADIUS);
-          [l, r, top] = [Math.min(l, x), Math.max(r, x), Math.min(top, y)];
-        }
-        const beam = ctx.createLinearGradient(0, H, 0, top);
-        beam.addColorStop(0, 'rgba(95,216,255,0.2)');
-        beam.addColorStop(1, 'rgba(95,216,255,0)');
+          return project(Math.cos(ang) * RADIUS, 0, Math.sin(ang) * RADIUS);
+        });
+        const left = rim.reduce((a, b) => (b[0] < a[0] ? b : a));
+        const right = rim.reduce((a, b) => (b[0] > a[0] ? b : a));
+        const low = Math.max(...rim.map((p) => p[1]));
+        const [ex, ey] = [(left[0] + right[0]) / 2, Math.min(H - 16, low + Math.max(40, (H - low) * 0.7))];
+        const glow = Math.min(1, grow * 2) * flicker;
+        const reach = Math.hypot(ex - left[0], ey - (left[1] + right[1]) / 2) * 1.1;
         ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = beam;
-        ctx.globalAlpha = Math.min(1, grow * 2);
+        // Three nested fans make the beam soft at its edges and strongest down the middle
+        for (const [narrow, a] of [
+          [1, 0.55],
+          [0.65, 0.45],
+          [0.3, 0.5],
+        ]) {
+          const light = ctx.createRadialGradient(ex, ey, 0, ex, ey, reach);
+          light.addColorStop(0, 'rgba(225,250,255,0.5)');
+          light.addColorStop(0.1, 'rgba(130,228,255,0.22)');
+          light.addColorStop(0.55, 'rgba(95,216,255,0.06)');
+          light.addColorStop(1, 'rgba(95,216,255,0)');
+          ctx.fillStyle = light;
+          ctx.globalAlpha = a * glow;
+          ctx.beginPath();
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(ex + (left[0] - ex) * narrow, left[1]);
+          for (let i = 0; i <= 12; i++) {
+            const t = i / 12;
+            ctx.lineTo(
+              ex + (left[0] + (right[0] - left[0]) * t - ex) * narrow,
+              left[1] + (right[1] - left[1]) * t + Math.sin(Math.PI * t) * (low - (left[1] + right[1]) / 2),
+            );
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+        for (let i = 0; i < 16; i++) {
+          const t = (i + 0.5) / 16 + Math.sin(now / 1300 + i * 2.1) * 0.02;
+          const [x, y] = [
+            left[0] + (right[0] - left[0]) * t,
+            left[1] + (right[1] - left[1]) * t + Math.sin(Math.PI * t) * (low - (left[1] + right[1]) / 2),
+          ];
+          const ray = ctx.createLinearGradient(ex, ey, x, y);
+          ray.addColorStop(0, 'rgba(210,248,255,0.55)');
+          ray.addColorStop(1, 'rgba(95,216,255,0)');
+          ctx.strokeStyle = ray;
+          ctx.lineWidth = 1 + (i % 3) * 0.6;
+          ctx.globalAlpha = glow * (0.25 + 0.35 * (0.5 + 0.5 * Math.sin(now / (180 + i * 23) + i)));
+          ctx.beginPath();
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+        }
+        // The lens itself
+        const pulse = 1 + 0.06 * Math.sin(now / 240);
+        const halo = ctx.createRadialGradient(ex, ey, 0, ex, ey, 46 * pulse);
+        halo.addColorStop(0, 'rgba(235,252,255,0.9)');
+        halo.addColorStop(0.2, 'rgba(140,230,255,0.45)');
+        halo.addColorStop(1, 'rgba(95,216,255,0)');
+        ctx.fillStyle = halo;
+        ctx.globalAlpha = glow;
         ctx.beginPath();
-        ctx.moveTo(W / 2 - 30, H);
-        ctx.lineTo(l, top + (H - top) * 0.45);
-        ctx.lineTo(r, top + (H - top) * 0.45);
-        ctx.lineTo(W / 2 + 30, H);
+        ctx.arc(ex, ey, 46 * pulse, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = '#8fe6ff';
+        for (const [rx, a] of [
+          [20, 0.7],
+          [34, 0.3],
+        ]) {
+          ctx.globalAlpha = a * glow;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.ellipse(ex, ey + 2, rx * pulse, rx * 0.26 * pulse, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         // The picked spot, or the one the camera is drifting past: a light column and a ring pulsing out from it
         const s = scene?.spots[sel] ?? tour;
         if (s) {
