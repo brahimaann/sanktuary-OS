@@ -217,12 +217,8 @@ const FITS: [Fit, string, string][] = [
 type Source = HTMLImageElement | HTMLCanvasElement;
 const dims = (s: Source) => (s instanceof HTMLImageElement ? [s.naturalWidth, s.naturalHeight] : [s.width, s.height]);
 
-/**
- * Match look: the average and spread of a picture's light (L) and colour (a, b) in Oklab, from a small copy.
- * The same maths as srgb_to_oklab in the shader, so the shader can move one picture's numbers onto another's
- * (Reinhard-style colour transfer).
- */
-function labStats(img: Source): [number[], number[]] {
+/** A small copy of the picture in Oklab (L, a, b per pixel), with the same maths as srgb_to_oklab in the shader. */
+function oklabPixels(img: Source): Float32Array {
   const [w, h] = dims(img);
   const k = Math.min(1, 256 / Math.max(w, h, 1));
   const c = document.createElement('canvas');
@@ -231,27 +227,77 @@ function labStats(img: Source): [number[], number[]] {
   const x = c.getContext('2d', { willReadFrequently: true })!;
   x.drawImage(img, 0, 0, c.width, c.height);
   const d = x.getImageData(0, 0, c.width, c.height).data;
-  const sum = [0, 0, 0];
-  const sq = [0, 0, 0];
+  const out = new Float32Array((d.length / 4) * 3);
   const lin = (v: number) => ((v /= 255) <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)); // exact sRGB, as in the shader
   for (let i = 0; i < d.length; i += 4) {
     const [r, g, b] = [lin(d[i]), lin(d[i + 1]), lin(d[i + 2])];
     const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
     const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
     const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    const lab = [
-      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
-      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
-      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-    ];
-    for (let j = 0; j < 3; j++) {
-      sum[j] += lab[j];
-      sq[j] += lab[j] * lab[j];
-    }
+    out.set(
+      [
+        0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+      ],
+      (i / 4) * 3,
+    );
   }
-  const n = d.length / 4;
+  return out;
+}
+
+/**
+ * Match look: the average and spread of a picture's light (L) and colour (a, b) in Oklab, so the shader can move one
+ * picture's numbers onto another's (Reinhard-style colour transfer).
+ */
+function labStats(img: Source): [number[], number[]] {
+  const px = oklabPixels(img);
+  const sum = [0, 0, 0];
+  const sq = [0, 0, 0];
+  for (let i = 0; i < px.length; i += 3)
+    for (let j = 0; j < 3; j++) {
+      sum[j] += px[i + j];
+      sq[j] += px[i + j] * px[i + j];
+    }
+  const n = px.length / 3;
   const mean = sum.map((v) => v / n);
   return [mean, sq.map((v, j) => Math.max(0.0001, Math.sqrt(Math.max(0, v / n - mean[j] * mean[j]))))];
+}
+
+// Skin, as a soft region in OkLCh (the same one the film stocks protect): around a hue, low chroma (a red jacket is too
+// saturated to be skin), and not hair-black or specular white. dh is the distance from the centre hue in radians.
+const ramp = (x: number, a: number, b: number) => Math.min(Math.max((x - a) / (b - a), 0), 1);
+const SKIN_WIDTH = 0.384; // 22 degrees
+const skinWeight = (L: number, C: number, dh: number) =>
+  Math.exp(-(dh * dh) / (2 * SKIN_WIDTH * SKIN_WIDTH)) *
+  ramp(C, 0.015, 0.035) *
+  (1 - ramp(C, 0.15, 0.2)) *
+  ramp(L, 0.12, 0.2) *
+  (1 - ramp(L, 0.82, 0.92));
+const angle = (d: number) => Math.atan2(Math.sin(d), Math.cos(d)); // wrap to -pi..pi
+
+/** Skin uniformity: this photo's own skin tone (hue in radians, chroma), or null when there's hardly any skin in it. */
+function skinCentre(img: Source): [number, number] | null {
+  const px = oklabPixels(img);
+  // Start from typical skin, then centre on this person's: deep, golden, olive and pink undertones all differ
+  let hue = (50 * Math.PI) / 180;
+  let res: [number, number] | null = null;
+  for (let pass = 0; pass < 2; pass++) {
+    let [sw, sa, sb, sc] = [0, 0, 0, 0];
+    for (let i = 0; i < px.length; i += 3) {
+      const C = Math.hypot(px[i + 1], px[i + 2]);
+      // Only clear skin sets the target: near-greys (a beige wall, a grey-lit cheek) would drag it toward grey
+      const w = skinWeight(px[i], C, angle(Math.atan2(px[i + 2], px[i + 1]) - hue)) * ramp(C, 0.025, 0.045);
+      sw += w;
+      sa += w * px[i + 1];
+      sb += w * px[i + 2];
+      sc += w * C;
+    }
+    if (sw < (px.length / 3) * 0.01) return null;
+    hue = Math.atan2(sb, sa);
+    res = [hue, sc / sw];
+  }
+  return res;
 }
 
 // crop: fill the slot and trim the overflow; fit: whole photo inside the slot; stretch: fill it, distorting
@@ -301,7 +347,27 @@ export interface DarkroomParams {
   // Match look: how far the photo moves to the reference photo's colours (0 = off), and whether light moves too
   match: number;
   matchTone: boolean;
+  // Colour mixer: per hue band (MIX_BANDS), -1 to 1 each. Hue moves up to 30 degrees, lightness up to 0.1 in OkLCh
+  mixHue: number[];
+  mixSat: number[];
+  mixLum: number[];
+  skinUniform: number; // 0 to 1: pulls every bit of skin toward the photo's own average skin tone
 }
+
+// Colour mixer bands: name and centre hue in OkLCh degrees (skin sits between red and orange)
+const MIX_BANDS = [
+  ['Red', 25],
+  ['Orange', 55],
+  ['Yellow', 100],
+  ['Green', 140],
+  ['Aqua', 195],
+  ['Blue', 255],
+  ['Purple', 300],
+  ['Magenta', 340],
+] as const;
+// Each band is a bell as wide as its gaps to the neighbours, so the bands share out every hue between them
+const MIX_C = MIX_BANDS.map(([, h]) => (h * Math.PI) / 180);
+const MIX_W = MIX_C.map((h, i) => (angle(h - MIX_C[(i + 7) % 8]) + angle(MIX_C[(i + 1) % 8] - h)) / 4);
 
 const DEFAULT_PARAMS: DarkroomParams = {
   preset: 0,
@@ -331,6 +397,10 @@ const DEFAULT_PARAMS: DarkroomParams = {
   glitchThreshold: 0,
   match: 0,
   matchTone: true,
+  mixHue: [0, 0, 0, 0, 0, 0, 0, 0],
+  mixSat: [0, 0, 0, 0, 0, 0, 0, 0],
+  mixLum: [0, 0, 0, 0, 0, 0, 0, 0],
+  skinUniform: 0,
 };
 
 const VERT = `attribute vec2 p; varying vec2 uv; void main() { uv = (p + 1.0) / 2.0; gl_Position = vec4(p, 0.0, 1.0); }`;
@@ -352,6 +422,8 @@ uniform int glitchMode;
 uniform float glitchAmount, glitchThreshold;
 uniform float uMatch, uMatchTone;
 uniform vec3 uSrcMean, uSrcStd, uRefMean, uRefStd;
+uniform float uMixC[8], uMixW[8], uMixH[8], uMixS[8], uMixL[8];
+uniform float uMixOn, uSkinU, uSkinH, uSkinC;
 uniform float uNoise;
 uniform float uSharpen;
 uniform float uPixel2x;
@@ -783,6 +855,38 @@ void main() {
     c = texture2D(img, st).rgb;
   }
 
+  // Skin uniformity and colour mixer, in OkLCh on the photo's own colours (before any look)
+  if (uSkinU > 0.001 || uMixOn > 0.5) {
+    vec3 lab = srgb_to_oklab(c);
+    float L = lab.x;
+    float C = length(lab.yz);
+    float h = atan(lab.z, lab.y);
+    // Skin: blotches and casts (red patches, a green spill) move toward this person's own skin tone; light stays
+    if (uSkinU > 0.001) {
+      float d = mod(uSkinH - h + 9.424778, 6.283185) - 3.141593;
+      float w = exp(-d * d / 0.294912) * clamp((C - 0.015) / 0.02, 0.0, 1.0) * (1.0 - clamp((C - 0.15) / 0.05, 0.0, 1.0))
+        * clamp((L - 0.12) / 0.08, 0.0, 1.0) * (1.0 - clamp((L - 0.82) / 0.1, 0.0, 1.0));
+      h += d * uSkinU * w;
+      C = mix(C, uSkinC, 0.35 * uSkinU * w);
+    }
+    if (uMixOn > 0.5) {
+      float sum = 0.0, dh = 0.0, ds = 0.0, dl = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float d = mod(h - uMixC[i] + 9.424778, 6.283185) - 3.141593;
+        float w = exp(-d * d / (2.0 * uMixW[i] * uMixW[i]));
+        sum += w;
+        dh += w * uMixH[i];
+        ds += w * uMixS[i];
+        dl += w * uMixL[i];
+      }
+      float colourful = smoothstep(0.02, 0.06, C) / sum; // greys have no hue to pick a band by, so they stay put
+      h += dh * colourful * 0.5236;
+      C *= max(0.0, 1.0 + ds * colourful);
+      L += dl * colourful * 0.1;
+    }
+    c = oklab_to_srgb(vec3(L, C * cos(h), C * sin(h)));
+  }
+
   // Match look: move the colours (and light) statistics to the reference photo's, in Oklab
   if (uMatch > 0.001) {
     vec3 lab = srgb_to_oklab(c);
@@ -1013,6 +1117,7 @@ const TABS = [
   ['swag', 'Swag Filters'],
   ['goth', 'Goth Filters'],
   ['film', 'Film Stocks'],
+  ['mixer', 'Colour Mixer'],
   ['jpeg', 'JPEG Degradation'],
   ['ccd', 'CCD Bloom'],
   ['camera', '1-Click Cameras'],
@@ -1052,6 +1157,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
   // what the server picker is for: opening a photo, the Match look reference, or carousel slides
   const [showServerPicker, setShowServerPicker] = useState<false | 'open' | 'ref' | 'slides'>(false);
   const [matchRef, setMatchRef] = useState<{ img: HTMLImageElement; name: string } | null>(null);
+  const [mixBand, setMixBand] = useState(1); // Colour mixer: the band being edited (Orange, where most skin sits)
   const [refStats, setRefStats] = useState<[number[], number[]] | null>(null);
   const pickReference = (img: HTMLImageElement, name: string) => {
     setMatchRef({ img, name });
@@ -1150,7 +1256,11 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     () => (refStats && source ? ([...labStats(source), ...refStats] as [number[], number[], number[], number[]]) : null),
     [refStats, source],
   );
-  const dirty = isCollageActive || (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => params[k] !== DEFAULT_PARAMS[k]);
+  const skinUsed = params.skinUniform > 0;
+  const skin = useMemo(() => (skinUsed && source ? skinCentre(source) : null), [skinUsed, source]);
+  const dirty =
+    isCollageActive ||
+    (Object.keys(DEFAULT_PARAMS) as (keyof DarkroomParams)[]).some((k) => String(params[k]) !== String(DEFAULT_PARAMS[k]));
   const canUndo = dirty || pos > 0;
   const canRedo = pos < history.length - 1;
 
@@ -1672,13 +1782,22 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     ctx.uniform3fv(u('uSrcStd'), ss);
     ctx.uniform3fv(u('uRefMean'), rm);
     ctx.uniform3fv(u('uRefStd'), rs);
+    ctx.uniform1fv(u('uMixC'), MIX_C);
+    ctx.uniform1fv(u('uMixW'), MIX_W);
+    ctx.uniform1fv(u('uMixH'), p.mixHue);
+    ctx.uniform1fv(u('uMixS'), p.mixSat);
+    ctx.uniform1fv(u('uMixL'), p.mixLum);
+    ctx.uniform1f(u('uMixOn'), [...p.mixHue, ...p.mixSat, ...p.mixLum].some((v) => v) ? 1 : 0);
+    ctx.uniform1f(u('uSkinU'), skin ? p.skinUniform : 0);
+    ctx.uniform1f(u('uSkinH'), skin?.[0] ?? 0);
+    ctx.uniform1f(u('uSkinC'), skin?.[1] ?? 0);
     ctx.uniform1f(u('uNoise'), p.jpegNoise ? 1.0 : 0.0);
     ctx.uniform1f(u('uSharpen'), p.jpegSharpen ? 1.0 : 0.0);
     ctx.uniform1f(u('uPixel2x'), p.pixelate2x ? 1.0 : 0.0);
     ctx.uniform1f(u('uTime'), (Date.now() % 100000) / 1000.0);
 
     ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4);
-  }, [source, crushed, params, compare, matchStats, redraw]);
+  }, [source, crushed, params, compare, matchStats, skin, redraw]);
 
   const toJpeg = () =>
     new Promise<Blob>((ok, no) => canvasRef.current!.toBlob((b) => (b ? ok(b) : no(new Error('Export failed'))), 'image/jpeg', 0.94));
@@ -2516,6 +2635,65 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   {slider('Clarity', 'clarity', -0.5, 1, 0.01, pct(params.clarity))}
                   {slider('Contrast', 'contrast', 0.5, 2, 0.01, `${params.contrast.toFixed(2)}x`)}
                   {slider('Warmth', 'warmth', -1, 1, 0.02, params.warmth.toFixed(2))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Colour Mixer ── */}
+            {activeTab === 'mixer' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {MIX_BANDS.map(([name, hue], i) => (
+                    <button
+                      key={name}
+                      onClick={() => setMixBand(i)}
+                      style={{ ...button, fontSize: 11, padding: '2px 8px', fontWeight: mixBand === i ? 700 : 400 }}
+                    >
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: 9,
+                          height: 9,
+                          marginRight: 4,
+                          border: '1px solid #000',
+                          background: `oklch(0.7 0.14 ${hue})`,
+                          outline: mixBand === i ? '1px dotted #000' : undefined,
+                        }}
+                      />
+                      {name}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 6 }}>
+                  {(
+                    [
+                      ['Hue', 'mixHue', (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 30)}°`],
+                      ['Saturation', 'mixSat', (v: number) => `${v > 0 ? '+' : ''}${pct(v)}`],
+                      ['Lightness', 'mixLum', (v: number) => `${v > 0 ? '+' : ''}${pct(v)}`],
+                    ] as const
+                  ).map(([label, key, shown]) => (
+                    <label key={key}>
+                      {MIX_BANDS[mixBand][0]} {label.toLowerCase()}: {shown(params[key][mixBand])}
+                      <input
+                        type="range"
+                        min={-1}
+                        max={1}
+                        step={0.01}
+                        value={params[key][mixBand]}
+                        onChange={(e) =>
+                          setParams((prev) => ({ ...prev, [key]: prev[key].map((v, i) => (i === mixBand ? +e.target.value : v)) }))
+                        }
+                        onDoubleClick={() => setParams((prev) => ({ ...prev, [key]: prev[key].map((v, i) => (i === mixBand ? 0 : v)) }))}
+                        style={{ width: '100%' }}
+                      />
+                    </label>
+                  ))}
+                  {slider('Skin uniformity', 'skinUniform', 0, 1, 0.01, pct(params.skinUniform))}
+                </div>
+                <div style={{ color: '#444' }}>
+                  {skinUsed && !skin
+                    ? "Skin uniformity didn't find enough skin in this photo to work from."
+                    : "Skin uniformity evens out blotchy or colour-cast patches by pulling them toward the photo's own skin tone, without changing how light or dark the skin is. Double-click a slider to reset it."}
                 </div>
               </div>
             )}
