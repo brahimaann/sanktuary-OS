@@ -641,7 +641,6 @@ const Nodes: React.FC = () => {
   const zoomBy = useRef<(factor: number) => void>(() => {});
   const pick = useRef<(spot: number) => void>(() => {});
   const [spot, setSpot] = useState(-1);
-  const [credits, setCredits] = useState(false);
   const [away, setAway] = useState<string[]>([]);
   const [status, setStatus] = useState<'ready' | 'loading' | 'lost' | 'no-webgl'>('ready');
 
@@ -1346,9 +1345,6 @@ const Nodes: React.FC = () => {
               ◎
             </button>
           )}
-          <button className={btn} onClick={() => setCredits((c) => !c)} aria-label="Map credits">
-            ©
-          </button>
           <button className={btn} onClick={() => zoomBy.current(0.8)} aria-label="Zoom in">
             +
           </button>
@@ -1370,12 +1366,6 @@ const Nodes: React.FC = () => {
           {a}
         </button>
       ))}
-      {credits && (
-        <div className="absolute top-12 right-3 max-w-[260px] border border-[#5fd8ff]/50 bg-[#020a12]/90 px-2 py-1 text-[11px] opacity-90">
-          Map data © OpenStreetMap contributors, Overture Maps Foundation (ODbL), Google Open Buildings (CC BY 4.0). Coastlines: Natural
-          Earth.
-        </div>
-      )}
     </div>
   );
 };
