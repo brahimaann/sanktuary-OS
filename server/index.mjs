@@ -5491,6 +5491,9 @@ const STORY_PAGE = new URL('./story.html', import.meta.url);
 const STORY_IMAGE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tif', '.tiff']);
 const STORY_VIDEO = new Set(['.mp4', '.m4v', '.webm', '.mov']);
 const STORY_WIDTHS = [800, 1600, 2400];
+// Pictures and clips on public pages: Cloudflare keeps them for 10 minutes (see ops/README.md, "Cloudflare cache
+// rule"). Short, because story items are addressed by position and covers can be swapped under the same URL.
+const PUBLIC_MEDIA = 'public, max-age=600';
 let storiesDb = null;
 let storiesSaved = Promise.resolve();
 const loadStories = async () => (storiesDb ??= await readJson('stories.json', { stories: {} }));
@@ -5637,10 +5640,12 @@ async function storyPublic(req, res, url) {
   const root = (await storyRoot(st)) || fail(503, 'This story is offline right now');
   const abs = resolve(root, ...item.file.split('/'));
   if (!inside(resolve(root), abs)) fail(400, 'Bad path');
+  const cache = st.public ? PUBLIC_MEDIA : 'no-store'; // an admin's look at an unpublished story stays off the edge
   if (item.kind === 'image') {
     const w = Number(url.searchParams.get('w'));
-    return thumb(res, abs, STORY_WIDTHS.includes(w) ? w : 1600);
+    return thumb(res, abs, STORY_WIDTHS.includes(w) ? w : 1600, cache);
   }
+  res.setHeader('cache-control', cache);
   return stream(req, res, new URLSearchParams(), abs);
 }
 
@@ -5763,7 +5768,7 @@ async function releasePublic(req, res, url) {
   if (part === 'cover') {
     const file = (await releaseFile(r.cover)) || fail(404, 'No cover');
     const w = Number(url.searchParams.get('w'));
-    return thumb(res, file, [400, 800, 1600].includes(w) ? w : 800);
+    return thumb(res, file, [400, 800, 1600].includes(w) ? w : 800, PUBLIC_MEDIA);
   }
   if (part === 'preview') {
     const t = own(tdb.tracks, id);
@@ -6515,25 +6520,36 @@ async function aiPreview(file) {
   }
 }
 
-/** Cached WebP rendering of an image: 256 px thumbnails, or larger previews for formats browsers can't show (PSD, TIFF). */
-async function thumb(res, file, max = 256) {
+/**
+ * Cached WebP rendering of an image: 256 px thumbnails, or larger previews for formats browsers can't show (PSD, TIFF).
+ * Public pages pass a public cache header so Cloudflare serves repeat visitors instead of this PC's upload.
+ */
+const thumbJobs = new Map(); // cache file -> Promise, so a burst of visitors renders a new picture once
+async function thumb(res, file, max = 256, cache = 'private, max-age=86400') {
   if (!THUMBABLE.has(extname(file).toLowerCase())) fail(415, 'No thumbnail');
   const s = (await stat(file).catch(() => null)) || fail(404, 'Not found');
   const dir = await cacheDir();
   const cached = join(dir, createHash('sha1').update(`${file}|${s.size}|${s.mtimeMs}|${max}`).digest('hex') + '.webp');
   if (!existsSync(cached)) {
-    await mkdir(dir, { recursive: true });
-    const img = await imageInput(file, s.size);
-    const webp = await img
-      .rotate()
-      .resize(max, max, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: max > 256 ? 85 : 70 })
-      .toBuffer()
-      .catch(() => fail(415, "Couldn't read this image — use Download")); // damaged or unsupported file
-    await writeFile(cached, webp);
-    pruneCache(dir);
+    if (!thumbJobs.has(cached)) {
+      const job = (async () => {
+        await mkdir(dir, { recursive: true });
+        const img = await imageInput(file, s.size);
+        const webp = await img
+          .rotate()
+          .resize(max, max, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: max > 256 ? 85 : 70 })
+          .toBuffer()
+          .catch(() => fail(415, "Couldn't read this image — use Download")); // damaged or unsupported file
+        await writeFile(cached, webp);
+        pruneCache(dir);
+      })();
+      thumbJobs.set(cached, job);
+      job.finally(() => thumbJobs.delete(cached)).catch(() => {});
+    }
+    await thumbJobs.get(cached);
   }
-  res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': 'private, max-age=86400' });
+  res.writeHead(200, { 'content-type': 'image/webp', 'cache-control': cache });
   return pipeline(createReadStream(cached), res);
 }
 
