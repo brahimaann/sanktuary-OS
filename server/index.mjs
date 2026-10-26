@@ -2807,13 +2807,178 @@ const BIZ = () => join(DATA, 'business');
 const BIZ_KINDS = {
   clients: { text: { name: 100, company: 100, email: 200, phone: 50, notes: 4000 }, status: ['Lead', 'Active', 'Past'] },
   jobs: { text: { title: 150, notes: 4000 }, status: ['Quote', 'In progress', 'Delivered', 'Paid', 'Cancelled'] },
-  invoices: { text: { notes: 2000, billTo: 500 }, status: ['Draft', 'Sent', 'Paid', 'Void'] },
+  invoices: { text: { notes: 2000, billTo: 500, title: 150 }, status: ['Draft', 'Sent', 'Paid', 'Void'] },
+  templates: { text: { name: 100, notes: 2000, title: 150 }, status: ['Active'] },
 };
+// What an invoice is for; each kind has a starter template (below) with its usual lines, brand and terms
+const INVOICE_TYPES = ['Talent hosting', 'Music work', 'Event', 'Shop order', 'Photo/video shoot', 'Other'];
+// Who an invoice is from: name, logo, colour, contact, how to pay and the small print, per brand
+const BRAND_TEXT = { name: 100, address: 500, email: 200, payment: 1000, terms: 1000, logo: 500, color: 7 };
+const blankBrand = (id, name) => ({ id, name, address: '', email: '', payment: '', terms: '', logo: '', color: '#000080', cards: true });
+const starter = (id, name, type, brand, lines, notes, dueDays = 14) => ({
+  id,
+  name,
+  type,
+  brand,
+  title: '',
+  items: lines.map((desc) => ({ desc, qty: 1, rate: 0 })),
+  tax: 0,
+  discount: 0,
+  dueDays,
+  notes,
+  status: 'Active',
+  client: null,
+  created: new Date().toISOString(),
+  createdBy: 'sanktuary',
+});
+const STARTER_TEMPLATES = [
+  starter(
+    't-hosting',
+    'Talent hosting',
+    'Talent hosting',
+    'mrnd',
+    ['Artist hosting / booking fee', 'Travel and lodging'],
+    'Thank you for booking with MRND.',
+  ),
+  starter(
+    't-music',
+    'Music work',
+    'Music work',
+    'mrnd',
+    ['Production (per beat)', 'Mixing (per song)', 'Mastering (per song)', 'Studio time (per hour)'],
+    'Files are delivered once this invoice is paid.',
+  ),
+  starter(
+    't-event',
+    'Event',
+    'Event',
+    'mhotc',
+    ['Event hosting and curation', 'Sound and setup', 'Performer fees'],
+    'A 50% deposit holds the date; the rest is due on the day.',
+    7,
+  ),
+  starter('t-shop', 'Shop order', 'Shop order', 'main', ['Item', 'Shipping'], 'Ships once paid.', 7),
+  starter(
+    't-shoot',
+    'Photo/video shoot',
+    'Photo/video shoot',
+    'main',
+    ['Shoot (per hour)', 'Editing and retouching (per image)', 'Usage licence'],
+    'A 50% deposit books the shoot; the rest is due on delivery.',
+  ),
+];
+/** Subtotal, less the discount, plus tax (a percentage). */
+const invoiceTotal = (i) => {
+  const net = Math.max(0, i.items.reduce((n, it) => n + it.qty * it.rate, 0) - (i.discount || 0));
+  return Math.round(net * (1 + (i.tax || 0) / 100) * 100) / 100;
+};
+const usd = (n) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const twoStep = new Map(); // clerk user id -> { on, at }
 let bizDb = null;
 let bizSaved = Promise.resolve();
-const loadBiz = async () =>
-  (bizDb ??= await readJson('business/business.json', { clients: {}, jobs: {}, invoices: {}, docs: {}, nextInvoice: {} }));
+const loadBiz = async () => {
+  bizDb ??= await readJson('business/business.json', { clients: {}, jobs: {}, invoices: {}, docs: {}, nextInvoice: {} });
+  // The old single "your details" become the main brand, next to MRND and MHOTC
+  bizDb.brands ??= {
+    main: { ...blankBrand('main', 'Sanktuary'), ...bizDb.settings, id: 'main' },
+    mrnd: blankBrand('mrnd', 'MRND'),
+    mhotc: blankBrand('mhotc', 'MHOTC'),
+  };
+  bizDb.templates ??= Object.fromEntries(STARTER_TEMPLATES.map((t) => [t.id, t]));
+  return bizDb;
+};
+const brandOf = (db, id) => (own(db.brands, id) && !db.brands[id].deleted && db.brands[id]) || db.brands.main;
+
+/** The invoice as a page: printed by admins, and what the client opens from the emailed link. */
+function invoiceHtml(i, brand, c, { admin = false, pay = false, thanks = false } = {}) {
+  const e = mailEsc;
+  const br = (t) => e(t).replace(/\n/g, '<br>');
+  const color = /^#[0-9a-f]{6}$/i.test(brand.color) ? brand.color : '#000080';
+  const sub = i.items.reduce((n, it) => n + it.qty * it.rate, 0);
+  const net = Math.max(0, sub - (i.discount || 0));
+  const line = (label, v) => `<div>${label} <span>${v}</span></div>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(brand.name)} ${e(i.number)}</title><style>
+  body{font:14px/1.45 Georgia,serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px}
+  h1{font:700 26px Arial,sans-serif;margin:0;color:${color}} .muted{color:#555} table{width:100%;border-collapse:collapse;margin:24px 0}
+  th{border-bottom:2px solid ${color}} th,td{text-align:left;padding:6px 4px} td{border-bottom:1px solid #ccc} td.n,th.n{text-align:right}
+  .sums{text-align:right;font-family:Arial,sans-serif} .sums span{display:inline-block;min-width:110px}
+  .tot{font:700 18px Arial,sans-serif} .row{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  .logo{max-height:64px;max-width:200px;display:block;margin-bottom:8px} .pay{margin:20px 0;padding:14px;border:2px solid ${color}}
+  .pay button{font:700 15px Arial,sans-serif;background:${color};color:#fff;border:0;padding:10px 18px;cursor:pointer}
+  @media print{button,.pay form{display:none}}</style></head><body>
+  ${admin ? '<button onclick="print()">Print / Save as PDF</button>' : ''}
+  <div class="row"><div>${/^https:\/\//.test(brand.logo) ? `<img class="logo" src="${e(brand.logo)}" alt="">` : ''}<h1>${e(brand.name || 'Invoice')}</h1><div class="muted">${br(brand.address)}${brand.email ? `<br>${e(brand.email)}` : ''}</div></div>
+  <div style="text-align:right"><h1>INVOICE</h1><div>${e(i.number)}</div>${i.type && i.type !== 'Other' ? `<div>${e(i.type)}</div>` : ''}<div class="muted">Issued ${e(i.issued || '')}${i.due ? `<br>Due ${e(i.due)}` : ''}</div></div></div>
+  <p><b>Bill to</b><br>${br(i.billTo || [c?.name, c?.company, c?.email].filter(Boolean).join('\n'))}</p>
+  ${i.title ? `<p><b>For</b><br>${e(i.title)}</p>` : ''}
+  <table><tr><th>Description</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>
+  ${i.items.map((it) => `<tr><td>${e(it.desc)}</td><td class="n">${it.qty}</td><td class="n">${usd(it.rate)}</td><td class="n">${usd(it.qty * it.rate)}</td></tr>`).join('')}
+  </table><div class="sums">${i.discount || i.tax ? line('Subtotal', usd(sub)) : ''}${i.discount ? line('Discount', `−${usd(i.discount)}`) : ''}${i.tax ? line(`Tax ${i.tax}%`, usd(net * (i.tax / 100))) : ''}
+  <div class="tot">Total <span>${usd(invoiceTotal(i))}</span></div>${i.status === 'Paid' ? `<div class="tot" style="color:#006000">PAID ${e(i.paidOn || '')}</div>` : ''}</div>
+  ${thanks && i.status !== 'Paid' ? '<p class="pay">Thank you. Your payment is going through; this page shows PAID once it lands.</p>' : ''}
+  ${pay ? `<div class="pay"><form method="post" action="/invoice/${e(i.id)}/${e(i.link)}/pay"><button>Pay ${usd(invoiceTotal(i))} by card</button></form></div>` : ''}
+  ${i.status !== 'Paid' && brand.payment ? `<p><b>How to pay</b><br>${br(brand.payment)}</p>` : ''}
+  ${i.notes ? `<p class="muted">${br(i.notes)}</p>` : ''}${brand.terms ? `<p class="muted" style="font-size:12px">${br(brand.terms)}</p>` : ''}</body></html>`;
+}
+const invoiceLink = (req, i) => `${siteOrigin(req)}/invoice/${i.id}/${(i.link ||= randomUUID())}`;
+const canPayByCard = (i, brand) => stripeReady() && brand.cards !== false && i.status === 'Sent' && invoiceTotal(i) >= 1;
+
+/** /invoice/<id>/<link>: the client's copy, no account needed; with a card button when Stripe is set up. */
+async function invoicePage(req, res, url) {
+  res.setHeader('x-robots-tag', 'noindex, nofollow');
+  res.setHeader('referrer-policy', 'no-referrer'); // the link is the key
+  const [, , id, link, action] = url.pathname.split('/');
+  const db = await loadBiz();
+  const i = own(db.invoices, id) && db.invoices[id];
+  if (!i || i.deleted || !i.link || i.link !== link || i.status === 'Void' || i.status === 'Draft')
+    fail(410, 'This invoice link no longer works. Ask the sender for a new one.');
+  const brand = brandOf(db, i.brand);
+  if (req.method === 'POST' && action === 'pay') {
+    if (!canPayByCard(i, brand))
+      fail(409, i.status === 'Paid' ? 'This invoice is already paid' : 'Card payment is not open for this invoice');
+    const back = `${siteOrigin(req)}/invoice/${i.id}/${i.link}`;
+    const session = await stripe('/checkout/sessions', {
+      mode: 'payment',
+      line_items: {
+        0: {
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            unit_amount: Math.round(invoiceTotal(i) * 100),
+            product_data: { name: `${brand.name} invoice ${i.number}`.slice(0, 200) },
+          },
+        },
+      },
+      success_url: `${back}?paid=1`,
+      cancel_url: back,
+      metadata: { invoice: i.id },
+    });
+    return res.writeHead(303, { location: session.url }).end();
+  }
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-security-policy':
+      "default-src 'none'; style-src 'unsafe-inline'; img-src https:; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'",
+  });
+  res.end(
+    invoiceHtml(i, brand, own(db.clients, i.client) && db.clients[i.client], {
+      pay: canPayByCard(i, brand),
+      thanks: url.searchParams.has('paid'),
+    }),
+  );
+}
+
+/** Called from the Stripe webhook when an invoice is paid by card. */
+async function invoicePaid(s) {
+  const db = await loadBiz();
+  const i = own(db.invoices, s.metadata.invoice) && db.invoices[s.metadata.invoice];
+  if (!i || i.status === 'Paid' || s.payment_status !== 'paid') return;
+  Object.assign(i, { status: 'Paid', paidOn: localDate(), paidVia: 'card', updated: new Date().toISOString() });
+  saveBiz();
+  for (const a of (await loadConfig()).admins)
+    await notify(a, `Invoice ${i.number} was paid by card: ${usd((s.amount_total || 0) / 100)}.`, {});
+}
 const saveBiz = () =>
   (bizSaved = bizSaved
     .then(() => mkdir(BIZ(), { recursive: true }).then(() => saveJson('business/business.json', bizDb)))
@@ -2867,7 +3032,7 @@ async function businessApi(req, res, url) {
   if (req.method === 'GET' && kind === 'overview') {
     await audit(req, user, 'opened the portal');
     const inv = Object.values(db.invoices).filter((i) => !i.deleted);
-    const total = (i) => i.items.reduce((n, it) => n + it.qty * it.rate, 0);
+    const total = invoiceTotal;
     const today = localDate();
     const year = today.slice(0, 4);
     return json(res, {
@@ -2892,17 +3057,30 @@ async function businessApi(req, res, url) {
     );
   }
 
-  if (kind === 'settings') {
-    // What goes at the top and bottom of an invoice
-    db.settings ||= { name: '', address: '', email: '', payment: '' };
-    if (req.method === 'PATCH') {
+  if (kind === 'settings') return json(res, db.brands.main); // letterhead for proposals
+  if (kind === 'brands') {
+    if (req.method === 'GET')
+      return json(
+        res,
+        Object.values(db.brands).filter((x) => !x.deleted),
+      );
+    const nid = randomUUID().slice(0, 8);
+    const x =
+      req.method === 'POST'
+        ? (db.brands[nid] = blankBrand(nid, 'New brand'))
+        : (own(db.brands, id) && !db.brands[id].deleted && db.brands[id]) || fail(404, 'No such brand');
+    if (req.method === 'DELETE') {
+      if (x.id === 'main') fail(400, 'The main brand stays');
+      x.deleted = new Date().toISOString(); // its invoices fall back to the main brand
+    } else {
       const input = await jsonBody(req);
-      for (const [k, max] of Object.entries({ name: 100, address: 500, email: 200, payment: 1000 }))
-        if (input[k] !== undefined) db.settings[k] = String(input[k] ?? '').slice(0, max);
-      saveBiz();
-      await audit(req, user, 'changed invoice details');
+      for (const [k, max] of Object.entries(BRAND_TEXT)) if (input[k] !== undefined) x[k] = String(input[k] ?? '').slice(0, max);
+      if (input.logo && !/^https:\/\//.test(x.logo)) fail(400, 'The logo needs to be an https:// link to an image');
+      if (input.cards !== undefined) x.cards = !!input.cards;
     }
-    return json(res, db.settings);
+    saveBiz();
+    await audit(req, user, `${{ POST: 'added', DELETE: 'removed' }[req.method] || 'changed'} brand`, x.name);
+    return json(res, x);
   }
   if (kind === 'docs') return businessDocs(req, res, url, user, db, id, sub);
   if (kind === 'revenue') return businessRevenue(req, res, url, user, db, id);
@@ -2953,15 +3131,22 @@ async function businessApi(req, res, url) {
       if (input.amount !== undefined) x.amount = money(input.amount || 0);
       if (input.due !== undefined) x.due = dateOrNull(input.due);
     }
-    if (kind === 'invoices') {
-      if (input.job !== undefined) x.job = input.job && own(db.jobs, input.job) ? input.job : null;
-      for (const k of ['issued', 'due', 'paidOn']) if (input[k] !== undefined) x[k] = dateOrNull(input[k]);
+    if (kind === 'invoices' || kind === 'templates') {
+      if (input.type !== undefined) x.type = INVOICE_TYPES.includes(input.type) ? input.type : fail(400, 'Bad invoice type');
+      if (input.brand !== undefined) x.brand = own(db.brands, input.brand) ? input.brand : fail(400, 'No such brand');
+      if (input.tax !== undefined) x.tax = Math.min(100, Math.max(0, money(input.tax || 0)));
+      if (input.discount !== undefined) x.discount = Math.max(0, money(input.discount || 0));
       if (input.items !== undefined)
         x.items = (Array.isArray(input.items) ? input.items : []).slice(0, 50).map((it) => ({
           desc: String(it?.desc || '').slice(0, 300),
           qty: money(it?.qty ?? 1),
           rate: money(it?.rate ?? 0),
         }));
+    }
+    if (kind === 'templates' && input.dueDays !== undefined) x.dueDays = Math.min(365, Math.max(0, Math.round(money(input.dueDays || 0))));
+    if (kind === 'invoices') {
+      if (input.job !== undefined) x.job = input.job && own(db.jobs, input.job) ? input.job : null;
+      for (const k of ['issued', 'due', 'paidOn']) if (input[k] !== undefined) x[k] = dateOrNull(input[k]);
       if (x.status === 'Paid' && !x.paidOn) x.paidOn = localDate();
     }
   };
@@ -2981,33 +3166,84 @@ async function businessApi(req, res, url) {
         due: null,
         paidOn: null,
         job: null,
+        brand: 'main',
+        type: 'Other',
+        tax: 0,
+        discount: 0,
       });
+      // Start from a template (its lines, brand, notes and due date) or copy another invoice
+      const from = input.template
+        ? own(db.templates, input.template) && db.templates[input.template]
+        : input.copy && own(db.invoices, input.copy) && db.invoices[input.copy];
+      if ((input.template || input.copy) && !from) fail(404, 'No such template');
+      if (from) {
+        for (const k of ['brand', 'type', 'title', 'notes', 'tax', 'discount']) x[k] = from[k] ?? x[k];
+        x.items = from.items.map((it) => ({ ...it }));
+        if (input.copy) Object.assign(x, { client: from.client, job: from.job, billTo: from.billTo });
+        if (from.dueDays) x.due = localDate(new Date(Date.now() + from.dueDays * 864e5));
+      }
     }
+    if (kind === 'templates')
+      Object.assign(x, { name: 'New template', items: [], brand: 'main', type: 'Other', tax: 0, discount: 0, dueDays: 14 });
     if (kind === 'jobs') Object.assign(x, { amount: 0, due: null });
     apply(x, input);
     if (kind === 'clients' && !x.name.trim()) fail(400, 'Give the client a name');
     if (kind === 'jobs' && !x.title.trim()) fail(400, 'Give the job a title');
     coll[x.id] = x;
     saveBiz();
-    await audit(req, user, `added ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    await audit(req, user, `added ${kind.slice(0, -1)}`, x.number || x.name || x.title);
     return json(res, x);
   }
   const x = (own(coll, id) && !coll[id].deleted && coll[id]) || fail(404, 'Not found');
+  if (kind === 'invoices' && sub === 'page') {
+    // The printable copy and the client's link (made the first time it's asked for)
+    const link = invoiceLink(req, x);
+    saveBiz();
+    return json(res, {
+      link,
+      html: invoiceHtml(x, brandOf(db, x.brand), own(db.clients, x.client) && db.clients[x.client], { admin: true }),
+    });
+  }
+  if (kind === 'invoices' && sub === 'send' && req.method === 'POST') {
+    // Emails the client a link to their copy (with a card button when Stripe is on); a draft becomes Sent
+    const input = await jsonBody(req);
+    const to = String(input.to || (own(db.clients, x.client) && db.clients[x.client].email) || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) fail(400, 'Give an email address to send it to');
+    if (x.status === 'Void' || x.status === 'Paid') fail(409, `This invoice is ${x.status.toLowerCase()}`);
+    if (!mailReady()) fail(503, "Email isn't set up on the server yet (RESEND_API_KEY / MAIL_FROM). Copy the link and send it yourself.");
+    if (x.status === 'Draft') x.status = 'Sent';
+    const brand = brandOf(db, x.brand);
+    const link = invoiceLink(req, x);
+    const message =
+      String(input.message || '').slice(0, 3000) ||
+      `Hi {name},\n\nHere is invoice ${x.number}${x.title ? ` for ${x.title}` : ''}: ${usd(invoiceTotal(x))}${x.due ? `, due ${x.due}` : ''}.`;
+    const name = (own(db.clients, x.client) && db.clients[x.client].name.split(' ')[0]) || '';
+    await sendMail(
+      { email: to, name, replyTo: brand.email || undefined },
+      `${brand.name} invoice ${x.number}: ${usd(invoiceTotal(x))}`,
+      `${message}\n\nView${canPayByCard(x, brand) ? ' and pay' : ''}: ${link}\n\n${brand.name}`,
+      siteOrigin(req),
+    );
+    x.sent = [...(x.sent || []), { at: new Date().toISOString(), to, by: me }].slice(-20);
+    saveBiz();
+    await audit(req, user, 'sent invoice', `${x.number} to ${to}`);
+    return json(res, x);
+  }
   if (req.method === 'GET') {
-    await audit(req, user, `opened ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    await audit(req, user, `opened ${kind.slice(0, -1)}`, x.number || x.name || x.title);
     return json(res, x);
   }
   if (req.method === 'PATCH') {
     apply(x, await jsonBody(req));
     x.updated = new Date().toISOString();
     saveBiz();
-    await audit(req, user, `changed ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    await audit(req, user, `changed ${kind.slice(0, -1)}`, x.number || x.name || x.title);
     return json(res, x);
   }
   if (req.method === 'DELETE') {
     x.deleted = new Date().toISOString(); // kept in the file, hidden: nothing here is ever really deleted
     saveBiz();
-    await audit(req, user, `removed ${kind.slice(0, -1)}`, x.name || x.title || x.number);
+    await audit(req, user, `removed ${kind.slice(0, -1)}`, x.number || x.name || x.title);
     return json(res, { ok: true });
   }
   fail(405, 'Not allowed');
@@ -4634,6 +4870,7 @@ async function stripeWebhook(req, res) {
       for (const a of cfg.admins) await notify(a, `${s.metadata.anonymous ? 'Someone' : name} put $${amount} into "${p.title}".`, {});
     }
     if (s.metadata?.order) await shopPaid(s); // the shop (below)
+    if (s.metadata?.invoice) await invoicePaid(s); // a business invoice paid from its link
   }
   if (event.type === 'checkout.session.expired' && event.data.object.metadata?.order) {
     // An abandoned checkout: its hold ends now (needs "checkout.session.expired" ticked on the Stripe webhook)
@@ -7968,6 +8205,7 @@ async function sendMail(sub, subject, text, origin) {
         .slice(0, 150),
       text: body + foot,
       html,
+      ...(sub.replyTo ? { reply_to: sub.replyTo } : {}),
       headers: unsub ? { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } : {},
     }),
   });
@@ -8405,6 +8643,7 @@ const routes = [
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
   ['/sign/', signPage],
+  ['/invoice/', invoicePage],
   ['/b/', publicBoard],
   // Normally the service worker answers the phone's "Share to Sanktuary"; if it wasn't running, say so instead of 404
   ['/share-target', (req, res) => (req.resume(), res.writeHead(303, { location: '/?share=missed' }).end())],

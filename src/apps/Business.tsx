@@ -32,6 +32,13 @@ interface Item {
 interface Invoice {
   id: string;
   number: string;
+  brand?: string;
+  type?: string;
+  title?: string;
+  tax?: number;
+  discount?: number;
+  sent?: { at: string; to: string }[];
+  paidVia?: string;
   client: string | null;
   job: string | null;
   status: string;
@@ -57,16 +64,36 @@ interface Settings {
   email: string;
   payment: string;
 }
+interface Brand extends Settings {
+  id: string;
+  terms: string;
+  logo: string;
+  color: string;
+  cards: boolean;
+}
+interface Template {
+  id: string;
+  name: string;
+  type: string;
+  brand: string;
+  title: string;
+  items: Item[];
+  tax: number;
+  discount: number;
+  dueDays: number;
+  notes: string;
+}
+const INVOICE_TYPES = ['Talent hosting', 'Music work', 'Event', 'Shop order', 'Photo/video shoot', 'Other'];
 
 /**
  * Opens a print window straight away (browsers block pop-ups opened after waiting on the network), then fills it
  * with a page built from the business details.
  */
-const printWindow = async (b: B, page: (s: Settings) => string) => {
+const printWindow = async <T = Settings,>(b: B, page: (s: T) => string, path = '/settings') => {
   const w = window.open('', '_blank');
   if (!w) return dialog.alert('Your browser blocked the new window. Allow pop-ups for this site and try again.');
   try {
-    w.document.write(page(await b('/settings')));
+    w.document.write(page(await b(path)));
     w.document.close();
   } catch (e) {
     w.close();
@@ -76,7 +103,9 @@ const printWindow = async (b: B, page: (s: Settings) => string) => {
 
 const TABS = ['Overview', 'Clients', 'Jobs', 'Invoices', 'Orders', 'Revenue', 'Documents', 'Access log'] as const;
 const usd = (n: number) => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
-const total = (i: Invoice) => i.items.reduce((n, it) => n + it.qty * it.rate, 0);
+/** Subtotal, less the discount, plus tax (a percentage): the same sum the server makes. */
+const total = (i: Pick<Invoice, 'items' | 'tax' | 'discount'>) =>
+  Math.round(Math.max(0, i.items.reduce((n, it) => n + it.qty * it.rate, 0) - (i.discount || 0)) * (1 + (i.tax || 0) / 100) * 100) / 100;
 const STATUSES = {
   clients: ['Lead', 'Active', 'Past'],
   jobs: ['Quote', 'In progress', 'Delivered', 'Paid', 'Cancelled'],
@@ -144,7 +173,7 @@ const BusinessApp: React.FC = () => {
     );
 
   const clientName = (id: string | null) => clients.find((c) => c.id === id)?.name || '—';
-  const create = async (kind: 'clients' | 'jobs' | 'invoices', body: object) => {
+  const create = async (kind: 'clients' | 'jobs' | 'invoices' | 'templates', body: object) => {
     try {
       const x = await b(`/${kind}`, { method: 'POST', body: JSON.stringify(body) });
       await loadAll();
@@ -167,7 +196,7 @@ const BusinessApp: React.FC = () => {
     await b(`/${kind}/${id}`, { method: 'DELETE' }).catch((e) => setMsg(e.message));
     loadAll();
   };
-  const shared = { clients, jobs, invoices, clientName, create, patch, remove, setMsg };
+  const shared = { clients, jobs, invoices, clientName, create, patch, remove, setMsg, reload: loadAll };
 
   return (
     <div style={shell}>
@@ -467,20 +496,18 @@ type Shared = {
   jobs: Job[];
   invoices: Invoice[];
   clientName: (id: string | null) => string;
-  create: (kind: 'clients' | 'jobs' | 'invoices', body: object) => Promise<any>;
+  create: (kind: 'clients' | 'jobs' | 'invoices' | 'templates', body: object) => Promise<any>;
   patch: (kind: string, id: string, body: object) => Promise<void>;
   remove: (kind: string, id: string, what: string) => Promise<void>;
   setMsg: (m: string) => void;
+  reload: () => Promise<void>;
 };
 
 const Overview: React.FC<{ b: B; clientName: (id: string | null) => string }> = ({ b, clientName }) => {
   const [o, setO] = useState<any>(null);
-  const [s, setS] = useState<Settings | null>(null);
   useEffect(() => {
     b('/overview').then(setO, () => {});
-    b('/settings').then(setS, () => {});
   }, [b]);
-  const saveS = (k: keyof Settings, v: string) => b('/settings', { method: 'PATCH', body: JSON.stringify({ [k]: v }) }).then(setS);
   if (!o) return <div>Loading...</div>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -507,29 +534,7 @@ const Overview: React.FC<{ b: B; clientName: (id: string | null) => string }> = 
           ))
         )}
       </fieldset>
-      {s && (
-        <fieldset style={fieldset}>
-          <legend>Your details on invoices</legend>
-          {(
-            [
-              ['name', 'Business name', 'e.g. Boroma Studios'],
-              ['email', 'Email', 'where clients reply'],
-              ['address', 'Address', 'optional'],
-              ['payment', 'How to pay', 'e.g. Zelle / Venmo / bank details / pay link'],
-            ] as [keyof Settings, string, string][]
-          ).map(([k, label, hint]) => (
-            <label key={k} style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 6, alignItems: 'center' }}>
-              {label}
-              <input
-                style={input}
-                defaultValue={s[k]}
-                placeholder={hint}
-                onBlur={(e) => e.target.value !== s[k] && saveS(k, e.target.value)}
-              />
-            </label>
-          ))}
-        </fieldset>
-      )}
+      <div style={{ color: '#444' }}>Names, logos and payment details on invoices are under Invoices &gt; Brands.</div>
     </div>
   );
 };
@@ -815,87 +820,210 @@ const Jobs: React.FC<Shared> = ({ jobs, clients, clientName, create, patch, remo
   );
 };
 
-const Invoices: React.FC<Shared & { b: B }> = ({ invoices, clients, jobs, clientName, create, patch, remove, b }) => {
+/**
+ * Invoices for any kind of work: each comes from a brand (its name, logo, colour, payment details and small print)
+ * and can start from a template (the usual lines for talent hosting, music work, events, shop orders, shoots...).
+ * Print it, or email the client a link to their copy, which has a card button when Stripe is set up.
+ */
+const Invoices: React.FC<Shared & { b: B }> = ({ invoices, clients, jobs, clientName, create, patch, remove, b, setMsg, reload }) => {
+  const [view, setView] = useState<'Invoices' | 'Templates' | 'Brands'>('Invoices');
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [tpl, setTpl] = useState('');
+  const [type, setType] = useState('');
+  const loadExtras = useCallback(
+    () =>
+      Promise.all([b('/brands').then(setBrands), b('/templates').then(setTemplates)]).then(
+        () => {},
+        (e) => setMsg(e.message),
+      ),
+    [b, setMsg],
+  );
+  useEffect(() => {
+    loadExtras();
+  }, [loadExtras]);
+  const patchX: Shared['patch'] = (kind, id, body) => patch(kind, id, body).then(loadExtras);
+  const removeX: Shared['remove'] = (kind, id, what) => remove(kind, id, what).then(loadExtras);
+  const brandOptions = brands.map((x) => [x.id, x.name || '(no name)'] as [string, string]);
+  const brandName = (id?: string) => brands.find((x) => x.id === id)?.name || brands.find((x) => x.id === 'main')?.name || '';
   const clientOptions: [string, string][] = [['', '(no client)'], ...clients.map((c) => [c.id, c.name] as [string, string])];
-  const print = (i: Invoice) =>
-    printWindow(b, (s) => {
-      const c = clients.find((x) => x.id === i.client);
-      const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
-      return `<!doctype html><html><head><title>${esc(i.number)}</title><style>
-      body{font:14px/1.45 Georgia,serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px}
-      h1{font:700 26px Arial,sans-serif;margin:0} .muted{color:#555} table{width:100%;border-collapse:collapse;margin:24px 0}
-      th,td{text-align:left;padding:6px 4px;border-bottom:1px solid #ccc} td.n,th.n{text-align:right}
-      .tot{font:700 18px Arial,sans-serif;text-align:right} .row{display:flex;justify-content:space-between;gap:24px}
-      @media print{button{display:none}}</style></head><body>
-      <button onclick="print()">Print / Save as PDF</button>
-      <div class="row"><div><h1>${esc(s.name || 'Invoice')}</h1><div class="muted">${esc(s.address).replace(/\n/g, '<br>')}${s.email ? `<br>${esc(s.email)}` : ''}</div></div>
-      <div style="text-align:right"><h1>INVOICE</h1><div>${esc(i.number)}</div><div class="muted">Issued ${esc(i.issued || '')}${i.due ? `<br>Due ${esc(i.due)}` : ''}</div></div></div>
-      <p><b>Bill to</b><br>${esc(i.billTo || [c?.name, c?.company, c?.email].filter(Boolean).join('\n')).replace(/\n/g, '<br>')}</p>
-      <table><tr><th>Description</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>
-      ${i.items.map((it) => `<tr><td>${esc(it.desc)}</td><td class="n">${it.qty}</td><td class="n">${usd(it.rate)}</td><td class="n">${usd(it.qty * it.rate)}</td></tr>`).join('')}
-      </table><div class="tot">Total ${usd(total(i))}${i.status === 'Paid' ? ` · PAID ${esc(i.paidOn || '')}` : ''}</div>
-      ${s.payment ? `<p><b>How to pay</b><br>${esc(s.payment).replace(/\n/g, '<br>')}</p>` : ''}
-      ${i.notes ? `<p class="muted">${esc(i.notes).replace(/\n/g, '<br>')}</p>` : ''}</body></html>`;
-    });
+  const print = (i: Invoice) => printWindow<{ html: string }>(b, (r) => r.html, `/invoices/${i.id}/page`);
+
   return (
-    <ListAndEdit
-      rows={[...invoices].sort((a, b) => b.number.localeCompare(a.number))}
-      columns={[
-        ['Number', (i) => <b>{i.number}</b>],
-        ['Client', (i) => clientName(i.client)],
-        ['Issued', (i) => i.issued || ''],
-        ['Due', (i) => i.due || ''],
-        ['Total', (i) => usd(total(i))],
-        ['Status', (i) => i.status],
-      ]}
-      add={
-        <button style={{ ...button, fontWeight: 700 }} onClick={() => create('invoices', { client: clients[0]?.id || null })}>
-          <IconLabel icon="plus">New invoice</IconLabel>
-        </button>
-      }
-      edit={(i) => <InvoiceEditor key={i.id} i={i} clientOptions={clientOptions} jobs={jobs} patch={patch} remove={remove} print={print} />}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 2 }}>
+        {(['Invoices', 'Templates', 'Brands'] as const).map((v) => (
+          <button key={v} style={{ ...button, fontWeight: view === v ? 700 : 400 }} onClick={() => setView(v)}>
+            {v}
+          </button>
+        ))}
+      </div>
+      {view === 'Invoices' && (
+        <ListAndEdit
+          rows={[...invoices].filter((i) => !type || (i.type || 'Other') === type).sort((a, b) => b.number.localeCompare(a.number))}
+          columns={[
+            ['Number', (i) => <b>{i.number}</b>],
+            ['Client', (i) => clientName(i.client)],
+            ['For', (i) => i.title || i.type || ''],
+            ['Brand', (i) => brandName(i.brand)],
+            ['Due', (i) => i.due || ''],
+            ['Total', (i) => usd(total(i))],
+            ['Status', (i) => i.status],
+          ]}
+          add={
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                style={{ ...button, fontWeight: 700 }}
+                onClick={() => create('invoices', { client: clients[0]?.id || null, ...(tpl ? { template: tpl } : {}) })}
+              >
+                <IconLabel icon="plus">New invoice</IconLabel>
+              </button>
+              <select style={input} value={tpl} onChange={(e) => setTpl(e.target.value)} title="What the new invoice starts from">
+                <option value="">Blank</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    From template: {t.name}
+                  </option>
+                ))}
+              </select>
+              <span style={{ flex: 1 }} />
+              <select style={input} value={type} onChange={(e) => setType(e.target.value)} title="Show only one kind of work">
+                <option value="">All kinds of work</option>
+                {INVOICE_TYPES.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+          }
+          edit={(i) => (
+            <InvoiceEditor
+              key={i.id}
+              i={i}
+              b={b}
+              clients={clients}
+              clientOptions={clientOptions}
+              brandOptions={brandOptions}
+              jobs={jobs}
+              create={create}
+              patch={patch}
+              remove={remove}
+              print={print}
+              saved={loadExtras}
+              reload={reload}
+            />
+          )}
+        />
+      )}
+      {view === 'Templates' && (
+        <ListAndEdit
+          rows={templates}
+          columns={[
+            ['Template', (t) => <b>{t.name}</b>],
+            ['For', (t) => t.type],
+            ['Brand', (t) => brandName(t.brand)],
+            ['Lines', (t) => t.items.length],
+          ]}
+          add={
+            <button style={{ ...button, fontWeight: 700 }} onClick={() => create('templates', {}).then(loadExtras)}>
+              <IconLabel icon="plus">New template</IconLabel>
+            </button>
+          }
+          edit={(t) => (
+            <>
+              <Field label="Name" value={t.name} onSave={(v) => patchX('templates', t.id, { name: v })} />
+              <InvoiceFields x={t} kind="templates" brandOptions={brandOptions} patch={patchX} />
+              <Field
+                label="Due in (days)"
+                type="number"
+                value={String(t.dueDays)}
+                onSave={(v) => patchX('templates', t.id, { dueDays: v })}
+              />
+              <Field label="Notes" value={t.notes} area onSave={(v) => patchX('templates', t.id, { notes: v })} />
+              <div>
+                <button style={button} onClick={() => removeX('templates', t.id, `the "${t.name}" template`)}>
+                  <IconLabel icon="close">Remove template</IconLabel>
+                </button>
+              </div>
+            </>
+          )}
+        />
+      )}
+      {view === 'Brands' && (
+        <>
+          {brands.map((x) => {
+            const save = (body: object) =>
+              b(`/brands/${x.id}`, { method: 'PATCH', body: JSON.stringify(body) }).then(loadExtras, (e) => setMsg(e.message));
+            return (
+              <fieldset key={x.id} style={fieldset}>
+                <legend style={{ color: x.color }}>{x.name || '(no name)'}</legend>
+                {(
+                  [
+                    ['name', 'Name'],
+                    ['email', 'Email (replies go here)'],
+                    ['logo', 'Logo link (https://...)'],
+                  ] as [keyof Brand, string][]
+                ).map(([k, label]) => (
+                  <Field key={k} label={label} value={String(x[k] ?? '')} onSave={(v) => save({ [k]: v })} />
+                ))}
+                <Field label="Colour" type="color" value={x.color} onSave={(v) => save({ color: v })} />
+                <Field label="Address" value={x.address} area onSave={(v) => save({ address: v })} />
+                <Field label="How to pay" value={x.payment} area onSave={(v) => save({ payment: v })} />
+                <Field label="Small print" value={x.terms} area onSave={(v) => save({ terms: v })} />
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input type="checkbox" checked={x.cards !== false} onChange={(e) => save({ cards: e.target.checked })} />
+                  Card payment button on sent invoices (when Stripe is set up)
+                </label>
+                {x.id !== 'main' && (
+                  <div>
+                    <button
+                      style={button}
+                      onClick={async () =>
+                        (await dialog.confirm(`Remove ${x.name}? Its invoices will show the main brand.`, { icon: 'warning' })) &&
+                        b(`/brands/${x.id}`, { method: 'DELETE' }).then(loadExtras, (e) => setMsg(e.message))
+                      }
+                    >
+                      <IconLabel icon="close">Remove brand</IconLabel>
+                    </button>
+                  </div>
+                )}
+              </fieldset>
+            );
+          })}
+          <div>
+            <button
+              style={{ ...button, fontWeight: 700 }}
+              onClick={() => b('/brands', { method: 'POST', body: '{}' }).then(loadExtras, (e) => setMsg(e.message))}
+            >
+              <IconLabel icon="plus">Add brand</IconLabel>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 };
 
-const InvoiceEditor: React.FC<{
-  i: Invoice;
-  clientOptions: [string, string][];
-  jobs: Job[];
+/** What invoices and templates share: brand, kind of work, what it's for, the lines, discount and tax. */
+const InvoiceFields: React.FC<{
+  x: Pick<Invoice, 'id' | 'brand' | 'type' | 'title' | 'items' | 'tax' | 'discount'>;
+  kind: 'invoices' | 'templates';
+  brandOptions: [string, string][];
   patch: Shared['patch'];
-  remove: Shared['remove'];
-  print: (i: Invoice) => void;
-}> = ({ i, clientOptions, jobs, patch, remove, print }) => {
-  const [items, setItems] = useState<Item[]>(i.items.length ? i.items : [{ desc: '', qty: 1, rate: 0 }]);
-  const saveItems = (next: Item[]) => patch('invoices', i.id, { items: next.filter((it) => it.desc.trim() || it.rate) });
+}> = ({ x, kind, brandOptions, patch }) => {
+  const [items, setItems] = useState<Item[]>(x.items.length ? x.items : [{ desc: '', qty: 1, rate: 0 }]);
+  const saveItems = (next: Item[]) => patch(kind, x.id, { items: next.filter((it) => it.desc.trim() || it.rate) });
   const set = (n: number, k: keyof Item, v: string) =>
     setItems(items.map((it, j) => (j === n ? { ...it, [k]: k === 'desc' ? v : Number(v) || 0 } : it)));
   return (
     <>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <b style={{ fontSize: 13, flex: 1 }}>{i.number}</b>
-        <button style={{ ...button, fontWeight: 700 }} onClick={() => print(i)}>
-          <IconLabel icon="external">Print / PDF...</IconLabel>
-        </button>
-      </div>
-      <Pick label="Client" value={i.client || ''} options={clientOptions} onSave={(v) => patch('invoices', i.id, { client: v || null })} />
+      <Pick label="From" value={x.brand || 'main'} options={brandOptions} onSave={(v) => patch(kind, x.id, { brand: v })} />
       <Pick
-        label="Job"
-        value={i.job || ''}
-        options={[
-          ['', '(none)'],
-          ...jobs.filter((j) => !i.client || j.client === i.client).map((j) => [j.id, j.title] as [string, string]),
-        ]}
-        onSave={(v) => patch('invoices', i.id, { job: v || null })}
+        label="Kind of work"
+        value={x.type || 'Other'}
+        options={INVOICE_TYPES.map((t) => [t, t])}
+        onSave={(v) => patch(kind, x.id, { type: v })}
       />
-      <Pick
-        label="Status"
-        value={i.status}
-        options={STATUSES.invoices.map((s) => [s, s])}
-        onSave={(v) => patch('invoices', i.id, { status: v })}
-      />
-      <Field label="Issued" value={i.issued || ''} type="date" onSave={(v) => patch('invoices', i.id, { issued: v || null })} />
-      <Field label="Due" value={i.due || ''} type="date" onSave={(v) => patch('invoices', i.id, { due: v || null })} />
+      <Field label="For" value={x.title || ''} onSave={(v) => patch(kind, x.id, { title: v })} />
       <fieldset style={fieldset}>
         <legend>Line items</legend>
         {items.map((it, n) => (
@@ -944,12 +1072,102 @@ const InvoiceEditor: React.FC<{
           <button style={button} onClick={() => setItems([...items, { desc: '', qty: 1, rate: 0 }])}>
             <IconLabel icon="plus">Add line</IconLabel>
           </button>
-          <b>Total {usd(items.reduce((n, it) => n + it.qty * it.rate, 0))}</b>
+          <b>Total {usd(total({ items, tax: x.tax, discount: x.discount }))}</b>
         </div>
       </fieldset>
+      <Field label="Discount ($)" type="number" value={String(x.discount || 0)} onSave={(v) => patch(kind, x.id, { discount: v })} />
+      <Field label="Tax (%)" type="number" value={String(x.tax || 0)} onSave={(v) => patch(kind, x.id, { tax: v })} />
+    </>
+  );
+};
+
+const InvoiceEditor: React.FC<{
+  i: Invoice;
+  b: B;
+  clients: Client[];
+  clientOptions: [string, string][];
+  brandOptions: [string, string][];
+  jobs: Job[];
+  create: Shared['create'];
+  patch: Shared['patch'];
+  remove: Shared['remove'];
+  print: (i: Invoice) => void;
+  saved: () => void;
+  reload: () => Promise<void>;
+}> = ({ i, b, clients, clientOptions, brandOptions, jobs, create, patch, remove, print, saved, reload }) => {
+  const fail = (e: Error) => dialog.alert(e.message, { icon: 'error' });
+  const send = async () => {
+    const to = await dialog.prompt('Email this invoice to:', clients.find((c) => c.id === i.client)?.email || '');
+    if (!to) return;
+    await b(`/invoices/${i.id}/send`, { method: 'POST', body: JSON.stringify({ to }) }).then(
+      () => (reload(), dialog.alert(`Sent to ${to}. Replies go to the brand's email.`)),
+      fail,
+    );
+  };
+  const copyLink = async () => {
+    if (i.status === 'Draft') {
+      if (!(await dialog.confirm('The link only opens once the invoice is sent. Mark it as Sent?'))) return;
+      await patch('invoices', i.id, { status: 'Sent' });
+    }
+    await b(`/invoices/${i.id}/page`)
+      .then((r) => navigator.clipboard.writeText(r.link).then(() => dialog.alert(`Link copied:\n${r.link}`)))
+      .catch(fail);
+  };
+  const saveTemplate = async () => {
+    const name = await dialog.prompt('Name the template:', i.title || i.type || 'My template');
+    if (!name) return;
+    const { brand, type, title, items, tax, discount, notes } = i;
+    await create('templates', { name, brand, type, title, items, tax, discount, notes });
+    saved();
+  };
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <b style={{ fontSize: 13, flex: 1 }}>{i.number}</b>
+        <button style={{ ...button, fontWeight: 700 }} onClick={send} disabled={i.status === 'Paid' || i.status === 'Void'}>
+          <IconLabel icon="share">Email...</IconLabel>
+        </button>
+        <button style={button} onClick={copyLink}>
+          <IconLabel icon="link">Copy link</IconLabel>
+        </button>
+        <button style={button} onClick={() => print(i)}>
+          <IconLabel icon="external">Print / PDF...</IconLabel>
+        </button>
+      </div>
+      {!!i.sent?.length && (
+        <div style={{ color: '#444' }}>
+          Emailed {i.sent.map((s) => `to ${s.to} on ${s.at.slice(0, 10)}`).join(', ')}
+          {i.paidVia === 'card' ? ' · paid by card' : ''}
+        </div>
+      )}
+      <Pick label="Client" value={i.client || ''} options={clientOptions} onSave={(v) => patch('invoices', i.id, { client: v || null })} />
+      <Pick
+        label="Job"
+        value={i.job || ''}
+        options={[
+          ['', '(none)'],
+          ...jobs.filter((j) => !i.client || j.client === i.client).map((j) => [j.id, j.title] as [string, string]),
+        ]}
+        onSave={(v) => patch('invoices', i.id, { job: v || null })}
+      />
+      <Pick
+        label="Status"
+        value={i.status}
+        options={STATUSES.invoices.map((s) => [s, s])}
+        onSave={(v) => patch('invoices', i.id, { status: v })}
+      />
+      <Field label="Issued" value={i.issued || ''} type="date" onSave={(v) => patch('invoices', i.id, { issued: v || null })} />
+      <Field label="Due" value={i.due || ''} type="date" onSave={(v) => patch('invoices', i.id, { due: v || null })} />
+      <InvoiceFields x={i} kind="invoices" brandOptions={brandOptions} patch={patch} />
       <Field label="Bill to" value={i.billTo} area onSave={(v) => patch('invoices', i.id, { billTo: v })} />
       <Field label="Notes" value={i.notes} area onSave={(v) => patch('invoices', i.id, { notes: v })} />
-      <div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button style={button} onClick={() => create('invoices', { copy: i.id })}>
+          <IconLabel icon="plus">Duplicate</IconLabel>
+        </button>
+        <button style={button} onClick={saveTemplate}>
+          <IconLabel icon="note">Save as template</IconLabel>
+        </button>
         <button style={button} onClick={() => remove('invoices', i.id, i.number)}>
           <IconLabel icon="close">Remove invoice</IconLabel>
         </button>

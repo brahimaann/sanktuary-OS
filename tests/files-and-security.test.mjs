@@ -880,6 +880,93 @@ try {
   const paid = (await bj('alice', `/invoices/${inv1.id}`)).body;
   check('paying stamps the date', paid.paidOn === new Date().toLocaleDateString('en-CA'));
   check('overview: paid this year', (await bj('alice', '/overview')).body.paidThisYear === 1500);
+
+  {
+    // Invoices for any kind of work: brands, templates, discount and tax, an emailed link, card payment
+    const brands = (await bj('alice', '/brands')).body;
+    check(
+      'brands: main, MRND and MHOTC to start',
+      ['main', 'mrnd', 'mhotc'].every((id) => brands.some((x) => x.id === id)),
+    );
+    await biz('alice', '/brands/mrnd', 'PATCH', { email: 'mrnd@example.com', payment: 'Zelle mrnd@example.com', color: '#aa0000' });
+    check(
+      'brands: the logo has to be an https link',
+      (await biz('alice', '/brands/mrnd', 'PATCH', { logo: 'javascript:x' })).status === 400,
+    );
+    check('brands: the main one stays', (await biz('alice', '/brands/main', 'DELETE')).status === 400);
+    const tpls = (await bj('alice', '/templates')).body;
+    check(
+      'starter templates for each kind of work',
+      ['Talent hosting', 'Music work', 'Event', 'Shop order', 'Photo/video shoot'].every((t) => tpls.some((x) => x.type === t)),
+    );
+    const music = (await bj('alice', '/invoices', 'POST', { client: client.id, template: 't-music' })).body;
+    check(
+      'from a template: its brand, kind and lines',
+      music.brand === 'mrnd' && music.type === 'Music work' && music.items.length === 4 && !!music.due,
+    );
+    const priced = (
+      await bj('alice', `/invoices/${music.id}`, 'PATCH', {
+        items: [{ desc: 'Mix', qty: 2, rate: 100 }],
+        discount: 20,
+        tax: 10,
+        title: 'EP mixes',
+      })
+    ).body;
+    check('bad kind of work refused', (await biz('alice', `/invoices/${music.id}`, 'PATCH', { type: 'Nope' })).status === 400);
+    check('discount then tax', (await bj('alice', '/overview')).body.owed === 0 && priced.discount === 20 && priced.tax === 10);
+    const page = (await bj('alice', `/invoices/${music.id}/page`)).body;
+    check(
+      'printed copy shows brand, lines and total',
+      page.html.includes('MRND') && page.html.includes('EP mixes') && page.html.includes('$198.00'),
+    );
+    const invPath = new URL(page.link).pathname;
+    check('a draft link does not open yet', (await fetch(B + invPath)).status === 410);
+    const mailsBeforeInv = mails.length;
+    const sentInv = (await bj('alice', `/invoices/${music.id}/send`, 'POST', {})).body;
+    const invMail = mails[mailsBeforeInv];
+    check(
+      'emailing goes to the client, replies to the brand, and marks it Sent',
+      sentInv.status === 'Sent' &&
+        invMail?.to[0] === 'hi@example.com' &&
+        invMail.reply_to === 'mrnd@example.com' &&
+        invMail.text.includes(invPath),
+    );
+    check('send needs an address', (await biz('alice', `/invoices/${inv2.id}/send`, 'POST', { to: 'nope' })).status === 400);
+    check('overview counts the total after discount and tax', (await bj('alice', '/overview')).body.owed === 198);
+    const clientCopy = await fetch(B + invPath);
+    const clientHtml = await clientCopy.text();
+    check(
+      'the client opens it without an account, with a card button',
+      clientCopy.status === 200 && clientHtml.includes('Pay $198.00 by card') && !clientHtml.includes('<script'),
+    );
+    check('a wrong link is refused', (await fetch(B + `/invoice/${music.id}/not-the-key`)).status === 410);
+    const pay = await fetch(B + invPath + '/pay', { method: 'POST', redirect: 'manual' });
+    const invCheckout = stripeCalls.at(-1).form;
+    check(
+      'card payment goes to Stripe Checkout for the total',
+      pay.status === 303 &&
+        invCheckout.get('line_items[0][price_data][unit_amount]') === '19800' &&
+        invCheckout.get('metadata[invoice]') === music.id,
+    );
+    await stripeHook({ id: 'cs_inv_1', payment_status: 'paid', amount_total: 19800, metadata: { invoice: music.id } });
+    const paidInv = (await bj('alice', `/invoices/${music.id}`)).body;
+    check('the signed webhook marks it paid', paidInv.status === 'Paid' && paidInv.paidVia === 'card');
+    check('a paid invoice has no card button', !(await (await fetch(B + invPath)).text()).includes('by card'));
+    const copied = (await bj('alice', '/invoices', 'POST', { copy: music.id })).body;
+    check(
+      'duplicate copies the client and lines as a new draft',
+      copied.client === client.id && copied.items[0].desc === 'Mix' && copied.status === 'Draft',
+    );
+    const mine = (
+      await bj('alice', '/templates', 'POST', {
+        name: 'Mix package',
+        type: 'Music work',
+        brand: 'mrnd',
+        items: [{ desc: 'Mix', qty: 1, rate: 150 }],
+      })
+    ).body;
+    check('save your own template', mine.name === 'Mix package' && mine.items[0].rate === 150);
+  }
   const doc = (await bj('alice', `/docs?name=contract.pdf&client=${client.id}&vault=1`, 'PUT', '%PDF-1.4 contract', {}, true)).body;
   check('document stored', doc.size === 17 && doc.vault === true);
   check('vault opens off the tunnel (Tailscale / on the PC)', (await biz('alice', `/docs/${doc.id}/file`)).text === '%PDF-1.4 contract');
