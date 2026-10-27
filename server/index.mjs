@@ -1368,7 +1368,8 @@ async function publicShare(req, res, url) {
 // member unless `members` lists who may see them (owner + admins always can), like boards. People in `listeners`
 // can only listen, comment and follow: they can't change the release or its songs.
 const TRACK_STATUSES = ['Idea', 'Writing', 'Recording', 'Mixing', 'Mastering', 'Done'];
-const RELEASE_KINDS = ['Album', 'EP', 'Single'];
+// A Folder holds loose songs (demos, beats); a Playlist holds no songs of its own, only `items`: songs from other projects
+const RELEASE_KINDS = ['Album', 'EP', 'Single', 'Folder', 'Playlist'];
 // A song's BMI work-registration sheet (and split sheet): only the song's team sees it, never public pages.
 // Identifiers are checked for shape here; shares adding up to 100% is checked in the app (drafts may not yet).
 const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
@@ -1848,7 +1849,15 @@ async function tracksApi(req, res, url) {
         else await linkReleaseFolder(r, input.folder, user, cfg, !!input.setup);
       }
       if (input.title !== undefined) r.title = String(input.title).trim().slice(0, 80) || r.title;
-      if (input.kind !== undefined) r.kind = RELEASE_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+      if (input.kind !== undefined) {
+        if (!RELEASE_KINDS.includes(input.kind)) fail(400, 'Bad kind');
+        if ((input.kind === 'Playlist') !== (r.kind === 'Playlist')) fail(400, "A playlist can't become a project, or the other way round");
+        r.kind = input.kind;
+      }
+      if (input.items !== undefined)
+        r.items = [
+          ...new Set((Array.isArray(input.items) ? input.items : []).filter((i) => own(db.tracks, i) && !db.tracks[i].deleted)),
+        ].slice(0, 500);
       if (input.date !== undefined) r.date = dateOrNull(input.date);
       if (input.cover !== undefined) r.cover = fileRef(input.cover);
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
@@ -1903,6 +1912,7 @@ async function tracksApi(req, res, url) {
         (own(db.releases, input.release) && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
         fail(404, 'No such release');
       editRelease(user, r);
+      if (r.kind === 'Playlist') fail(400, 'Add songs to a playlist from their own project');
       const t = newTrack(db, r, input.title, me, 'added the track');
       changed(r);
       return json(res, t);

@@ -593,6 +593,16 @@ try {
   check('listen only: but can follow', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { follow: true })).status === 200);
   check('the owner is never listen only', (await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '100' })).status === 200);
   await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] });
+  const pl = JSON.parse((await call('bob', '/api/tracks/release', 'POST', { title: 'march mixes', kind: 'Playlist' })).text);
+  const plItems = JSON.parse(
+    (await call('bob', `/api/tracks/release/${pl.id}`, 'PATCH', { items: [song.id, song.id, 'nope'] })).text,
+  ).items;
+  check('a playlist keeps songs from other projects, once each', plItems.length === 1 && plItems[0] === song.id);
+  check(
+    'a playlist has no songs of its own',
+    (await call('bob', '/api/tracks/track', 'POST', { release: pl.id, title: 'x' })).status === 400,
+  );
+  check('a playlist stays a playlist', (await call('bob', `/api/tracks/release/${pl.id}`, 'PATCH', { kind: 'Album' })).status === 400);
 
   // Sign links: anyone on a sheet signs from a link without an account; changing the shares turns the links off
   const splits = (a) => [
