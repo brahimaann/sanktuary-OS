@@ -1629,6 +1629,8 @@ try {
   const sp = '/api/public/story/heart-of-the-cities';
   check('an unpublished story is not public', (await pub(sp)).status === 404 && (await pub(sp + '/0')).status === 404);
   check('admins can preview it', (await call('alice', sp)).status === 200);
+  const draftPic = await call('alice', sp + '/0?w=800');
+  check('an unpublished story’s photos are never cached', draftPic.status === 200 && draftPic.headers.get('cache-control') === 'no-store');
   await call('alice', '/api/stories/heart-of-the-cities', 'PATCH', { public: true, subtitle: 'Twin Cities, 2026' });
   const pubStory = await (await pub(sp)).json();
   check('a published story is public', pubStory.title === 'Heart of the Cities' && pubStory.items.length === 2);
@@ -1636,8 +1638,13 @@ try {
     'file names and paths never reach visitors',
     !JSON.stringify(pubStory).includes('corner.jpg') && !JSON.stringify(pubStory).includes('hotc'),
   );
-  const pic = await pub(sp + '/0?w=800');
+  const [pic, ...burst] = await Promise.all([1, 2, 3, 4].map(() => pub(sp + '/0?w=1600'))); // a new size, rendered once for all
   check('photos come as resized WebP, not the original', pic.status === 200 && pic.headers.get('content-type') === 'image/webp');
+  check(
+    'visitors arriving together all get the photo',
+    burst.every((r) => r.status === 200),
+  );
+  check('published photos can be cached by Cloudflare', pic.headers.get('cache-control') === 'public, max-age=600');
   const clip = await pub(sp + '/1', { headers: { range: 'bytes=0-99' } });
   check('videos stream with ranges', clip.status === 206 && clip.headers.get('content-type') === 'video/mp4');
   check(

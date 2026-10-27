@@ -47,3 +47,18 @@ Register-ScheduledTask -TaskName 'Sanktuary OS auto-deploy' -Action $a -Trigger 
 ```
 
 5. Power plan: High performance, never sleep, never turn off hard disks; Docker Desktop "start when you sign in".
+
+## Cloudflare cache rule
+
+Public pictures and clips (release covers, track previews, story photos and videos) say `public` in their
+`cache-control`, but Cloudflare only caches paths without a file extension when a rule tells it to. Without the rule
+every visitor's download comes from this PC's home upload. Set it once in the Cloudflare dashboard:
+**sanktuary.studio > Caching > Cache Rules > Create rule**, "Edit expression":
+
+```
+(http.request.uri.path wildcard r"/api/public/release/*/cover") or (http.request.uri.path wildcard r"/api/public/release/*/preview/*") or (http.request.uri.path wildcard r"/api/public/story/*/*")
+```
+
+Then **Cache eligibility: Eligible for cache**, **Edge TTL: Use cache-control header if present**, and deploy. The
+release and story pages themselves (`/api/public/release/<slug>`, `/api/public/story/<slug>`) stay out of it so
+their view counts keep working.
