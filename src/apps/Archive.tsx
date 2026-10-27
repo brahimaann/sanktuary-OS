@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useApi } from '../utils/api';
 import { shell, button, statusBar } from './TeamFiles';
 import RetroIcon from '../components/RetroIcon';
-import { openStudio } from './Studio';
+import { openMusic, openStudio } from './Studio';
 import { useWindowManager } from '../wm/manager';
 
 interface ArchiveItem {
@@ -131,7 +131,7 @@ export const Archive: React.FC = () => {
                       onClick={() => {
                         if (item.type === 'release') {
                           window.dispatchEvent(new CustomEvent('sk:tracks-release', { detail: item.id }));
-                          openStudio(openWindow, 'songs');
+                          openMusic(openWindow);
                         } else {
                           window.dispatchEvent(new CustomEvent('sk:timeline-entry', { detail: item.id }));
                           openStudio(openWindow, 'calendar');

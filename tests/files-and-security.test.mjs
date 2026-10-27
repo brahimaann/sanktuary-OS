@@ -582,6 +582,17 @@ try {
     JSON.parse((await call('bob', '/api/tracks')).text).tracks.some((t) => t.id === song.id),
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
+  check('bob cannot set who edits', (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] })).status === 403);
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: ['bob', 'alice'] });
+  check('listen only: bob cannot edit a track', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '1' })).status === 403);
+  check('listen only: or add one', (await call('bob', '/api/tracks/track', 'POST', { release: album.id, title: 'x' })).status === 403);
+  check(
+    'listen only: or rename the release',
+    (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { title: 'x' })).status === 403,
+  );
+  check('listen only: but can follow', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { follow: true })).status === 200);
+  check('the owner is never listen only', (await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '100' })).status === 200);
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] });
 
   // Sign links: anyone on a sheet signs from a link without an account; changing the shares turns the links off
   const splits = (a) => [

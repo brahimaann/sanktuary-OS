@@ -30,15 +30,16 @@ const STUDIO_MENU: MenuItem[] = [
     width: 560,
     height: 420,
   },
+  { id: 'music', label: 'Music', title: 'Music', appType: 'tracks', icon: icon('sound-32x32.png'), width: 960, height: 620 },
   {
     id: 'studio',
-    label: 'Studio (songs, calendar, boards)',
+    label: 'Studio (calendar, boards, opportunities)',
     title: 'Studio',
     appType: 'studio',
     icon: icon('media-player-32x32.png'),
     width: 960,
     height: 620,
-    props: { tab: 'songs' },
+    props: { tab: 'calendar' },
   },
   { id: 'moodboards', label: 'Moodboards', title: 'Moodboards', appType: 'boards', icon: icon('paint-32x32.png'), width: 560, height: 420 },
   {

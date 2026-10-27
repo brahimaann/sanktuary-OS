@@ -25,13 +25,15 @@ interface DesktopIconDef {
 const I = (name: string) => `/images/icons/${name}-32x32.png`;
 const app = {
   new: { id: 'new', title: 'New...', icon: I('file'), appType: 'new', width: 460, height: 420 },
-  // Studio: songs (Tracks), calendar (Timeline) and to-do boards (Planner) in one window
+  // Music: the team's projects, songs and bounces (Tracks), like Untitled
+  music: { id: 'music', title: 'Music', icon: I('sound'), appType: 'tracks', width: 960, height: 620 },
+  // Studio: calendar (Timeline), to-do boards (Planner), opportunities and outreach in one window
   studio: {
     id: 'studio',
     title: 'Studio',
     icon: I('media-player'),
     appType: 'studio',
-    appProps: { tab: 'songs' },
+    appProps: { tab: 'calendar' },
     width: 960,
     height: 620,
   },
@@ -135,6 +137,7 @@ const folder = (id: string, title: string, icon: string, items: DesktopIconDef[]
 // Logged on: everyday studio apps first, then the front door, then folders. Visitors get the front door and extras.
 const memberIcons = (admin: boolean): DesktopIconDef[] => [
   app.new,
+  app.music,
   app.studio,
   app.moodboards,
   app.teams,

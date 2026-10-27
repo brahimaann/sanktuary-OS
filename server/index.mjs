@@ -1365,7 +1365,8 @@ async function publicShare(req, res, url) {
 // ── /api/tracks: releases (album / EP / single) and their track pages — data/tracks.json ──
 // A track points at files in the spaces (current bounce, project folder, stems folder) rather than holding
 // them, so playing or opening them still goes through the normal space rights. Releases are open to every
-// member unless `members` lists who may see them (owner + admins always can), like boards.
+// member unless `members` lists who may see them (owner + admins always can), like boards. People in `listeners`
+// can only listen, comment and follow: they can't change the release or its songs.
 const TRACK_STATUSES = ['Idea', 'Writing', 'Recording', 'Mixing', 'Mastering', 'Done'];
 const RELEASE_KINDS = ['Album', 'EP', 'Single'];
 // A song's BMI work-registration sheet (and split sheet): only the song's team sees it, never public pages.
@@ -1752,6 +1753,9 @@ const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { rel
 const saveTracks = () => (tracksSaved = tracksSaved.then(() => saveJson('tracks.json', tracksDb)).catch(console.error));
 const canSeeRelease = (user, r) =>
   !r.deleted && (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
+const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
+const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
+const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
 const fileRef = (v) =>
   v === null
     ? null
@@ -1817,6 +1821,7 @@ async function tracksApi(req, res, url) {
     }
     const r = (own(db.releases, id) && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
     if (req.method === 'GET' && url.searchParams.has('ready')) return json(res, await releaseReadiness(db, r));
+    if (req.method !== 'GET') editRelease(user, r);
     if (req.method === 'POST' && url.searchParams.has('scan')) {
       if (!r.folder) fail(400, 'Link the release to a folder first');
       await releaseSpace(r.folder.space, user, cfg); // still allowed to see that folder?
@@ -1873,7 +1878,11 @@ async function tracksApi(req, res, url) {
       if (input.story !== undefined) r.story = input.story ? String(input.story).slice(0, 80) : null; // a Story as its visual world
       if (input.members !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
-        r.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
+        r.members = Array.isArray(input.members) ? userList(input.members) : null;
+      }
+      if (input.listeners !== undefined) {
+        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
+        r.listeners = Array.isArray(input.listeners) ? userList(input.listeners).filter((u) => u !== r.owner) : [];
       }
       const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
@@ -1893,6 +1902,7 @@ async function tracksApi(req, res, url) {
       const r =
         (own(db.releases, input.release) && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
         fail(404, 'No such release');
+      editRelease(user, r);
       const t = newTrack(db, r, input.title, me, 'added the track');
       changed(r);
       return json(res, t);
@@ -1920,6 +1930,7 @@ async function tracksApi(req, res, url) {
     }
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);
+      if (Object.keys(input).some((k) => k !== 'follow')) editRelease(user, r); // listeners can still follow
       const log = (action) => (t.history = [{ at: new Date().toISOString(), user: me, action }, ...t.history].slice(0, 100));
       const news = [];
       for (const [k, max] of Object.entries(TRACK_TEXT)) if (input[k] !== undefined) t[k] = String(input[k] ?? '').slice(0, max);

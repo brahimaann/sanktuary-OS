@@ -6,6 +6,7 @@ import { button } from './TeamFiles';
 /**
  * Dialog for choosing who can see something. `members === null` means everyone.
  * `always` (the creator) is always included and can't be unticked.
+ * With `listeners`, each person in it can also be set to "Can listen" (see and comment, not change) instead of "Can edit".
  */
 const MembersPicker: React.FC<{
   title: string;
@@ -13,12 +14,20 @@ const MembersPicker: React.FC<{
   always?: string;
   allowEveryone?: boolean;
   note?: string;
-  onSave: (members: string[] | null) => void;
+  listeners?: string[];
+  onSave: (members: string[] | null, listeners: string[]) => void;
   onClose: () => void;
-}> = ({ title, members, always, allowEveryone = true, note, onSave, onClose }) => {
+}> = ({ title, members, always, allowEveryone = true, note, listeners, onSave, onClose }) => {
   const { profiles } = useProfiles();
   const [everyone, setEveryone] = useState(allowEveryone && members === null);
   const [picked, setPicked] = useState<Set<string>>(new Set([...(members || []), ...(always ? [always] : [])]));
+  const [listen, setListen] = useState(new Set(listeners));
+  const setRole = (u: string, onlyListen: boolean) =>
+    setListen((l) => {
+      const n = new Set(l);
+      onlyListen ? n.add(u) : n.delete(u);
+      return n;
+    });
   const toggle = (u: string) =>
     setPicked((p) => {
       const n = new Set(p);
@@ -65,7 +74,15 @@ const MembersPicker: React.FC<{
               </label>
             </>
           )}
-          <div style={{ overflow: 'auto', background: '#fff', border: '2px inset #808080', maxHeight: 240, opacity: everyone ? 0.5 : 1 }}>
+          <div
+            style={{
+              overflow: 'auto',
+              background: '#fff',
+              border: '2px inset #808080',
+              maxHeight: 240,
+              opacity: everyone && !listeners ? 0.5 : 1,
+            }}
+          >
             {profiles.map((p) => (
               <label key={p.username} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px' }}>
                 <input
@@ -77,6 +94,16 @@ const MembersPicker: React.FC<{
                 <Avatar username={p.username} avatar={p.avatar} size={18} />
                 {displayName(p)}
                 {p.username === always ? ' (creator)' : ''}
+                {listeners && p.username !== always && (everyone || picked.has(p.username)) && (
+                  <select
+                    style={{ marginLeft: 'auto', fontSize: 11 }}
+                    value={listen.has(p.username) ? 'listen' : 'edit'}
+                    onChange={(e) => setRole(p.username, e.target.value === 'listen')}
+                  >
+                    <option value="edit">Can edit</option>
+                    <option value="listen">Can listen</option>
+                  </select>
+                )}
               </label>
             ))}
           </div>
@@ -86,7 +113,16 @@ const MembersPicker: React.FC<{
           <button style={button} onClick={onClose}>
             Cancel
           </button>
-          <button style={{ ...button, fontWeight: 700 }} onClick={() => onSave(everyone ? null : [...picked])}>
+          <button
+            style={{ ...button, fontWeight: 700 }}
+            onClick={() => {
+              const m = everyone ? null : [...picked];
+              onSave(
+                m,
+                [...listen].filter((u) => u !== always && (!m || m.includes(u))),
+              );
+            }}
+          >
             OK
           </button>
         </div>

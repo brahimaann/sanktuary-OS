@@ -4,7 +4,7 @@ import { RANK, useApi, useMe } from '../utils/api';
 import { parseWhen, describeWhen } from '../utils/when';
 import { uploadFiles } from '../utils/upload';
 import { useWindowManager } from '../wm/manager';
-import { openStudio } from './Studio';
+import { openMusic, openStudio } from './Studio';
 import { LogOn, shell, button } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { IconLabel, IconName } from '../components/RetroIcon';
@@ -160,7 +160,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const openTracks = (id: string) => {
     remember('sk_tracks_release', id);
     window.dispatchEvent(new CustomEvent('sk:tracks-release', { detail: id }));
-    openStudio(openWindow, 'songs');
+    openMusic(openWindow);
   };
 
   const openTimeline = (id: string) => {

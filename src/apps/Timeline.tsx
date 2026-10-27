@@ -5,7 +5,7 @@ import { useLiveEvent } from '../utils/live';
 import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
-import { openStudio } from './Studio';
+import { openMusic, openStudio } from './Studio';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
@@ -104,7 +104,7 @@ const TimelineApp: React.FC = () => {
       height: 420,
       appProps: { kind: kind && kind !== 'Other' && data.kinds.includes(kind) ? kind : undefined },
     });
-  const openTracks = () => openStudio(openWindow, 'songs');
+  const openTracks = () => openMusic(openWindow);
 
   // Rows grouped by month, with a "Today" marker between past and upcoming
   const rows: React.ReactNode[] = [];

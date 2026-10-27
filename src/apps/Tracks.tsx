@@ -35,6 +35,9 @@ interface Release {
   artist?: string; // who it's by (asked first when it's made)
   upc?: string; // the release's barcode
   writers?: Partial<BmiWriter>[]; // its usual songwriters: each song's BMI sheet starts from these
+  created?: string;
+  cover?: FileRef | null; // found in Artwork by a scan
+  listeners?: string[]; // can listen and comment, not change it
 }
 const STORES: [string, string][] = [
   ['presave', 'Pre-save link (shown until release day)'],
@@ -132,7 +135,10 @@ const due = (d: string) => {
   return n < 0 ? `${-n} day(s) late` : n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
 };
 
-/** Album / EP / single tracker: every song's bounce, project, stems, links, status and deadline in one place. */
+/**
+ * Music: the team's projects (albums, EPs, singles) as a library of covers, like Untitled. Opening one shows every
+ * song's bounce, project, stems, links, status and deadline in one place.
+ */
 const Tracks: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
@@ -144,13 +150,7 @@ const TracksApp: React.FC = () => {
   const api = useApi();
   const { me } = useMe();
   const [data, setData] = useState<{ releases: Release[]; tracks: Track[]; statuses: string[]; kinds: string[] } | null>(null);
-  const [releaseId, setReleaseId] = useState<string>(() => {
-    try {
-      return localStorage.getItem('sk_tracks_release') || '';
-    } catch {
-      return '';
-    }
-  });
+  const [releaseId, setReleaseId] = useState(''); // '' = the library
   const [trackId, setTrackId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
@@ -184,7 +184,8 @@ const TracksApp: React.FC = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const releases = data?.releases || [];
-  const release = releases.find((r) => r.id === releaseId) || releases[0];
+  const release = releases.find((r) => r.id === releaseId);
+  const listenOnly = !!(release && me && release.owner !== me.username && !me.admin && release.listeners?.includes(me.username));
   const [ready, setReady] = useState<Readiness | null>(null);
   const [readyOpen, setReadyOpen] = useState(false);
   // Guided path on by default; hiding it is remembered in this browser
@@ -220,9 +221,6 @@ const TracksApp: React.FC = () => {
   const pickRelease = (id: string) => {
     setReleaseId(id);
     setTrackId(null);
-    try {
-      localStorage.setItem('sk_tracks_release', id);
-    } catch {}
   };
   const run = async (fn: () => Promise<unknown>) => {
     try {
@@ -324,19 +322,21 @@ const TracksApp: React.FC = () => {
   return (
     <div style={shell}>
       <div style={toolbar}>
-        {releases.length > 0 && (
-          <select value={release?.id} onChange={(e) => pickRelease(e.target.value)} style={input}>
-            {releases.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.title} ({r.kind})
-              </option>
-            ))}
-          </select>
+        {release ? (
+          <button style={button} onClick={() => pickRelease('')} title="All projects">
+            ◄ Library
+          </button>
+        ) : (
+          <button style={button} onClick={newRelease}>
+            <IconLabel icon="plus">New project...</IconLabel>
+          </button>
         )}
-        <button style={button} onClick={newRelease}>
-          <IconLabel icon="plus">New release...</IconLabel>
-        </button>
-        {release && (
+        {listenOnly && (
+          <span style={{ padding: '0 6px', color: '#444' }} title="Ask whoever made it for edit access">
+            🎧 {release!.title}: you can listen and comment
+          </span>
+        )}
+        {release && !listenOnly && (
           <>
             <button style={{ ...button, fontWeight: 700 }} onClick={addTrack}>
               <IconLabel icon="note">Add track...</IconLabel>
@@ -437,8 +437,9 @@ const TracksApp: React.FC = () => {
             >
               Campaign...
             </button>
-            <button style={button} onClick={() => setSharing(true)} title="Who can see this release">
-              {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}...
+            <button style={button} onClick={() => setSharing(true)} title="Who can see this project, and who can edit it">
+              {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
+              {release.listeners?.length ? `, ${release.listeners.length} listening` : ''}...
             </button>
             <label
               style={{ display: 'flex', gap: 3, alignItems: 'center' }}
@@ -489,9 +490,7 @@ const TracksApp: React.FC = () => {
         onDrop={drop}
       >
         {!release ? (
-          <div style={{ ...listBox, padding: 16 }}>
-            No releases yet. Click <b>New release...</b> to start one (an album, EP or single), or drop a folder of bounces here.
-          </div>
+          <Library releases={releases} tracks={data.tracks} me={me?.username} onOpen={pickRelease} />
         ) : (
           <div style={{ ...listBox, flex: track && !narrow ? '0 0 42%' : 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -590,8 +589,9 @@ const TracksApp: React.FC = () => {
             title={`Who can see ${release.title}`}
             members={release.members}
             always={release.owner}
-            note="Everyone = every member. Pick people to keep it private (you and admins always see it)."
-            onSave={(m) => patchRelease({ members: m && m.filter((u) => u !== release.owner) })}
+            listeners={release.listeners || []}
+            note="Everyone = every member. Pick people to keep it private (you and admins always see it). Can listen = play, comment and follow, but not change anything."
+            onSave={(m, listeners) => patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners })}
             onClose={() => setSharing(false)}
           />
         )}
@@ -600,8 +600,79 @@ const TracksApp: React.FC = () => {
         {msg ||
           (release
             ? `${release.title} · ${tracks.length} track(s), ${done} done${release.date ? ` · out ${due(release.date)} (${release.date})` : ''}`
-            : '')}
+            : `${releases.length} project(s)`)}
       </div>
+    </div>
+  );
+};
+
+/** Every project as a cover card, newest first. Drop a folder anywhere on it to make a new project. */
+const Library: React.FC<{ releases: Release[]; tracks: Track[]; me?: string; onOpen: (id: string) => void }> = ({
+  releases,
+  tracks,
+  me,
+  onOpen,
+}) => {
+  const { getToken } = useAuth();
+  const [token, setToken] = useState('');
+  useEffect(() => {
+    getToken().then((x) => setToken(x || ''));
+  }, [getToken]);
+  if (!releases.length)
+    return (
+      <div style={{ ...listBox, flex: 1, padding: 16 }}>
+        No projects yet. Click <b>New project...</b> to start one (an album, EP or single), or drop a folder of bounces here.
+      </div>
+    );
+  const sorted = [...releases].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  return (
+    <div
+      style={{
+        ...listBox,
+        flex: 1,
+        padding: 10,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+        gap: 12,
+        alignContent: 'start',
+      }}
+    >
+      {sorted.map((r) => {
+        const n = tracks.filter((t) => t.release === r.id).length;
+        const cover = r.cover && token ? `${fileUrl(r.cover.space, r.cover.path.split('/'))}?thumb&t=${token}` : '';
+        return (
+          <button
+            key={r.id}
+            onClick={() => onOpen(r.id)}
+            title={`Open ${r.title}`}
+            style={{ all: 'unset', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}
+          >
+            <div
+              style={{
+                aspectRatio: '1',
+                border: '2px outset #c0c0c0',
+                background: cover ? `#000 url("${cover}") center / cover` : STATUS_COLORS.Mixing,
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 36,
+                fontWeight: 700,
+              }}
+            >
+              {!cover && r.title.slice(0, 1).toUpperCase()}
+            </div>
+            <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.members ? '🔒 ' : ''}
+              {r.title}
+            </b>
+            <span style={{ color: '#555' }}>
+              {r.kind} · {n} track(s)
+              {me && r.listeners?.includes(me) ? ' · listen only' : ''}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 };
