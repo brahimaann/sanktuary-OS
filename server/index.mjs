@@ -1365,9 +1365,11 @@ async function publicShare(req, res, url) {
 // ── /api/tracks: releases (album / EP / single) and their track pages — data/tracks.json ──
 // A track points at files in the spaces (current bounce, project folder, stems folder) rather than holding
 // them, so playing or opening them still goes through the normal space rights. Releases are open to every
-// member unless `members` lists who may see them (owner + admins always can), like boards.
+// member unless `members` lists who may see them (owner + admins always can), like boards. People in `listeners`
+// can only listen, comment and follow: they can't change the release or its songs.
 const TRACK_STATUSES = ['Idea', 'Writing', 'Recording', 'Mixing', 'Mastering', 'Done'];
-const RELEASE_KINDS = ['Album', 'EP', 'Single'];
+// A Folder holds loose songs (demos, beats); a Playlist holds no songs of its own, only `items`: songs from other projects
+const RELEASE_KINDS = ['Album', 'EP', 'Single', 'Folder', 'Playlist'];
 // A song's BMI work-registration sheet (and split sheet): only the song's team sees it, never public pages.
 // Identifiers are checked for shape here; shares adding up to 100% is checked in the app (drafts may not yet).
 const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
@@ -1752,6 +1754,9 @@ const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { rel
 const saveTracks = () => (tracksSaved = tracksSaved.then(() => saveJson('tracks.json', tracksDb)).catch(console.error));
 const canSeeRelease = (user, r) =>
   !r.deleted && (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
+const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
+const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
+const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
 const fileRef = (v) =>
   v === null
     ? null
@@ -1817,6 +1822,7 @@ async function tracksApi(req, res, url) {
     }
     const r = (own(db.releases, id) && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
     if (req.method === 'GET' && url.searchParams.has('ready')) return json(res, await releaseReadiness(db, r));
+    if (req.method !== 'GET') editRelease(user, r);
     if (req.method === 'POST' && url.searchParams.has('scan')) {
       if (!r.folder) fail(400, 'Link the release to a folder first');
       await releaseSpace(r.folder.space, user, cfg); // still allowed to see that folder?
@@ -1843,7 +1849,15 @@ async function tracksApi(req, res, url) {
         else await linkReleaseFolder(r, input.folder, user, cfg, !!input.setup);
       }
       if (input.title !== undefined) r.title = String(input.title).trim().slice(0, 80) || r.title;
-      if (input.kind !== undefined) r.kind = RELEASE_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+      if (input.kind !== undefined) {
+        if (!RELEASE_KINDS.includes(input.kind)) fail(400, 'Bad kind');
+        if ((input.kind === 'Playlist') !== (r.kind === 'Playlist')) fail(400, "A playlist can't become a project, or the other way round");
+        r.kind = input.kind;
+      }
+      if (input.items !== undefined)
+        r.items = [
+          ...new Set((Array.isArray(input.items) ? input.items : []).filter((i) => own(db.tracks, i) && !db.tracks[i].deleted)),
+        ].slice(0, 500);
       if (input.date !== undefined) r.date = dateOrNull(input.date);
       if (input.cover !== undefined) r.cover = fileRef(input.cover);
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
@@ -1873,7 +1887,11 @@ async function tracksApi(req, res, url) {
       if (input.story !== undefined) r.story = input.story ? String(input.story).slice(0, 80) : null; // a Story as its visual world
       if (input.members !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
-        r.members = Array.isArray(input.members) ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))] : null;
+        r.members = Array.isArray(input.members) ? userList(input.members) : null;
+      }
+      if (input.listeners !== undefined) {
+        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
+        r.listeners = Array.isArray(input.listeners) ? userList(input.listeners).filter((u) => u !== r.owner) : [];
       }
       const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
@@ -1893,6 +1911,8 @@ async function tracksApi(req, res, url) {
       const r =
         (own(db.releases, input.release) && canSeeRelease(user, db.releases[input.release]) && db.releases[input.release]) ||
         fail(404, 'No such release');
+      editRelease(user, r);
+      if (r.kind === 'Playlist') fail(400, 'Add songs to a playlist from their own project');
       const t = newTrack(db, r, input.title, me, 'added the track');
       changed(r);
       return json(res, t);
@@ -1920,6 +1940,7 @@ async function tracksApi(req, res, url) {
     }
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);
+      if (Object.keys(input).some((k) => k !== 'follow')) editRelease(user, r); // listeners can still follow
       const log = (action) => (t.history = [{ at: new Date().toISOString(), user: me, action }, ...t.history].slice(0, 100));
       const news = [];
       for (const [k, max] of Object.entries(TRACK_TEXT)) if (input[k] !== undefined) t[k] = String(input[k] ?? '').slice(0, max);

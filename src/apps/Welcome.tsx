@@ -72,9 +72,9 @@ const MEMBER_TOUR: Step[] = [
     open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png', 560, 420),
   },
   {
-    title: 'Studio > Songs: tracks fill themselves in',
+    title: 'Music: tracks fill themselves in',
     text: 'Drop bounces into a release\'s folder (or onto Tracks): "03 Song v4.wav" becomes track 3 with v4 as its bounce. Projects, stems, BPM and the cover are linked by name.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'songs' }),
+    open: win('music', 'Music', 'tracks', 'sound-16x16.png', 960, 620),
   },
   {
     title: 'Studio > Calendar: shoots, shows, drops',

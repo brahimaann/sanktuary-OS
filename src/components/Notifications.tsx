@@ -3,7 +3,7 @@ import { useApi, useMe } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
-import { openStudio } from '../apps/Studio';
+import { openMusic, openStudio } from '../apps/Studio';
 import RetroIcon from './RetroIcon';
 
 /**
@@ -135,7 +135,7 @@ export const NotificationTray: React.FC = () => {
         name: /\.(psd|psb|ai)$/i.test(w.name) ? w.dir[w.dir.length - 1] : w.name,
       });
     } else if (n.track) {
-      openStudio(openWindow, 'songs');
+      openMusic(openWindow);
     } else if (n.timeline) {
       openStudio(openWindow, 'calendar');
     } else if (n.opportunity) {

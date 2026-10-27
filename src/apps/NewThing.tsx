@@ -4,7 +4,7 @@ import { RANK, useApi, useMe } from '../utils/api';
 import { parseWhen, describeWhen } from '../utils/when';
 import { uploadFiles } from '../utils/upload';
 import { useWindowManager } from '../wm/manager';
-import { openStudio } from './Studio';
+import { openMusic, openStudio } from './Studio';
 import { LogOn, shell, button } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { IconLabel, IconName } from '../components/RetroIcon';
@@ -13,7 +13,7 @@ import { useOpenRef } from '../utils/refs';
 type Kind = 'release' | 'song' | 'session' | 'article' | 'Shoot' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
 
 const KINDS: { id: Kind; label: string; icon: IconName; hint: string }[] = [
-  { id: 'release', label: 'Release', icon: 'archive', hint: 'Album, EP or single, with its folders' },
+  { id: 'release', label: 'Release', icon: 'archive', hint: 'Album, EP, single or a folder of demos, with its folders' },
   { id: 'song', label: 'Song', icon: 'note', hint: 'A track, with its bounce' },
   { id: 'session', label: 'Studio Scratch', icon: 'note', hint: 'Walk-in session with scratch folder & tags' },
   { id: 'article', label: 'Article / Draft', icon: 'link', hint: 'Native blog post or essay draft' },
@@ -131,6 +131,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     if (releaseKind === 'Album') setTrackCount(10);
     else if (releaseKind === 'EP') setTrackCount(5);
     else if (releaseKind === 'Single') setTrackCount(1);
+    else if (releaseKind === 'Folder') setTrackCount(0); // demos, beats: songs come from what's dropped in
   }, [releaseKind]);
 
   const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && RANK[s.rights] >= RANK.upload);
@@ -160,7 +161,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const openTracks = (id: string) => {
     remember('sk_tracks_release', id);
     window.dispatchEvent(new CustomEvent('sk:tracks-release', { detail: id }));
-    openStudio(openWindow, 'songs');
+    openMusic(openWindow);
   };
 
   const openTimeline = (id: string) => {
@@ -493,12 +494,12 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           <label style={row}>
             <span style={cap}>Kind</span>
             <select style={field} value={releaseKind} onChange={(e) => setReleaseKind(e.target.value)}>
-              {['Album', 'EP', 'Single'].map((k) => (
+              {['Album', 'EP', 'Single', 'Folder'].map((k) => (
                 <option key={k}>{k}</option>
               ))}
             </select>
           </label>
-          {releaseKind !== 'Single' && (
+          {!['Single', 'Folder'].includes(releaseKind) && (
             <div style={row}>
               <span style={cap}>Tracks</span>
               <button style={{ ...button, padding: '1px 6px', fontSize: 11 }} onClick={() => setTrackCount((c) => Math.max(1, c - 1))}>

@@ -7,7 +7,9 @@ import { useLiveEvent } from '../utils/live';
 import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
-import { fileKind } from './fileTypes';
+import { fileKind, lightAudio } from './fileTypes';
+import ShareDialog from './ShareDialog';
+import { Ref } from '../utils/refs';
 import { fileUrl, LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import MediaControls from '../components/MediaControls';
 import FilePicker, { FileRef } from '../components/FilePicker';
@@ -35,6 +37,10 @@ interface Release {
   artist?: string; // who it's by (asked first when it's made)
   upc?: string; // the release's barcode
   writers?: Partial<BmiWriter>[]; // its usual songwriters: each song's BMI sheet starts from these
+  created?: string;
+  cover?: FileRef | null; // found in Artwork by a scan
+  listeners?: string[]; // can listen and comment, not change it
+  items?: string[]; // a Playlist's songs (track ids from other projects)
 }
 const STORES: [string, string][] = [
   ['presave', 'Pre-save link (shown until release day)'],
@@ -132,7 +138,10 @@ const due = (d: string) => {
   return n < 0 ? `${-n} day(s) late` : n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
 };
 
-/** Album / EP / single tracker: every song's bounce, project, stems, links, status and deadline in one place. */
+/**
+ * Music: the team's projects (albums, EPs, singles) as a library of covers, like Untitled. Opening one shows every
+ * song's bounce, project, stems, links, status and deadline in one place.
+ */
 const Tracks: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
@@ -144,13 +153,7 @@ const TracksApp: React.FC = () => {
   const api = useApi();
   const { me } = useMe();
   const [data, setData] = useState<{ releases: Release[]; tracks: Track[]; statuses: string[]; kinds: string[] } | null>(null);
-  const [releaseId, setReleaseId] = useState<string>(() => {
-    try {
-      return localStorage.getItem('sk_tracks_release') || '';
-    } catch {
-      return '';
-    }
-  });
+  const [releaseId, setReleaseId] = useState(''); // '' = the library
   const [trackId, setTrackId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
@@ -184,7 +187,70 @@ const TracksApp: React.FC = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const releases = data?.releases || [];
-  const release = releases.find((r) => r.id === releaseId) || releases[0];
+  const release = releases.find((r) => r.id === releaseId);
+  const isPlaylist = release?.kind === 'Playlist';
+  const playlists = releases.filter((r) => r.kind === 'Playlist');
+  const byId = new Map((data?.tracks || []).map((t) => [t.id, t]));
+
+  // ── Now playing: one player for the whole window, so music keeps going while you browse ──
+  const player = useRef<HTMLAudioElement | null>(null);
+  const [queue, setQueue] = useState<string[]>([]); // track ids; the one playing and what's next up
+  const [nowId, setNowId] = useState<string | null>(null);
+  const [nowSrc, setNowSrc] = useState('');
+  const [queueOpen, setQueueOpen] = useState(false);
+  const now = nowId ? byId.get(nowId) : undefined;
+  useEffect(() => {
+    const other = (e: Event) => e.target !== player.current && player.current?.pause(); // a song page's own player started
+    document.addEventListener('play', other, true);
+    return () => document.removeEventListener('play', other, true);
+  }, []);
+  const play = async (id: string) => {
+    const t = byId.get(id);
+    if (!t?.bounce) return;
+    const b = t.bounce;
+    setNowId(id);
+    setNowSrc(`${fileUrl(b.space, b.path.split('/'))}?${lightAudio(b.path) ? 'preview&' : ''}t=${await getToken()}`);
+  };
+  const playAll = (ids: string[], start = ids[0]) => {
+    const playable = ids.filter((i) => byId.get(i)?.bounce);
+    if (!playable.length) return setMsg('Nothing to play yet: no bounces.');
+    setQueue(playable);
+    play(playable.includes(start) ? start : playable[0]);
+  };
+  const step = (by: number) => {
+    const next = queue[queue.indexOf(nowId || '') + by];
+    if (next) play(next);
+  };
+  const addNext = (id: string) => {
+    if (!byId.get(id)?.bounce) return setMsg('That song has no bounce yet.');
+    setQueue((q) => {
+      const rest = q.filter((i) => i !== id);
+      const at = rest.indexOf(nowId || '') + 1;
+      return [...rest.slice(0, at), id, ...rest.slice(at)];
+    });
+    if (!nowId) play(id);
+    setMsg(`${byId.get(id)!.title} is next up.`);
+  };
+  const addToPlaylist = (playlistId: string, id: string) => {
+    const pl = releases.find((r) => r.id === playlistId);
+    if (!pl) return;
+    run(() =>
+      api(`/api/tracks/release/${pl.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ items: [...(pl.items || []).filter((i) => i !== id), id] }),
+      }),
+    );
+  };
+  const newPlaylist = async (first?: string) => {
+    const title = (await dialog.prompt('Name the playlist (e.g. march mixes):', '', { title: 'New playlist' }))?.trim();
+    if (!title) return;
+    run(async () => {
+      const pl = await api('/api/tracks/release', { method: 'POST', body: JSON.stringify({ title, kind: 'Playlist' }) });
+      if (first) await api(`/api/tracks/release/${pl.id}`, { method: 'PATCH', body: JSON.stringify({ items: [first] }) });
+      if (!first) pickRelease(pl.id);
+    });
+  };
+  const listenOnly = !!(release && me && release.owner !== me.username && !me.admin && release.listeners?.includes(me.username));
   const [ready, setReady] = useState<Readiness | null>(null);
   const [readyOpen, setReadyOpen] = useState(false);
   // Guided path on by default; hiding it is remembered in this browser
@@ -212,17 +278,17 @@ const TracksApp: React.FC = () => {
     else setReadyOpen(true);
   };
   useEffect(() => {
-    if (!release) return;
+    if (!release || ['Folder', 'Playlist'].includes(release.kind)) return setReady(null);
     api(`/api/tracks/release/${release.id}?ready`).then(setReady, () => setReady(null));
   }, [api, release?.id, data]); // eslint-disable-line react-hooks/exhaustive-deps
-  const tracks = (data?.tracks || []).filter((t) => t.release === release?.id).sort((a, b) => a.n - b.n);
+  const tracks = isPlaylist
+    ? (release.items || []).flatMap((i) => byId.get(i) || [])
+    : (data?.tracks || []).filter((t) => t.release === release?.id).sort((a, b) => a.n - b.n);
+  const releaseOf = (t: Track) => releases.find((r) => r.id === t.release)!;
   const track = tracks.find((t) => t.id === trackId) || null;
   const pickRelease = (id: string) => {
     setReleaseId(id);
     setTrackId(null);
-    try {
-      localStorage.setItem('sk_tracks_release', id);
-    } catch {}
   };
   const run = async (fn: () => Promise<unknown>) => {
     try {
@@ -324,39 +390,61 @@ const TracksApp: React.FC = () => {
   return (
     <div style={shell}>
       <div style={toolbar}>
-        {releases.length > 0 && (
-          <select value={release?.id} onChange={(e) => pickRelease(e.target.value)} style={input}>
-            {releases.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.title} ({r.kind})
-              </option>
-            ))}
-          </select>
+        {release ? (
+          <button style={button} onClick={() => pickRelease('')} title="All projects">
+            ◄ Library
+          </button>
+        ) : (
+          <>
+            <button style={button} onClick={newRelease}>
+              <IconLabel icon="plus">New project...</IconLabel>
+            </button>
+            <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
+              New playlist...
+            </button>
+          </>
         )}
-        <button style={button} onClick={newRelease}>
-          <IconLabel icon="plus">New release...</IconLabel>
-        </button>
-        {release && (
+        {release && tracks.some((t) => t.bounce) && (
+          <button style={button} onClick={() => playAll(tracks.map((t) => t.id))} title="Play every song with a bounce, in order">
+            ▶ Play all
+          </button>
+        )}
+        {isPlaylist && !listenOnly && (
+          <button style={button} onClick={() => setSharing(true)} title="Who can see this playlist, and who can edit it">
+            {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
+            {release.listeners?.length ? `, ${release.listeners.length} listening` : ''}...
+          </button>
+        )}
+        {listenOnly && (
+          <span style={{ padding: '0 6px', color: '#444' }} title="Ask whoever made it for edit access">
+            🎧 {release!.title}: you can listen and comment
+          </span>
+        )}
+        {release && !listenOnly && !isPlaylist && (
           <>
             <button style={{ ...button, fontWeight: 700 }} onClick={addTrack}>
               <IconLabel icon="note">Add track...</IconLabel>
             </button>
-            <button
-              style={{ ...button, color: ready && ready.ready < ready.of ? '#a00000' : '#006000' }}
-              onClick={() => setReadyOpen(true)}
-              title="Everything it needs before it goes to your distributor"
-            >
-              {ready ? `Ready? ${ready.ready}/${ready.of}` : 'Ready?'}
-            </button>
+            {ready && (
+              <button
+                style={{ ...button, color: ready.ready < ready.of ? '#a00000' : '#006000' }}
+                onClick={() => setReadyOpen(true)}
+                title="Everything it needs before it goes to your distributor"
+              >
+                Ready? {ready.ready}/{ready.of}
+              </button>
+            )}
             {!guided && (
               <button style={button} onClick={() => guide(true)} title="Show the guided path: stages and the next thing to do">
                 Guide
               </button>
             )}
             <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of release">
-              {data.kinds.map((k) => (
-                <option key={k}>{k}</option>
-              ))}
+              {data.kinds
+                .filter((k) => k !== 'Playlist')
+                .map((k) => (
+                  <option key={k}>{k}</option>
+                ))}
             </select>
             <input
               ref={artistBox}
@@ -437,8 +525,9 @@ const TracksApp: React.FC = () => {
             >
               Campaign...
             </button>
-            <button style={button} onClick={() => setSharing(true)} title="Who can see this release">
-              {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}...
+            <button style={button} onClick={() => setSharing(true)} title="Who can see this project, and who can edit it">
+              {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
+              {release.listeners?.length ? `, ${release.listeners.length} listening` : ''}...
             </button>
             <label
               style={{ display: 'flex', gap: 3, alignItems: 'center' }}
@@ -489,15 +578,28 @@ const TracksApp: React.FC = () => {
         onDrop={drop}
       >
         {!release ? (
-          <div style={{ ...listBox, padding: 16 }}>
-            No releases yet. Click <b>New release...</b> to start one (an album, EP or single), or drop a folder of bounces here.
-          </div>
+          <Library
+            releases={releases}
+            tracks={data.tracks}
+            me={me?.username}
+            onOpen={pickRelease}
+            onPlay={(r) =>
+              playAll(
+                r.kind === 'Playlist'
+                  ? r.items || []
+                  : data.tracks
+                      .filter((t) => t.release === r.id)
+                      .sort((a, b) => a.n - b.n)
+                      .map((t) => t.id),
+              )
+            }
+          />
         ) : (
           <div style={{ ...listBox, flex: track && !narrow ? '0 0 42%' : 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['#', 'Title', 'Status', 'BPM', 'Key', 'Due'].map((h) => (
+                  {['#', 'Title', 'Status', 'BPM', 'Key', 'Due', ''].map((h) => (
                     <th key={h} style={th}>
                       {h}
                     </th>
@@ -505,16 +607,18 @@ const TracksApp: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {tracks.map((t) => (
+                {tracks.map((t, i) => (
                   <tr
                     key={t.id}
                     onClick={() => setTrackId(t.id === trackId ? null : t.id)}
                     style={t.id === trackId ? { background: '#000080', color: '#fff' } : undefined}
                   >
-                    <td style={td}>{t.n}</td>
+                    <td style={td}>{isPlaylist ? i + 1 : t.n}</td>
                     <td style={{ ...td, fontWeight: 700 }}>
+                      {t.id === nowId ? '🔊 ' : ''}
                       {t.title}
                       {t.bounce ? ' ♪' : ''}
+                      {isPlaylist && <span style={{ fontWeight: 400, opacity: 0.7 }}> · {releaseOf(t)?.title}</span>}
                     </td>
                     <td style={td}>
                       <StatusChip s={t.status} />
@@ -529,13 +633,58 @@ const TracksApp: React.FC = () => {
                     >
                       {t.deadline ? due(t.deadline) : ''}
                     </td>
+                    <td style={{ ...td, padding: '1px 4px' }} onClick={(e) => e.stopPropagation()}>
+                      {t.bounce && (
+                        <>
+                          <button
+                            style={rowButton}
+                            title="Play from here"
+                            onClick={() =>
+                              playAll(
+                                tracks.map((x) => x.id),
+                                t.id,
+                              )
+                            }
+                          >
+                            ▶
+                          </button>
+                          <button style={rowButton} title="Play after the current song" onClick={() => addNext(t.id)}>
+                            + Next up
+                          </button>
+                        </>
+                      )}
+                      {isPlaylist && !listenOnly && (
+                        <button
+                          style={rowButton}
+                          title="Take it off this playlist (the song itself stays)"
+                          onClick={() =>
+                            run(() =>
+                              api(`/api/tracks/release/${release.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ items: (release.items || []).filter((x) => x !== t.id) }),
+                              }),
+                            )
+                          }
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {!tracks.length && (
                   <tr>
-                    <td style={td} colSpan={6}>
-                      No tracks yet. Click <b>Add track...</b>
-                      {release.folder ? ', or drop bounces here ("03 Song v2.wav" becomes track 3).' : ''}
+                    <td style={td} colSpan={7}>
+                      {isPlaylist ? (
+                        <>
+                          No songs yet. Open a song in any project and pick this playlist under <b>Add to playlist</b>.
+                        </>
+                      ) : (
+                        <>
+                          No tracks yet. Click <b>Add track...</b>
+                          {release.folder ? ', or drop bounces here ("03 Song v2.wav" becomes track 3).' : ''}
+                        </>
+                      )}
                     </td>
                   </tr>
                 )}
@@ -547,10 +696,12 @@ const TracksApp: React.FC = () => {
           <TrackPage
             key={track.id}
             track={track}
-            release={release!}
+            release={releaseOf(track)}
+            playlists={playlists}
+            onAddToPlaylist={(pl) => (pl ? addToPlaylist(pl, track.id) : newPlaylist(track.id))}
             focus={focus}
             statuses={data.statuses}
-            canRemove={!!me && (release!.owner === me.username || me.admin)}
+            canRemove={!isPlaylist && !!me && (release!.owner === me.username || me.admin)}
             overlay={narrow}
             onChange={load}
             onClose={() => setTrackId(null)}
@@ -590,18 +741,158 @@ const TracksApp: React.FC = () => {
             title={`Who can see ${release.title}`}
             members={release.members}
             always={release.owner}
-            note="Everyone = every member. Pick people to keep it private (you and admins always see it)."
-            onSave={(m) => patchRelease({ members: m && m.filter((u) => u !== release.owner) })}
+            listeners={release.listeners || []}
+            note="Everyone = every member. Pick people to keep it private (you and admins always see it). Can listen = play, comment and follow, but not change anything."
+            onSave={(m, listeners) => patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners })}
             onClose={() => setSharing(false)}
           />
         )}
       </div>
+      {now && (
+        <div style={{ ...toolbar, flexDirection: 'column', alignItems: 'stretch', gap: 2, borderTop: '1px solid #808080' }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <button style={button} disabled={queue.indexOf(now.id) <= 0} onClick={() => step(-1)} title="Previous">
+              ⏮
+            </button>
+            <button style={button} disabled={queue.indexOf(now.id) >= queue.length - 1} onClick={() => step(1)} title="Next">
+              ⏭
+            </button>
+            <b style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              ♪ {now.title} · <span style={{ fontWeight: 400 }}>{releaseOf(now)?.title}</span>
+            </b>
+            <button style={button} onClick={() => setQueueOpen((o) => !o)} title="What plays after this">
+              Next up ({Math.max(0, queue.length - queue.indexOf(now.id) - 1)})
+            </button>
+            <button
+              style={button}
+              title="Stop and close the player"
+              onClick={() => {
+                player.current?.pause();
+                setNowId(null);
+                setQueue([]);
+              }}
+            >
+              <RetroIcon name="close" />
+            </button>
+          </div>
+          {queueOpen && (
+            <div style={{ ...listBox, maxHeight: 110 }}>
+              {queue.slice(queue.indexOf(now.id) + 1).map((id) => (
+                <div key={id} style={{ display: 'flex', gap: 4, padding: '1px 6px', alignItems: 'center' }}>
+                  <span style={{ flex: 1, cursor: 'pointer' }} onClick={() => play(id)} title="Play now">
+                    {byId.get(id)?.title} <span style={{ color: '#666' }}>· {byId.get(id) && releaseOf(byId.get(id)!)?.title}</span>
+                  </span>
+                  <button style={rowButton} onClick={() => setQueue((q) => q.filter((x) => x !== id))} title="Take it out of Next up">
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {queue.indexOf(now.id) >= queue.length - 1 && <div style={{ padding: '1px 6px', color: '#666' }}>Nothing next up.</div>}
+            </div>
+          )}
+          <audio ref={(el) => void (player.current = el)} src={nowSrc} autoPlay onEnded={() => step(1)} />
+          <MediaControls media={player} src={nowSrc} />
+        </div>
+      )}
       <div style={statusBar}>
         {msg ||
           (release
             ? `${release.title} · ${tracks.length} track(s), ${done} done${release.date ? ` · out ${due(release.date)} (${release.date})` : ''}`
-            : '')}
+            : `${releases.length} project(s)`)}
       </div>
+    </div>
+  );
+};
+
+/** Every project as a cover card, newest first. Drop a folder anywhere on it to make a new project. */
+const Library: React.FC<{
+  releases: Release[];
+  tracks: Track[];
+  me?: string;
+  onOpen: (id: string) => void;
+  onPlay: (r: Release) => void;
+}> = ({ releases, tracks, me, onOpen, onPlay }) => {
+  const { getToken } = useAuth();
+  const [token, setToken] = useState('');
+  useEffect(() => {
+    getToken().then((x) => setToken(x || ''));
+  }, [getToken]);
+  if (!releases.length)
+    return (
+      <div style={{ ...listBox, flex: 1, padding: 16 }}>
+        No projects yet. Click <b>New project...</b> to start one (an album, EP or single), or drop a folder of bounces here.
+      </div>
+    );
+  const sorted = [...releases].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  return (
+    <div
+      style={{
+        ...listBox,
+        flex: 1,
+        padding: 10,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+        gap: 12,
+        alignContent: 'start',
+      }}
+    >
+      {sorted.map((r) => {
+        const n = r.kind === 'Playlist' ? (r.items || []).length : tracks.filter((t) => t.release === r.id).length;
+        const cover = r.cover && token ? `${fileUrl(r.cover.space, r.cover.path.split('/'))}?thumb&t=${token}` : '';
+        return (
+          <button
+            key={r.id}
+            onClick={() => onOpen(r.id)}
+            title={`Open ${r.title}`}
+            style={{ all: 'unset', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}
+          >
+            <div
+              style={{
+                aspectRatio: '1',
+                border: '2px outset #c0c0c0',
+                background: cover ? `#000 url("${cover}") center / cover` : STATUS_COLORS.Mixing,
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 36,
+                fontWeight: 700,
+                position: 'relative',
+              }}
+            >
+              {!cover && (r.kind === 'Playlist' ? '♫' : r.kind === 'Folder' ? '📁' : r.title.slice(0, 1).toUpperCase())}
+              <span
+                role="button"
+                title={`Play ${r.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlay(r);
+                }}
+                style={{
+                  position: 'absolute',
+                  right: 4,
+                  bottom: 4,
+                  fontSize: 12,
+                  background: '#c0c0c0',
+                  color: '#000',
+                  border: '2px outset #fff',
+                  padding: '1px 6px',
+                }}
+              >
+                ▶
+              </span>
+            </div>
+            <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.members ? '🔒 ' : ''}
+              {r.title}
+            </b>
+            <span style={{ color: '#555' }}>
+              {r.kind} · {n} track(s)
+              {me && r.listeners?.includes(me) ? ' · listen only' : ''}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 };
@@ -626,7 +917,9 @@ const TrackPage: React.FC<{
   onClose: () => void;
   setMsg: (m: string) => void;
   focus?: { where: string; n: number } | null; // from the guided strip's Go
-}> = ({ track: t, release, statuses, canRemove, overlay, onChange, onClose, setMsg, focus }) => {
+  playlists: Release[];
+  onAddToPlaylist: (playlistId: string) => void; // '' = a new playlist
+}> = ({ track: t, release, statuses, canRemove, overlay, onChange, onClose, setMsg, focus, playlists, onAddToPlaylist }) => {
   const api = useApi();
   const openRef = useOpenRef();
   const { openWindow } = useWindowManager();
@@ -637,6 +930,7 @@ const TrackPage: React.FC<{
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [bmiOpen, setBmiOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const { me } = useMe();
   const syncKit = async () => {
     try {
@@ -759,6 +1053,23 @@ const TrackPage: React.FC<{
           <input type="checkbox" checked={t.following} onChange={(e) => save({ follow: e.target.checked })} />
           Follow
         </label>
+        <select
+          style={input}
+          value=""
+          title="Put this song on a playlist (it stays in this project too)"
+          onChange={(e) => onAddToPlaylist(e.target.value === 'new' ? '' : e.target.value)}
+        >
+          <option value="" disabled>
+            Add to playlist...
+          </option>
+          {playlists.map((p) => (
+            <option key={p.id} value={p.id} disabled={p.items?.includes(t.id)}>
+              {p.title}
+              {p.items?.includes(t.id) ? ' ✓' : ''}
+            </option>
+          ))}
+          <option value="new">New playlist...</option>
+        </select>
       </div>
 
       <Section title="Current bounce" step="bounce">
@@ -791,10 +1102,30 @@ const TrackPage: React.FC<{
               >
                 <IconLabel icon="chat">Comments...</IconLabel>
               </button>
+              <button style={button} onClick={() => setShareOpen(true)} title="A link to listen without an account, or send it in Messages">
+                <IconLabel icon="link">Share...</IconLabel>
+              </button>
               <button style={button} onClick={() => setPicking('bounce')}>
                 Change...
               </button>
             </div>
+            {shareOpen && (
+              <ShareDialog
+                item={
+                  {
+                    kind: 'file',
+                    title: t.bounce.path.split('/').pop(),
+                    app: t.bounce.space,
+                    dir: t.bounce.path.split('/').slice(0, -1),
+                    name: t.bounce.path.split('/').pop(),
+                  } as Ref
+                }
+                onClose={(sent) => {
+                  setShareOpen(false);
+                  if (sent) setMsg(`Sent ${t.title} to ${sent}.`);
+                }}
+              />
+            )}
             {bounceSrc && fileKind(t.bounce.path) === 'audio' && (
               <>
                 <audio ref={(el) => void (media.current = el)} src={bounceSrc} preload="metadata" />
@@ -1875,6 +2206,7 @@ const Section: React.FC<{ title: React.ReactNode; step?: string; children: React
   </fieldset>
 );
 
+const rowButton: React.CSSProperties = { fontFamily: 'inherit', fontSize: 10, padding: '0 4px', marginRight: 2 };
 const listBox: React.CSSProperties = { overflow: 'auto', background: '#fff', border: '2px inset #808080', minWidth: 0 };
 const th: React.CSSProperties = {
   position: 'sticky',

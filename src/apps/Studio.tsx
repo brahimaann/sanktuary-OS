@@ -2,19 +2,17 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Studio: songs (Tracks), the calendar (Timeline), to-do boards (Planner) and opportunities (grants, calls, gigs)
-// in one window. Each tab is the
-// full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
-const Tracks = lazy(() => import('./Tracks'));
+// Studio: the calendar (Timeline), to-do boards (Planner) and opportunities (grants, calls, gigs) in one window.
+// Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
+// Music (Tracks) is its own window: openMusic.
 const Timeline = lazy(() => import('./Timeline'));
 const Boards = lazy(() => import('./Boards'));
 const Opportunities = lazy(() => import('./Opportunities'));
 const Archive = lazy(() => import('./Archive'));
 const Outreach = lazy(() => import('./Outreach'));
 
-export type StudioTab = 'songs' | 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'archive';
+export type StudioTab = 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'archive';
 const TABS: [StudioTab, string][] = [
-  ['songs', 'Songs'],
   ['calendar', 'Calendar'],
   ['boards', 'Planner'],
   ['opportunities', 'Opportunities'],
@@ -23,7 +21,7 @@ const TABS: [StudioTab, string][] = [
 ];
 
 /** Opens Studio on a tab (switching the tab if Studio is already open). */
-export function openStudio(openWindow: ReturnType<typeof useWindowManager.getState>['openWindow'], tab: StudioTab = 'songs') {
+export function openStudio(openWindow: ReturnType<typeof useWindowManager.getState>['openWindow'], tab: StudioTab = 'calendar') {
   window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: tab }));
   openWindow({
     id: 'studio',
@@ -36,7 +34,11 @@ export function openStudio(openWindow: ReturnType<typeof useWindowManager.getSta
   });
 }
 
-const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'songs' }) => {
+/** Opens Music: the team's music projects (releases, songs, bounces), in its own window. */
+export const openMusic = (openWindow: ReturnType<typeof useWindowManager.getState>['openWindow']) =>
+  openWindow({ id: 'music', title: 'Music', icon: '/images/icons/sound-16x16.png', appType: 'tracks', width: 960, height: 620 });
+
+const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
   const [active, setActive] = useState<StudioTab>(tab);
   const [opened, setOpened] = useState<Set<StudioTab>>(new Set([tab]));
   const show = (t: StudioTab) => {
@@ -67,9 +69,7 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'songs' }) => {
             ([id]) =>
               opened.has(id) && (
                 <div key={id} style={{ flex: 1, minWidth: 0, display: active === id ? 'flex' : 'none', flexDirection: 'column' }}>
-                  {id === 'songs' ? (
-                    <Tracks />
-                  ) : id === 'calendar' ? (
+                  {id === 'calendar' ? (
                     <Timeline />
                   ) : id === 'boards' ? (
                     <Boards kind="kanban" />
