@@ -5669,6 +5669,11 @@ const metaTags = ({ title, text, image, link, canonical = link, site = 'CITIES �
     `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
     ...ld.filter(Boolean).map((x) => `<script type="application/ld+json">${jsonLd({ '@context': 'https://schema.org', ...x })}</script>`),
   ].join('\n    ');
+// The trail above a result in search: CITIES › Heart of the Cities › the story
+const crumbs = (origin, trail) => ({
+  '@type': 'BreadcrumbList',
+  itemListElement: trail.map(([name, path], i) => ({ '@type': 'ListItem', position: i + 1, name, item: origin + path })),
+});
 const jsonLd = (x) => JSON.stringify(x).replace(/</g, '\\u003c'); // never closes the script tag early
 // Who publishes everything here, for search engines (the logo and profiles beside the name in results)
 const orgLd = async (origin) => ({
@@ -5679,7 +5684,7 @@ const orgLd = async (origin) => ({
   url: origin + '/',
   logo: origin + '/icons/icon-512.png',
   description: (await loadFront()).intro,
-  areaServed: 'Minneapolis–Saint Paul, Minnesota',
+  areaServed: ['Minneapolis', 'Saint Paul'].map((name) => ({ '@type': 'City', name, containedInPlace: 'Minnesota' })),
   sameAs: String((await loadFront()).portfolio?.links || '')
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -5725,6 +5730,11 @@ async function blogPage(req, res, url) {
               sameAs: (x.links || []).filter((l) => /^https:\/\//.test(l)),
             },
           },
+          crumbs(origin, [
+            ['CITIES', '/cities'],
+            ['Heart of the Cities', '/cities/heart'],
+            [x.name, url.pathname],
+          ]),
         ],
       };
   } else if (a) {
@@ -5752,6 +5762,11 @@ async function blogPage(req, res, url) {
           isPartOf: { '@type': 'Blog', name: 'CITIES', url: origin + '/cities' },
           about: post.people.map((x) => ({ '@type': 'Person', name: x.name, url: origin + x.url })),
         },
+        crumbs(origin, [
+          ['CITIES', '/cities'],
+          [BLOG_SECTIONS[post.line]?.[0] || 'Heart of the Cities', `/cities/${post.line}`],
+          [post.title, url.pathname],
+        ]),
       ];
     }
   }
@@ -5927,7 +5942,7 @@ async function liteMain(a, b, c, pre) {
     return page(
       'CITIES Vol. 1',
       `<h1>CITIES Vol. 1</h1><p class="dim">Twin Cities artists in their own words. Scroll down to read the issue.</p>${order
-        .map((n) => `<p><img src="${img(`/magazine/pages/${n}`)}" alt=""></p>`)
+        .map((n, i) => `<p><img src="${img(`/magazine/pages/${n}`)}" alt="CITIES Vol. 1, page ${i + 1}"></p>`)
         .join('')}`,
     );
   }
@@ -5940,7 +5955,7 @@ async function liteMain(a, b, c, pre) {
       .map((s) => ownPostView(s));
     return page(
       `${p.name} · CITIES`,
-      `<h1>${h(p.name)}</h1>${p.role ? `<p class="dim">${h(p.role)}</p>` : ''}${p.portraits.map((u) => `<p><img src="${h(img(u))}" alt=""></p>`).join('')}${[
+      `<h1>${h(p.name)}</h1>${p.role ? `<p class="dim">${h(p.role)}</p>` : ''}${p.portraits.map((u) => `<p><img src="${h(img(u))}" alt="${h(p.name)}"></p>`).join('')}${[
         p.info,
         p.note,
       ]
@@ -5973,7 +5988,7 @@ async function liteMain(a, b, c, pre) {
       `${p.title} · CITIES`,
       `<h1>${h(p.title)}</h1>${p.preface ? `<p class="dim"><i>${h(p.preface)}</i></p>` : ''}<p><small>${h(p.publication)}${
         p.author && p.author !== p.publication ? ' · ' + h(p.author) : ''
-      } · ${liteDay(p.date)}</small></p>${p.image && !body.includes(p.image) ? `<p><img src="${h(img(p.image))}" alt=""></p>` : ''}${body}${
+      } · ${liteDay(p.date)}</small></p>${p.image && !body.includes(p.image) ? `<p><img src="${h(img(p.image))}" alt="${h(p.title)}"></p>` : ''}${body}${
         p.people?.length
           ? `<h2>People in this story</h2><ul>${p.people.map((x) => `<li><a href="${pre}${h(x.url)}">${h(x.name)}</a></li>`).join('')}</ul>`
           : ''

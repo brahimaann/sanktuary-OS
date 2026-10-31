@@ -1454,6 +1454,8 @@ try {
     postPage.includes('<h1>Lyric</h1>') &&
       postPage.includes('<link rel="canonical" href="') &&
       /"@type":"BlogPosting","headline":"Lyric"/.test(postPage) &&
+      postPage.includes('"@type":"BreadcrumbList"') &&
+      [...postPage.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/g)].every(([, j]) => JSON.parse(j)['@context']) &&
       !postPage.includes('id="app">Loading...'),
   );
   const sitemap = await (await fetch(B + '/sitemap.xml')).text();
