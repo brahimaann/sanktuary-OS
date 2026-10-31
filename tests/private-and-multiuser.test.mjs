@@ -42,6 +42,7 @@ const srv = spawn(process.execPath, [SERVER], {
     CLERK_SECRET_KEY: SECRET,
     CLERK_API_URL: 'http://127.0.0.1:3197',
     SITE_ORIGINS: '',
+    SCOUT_ALLOW_LOCAL: '1', // Scout reads its test sources from 127.0.0.1
   },
 });
 let srvOut = '';
@@ -365,6 +366,62 @@ try {
   const all = await fetch(`${B}/portfolios?all`, { redirect: 'manual', headers: { cookie: cookie('carol') } });
   check('?all shows a member the index', all.status === 200);
   check('the studio portfolio stays at /portfolio', /Portfolio · Sanktuary/.test(await (await fetch(`${B}/portfolio`)).text()));
+
+  // Scout: reads feeds, calendars and listing pages into leads for admins; nothing goes public by itself
+  const site = http
+    .createServer((req, res) => {
+      const pages = {
+        '/robots.txt': 'User-agent: *\nDisallow: /private/\n',
+        '/feed': `<rss><channel><title>Zine</title><item><title>Open call: mural on Lake St</title><link>http://127.0.0.1:3195/a</link><guid>a</guid><description>Deadline: December 1, 2026</description></item><item><title>Quarterly earnings</title><link>http://127.0.0.1:3195/b</link><guid>b</guid></item></channel></rss>`,
+        '/cal.ics':
+          'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x1\r\nSUMMARY:Basement show\\, all ages\r\nDTSTART:20991201T200000\r\nLOCATION:Northeast\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:x0\r\nSUMMARY:Long gone\r\nDTSTART:20000101\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n',
+        '/listings': '<a href="/opportunity/studio-residency">Studio residency for young painters</a><a href="/about">About us here</a>',
+        '/opportunity/studio-residency':
+          '<meta property="og:description" content="Six months of studio time."><p>Apply by January 5, 2099.</p>',
+      };
+      res.statusCode = pages[req.url] ? 200 : 404;
+      res.end(pages[req.url] || '');
+    })
+    .listen(3195);
+  try {
+    const S = 'http://127.0.0.1:3195';
+    check('members cannot use Scout', (await call('bob', '/api/scout')).status === 403);
+    const ig = await call('alice', '/api/scout/sources', 'POST', { url: 'https://www.instagram.com/someartist' });
+    check('Instagram is refused, with the reason', ig.status === 400 && /scraping/.test(ig.data.error || ig.data));
+    check('robots.txt is respected', (await call('alice', '/api/scout/sources', 'POST', { url: `${S}/private/feed` })).status === 400);
+    await call('alice', '/api/scout/sources', 'POST', { url: `${S}/feed`, name: 'Zine', match: 'call|mural' });
+    await call('alice', '/api/scout/sources', 'POST', { url: `${S}/cal.ics`, name: 'Venue', kind: 'event' });
+    await call('alice', '/api/scout/sources', 'POST', { url: `${S}/listings`, name: 'Board', pattern: '/opportunity/' });
+    const leads = (await call('alice', '/api/scout')).data.leads;
+    const by = (t) => leads.find((l) => l.title.startsWith(t));
+    check(
+      'a feed item becomes an opportunity with its deadline',
+      by('Open call')?.kind === 'opportunity' && by('Open call')?.deadline === '2026-12-01',
+    );
+    check("a source's words filter what comes in", !by('Quarterly'));
+    check(
+      'a calendar event comes in with its date',
+      by('Basement show, all ages')?.start === '2099-12-01' && by('Basement')?.location === 'Northeast',
+    );
+    check('past calendar events are skipped', !by('Long gone'));
+    const res = by('Studio residency');
+    check(
+      'a listing page link is read for its summary and deadline',
+      res?.excerpt === 'Six months of studio time.' && res?.deadline === '2099-01-05' && !by('About'),
+    );
+    const ev = await call('alice', `/api/scout/leads/${by('Basement').id}/accept`, 'POST', { as: 'event' });
+    const entry = (await call('alice', '/api/timeline')).data.items.find((i) => i.id === ev.data.id);
+    check('an accepted event is a private Timeline entry', entry?.kind === 'Event' && !entry.public);
+    const st = await call('alice', `/api/scout/leads/${res.id}/accept`, 'POST', { as: 'story' });
+    const draft = (await call('alice', '/api/blog/admin')).data.posts.find((p) => p.id === st.data.id);
+    check('an accepted story is an unpublished CITIES draft', draft && !draft.published);
+    await call('alice', `/api/scout/leads/${by('Open call').id}/dismiss`, 'POST');
+    check('handled leads leave the list', (await call('alice', '/api/scout')).data.leads.length === 0);
+    await call('alice', '/api/scout/check', 'POST');
+    check('a lead seen once never comes back', (await call('alice', '/api/scout')).data.leads.length === 0);
+  } finally {
+    site.close();
+  }
 
   // A store that can't be read (locked, or here a folder in its place) is an error, never an empty list that the
   // next save would write over the real file
