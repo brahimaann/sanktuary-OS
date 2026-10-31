@@ -386,6 +386,8 @@ try {
   try {
     const S = 'http://127.0.0.1:3195';
     check('members cannot use Scout', (await call('bob', '/api/scout')).status === 403);
+    // The starter sources are real sites: take them off so the test never reads the internet
+    for (const src of (await call('alice', '/api/scout')).data.sources) await call('alice', `/api/scout/sources/${src.id}`, 'DELETE');
     const ig = await call('alice', '/api/scout/sources', 'POST', { url: 'https://www.instagram.com/someartist' });
     check('Instagram is refused, with the reason', ig.status === 400 && /scraping/.test(ig.data.error || ig.data));
     check('robots.txt is respected', (await call('alice', '/api/scout/sources', 'POST', { url: `${S}/private/feed` })).status === 400);
