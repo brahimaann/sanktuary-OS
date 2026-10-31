@@ -4016,14 +4016,16 @@ const MOODS = [
 const MOOD_LANE = 1200; // px between lane titles on a new month's board
 const moodTaps = new Map(); // ip -> { n, since }
 const MEDIA = { video: /\.(mp4|webm|mov|m4v)$/i, audio: /\.(mp3|wav|m4a|aac|ogg|flac)$/i, image: /\.(png|jpe?g|gif|webp|avif)$/i };
-function moodDrops(b, m) {
-  const items = [...b.items.values()].filter((i) => i.type !== 'edge');
-  const lanes = items
+const moodLanes = (items) =>
+  items
     .filter((i) => i.type === 'text')
     .flatMap((i) => {
       const k = MOODS.find(([, title]) => (i.text || '').toUpperCase().includes(title.split(' ')[1]));
-      return k && (i.text || '').length < 40 ? [{ mood: k[0], id: i.id, x: i.x + i.w / 2 }] : [];
+      return k && (i.text || '').length < 40 ? [{ mood: k[0], title: k[1], id: i.id, x: i.x + i.w / 2, y: i.y }] : [];
     });
+function moodDrops(b, m) {
+  const items = [...b.items.values()].filter((i) => i.type !== 'edge');
+  const lanes = moodLanes(items);
   const mid = (i) => i.x + i.w / 2;
   return items
     .filter((i) => !lanes.some((l) => l.id === i.id))
@@ -5766,7 +5768,7 @@ table{border-collapse:collapse;width:100%}td{padding:6px 8px;border-bottom:1px s
 </style></head><body>
 <div class="top"><a href="/lite"><b>SANKTUARY</b></a><a href="/lite/cities">CITIES</a><a href="/lite/magazine">Magazine</a>${
   who
-    ? `<a href="/lite/files">Files</a><form method="post" action="/lite/signout"><button>Sign out</button></form><span class="me">Signed in as <b>${h(who.username)}</b></span>`
+    ? `<a href="/lite/files">Files</a><a href="/lite/boards">Moodboards</a><form method="post" action="/lite/signout"><button>Sign out</button></form><span class="me">Signed in as <b>${h(who.username)}</b></span>`
     : `<a href="/lite/pair">Member sign-in</a>`
 }</div>
 <main>${main}</main></body></html>`;
@@ -5813,11 +5815,11 @@ async function pairApi(req, res, url) {
 // Member pages in Lite read the same /api the desktop uses, over the loopback with the visitor's own cookie (and
 // Cloudflare's headers, so tunnel-only rules still apply), so rights and logging stay in one place
 const SELF = `http://${/^(0\.0\.0\.0|::)?$/.test(HOST) ? '127.0.0.1' : HOST}:${PORT}`;
-async function liteApi(req, path) {
+async function liteApi(req, path, init = {}) {
   const headers = Object.fromEntries(
     ['cookie', 'cf-ray', 'cf-connecting-ip', 'cf-visitor'].filter((k) => req.headers[k]).map((k) => [k, req.headers[k]]),
   );
-  const r = await fetch(SELF + path, { headers });
+  const r = await fetch(SELF + path, { ...init, headers });
   if (!r.ok) fail(r.status, (await r.text()) || 'Not found');
   return r;
 }
@@ -5843,6 +5845,172 @@ x.onerror=function(){say('Upload failed: no connection');};x.send(file.slice(c*C
 part();}
 if(files.length)next();}
 </script>`;
+
+// ── Darkroom Lite: the desktop's film stocks plus the basic sliders, developed on the server with sharp ──
+const LITE_STOCKS = { 24: 'Portra 400', 25: 'Kodachrome', 26: 'Cinestill 800T', 27: 'Classic Chrome', 28: 'Velvia 50' };
+// The film stocks come from the desktop's own recipes (src/apps/filmLuts.ts), which Node can load as TypeScript from
+// 22.18 on; on an older Node, Lite still develops everything but the stock
+let filmLutsMod;
+const filmLuts = async () => (filmLutsMod ??= await import('../src/apps/filmLuts.ts').catch(() => ({})));
+const liteGrading = (q) => {
+  const num = (k, min, max) => Math.min(max, Math.max(min, Number(q.get(k)) || 0));
+  return {
+    look: LITE_STOCKS[q.get('look')] ? Number(q.get('look')) : 0,
+    exp: num('exp', -2, 2),
+    con: num('con', -100, 100),
+    warm: num('warm', -100, 100),
+    sat: num('sat', -100, 100),
+    grain: num('grain', 0, 100),
+  };
+};
+async function developLite(buf, g, max) {
+  const { data: raw, info } = await sharp(buf)
+    .rotate()
+    .resize(max, max, { fit: 'inside', withoutEnlargement: true })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const data = new Uint8ClampedArray(raw.buffer, raw.byteOffset, raw.length); // writes clamp to 0..255 instead of wrapping
+  // Exposure and warmth in linear light, then contrast around mid-grey: per channel, so one table each
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const enc = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.max(v, 0) ** (1 / 2.4) - 0.055);
+  const k = 1 + g.con / 100;
+  const curve = (x) => ((x = Math.min(Math.max(x, 0), 1)) < 0.5 ? 0.5 * (2 * x) ** k : 1 - 0.5 * (2 - 2 * x) ** k);
+  const gains = [1 + g.warm * 0.002, 1, 1 - g.warm * 0.002].map((w) => w * 2 ** g.exp);
+  const tables = gains.map((gain) => Uint8ClampedArray.from({ length: 256 }, (_, v) => Math.round(curve(enc(lin(v / 255) * gain)) * 255)));
+  const sat = 1 + g.sat / 100;
+  const lut = g.look && (await filmLuts()).filmLut?.(g.look);
+  const n = 33;
+  const grain = g.grain * 0.4;
+  for (let i = 0; i < data.length; i += 3) {
+    let r = tables[0][data[i]];
+    let gr = tables[1][data[i + 1]];
+    let b = tables[2][data[i + 2]];
+    if (sat !== 1) {
+      const l = 0.2126 * r + 0.7152 * gr + 0.0722 * b;
+      r = l + (r - l) * sat;
+      gr = l + (gr - l) * sat;
+      b = l + (b - l) * sat;
+    }
+    if (lut) {
+      // Trilinear lookup in the LUT, packed as in filmLuts.ts: x = blue slice * n + red, y = green
+      const f = (v) => (Math.min(Math.max(v, 0), 255) / 255) * (n - 1);
+      const [fr, fg, fb] = [f(r), f(gr), f(b)];
+      const [r0, g0, b0] = [Math.min(n - 2, fr | 0), Math.min(n - 2, fg | 0), Math.min(n - 2, fb | 0)];
+      const [dr, dg, db] = [fr - r0, fg - g0, fb - b0];
+      const out = [0, 0, 0];
+      for (let c = 0; c < 8; c++) {
+        const [x, y, z] = [c & 1, (c >> 1) & 1, (c >> 2) & 1];
+        const w = (x ? dr : 1 - dr) * (y ? dg : 1 - dg) * (z ? db : 1 - db);
+        const o = ((g0 + y) * n * n + (b0 + z) * n + r0 + x) * 4;
+        out[0] += lut[o] * w;
+        out[1] += lut[o + 1] * w;
+        out[2] += lut[o + 2] * w;
+      }
+      [r, gr, b] = out;
+    }
+    const noise = grain && (Math.random() - 0.5) * grain;
+    data[i] = r + noise;
+    data[i + 1] = gr + noise;
+    data[i + 2] = b + noise;
+  }
+  return sharp(raw, { raw: info }).jpeg({ quality: 88 }).toBuffer();
+}
+
+// ── Moodboard Lite: a board as a grid, lane by lane (the moodboard of the month's moods), with photos, links and notes
+// added at the bottom of a lane. No dragging: the board's layout stays the desktop's job.
+const LITE_BOARD_UPLOAD = `<script>
+function liteBoardPhoto(id){var f=document.getElementById('bf').files[0],msg=document.getElementById('bmsg');if(!f)return;
+msg.innerHTML='Uploading...';var x=new XMLHttpRequest();x.open('PUT','/api/boards/'+id+'/assets?name='+encodeURIComponent(f.name));
+x.onload=function(){if(x.status>=300){msg.innerHTML='';msg.appendChild(document.createTextNode('Upload failed: '+x.responseText));return;}
+var r=JSON.parse(x.responseText),form=document.getElementById('photo');form.src.value=r.src;form.name.value=r.name;form.submit();};
+x.onerror=function(){msg.innerHTML='Upload failed: no connection';};x.send(f);}
+</script>`;
+async function liteBoard(req, res, url, page, who, id) {
+  if (!id) {
+    const boards = await (await liteApi(req, '/api/boards')).json();
+    return page(
+      'Moodboards',
+      `<h1>Moodboards</h1><ul>${boards.map((b) => `<li><a href="/lite/boards/${h(encodeURIComponent(b.id))}"><b>${h(b.name)}</b></a><br><small>${b.items} items · ${liteDay(b.updated)}</small></li>`).join('')}</ul>`,
+    );
+  }
+  const b = await loadBoard(decodeURIComponent(id)).catch(() => fail(404, 'No such board'));
+  if (!canSeeBoard(who, b.meta)) fail(404, 'No such board');
+  const items = [...b.items.values()].filter((i) => i.type !== 'edge');
+  const lanes = moodLanes(items);
+  const laneOf = (i) =>
+    lanes.reduce((best, l) => (!best || Math.abs(l.x - (i.x + i.w / 2)) < Math.abs(best.x - (i.x + i.w / 2)) ? l : best), null);
+  if (req.method === 'POST') {
+    const q = new URLSearchParams(await body(req, 20_000));
+    const lane = lanes.find((l) => l.mood === q.get('lane')) || null;
+    const kind = q.get('kind');
+    let item;
+    if (kind === 'note' && q.get('text')?.trim())
+      item = { type: 'note', w: 200, h: 140, color: '#fff59d', text: q.get('text').slice(0, 2000) };
+    else if (kind === 'link' && q.get('url')?.trim()) {
+      const clean = /^https?:\/\//i.test(q.get('url')) ? q.get('url').trim() : `https://${q.get('url').trim()}`;
+      item = { type: 'link', w: 260, h: 64, url: clean, text: URL.canParse(clean) ? new URL(clean).hostname : clean };
+    } else if (kind === 'image' && /^\/api\/boards\/[\w-]+\/assets\/[\w.-]+$/.test(q.get('src') || '')) {
+      const meta = await sharp(join(DATA, 'boards', b.meta.id, 'assets', basename(q.get('src'))))
+        .metadata()
+        .catch(() => ({ width: 300, height: 300 }));
+      item = {
+        type: 'image',
+        w: 300,
+        h: Math.round((300 * meta.height) / meta.width) || 300,
+        src: q.get('src'),
+        name: String(q.get('name') || '').slice(0, 200),
+      };
+    }
+    if (item) {
+      const mine = lanes.length ? items.filter((i) => laneOf(i) === lane && !lanes.some((l) => l.id === i.id)) : items;
+      const x = lane ? lane.x - item.w / 2 : 0;
+      const y = Math.max(lane ? lane.y + 120 : 0, ...mine.map((i) => i.y + i.h + 40));
+      const z = Math.max(0, ...items.map((i) => i.z || 0)) + 1;
+      await liteApi(req, `/api/boards/${id}/ops`, {
+        method: 'POST',
+        body: JSON.stringify({ ops: [{ put: { id: randomUUID(), x, y, z, ...item } }] }),
+      });
+    }
+    return res.writeHead(303, { location: `/lite/boards/${id}` }).end();
+  }
+  const card = (i) => {
+    const pic = /^\/api\/boards\/[\w-]+\/assets\/([^?]+)/.exec(i.src || '')?.[1];
+    if (i.type === 'image' && pic) return `<div class="face"><img src="/lite/asset/${h(id)}/${h(pic)}" alt=""></div>`;
+    if (i.type === 'image' && i.src) return `<div class="face"><a href="${h(i.src)}">${h(i.name || 'Picture')}</a></div>`;
+    if (i.url) return `<div class="face"><a href="${h(i.url)}">${h(i.text || i.url)}</a></div>`;
+    if (i.type === 'note' || i.type === 'text')
+      return i.text?.trim()
+        ? `<div class="face" style="background:${i.type === 'note' ? '#2a2618' : 'transparent'};padding:8px;text-align:left">${h(i.text).replace(/\n/g, '<br>')}</div>`
+        : '';
+    return i.src ? `<div class="face"><a href="${h(i.src)}">${h(i.name || 'File')}</a></div>` : '';
+  };
+  const order = (list) =>
+    list
+      .sort((x, y) => x.y - y.y || x.x - y.x)
+      .map(card)
+      .join('');
+  const shown = lanes.length
+    ? lanes
+        .map(
+          (l) =>
+            `<h2>${h(l.title)}</h2><div>${order(items.filter((i) => laneOf(i) === l && i.id !== l.id && !lanes.some((x) => x.id === i.id))) || '<p class="dim">Nothing yet.</p>'}</div>`,
+        )
+        .join('')
+    : `<div>${order(items) || '<p class="dim">This board is empty.</p>'}</div>`;
+  const where = lanes.length
+    ? `<select name="lane">${lanes.map((l) => `<option value="${l.mood}">${h(l.title)}</option>`).join('')}</select> `
+    : '';
+  return page(
+    b.meta.name,
+    `<p><a href="/lite/boards">&larr; Moodboards</a></p><h1>${h(b.meta.name)}</h1>
+<h2>Add to the board</h2>
+<form method="post" id="photo"><input type="hidden" name="kind" value="image"><input type="hidden" name="src"><input type="hidden" name="name">${where}<input type="file" id="bf" accept="image/*"> <button type="button" onclick="liteBoardPhoto('${h(id)}')">Add photo</button> <span id="bmsg" class="dim"></span></form>${LITE_BOARD_UPLOAD}
+<form method="post"><input type="hidden" name="kind" value="link"><p>${where}<input name="url" placeholder="Paste a link" size="30"> <button>Add link</button></p></form>
+<form method="post"><input type="hidden" name="kind" value="note"><p>${where}<input name="text" placeholder="Write a note" size="30"> <button>Add note</button></p></form>
+${shown}`,
+  );
+}
 
 async function liteMember(req, res, url, page, who) {
   const [, , a, space, ...rest] = url.pathname.split('/');
@@ -5885,6 +6053,13 @@ async function liteMember(req, res, url, page, who) {
   const path = rest.join('/'); // still %-encoded, as the API wants it
   const api = `/api/files/${space}/${path}`;
   const crumbs = [space, ...rest].filter(Boolean);
+  if (a === 'asset') {
+    // A board's picture as JPEG: /lite/asset/<board>/<file>
+    const buf = Buffer.from(await (await liteApi(req, `/api/boards/${space}/assets/${rest[0] || ''}?view`)).arrayBuffer());
+    const jpg = await sharp(buf, { animated: false }).jpeg({ quality: 82 }).toBuffer();
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400' });
+    return res.end(jpg);
+  }
   if (a === 'jpg') {
     // A picture from the member's files as JPEG (the desktop's previews are WebP, which IE can't show)
     const buf = Buffer.from(await (await liteApi(req, `${api}?preview=1600`)).arrayBuffer());
@@ -5904,9 +6079,57 @@ async function liteMember(req, res, url, page, who) {
           : `<p class="dim">This kind of file can't be shown here. Download it to open it.</p>`;
     return page(
       name,
-      `<p><a href="${h(up)}">&larr; Back</a></p><h1>${h(name)}</h1>${view}<p><a class="btn" href="${h(api)}?download">Download</a></p>`,
+      `<p><a href="${h(up)}">&larr; Back</a></p><h1>${h(name)}</h1>${view}<p>${
+        LITE_PICTURE.test(name) ? `<a class="btn" href="/lite/darkroom/${h(space)}/${h(path)}">Edit in Darkroom</a>` : ''
+      }<a class="btn" href="${h(api)}?download">Download</a></p>`,
     );
   }
+  if (a === 'darkroom' || a === 'develop') {
+    const g = liteGrading(url.searchParams);
+    const name = decodeURIComponent(rest[rest.length - 1] || '');
+    const source = async (max) => developLite(Buffer.from(await (await liteApi(req, `${api}?preview=2400`)).arrayBuffer()), g, max);
+    if (a === 'develop') {
+      const jpg = await source(url.searchParams.has('download') ? 2400 : 1000);
+      const headers = { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' };
+      if (url.searchParams.has('download'))
+        headers['content-disposition'] =
+          `attachment; filename*=UTF-8''${encodeURIComponent(name.replace(/\.[^.]+$/, '') + ' (Darkroom).jpg')}`;
+      res.writeHead(200, headers);
+      return res.end(jpg);
+    }
+    const query = new URLSearchParams(Object.entries(g).map(([k, v]) => [k, String(v)])).toString();
+    let saved = '';
+    if (req.method === 'POST') {
+      // Save a copy next to the original (never over it); the server picks a free name if one is taken
+      const jpg = await source(2400);
+      const to = `/api/files/${[space, ...rest.slice(0, -1)].join('/')}/${encodeURIComponent(name.replace(/\.[^.]+$/, '') + ' (Darkroom).jpg')}`;
+      const r = await liteApi(req, `${to}?upload=lite${randomBytes(6).toString('hex')}&chunk=0&chunks=1&size=${jpg.length}`, {
+        method: 'PUT',
+        body: jpg,
+      }).then(
+        (x) => x.json(),
+        (e) => ({ error: e.message }),
+      );
+      saved = r.error
+        ? `<p class="note">Couldn't save: ${h(r.error)}. Use Download instead.</p>`
+        : `<p class="note">Saved as <b>${h(r.name)}</b> in this folder.</p>`;
+    }
+    const slider = (key, label, min, max, step) =>
+      `<p><label>${label} <input type="range" name="${key}" min="${min}" max="${max}" step="${step}" value="${g[key]}" onchange="this.form.submit()"></label> <small>${g[key]}</small></p>`;
+    return page(
+      `${name} · Darkroom`,
+      `<p><a href="/lite/open/${h(space)}/${h(path)}">&larr; Back</a></p><h1>Darkroom</h1>${saved}
+<p><img src="/lite/develop/${h(space)}/${h(path)}?${h(query)}" alt=""></p>
+<form method="get"><p><label>Look <select name="look" onchange="this.form.submit()">${[[0, 'None'], ...Object.entries(LITE_STOCKS)]
+        .map(([id, n]) => `<option value="${id}"${+id === g.look ? ' selected' : ''}>${h(n)}</option>`)
+        .join('')}</select></label></p>
+${slider('exp', 'Exposure', -2, 2, 0.25)}${slider('con', 'Contrast', -100, 100, 10)}${slider('warm', 'Warmth', -100, 100, 10)}${slider('sat', 'Saturation', -100, 100, 10)}${slider('grain', 'Grain', 0, 100, 10)}
+<p><button>Preview</button> <a class="btn" href="/lite/darkroom/${h(space)}/${h(path)}">Reset</a></p></form>
+<form method="post" action="?${h(query)}"><p><button>Save a copy</button> <a class="btn" href="/lite/develop/${h(space)}/${h(path)}?${h(query)}&amp;download">Download</a></p></form>
+<p class="dim">Changes show after a second or two: your home server develops the picture, not this device.</p>`,
+    );
+  }
+  if (a === 'boards') return liteBoard(req, res, url, page, who, space);
   if (!space) {
     const me = await (await liteApi(req, '/api/me')).json();
     return page(
@@ -5950,7 +6173,8 @@ async function litePage(req, res, url) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
     res.end(liteShell(title, main, who));
   };
-  if (['pair', 'signout', 'files', 'open', 'jpg'].includes(a)) return liteMember(req, res, url, page, who);
+  if (['pair', 'signout', 'files', 'open', 'jpg', 'darkroom', 'develop', 'boards', 'asset'].includes(a))
+    return liteMember(req, res, url, page, who);
   if (a === 'img') {
     if (!LITE_IMG[b] || !/^[\w-]+\.jpg$/.test(c || '')) fail(404, 'Not found');
     const file = LITE_IMG[b][1](c.slice(0, -4));
