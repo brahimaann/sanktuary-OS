@@ -3165,84 +3165,91 @@ ${thisYear}-03;Comma Song;0,456`,
     welcomeHtml.includes('Coming up') && !/Nothing on the calendar|Nothing announced yet|Profiles are on their way/.test(welcomeHtml),
   );
 
-  // ── Internet Explorer (a Surface RT can't get anything newer) goes to the script-free /lite, not a blank page ──
-  const IE = { 'user-agent': 'Mozilla/5.0 (Windows NT 6.3; ARM; Trident/7.0; Touch; rv:11.0) like Gecko' };
-  const ieTo = async (path) => (await fetch(B + path, { headers: IE, redirect: 'manual' })).headers.get('location');
-  check('IE is sent to Sanktuary Lite', (await ieTo('/')) === '/lite' && (await ieTo('/blog/heart')) === '/lite/cities/heart');
-  check('modern browsers still get the desktop', (await fetch(B + '/', { redirect: 'manual' })).status === 200);
-  const lite = await (await fetch(B + '/lite', { headers: IE })).text();
-  check('Sanktuary Lite renders without script', lite.includes('Sanktuary Lite') && !/<script/i.test(lite));
-  check('Lite pictures only from their folders', (await fetch(B + '/lite/img/blog/..%2F..%2Fconfig.jpg')).status === 404);
+  {
+    // Lite checks get their own scope, so their names can't clash with the tests above
+    // ── Internet Explorer (a Surface RT can't get anything newer) goes to the script-free /lite, not a blank page ──
+    const IE = { 'user-agent': 'Mozilla/5.0 (Windows NT 6.3; ARM; Trident/7.0; Touch; rv:11.0) like Gecko' };
+    const ieTo = async (path) => (await fetch(B + path, { headers: IE, redirect: 'manual' })).headers.get('location');
+    check('IE is sent to Sanktuary Lite', (await ieTo('/')) === '/lite' && (await ieTo('/blog/heart')) === '/lite/cities/heart');
+    check('modern browsers still get the desktop', (await fetch(B + '/', { redirect: 'manual' })).status === 200);
+    const lite = await (await fetch(B + '/lite', { headers: IE })).text();
+    check('Sanktuary Lite renders without script', lite.includes('Sanktuary Lite') && !/<script/i.test(lite));
+    check('Lite pictures only from their folders', (await fetch(B + '/lite/img/blog/..%2F..%2Fconfig.jpg')).status === 404);
 
-  // ── Pairing: a member signs the Surface in with a 6-digit code from the desktop ──
-  check('a device signed in with a code cannot make codes', (await call('bob', '/api/pair', 'POST')).status === 401);
-  const pairCode = async () =>
-    (await (await fetch(B + '/api/pair', { method: 'POST', headers: { authorization: `Bearer ${jwt('bob')}` } })).json()).code;
-  const pairWith = (code) =>
-    fetch(B + '/lite/pair', {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: `code=${code}&name=Surface`,
+    // ── Pairing: a member signs the Surface in with a 6-digit code from the desktop ──
+    check('a device signed in with a code cannot make codes', (await call('bob', '/api/pair', 'POST')).status === 401);
+    const pairCode = async () =>
+      (await (await fetch(B + '/api/pair', { method: 'POST', headers: { authorization: `Bearer ${jwt('bob')}` } })).json()).code;
+    const pairWith = (code) =>
+      fetch(B + '/lite/pair', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: `code=${code}&name=Surface`,
+      });
+    const code1 = await pairCode();
+    check('a wrong code is refused', (await (await pairWith('000000' === code1 ? '111111' : '000000')).text()).includes('That code'));
+    const paired = await pairWith(code1);
+    const devCookie = paired.headers.get('set-cookie')?.split(';')[0];
+    check('the code signs the device in', paired.status === 303 && paired.headers.get('location') === '/lite/files' && !!devCookie);
+    check('a code works once', (await (await pairWith(code1)).text()).includes('That code'));
+    const liteGet = (path, c = devCookie) => fetch(B + path, { headers: { cookie: c }, redirect: 'manual' });
+    const liteFiles = await (await liteGet('/lite/files/view')).text();
+    check('Lite lists the member’s files', liteFiles.includes('Signed in as <b>bob</b>') && liteFiles.includes('/lite/files/view/docs'));
+    check(
+      'Lite upload only where they may upload',
+      !liteFiles.includes('liteUpload(') && (await (await liteGet('/lite/files/up')).text()).includes('liteUpload('),
+    );
+    const dot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    await fetch(B + `/api/files/up/lite-dot.png?upload=litedot123&chunk=0&chunks=1&size=${dot.length}`, {
+      method: 'PUT',
+      headers: { cookie: devCookie },
+      body: dot,
     });
-  const code1 = await pairCode();
-  check('a wrong code is refused', (await (await pairWith('000000' === code1 ? '111111' : '000000')).text()).includes('That code'));
-  const paired = await pairWith(code1);
-  const devCookie = paired.headers.get('set-cookie')?.split(';')[0];
-  check('the code signs the device in', paired.status === 303 && paired.headers.get('location') === '/lite/files' && !!devCookie);
-  check('a code works once', (await (await pairWith(code1)).text()).includes('That code'));
-  const liteGet = (path, c = devCookie) => fetch(B + path, { headers: { cookie: c }, redirect: 'manual' });
-  const liteFiles = await (await liteGet('/lite/files/view')).text();
-  check('Lite lists the member’s files', liteFiles.includes('Signed in as <b>bob</b>') && liteFiles.includes('/lite/files/view/docs'));
-  check(
-    'Lite upload only where they may upload',
-    !liteFiles.includes('liteUpload(') && (await (await liteGet('/lite/files/up')).text()).includes('liteUpload('),
-  );
-  const dot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-  await fetch(B + `/api/files/up/lite-dot.png?upload=litedot123&chunk=0&chunks=1&size=${dot.length}`, {
-    method: 'PUT',
-    headers: { cookie: devCookie },
-    body: dot,
-  });
-  const liteJpg = await liteGet('/lite/jpg/up/lite-dot.png');
-  check('Lite shows the member’s pictures as JPEG', liteJpg.status === 200 && liteJpg.headers.get('content-type') === 'image/jpeg');
-  // Darkroom Lite: a real picture through a film stock, saved as a copy beside it
-  const photo = readFileSync(new URL('../public/magazine/pages/cover.webp', import.meta.url));
-  await fetch(B + `/api/files/up/lite-photo.webp?upload=litephoto1&chunk=0&chunks=1&size=${photo.length}`, {
-    method: 'PUT',
-    headers: { cookie: devCookie },
-    body: photo,
-  });
-  const develop = async (q) => Buffer.from(await (await liteGet(`/lite/develop/up/lite-photo.webp?${q}`)).arrayBuffer());
-  const [plain, portra] = [await develop(''), await develop('look=24&exp=0.5&sat=20')];
-  check('Darkroom Lite develops with a film stock', plain[0] === 0xff && portra[0] === 0xff && !plain.equals(portra));
-  const savedCopy = await (
-    await fetch(B + '/lite/darkroom/up/lite-photo.webp?look=24', { method: 'POST', headers: { cookie: devCookie } })
-  ).text();
-  check('Darkroom Lite saves a copy beside the original', savedCopy.includes('lite-photo (Darkroom).jpg'));
-  // Moodboard Lite: the board as a grid, adding a note and a photo
-  const liteBoard = JSON.parse((await call('bob', '/api/boards', 'POST', { name: 'Lite board' })).text);
-  const addToBoard = (form) =>
-    fetch(B + `/lite/boards/${liteBoard.id}`, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { cookie: devCookie, 'content-type': 'application/x-www-form-urlencoded' },
-      body: form,
+    const liteJpg = await liteGet('/lite/jpg/up/lite-dot.png');
+    check('Lite shows the member’s pictures as JPEG', liteJpg.status === 200 && liteJpg.headers.get('content-type') === 'image/jpeg');
+    // Darkroom Lite: a real picture through a film stock, saved as a copy beside it
+    const litePhoto = readFileSync(new URL('../public/magazine/pages/cover.webp', import.meta.url));
+    await fetch(B + `/api/files/up/lite-photo.webp?upload=litephoto1&chunk=0&chunks=1&size=${litePhoto.length}`, {
+      method: 'PUT',
+      headers: { cookie: devCookie },
+      body: litePhoto,
     });
-  await addToBoard('kind=note&text=From+the+Surface');
-  const asset = await (
-    await fetch(B + `/api/boards/${liteBoard.id}/assets?name=cover.webp`, { method: 'PUT', headers: { cookie: devCookie }, body: photo })
-  ).json();
-  await addToBoard(`kind=image&src=${encodeURIComponent(asset.src)}&name=cover.webp`);
-  const boardPage = await (await liteGet(`/lite/boards/${liteBoard.id}`)).text();
-  const boardPic = boardPage.match(/\/lite\/asset\/[^"]+/)?.[0];
-  check('Moodboard Lite adds notes and photos', boardPage.includes('From the Surface') && !!boardPic);
-  check('board pictures come as JPEG', (await liteGet(boardPic || '/x')).headers.get('content-type') === 'image/jpeg');
-  await fetch(B + '/api/pair', { method: 'DELETE', headers: { authorization: `Bearer ${jwt('bob')}` } });
-  check('"Sign out other devices" ends the device’s session', (await liteGet('/lite/files')).headers.get('location') === '/lite/pair');
-  const dev2 = (await pairWith(await pairCode())).headers.get('set-cookie')?.split(';')[0];
-  await fetch(B + '/lite/signout', { method: 'POST', headers: { cookie: dev2 }, redirect: 'manual' });
-  check('Sign out on the device ends its session', (await liteGet('/lite/files', dev2)).headers.get('location') === '/lite/pair');
+    const develop = async (q) => Buffer.from(await (await liteGet(`/lite/develop/up/lite-photo.webp?${q}`)).arrayBuffer());
+    const [plain, portra] = [await develop(''), await develop('look=24&exp=0.5&sat=20')];
+    check('Darkroom Lite develops with a film stock', plain[0] === 0xff && portra[0] === 0xff && !plain.equals(portra));
+    const savedCopy = await (
+      await fetch(B + '/lite/darkroom/up/lite-photo.webp?look=24', { method: 'POST', headers: { cookie: devCookie } })
+    ).text();
+    check('Darkroom Lite saves a copy beside the original', savedCopy.includes('lite-photo (Darkroom).jpg'));
+    // Moodboard Lite: the board as a grid, adding a note and a photo
+    const liteBoard = JSON.parse((await call('bob', '/api/boards', 'POST', { name: 'Lite board' })).text);
+    const addToBoard = (form) =>
+      fetch(B + `/lite/boards/${liteBoard.id}`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { cookie: devCookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: form,
+      });
+    await addToBoard('kind=note&text=From+the+Surface');
+    const boardAsset = await (
+      await fetch(B + `/api/boards/${liteBoard.id}/assets?name=cover.webp`, {
+        method: 'PUT',
+        headers: { cookie: devCookie },
+        body: litePhoto,
+      })
+    ).json();
+    await addToBoard(`kind=image&src=${encodeURIComponent(boardAsset.src)}&name=cover.webp`);
+    const boardPage = await (await liteGet(`/lite/boards/${liteBoard.id}`)).text();
+    const boardPic = boardPage.match(/\/lite\/asset\/[^"]+/)?.[0];
+    check('Moodboard Lite adds notes and photos', boardPage.includes('From the Surface') && !!boardPic);
+    check('board pictures come as JPEG', (await liteGet(boardPic || '/x')).headers.get('content-type') === 'image/jpeg');
+    await fetch(B + '/api/pair', { method: 'DELETE', headers: { authorization: `Bearer ${jwt('bob')}` } });
+    check('"Sign out other devices" ends the device’s session', (await liteGet('/lite/files')).headers.get('location') === '/lite/pair');
+    const dev2 = (await pairWith(await pairCode())).headers.get('set-cookie')?.split(';')[0];
+    await fetch(B + '/lite/signout', { method: 'POST', headers: { cookie: dev2 }, redirect: 'manual' });
+    check('Sign out on the device ends its session', (await liteGet('/lite/files', dev2)).headers.get('location') === '/lite/pair');
+  }
 } finally {
   srv.kill();
   clerk.close();
