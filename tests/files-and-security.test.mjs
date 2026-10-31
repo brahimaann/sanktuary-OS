@@ -213,6 +213,9 @@ const srv = spawn(process.execPath, [SERVER], {
     GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
     YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
     ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
+    // The headless Darkroom renderer only in CI: the home PC's deploy tests run against the old build, and a
+    // browser left behind there kept the tests (and so the deploy) waiting for hours
+    ...(process.env.CI ? {} : { DARKROOM_BROWSER: 'off' }),
     YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
   },
 });
@@ -3233,6 +3236,21 @@ ${thisYear}-03;Comma Song;0,456`,
       await fetch(B + '/lite/darkroom/up/lite-photo.webp?preset=24', { method: 'POST', headers: { cookie: devCookie } })
     ).text();
     check('Darkroom Lite saves a copy beside the original', savedCopy.includes('lite-photo (Darkroom).jpg'));
+    // The Files grid shows small previews; Darkroom in the top bar picks a photo from it
+    const upGrid = await (await liteGet('/lite/files/up')).text();
+    const thumb = upGrid.match(/\/lite\/jpg\/[^']+\?thumb/)?.[0];
+    const thumbRes = await liteGet(thumb || '/x');
+    check(
+      'Lite Files shows pictures as small previews',
+      thumbRes.headers.get('content-type') === 'image/jpeg' && Buffer.from(await thumbRes.arrayBuffer()).length < 60_000,
+    );
+    const picker = await (await liteGet('/lite/files/up?pick')).text();
+    check(
+      'Darkroom in the top bar opens photos straight in Darkroom',
+      (await (await liteGet('/lite/darkroom')).text()).includes('/lite/files/up?pick') &&
+        picker.includes('/lite/darkroom/up/lite-photo.webp') &&
+        !picker.includes('liteUpload('),
+    );
     // Moodboard Lite: the board as a grid, adding a note and a photo
     const liteBoard = JSON.parse((await call('bob', '/api/boards', 'POST', { name: 'Lite board' })).text);
     const addToBoard = (form) =>
@@ -3243,6 +3261,8 @@ ${thisYear}-03;Comma Song;0,456`,
         body: form,
       });
     await addToBoard('kind=note&text=From+the+Surface');
+    await addToBoard('kind=text&text=www.example.com%2Fmood'); // the one box: a link when it looks like one
+    await addToBoard('kind=text&text=Warm+tones+only');
     const boardAsset = await (
       await fetch(B + `/api/boards/${liteBoard.id}/assets?name=cover.webp`, {
         method: 'PUT',
@@ -3254,6 +3274,10 @@ ${thisYear}-03;Comma Song;0,456`,
     const boardPage = await (await liteGet(`/lite/boards/${liteBoard.id}`)).text();
     const boardPic = boardPage.match(/\/lite\/asset\/[^"]+/)?.[0];
     check('Moodboard Lite adds notes and photos', boardPage.includes('From the Surface') && !!boardPic);
+    check(
+      'Moodboard Lite’s one box adds links and notes',
+      boardPage.includes('href="https://www.example.com/mood"') && boardPage.includes('Warm tones only'),
+    );
     check('board pictures come as JPEG', (await liteGet(boardPic || '/x')).headers.get('content-type') === 'image/jpeg');
     await fetch(B + '/api/pair', { method: 'DELETE', headers: { authorization: `Bearer ${jwt('bob')}` } });
     check('"Sign out other devices" ends the device’s session', (await liteGet('/lite/files')).headers.get('location') === '/lite/pair');

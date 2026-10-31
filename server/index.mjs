@@ -5758,15 +5758,25 @@ body{margin:0;background:#0b0b0f;color:#f3efe8;font:18px/1.6 Georgia,'Times New 
 main{max-width:760px;margin:0 auto;padding:24px 20px 60px}
 a{color:#d9a441}h1,h2{line-height:1.2}h2{margin-top:40px;border-bottom:1px solid #333;padding-bottom:6px}
 ul{padding-left:20px}li{margin:0 0 12px}small,.dim{color:#b9b2a6}img{max-width:100%;height:auto;border:0}
-.top{background:#000;padding:10px 20px;font:15px Arial,sans-serif}.top a{margin-right:16px;color:#f3efe8;text-decoration:none}
+.top{background:#000;padding:0 12px;font:16px 'Segoe UI',Arial,sans-serif;overflow:hidden}
+.top a{display:inline-block;padding:14px 12px;margin-right:4px;color:#f3efe8;text-decoration:none}.top a:hover,.top a:active{background:#1d1a14}
 .note{background:#1d1a14;border-left:4px solid #d9a441;padding:10px 14px;font:15px/1.5 Arial,sans-serif;color:#b9b2a6}
 .btn{display:inline-block;margin:0 8px 8px 0;padding:6px 12px;border:1px solid #d9a441;text-decoration:none}
 .face{display:inline-block;width:150px;margin:0 12px 16px 0;vertical-align:top;text-align:center}
-.top form{display:inline;float:right}.top button,.top .me{float:right;margin-left:12px;font:15px Arial,sans-serif}
+.top form{display:inline;float:right}.top button{float:right;margin:8px 0 8px 12px;padding:8px 16px;font:15px 'Segoe UI',Arial,sans-serif}
+.top .me{float:right;margin-left:12px;padding:14px 0;font:15px 'Segoe UI',Arial,sans-serif;color:#b9b2a6}
+.grid{margin:16px -8px 0;font:15px/1.3 'Segoe UI',Arial,sans-serif}
+.card{display:inline-block;width:170px;margin:0 8px 16px;vertical-align:top;color:#f3efe8;text-decoration:none}
+.card .pic{display:block;height:128px;background-color:#1a1916;background-position:center;background-size:cover;background-repeat:no-repeat;border:1px solid #2a2722;text-align:center;line-height:128px;font-size:44px}
+.card .name{display:block;padding:6px 2px 0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.card small{display:block;padding:0 2px}
+a.card:hover .pic,a.card:active .pic{border-color:#d9a441}
+.sans,.board h1,.board h2{font-family:'Segoe UI',Arial,sans-serif;font-weight:600}.board h2{font-size:15px;letter-spacing:2px;text-transform:uppercase;color:#d9a441;border:0;margin-top:32px}
+.add{background:#15140f;border:1px solid #2a2722;padding:12px;font:15px 'Segoe UI',Arial,sans-serif}.add input[type=text]{width:55%}
+.add label.btn{cursor:pointer}.add input[type=file]{position:absolute;left:-9999px}
 input,button,select{font:16px Arial,sans-serif;padding:6px}.code{font-size:28px;letter-spacing:6px;width:180px;text-align:center}
 table{border-collapse:collapse;width:100%}td{padding:6px 8px;border-bottom:1px solid #222;vertical-align:top}td.n{text-align:right;white-space:nowrap}
 </style></head><body>
-<div class="top"><a href="/lite"><b>SANKTUARY</b></a><a href="/lite/cities">CITIES</a><a href="/lite/magazine">Magazine</a>${
+<div class="top"><a href="/lite"><b>SANKTUARY</b></a><a href="/lite/cities">CITIES</a><a href="/lite/darkroom">Darkroom</a>${
   who
     ? `<a href="/lite/files">Files</a><a href="/lite/boards">Moodboards</a><form method="post" action="/lite/signout"><button>Sign out</button></form><span class="me">Signed in as <b>${h(who.username)}</b></span>`
     : `<a href="/lite/pair">Member sign-in</a>`
@@ -5864,12 +5874,16 @@ const liteGrading = (q) => {
   };
 };
 // The full Darkroom: darkroom-render.html (the desktop's own shaders, src/darkroomRender.ts) in a headless browser.
-// On the home PC that's the installed Edge; DARKROOM_BROWSER can point at another Chromium. Closed after 10 idle minutes.
+// On the home PC that's the installed Edge; DARKROOM_BROWSER can point at another Chromium, or be "off" for the basic
+// version only. Closed after 10 idle minutes. Every step has a time limit: a stuck browser must never hold a request.
+const withinMs = (p, ms, what) =>
+  Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what} took over ${ms / 1000}s`)), ms).unref())]);
 let renderer = null;
 let rendererIdle;
 let renderQueue = Promise.resolve();
 let rendererFailed = 0; // when it last failed to start: tried again after 5 minutes, not on every picture
 function darkroomRenderer() {
+  if (process.env.DARKROOM_BROWSER === 'off') return Promise.reject(new Error('Darkroom Lite renderer is off'));
   if (!renderer && Date.now() - rendererFailed < 5 * 60_000) return Promise.reject(new Error('No headless browser for Darkroom Lite'));
   renderer ??= (async () => {
     const { chromium } = await import('playwright-core');
@@ -5881,14 +5895,20 @@ function darkroomRenderer() {
       handleSIGINT: false,
       handleSIGTERM: false,
       handleSIGHUP: false,
+      timeout: 30_000,
     });
     // The browser goes when the server does (a deploy restarting it, or the tests stopping it)
     for (const sig of ['SIGINT', 'SIGTERM'])
       process.once(sig, () => Promise.race([browser.close(), new Promise((ok) => setTimeout(ok, 3000))]).finally(() => process.exit(0)));
-    const page = await browser.newPage();
-    await page.goto(`${SELF}/darkroom-render.html`);
-    await page.waitForFunction(() => window.develop);
-    return { browser, page, looks: await page.evaluate(() => window.darkroomLooks) };
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${SELF}/darkroom-render.html`, { timeout: 20_000 });
+      await page.waitForFunction(() => window.develop, null, { timeout: 20_000 });
+      return { browser, page, looks: await page.evaluate(() => window.darkroomLooks) };
+    } catch (e) {
+      browser.close().catch(() => {}); // an old build without the render page, say: don't leave Edge running
+      throw e;
+    }
   })().catch((e) => {
     renderer = null;
     rendererFailed = Date.now();
@@ -5903,16 +5923,25 @@ function darkroomRenderer() {
   rendererIdle.unref();
   return renderer;
 }
-const darkroomLooks = async () => (await darkroomRenderer()).looks;
+const darkroomLooks = async () => {
+  const starting = darkroomRenderer();
+  try {
+    return (await withinMs(starting, 60_000, 'Starting the Darkroom renderer')).looks;
+  } catch (e) {
+    if (renderer === starting) [renderer, rendererFailed] = [null, Date.now()]; // stuck: start afresh in 5 minutes
+    throw e;
+  }
+};
 // One picture at a time: the renderer is one page, and the PC has other work to do
 const developFull = (buf, g, max) =>
   (renderQueue = renderQueue
     .catch(() => {})
     .then(async () => {
       const { page } = await darkroomRenderer();
-      const url = await page.evaluate(
-        ([src, p, m]) => window.develop(src, p, m),
-        [`data:image/webp;base64,${buf.toString('base64')}`, g, max],
+      const url = await withinMs(
+        page.evaluate(([src, p, m]) => window.develop(src, p, m), [`data:image/webp;base64,${buf.toString('base64')}`, g, max]),
+        60_000,
+        'Developing a picture',
       );
       return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
     }));
@@ -6065,7 +6094,7 @@ async function liteBoard(req, res, url, page, who, id) {
     const boards = await (await liteApi(req, '/api/boards')).json();
     return page(
       'Moodboards',
-      `<h1>Moodboards</h1><ul>${boards.map((b) => `<li><a href="/lite/boards/${h(encodeURIComponent(b.id))}"><b>${h(b.name)}</b></a><br><small>${b.items} items · ${liteDay(b.updated)}</small></li>`).join('')}</ul>`,
+      `<div class="board"><h1>Moodboards</h1><div class="grid">${boards.map((b) => `<a class="card" href="/lite/boards/${h(encodeURIComponent(b.id))}"><span class="pic">&#127912;</span><span class="name"><b>${h(b.name)}</b></span><small class="dim">${b.items} items · ${liteDay(b.updated)}</small></a>`).join('') || '<p class="dim">No boards yet.</p>'}</div></div>`,
     );
   }
   const b = await loadBoard(decodeURIComponent(id)).catch(() => fail(404, 'No such board'));
@@ -6077,7 +6106,9 @@ async function liteBoard(req, res, url, page, who, id) {
   if (req.method === 'POST') {
     const q = new URLSearchParams(await body(req, 20_000));
     const lane = lanes.find((l) => l.mood === q.get('lane')) || null;
-    const kind = q.get('kind');
+    const said = q.get('text')?.trim() || '';
+    const kind = q.get('kind') === 'text' ? (/^(https?:\/\/|www\.)\S+$/i.test(said) ? 'link' : 'note') : q.get('kind');
+    if (kind === 'link' && !q.get('url')) q.set('url', said);
     let item;
     if (kind === 'note' && q.get('text')?.trim())
       item = { type: 'note', w: 200, h: 140, color: '#fff59d', text: q.get('text').slice(0, 2000) };
@@ -6137,12 +6168,10 @@ async function liteBoard(req, res, url, page, who, id) {
     : '';
   return page(
     b.meta.name,
-    `<p><a href="/lite/boards">&larr; Moodboards</a></p><h1>${h(b.meta.name)}</h1>
-<h2>Add to the board</h2>
-<form method="post" id="photo"><input type="hidden" name="kind" value="image"><input type="hidden" name="src"><input type="hidden" name="name">${where}<input type="file" id="bf" accept="image/*"> <button type="button" onclick="liteBoardPhoto('${h(id)}')">Add photo</button> <span id="bmsg" class="dim"></span></form>${LITE_BOARD_UPLOAD}
-<form method="post"><input type="hidden" name="kind" value="link"><p>${where}<input name="url" placeholder="Paste a link" size="30"> <button>Add link</button></p></form>
-<form method="post"><input type="hidden" name="kind" value="note"><p>${where}<input name="text" placeholder="Write a note" size="30"> <button>Add note</button></p></form>
-${shown}`,
+    `<div class="board"><p class="sans"><a href="/lite/boards">&larr; Moodboards</a></p><h1>${h(b.meta.name)}</h1>
+<div class="add"><form method="post"><input type="hidden" name="kind" value="text">${where}<input type="text" name="text" placeholder="Write a note or paste a link"> <button>Add</button></form>
+<form method="post" id="photo" style="margin-top:8px"><input type="hidden" name="kind" value="image"><input type="hidden" name="src"><input type="hidden" name="name">${where}<label class="btn" for="bf">Add a photo</label><input type="file" id="bf" accept="image/*" onchange="liteBoardPhoto('${h(id)}')"> <span id="bmsg" class="dim"></span></form></div>${LITE_BOARD_UPLOAD}
+${shown}</div>`,
   );
 }
 
@@ -6196,8 +6225,10 @@ async function liteMember(req, res, url, page, who) {
   }
   if (a === 'jpg') {
     // A picture from the member's files as JPEG (the desktop's previews are WebP, which IE can't show)
-    const buf = Buffer.from(await (await liteApi(req, `${api}?preview=1600`)).arrayBuffer());
-    const jpg = await sharp(buf).jpeg({ quality: 82 }).toBuffer();
+    // ?thumb: a small one for the Files grid (the 2GB tablet shows dozens at once)
+    const thumb = url.searchParams.has('thumb');
+    const buf = Buffer.from(await (await liteApi(req, `${api}?preview=${thumb ? 800 : 1600}`)).arrayBuffer());
+    const jpg = await (thumb ? sharp(buf).resize(360, 270, { fit: 'inside' }) : sharp(buf)).jpeg({ quality: thumb ? 72 : 82 }).toBuffer();
     res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' });
     return res.end(jpg);
   }
@@ -6218,7 +6249,7 @@ async function liteMember(req, res, url, page, who) {
       }<a class="btn" href="${h(api)}?download">Download</a></p>`,
     );
   }
-  if (a === 'darkroom' || a === 'develop') {
+  if ((a === 'darkroom' && space) || a === 'develop') {
     // The desktop Darkroom itself in a headless browser when the server has one; the basic sharp version otherwise
     const looks = await darkroomLooks().catch((e) => (console.error('Darkroom Lite renderer:', e.message), null));
     const g = looks ? fullGrading(url.searchParams, looks) : liteGrading(url.searchParams);
@@ -6302,39 +6333,49 @@ async function liteMember(req, res, url, page, who) {
     );
   }
   if (a === 'boards') return liteBoard(req, res, url, page, who, space);
+  // Darkroom from the top bar: the Files grid in "pick a photo" mode, where a picture opens straight in Darkroom
+  const pick = url.searchParams.has('pick') || (a === 'darkroom' && !space);
+  const keep = pick ? '?pick' : '';
   if (!space) {
     const me = await (await liteApi(req, '/api/me')).json();
     return page(
-      'Files',
-      `<h1>Files</h1><ul>${me.spaces
-        .map(
-          (s) =>
-            `<li>${s.online ? `<a href="/lite/files/${h(encodeURIComponent(s.id))}"><b>${h(s.name)}</b></a>` : `<b>${h(s.name)}</b> <small>(drive not connected)</small>`}</li>`,
+      pick ? 'Darkroom' : 'Files',
+      `<h1>${pick ? 'Darkroom' : 'Files'}</h1>${pick ? '<p class="dim sans">Pick a photo to edit.</p>' : ''}<div class="grid">${me.spaces
+        .map((s) =>
+          s.online
+            ? `<a class="card" href="/lite/files/${h(encodeURIComponent(s.id))}${keep}"><span class="pic">&#128193;</span><span class="name"><b>${h(s.name)}</b></span></a>`
+            : `<span class="card"><span class="pic dim">&#128193;</span><span class="name">${h(s.name)}</span><small class="dim">Drive not connected</small></span>`,
         )
-        .join('')}</ul>`,
+        .join('')}</div>`,
     );
   }
   const list = await (await liteApi(req, `${api}?list`)).json();
-  const rows = list.entries
-    .filter((e) => !e.name.startsWith('.'))
+  const cards = list.entries
+    .filter((e) => !e.name.startsWith('.') && (!pick || e.isDir || LITE_PICTURE.test(e.name)))
     .sort((x, y) => y.isDir - x.isDir || x.name.localeCompare(y.name))
     .map((e) => {
-      const to = `${crumbs.join('/')}/${encodeURIComponent(e.name)}`;
-      return `<tr><td>${e.isDir ? '&#128193; ' : ''}<a href="/lite/${e.isDir ? 'files' : 'open'}/${h(to)}">${h(e.name)}</a></td><td class="n"><small>${e.isDir ? '' : liteSize(e.size)}</small></td><td class="n"><small>${liteDay(e.modified)}</small></td></tr>`;
+      const to = h(`${crumbs.join('/')}/${encodeURIComponent(e.name)}`);
+      const ext = (/\.(\w{1,5})$/.exec(e.name)?.[1] || '').toUpperCase();
+      const [href, pic] = e.isDir
+        ? [`/lite/files/${to}${keep}`, '<span class="pic">&#128193;</span>']
+        : LITE_PICTURE.test(e.name)
+          ? [`/lite/${pick ? 'darkroom' : 'open'}/${to}`, `<span class="pic" style="background-image:url('/lite/jpg/${to}?thumb')"></span>`]
+          : [`/lite/open/${to}`, `<span class="pic" style="font-size:20px;color:#b9b2a6">${h(ext || 'FILE')}</span>`];
+      return `<a class="card" href="${href}">${pic}<span class="name">${h(e.name)}</span><small class="dim">${e.isDir ? 'Folder' : `${liteSize(e.size)} · ${liteDay(e.modified)}`}</small></a>`;
     })
     .join('');
   const canUpload = ['upload', 'edit'].includes(list.rights) && !list.combined;
   return page(
-    'Files',
-    `<p><a href="/lite/files">Files</a> / ${crumbs
-      .map((c, i) => `<a href="/lite/files/${h(crumbs.slice(0, i + 1).join('/'))}">${h(decodeURIComponent(c))}</a>`)
+    pick ? 'Darkroom' : 'Files',
+    `<p class="sans"><a href="/lite/files${keep}">${pick ? 'Darkroom' : 'Files'}</a> / ${crumbs
+      .map((c, i) => `<a href="/lite/files/${h(crumbs.slice(0, i + 1).join('/'))}${keep}">${h(decodeURIComponent(c))}</a>`)
       .join(
         ' / ',
       )}</p>${list.lockedBy ? `<p class="note">${h(list.lockedBy.user)} has "${h(list.lockedBy.project)}" checked out, so it can't be changed here.</p>` : ''}${
-      canUpload
-        ? `<p><input type="file" id="f" multiple> <button type="button" onclick="liteUpload('${h(api.replace(/\/$/, ''))}')">Upload</button> <span id="msg" class="dim"></span></p>${LITE_UPLOAD}`
+      canUpload && !pick
+        ? `<p class="sans"><input type="file" id="f" multiple> <button type="button" onclick="liteUpload('${h(api.replace(/\/$/, ''))}')">Upload</button> <span id="msg" class="dim"></span></p>${LITE_UPLOAD}`
         : ''
-    }<table>${rows || '<tr><td class="dim">This folder is empty.</td></tr>'}</table>`,
+    }<div class="grid">${cards || `<p class="dim">${pick ? 'No photos in this folder.' : 'This folder is empty.'}</p>`}</div>`,
   );
 }
 
