@@ -3164,6 +3164,15 @@ ${thisYear}-03;Comma Song;0,456`,
     'the landing page has no "nothing here" placeholders',
     welcomeHtml.includes('Coming up') && !/Nothing on the calendar|Nothing announced yet|Profiles are on their way/.test(welcomeHtml),
   );
+
+  // ── Internet Explorer (a Surface RT can't get anything newer) goes to the script-free /lite, not a blank page ──
+  const IE = { 'user-agent': 'Mozilla/5.0 (Windows NT 6.3; ARM; Trident/7.0; Touch; rv:11.0) like Gecko' };
+  const ieTo = async (path) => (await fetch(B + path, { headers: IE, redirect: 'manual' })).headers.get('location');
+  check('IE is sent to Sanktuary Lite', (await ieTo('/')) === '/lite' && (await ieTo('/blog/heart')) === '/lite/cities/heart');
+  check('modern browsers still get the desktop', (await fetch(B + '/', { redirect: 'manual' })).status === 200);
+  const lite = await (await fetch(B + '/lite', { headers: IE })).text();
+  check('Sanktuary Lite renders without script', lite.includes('Sanktuary Lite') && !/<script/i.test(lite));
+  check('Lite pictures only from their folders', (await fetch(B + '/lite/img/blog/..%2F..%2Fconfig.jpg')).status === 404);
 } finally {
   srv.kill();
   clerk.close();

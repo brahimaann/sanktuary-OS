@@ -5728,6 +5728,167 @@ async function magazinePage(req, res, url) {
   res.end((await readFile(MAGAZINE_PAGE, 'utf8')).replace('<!--meta-->', metaTags(meta)));
 }
 
+// ── /lite: the public side for old browsers (Internet Explorer 11, e.g. a Surface RT, which can't get another one) ──
+// The desktop (React 19, Clerk, Tailwind 4, WebGL) and the public pages' scripts need a modern browser, so IE got a
+// blank page. Here the server renders everything and the page has no script: CITIES posts and people, the magazine,
+// releases with their streaming links and upcoming events. IE can't show WebP, so pictures come through /lite/img as JPEG.
+const isOldIE = (req) => /Trident\/|MSIE /.test(req.headers['user-agent'] || '');
+const LITE_IMG = {
+  blog: [/^\/api\/blog\/images\/([\w-]+)\.webp$/, (n) => join(DATA, 'blog', 'images', `${n}.webp`)],
+  magazine: [/^\/magazine\/pages\/([\w-]+)\.webp$/, (n) => join(DIST, 'magazine', 'pages', `${n}.webp`)],
+};
+const liteImg = (src) => {
+  const kind = Object.keys(LITE_IMG).find((k) => LITE_IMG[k][0].test(src || ''));
+  return kind ? `/lite/img/${kind}/${src.match(LITE_IMG[kind][0])[1]}.jpg` : src;
+};
+const h = (v) => escAttr(String(v ?? ''));
+const liteDay = (d) =>
+  d ? new Date(d.slice(0, 10) + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+const litePostLink = (p) =>
+  `<li><a href="/lite${h(p.url)}"><b>${h(p.title)}</b></a><br><small>${h(p.publication)} · ${liteDay(p.date)}</small></li>`;
+const liteShell = (title, main) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${h(title)}</title><link rel="icon" href="/icons/favicon-32.png">
+<style>
+body{margin:0;background:#0b0b0f;color:#f3efe8;font:18px/1.6 Georgia,'Times New Roman',serif}
+main{max-width:760px;margin:0 auto;padding:24px 20px 60px}
+a{color:#d9a441}h1,h2{line-height:1.2}h2{margin-top:40px;border-bottom:1px solid #333;padding-bottom:6px}
+ul{padding-left:20px}li{margin:0 0 12px}small,.dim{color:#b9b2a6}img{max-width:100%;height:auto;border:0}
+.top{background:#000;padding:10px 20px;font:15px Arial,sans-serif}.top a{margin-right:16px;color:#f3efe8;text-decoration:none}
+.note{background:#1d1a14;border-left:4px solid #d9a441;padding:10px 14px;font:15px/1.5 Arial,sans-serif;color:#b9b2a6}
+.btn{display:inline-block;margin:0 8px 8px 0;padding:6px 12px;border:1px solid #d9a441;text-decoration:none}
+.face{display:inline-block;width:150px;margin:0 12px 16px 0;vertical-align:top;text-align:center}
+</style></head><body>
+<div class="top"><a href="/lite"><b>SANKTUARY</b></a><a href="/lite/cities">CITIES</a><a href="/lite/magazine">Magazine</a></div>
+<main>${main}</main></body></html>`;
+
+async function litePage(req, res, url) {
+  const [, , a, b, c] = url.pathname.split('/');
+  const page = (title, main) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+    res.end(liteShell(title, main));
+  };
+  if (a === 'img') {
+    if (!LITE_IMG[b] || !/^[\w-]+\.jpg$/.test(c || '')) fail(404, 'Not found');
+    const file = LITE_IMG[b][1](c.slice(0, -4));
+    if (!existsSync(file)) fail(404, 'Not found');
+    const jpg = await sharp(file).resize(1200, 1600, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'public, max-age=86400' });
+    return res.end(jpg);
+  }
+  if (a === 'magazine') {
+    const names = (await readdir(join(DIST, 'magazine', 'pages')).catch(() => [])).filter((n) => n.endsWith('.webp')).sort();
+    const order = [
+      'cover.webp',
+      ...names.filter((n) => n !== 'cover.webp' && n !== 'back.webp'),
+      ...(names.includes('back.webp') ? ['back.webp'] : []),
+    ];
+    return page(
+      'CITIES Vol. 1',
+      `<h1>CITIES Vol. 1</h1><p class="dim">Twin Cities artists in their own words. Scroll down to read the issue.</p>${order
+        .map((n) => `<p><img src="${liteImg(`/magazine/pages/${n}`)}" alt=""></p>`)
+        .join('')}`,
+    );
+  }
+  const db = await loadBlog();
+  if (a === 'cities' && b === 'heart' && c) {
+    const x = Object.values(db.people || {}).find((p) => p.published && !p.deleted && p.slug === c) || fail(404, 'Not found');
+    const p = personView(x, true);
+    const stories = Object.values(db.posts)
+      .filter((s) => s.published && !s.deleted && (s.people || []).includes(x.id))
+      .map((s) => ownPostView(s));
+    return page(
+      `${p.name} · CITIES`,
+      `<h1>${h(p.name)}</h1>${p.role ? `<p class="dim">${h(p.role)}</p>` : ''}${p.portraits.map((u) => `<p><img src="${h(liteImg(u))}" alt=""></p>`).join('')}${[
+        p.info,
+        p.note,
+      ]
+        .filter(Boolean)
+        .map((t) => `<p>${h(t).replace(/\n+/g, '<br>')}</p>`)
+        .join(
+          '',
+        )}${p.links.length ? `<p>${p.links.map((l) => `<a class="btn" href="${h(l)}">${h(l.replace(/^https?:\/\/(www\.)?/, ''))}</a>`).join('')}</p>` : ''}${
+        stories.length ? `<h2>Stories</h2><ul>${stories.map(litePostLink).join('')}</ul>` : ''
+      }`,
+    );
+  }
+  if (a === 'cities' && b && !(BLOG_SECTIONS[b] && !c)) {
+    const own = !c && Object.values(db.posts).find((x) => x.published && !x.deleted && (x.slug === b || x.id === b));
+    const p = own
+      ? ownPostView(own, true)
+      : (c && (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === `/cities/${b}/${c}`)) ||
+        fail(404, 'Not found');
+    const body =
+      p.html ??
+      String(p.body || '')
+        .split(/\n{2,}/)
+        .map((para) =>
+          /^\/api\/blog\/images\/[\w-]+\.webp$/.test(para.trim())
+            ? `<p><img src="${liteImg(para.trim())}" alt=""></p>`
+            : `<p>${h(para).replace(/https:\/\/[^\s<]+/g, (u) => `<a href="${u}">${u}</a>`)}</p>`,
+        )
+        .join('');
+    return page(
+      `${p.title} · CITIES`,
+      `<h1>${h(p.title)}</h1>${p.preface ? `<p class="dim"><i>${h(p.preface)}</i></p>` : ''}<p><small>${h(p.publication)}${
+        p.author && p.author !== p.publication ? ' · ' + h(p.author) : ''
+      } · ${liteDay(p.date)}</small></p>${p.image && !body.includes(p.image) ? `<p><img src="${h(liteImg(p.image))}" alt=""></p>` : ''}${body}${
+        p.people?.length
+          ? `<h2>People in this story</h2><ul>${p.people.map((x) => `<li><a href="/lite${h(x.url)}">${h(x.name)}</a></li>`).join('')}</ul>`
+          : ''
+      }`,
+    );
+  }
+  const posts = await latestPosts(a === 'cities' ? 60 : 12);
+  const people = Object.values(db.people || {})
+    .filter((x) => x.published && !x.deleted)
+    .sort((x, y) => x.name.localeCompare(y.name))
+    .map((x) => personView(x));
+  const heart = people.length
+    ? `<h2>Heart of the Cities</h2><div>${people
+        .map(
+          (x) =>
+            `<a class="face" href="/lite${h(x.url)}">${x.portrait ? `<img src="${h(liteImg(x.portrait))}" alt=""><br>` : ''}${h(x.name)}</a>`,
+        )
+        .join('')}</div>`
+    : '';
+  if (a === 'cities')
+    return page(
+      'CITIES',
+      `<h1>CITIES</h1><p class="dim">Stories from the Twin Cities arts scene, told by the people in it.</p>${heart}<h2>Latest</h2><ul>${posts.map(litePostLink).join('')}</ul>`,
+    );
+  if (a) fail(404, 'Not found');
+  const today = localDate();
+  const events = Object.values((await loadTimeline()).items)
+    .filter((i) => i.public && !i.members && i.status !== 'Cancelled' && (i.end || i.start) >= today)
+    .sort((x, y) => x.start.localeCompare(y.start))
+    .slice(0, 8);
+  const releases = Object.values((await publicTracks()).releases)
+    .filter(publicRelease)
+    .sort((x, y) => (y.date || '9').localeCompare(x.date || '9'));
+  const storeLinks = (r) =>
+    RELEASE_STORES.filter((s) => /^https:\/\//.test(r.stores?.[s] || ''))
+      .map(
+        (s) =>
+          `<a class="btn" href="${h(r.stores[s])}">${h(s === 'presave' ? 'Pre-save' : s.replace(/([A-Z])/g, ' $1').replace(/^./, (m) => m.toUpperCase()))}</a>`,
+      )
+      .join('');
+  return page(
+    'Sanktuary',
+    `<p class="note">You're on Sanktuary Lite, made for older browsers like Internet Explorer. The full Sanktuary desktop, member sign-in, the Darkroom, the map and the live sky need a newer browser (Edge, Chrome, Firefox or Safari).</p>
+<h1>Sanktuary</h1><p>${h((await loadFront()).intro)}</p>
+<h2>CITIES</h2><p><a class="btn" href="/lite/cities">All stories</a><a class="btn" href="/lite/magazine">Read the magazine</a></p><ul>${posts.map(litePostLink).join('')}</ul>${heart}${
+      releases.length
+        ? `<h2>Music</h2>${releases.map((r) => `<p><b>${h(r.title)}</b>${r.artist ? ` · ${h(r.artist)}` : ''} <small>${liteDay(r.date)}</small><br>${storeLinks(r)}</p>`).join('')}`
+        : ''
+    }${
+      events.length
+        ? `<h2>Coming up</h2><ul>${events.map((e) => `<li><b>${h(e.title)}</b><br><small>${liteDay(e.start)}${e.time ? ' · ' + h(e.time) : ''}${e.location ? ' · ' + h(e.location) : ''}</small></li>`).join('')}</ul>`
+        : ''
+    }`,
+  );
+}
+
 // /write: where members start drafts for CITIES (signed in, never public); admins publish in Admin Panel > CITIES
 const WRITE_PAGE = new URL('./write.html', import.meta.url);
 function writePage(req, res, url) {
@@ -8677,6 +8838,7 @@ const routes = [
   ['/portfolios', portfoliosPage], // before /portfolio, which would match it too
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
   ['/magazine', magazinePage],
+  ['/lite', litePage],
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
   ['/sign/', signPage],
@@ -8693,6 +8855,15 @@ http
     res.setHeader('referrer-policy', 'same-origin');
     res.setHeader('x-frame-options', 'SAMEORIGIN');
     if (/https/.test(req.headers['cf-visitor'] || '')) res.setHeader('strict-transport-security', 'max-age=31536000');
+    // Internet Explorer can't run any of the site's pages, so its visitors go to the script-free /lite instead
+    if (isOldIE(req) && req.method === 'GET' && !/^\/(lite|api)(\/|$)/.test(url.pathname) && !url.pathname.includes('.')) {
+      const to = /^\/(cities|blog)(\/|$)/.test(url.pathname)
+        ? '/lite' + url.pathname.replace(/^\/blog/, '/cities')
+        : url.pathname.startsWith('/magazine')
+          ? '/lite/magazine'
+          : '/lite';
+      return res.writeHead(302, { location: to, 'cache-control': 'no-store' }).end();
+    }
     const handler = routes.find(([prefix]) => url.pathname.startsWith(prefix))?.[1] || staticFile;
     // new Promise catches handlers that throw synchronously too (a plain function calling fail())
     new Promise((ok) => ok(handler(req, res, url))).catch((err) => {

@@ -22,5 +22,9 @@
   <body class="desktop">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- Browsers without modules (Internet Explorer) would stay blank: send them to the script-free Sanktuary Lite -->
+    <script nomodule>
+      location.replace('/lite');
+    </script>
   </body>
 </html>
