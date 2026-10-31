@@ -3173,6 +3173,44 @@ ${thisYear}-03;Comma Song;0,456`,
   const lite = await (await fetch(B + '/lite', { headers: IE })).text();
   check('Sanktuary Lite renders without script', lite.includes('Sanktuary Lite') && !/<script/i.test(lite));
   check('Lite pictures only from their folders', (await fetch(B + '/lite/img/blog/..%2F..%2Fconfig.jpg')).status === 404);
+
+  // ── Pairing: a member signs the Surface in with a 6-digit code from the desktop ──
+  check('a device signed in with a code cannot make codes', (await call('bob', '/api/pair', 'POST')).status === 401);
+  const pairCode = async () =>
+    (await (await fetch(B + '/api/pair', { method: 'POST', headers: { authorization: `Bearer ${jwt('bob')}` } })).json()).code;
+  const pairWith = (code) =>
+    fetch(B + '/lite/pair', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `code=${code}&name=Surface`,
+    });
+  const code1 = await pairCode();
+  check('a wrong code is refused', (await (await pairWith('000000' === code1 ? '111111' : '000000')).text()).includes('That code'));
+  const paired = await pairWith(code1);
+  const devCookie = paired.headers.get('set-cookie')?.split(';')[0];
+  check('the code signs the device in', paired.status === 303 && paired.headers.get('location') === '/lite/files' && !!devCookie);
+  check('a code works once', (await (await pairWith(code1)).text()).includes('That code'));
+  const liteGet = (path, c = devCookie) => fetch(B + path, { headers: { cookie: c }, redirect: 'manual' });
+  const liteFiles = await (await liteGet('/lite/files/view')).text();
+  check('Lite lists the member’s files', liteFiles.includes('Signed in as <b>bob</b>') && liteFiles.includes('/lite/files/view/docs'));
+  check(
+    'Lite upload only where they may upload',
+    !liteFiles.includes('liteUpload(') && (await (await liteGet('/lite/files/up')).text()).includes('liteUpload('),
+  );
+  const dot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await fetch(B + `/api/files/up/lite-dot.png?upload=litedot123&chunk=0&chunks=1&size=${dot.length}`, {
+    method: 'PUT',
+    headers: { cookie: devCookie },
+    body: dot,
+  });
+  const liteJpg = await liteGet('/lite/jpg/up/lite-dot.png');
+  check('Lite shows the member’s pictures as JPEG', liteJpg.status === 200 && liteJpg.headers.get('content-type') === 'image/jpeg');
+  await fetch(B + '/api/pair', { method: 'DELETE', headers: { authorization: `Bearer ${jwt('bob')}` } });
+  check('"Sign out other devices" ends the device’s session', (await liteGet('/lite/files')).headers.get('location') === '/lite/pair');
+  const dev2 = (await pairWith(await pairCode())).headers.get('set-cookie')?.split(';')[0];
+  await fetch(B + '/lite/signout', { method: 'POST', headers: { cookie: dev2 }, redirect: 'manual' });
+  check('Sign out on the device ends its session', (await liteGet('/lite/files', dev2)).headers.get('location') === '/lite/pair');
 } finally {
   srv.kill();
   clerk.close();

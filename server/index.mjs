@@ -185,13 +185,14 @@ const COOKIE = 'sk_session';
 const COOKIE_HOURS = 8;
 const sign = (payload) => createHmac('sha256', process.env.CLERK_SECRET_KEY).update(payload).digest('base64url');
 
-function sessionCookie(req, user) {
-  const payload = Buffer.from(JSON.stringify({ sub: user.id, exp: Date.now() + COOKIE_HOURS * 3.6e6 })).toString('base64url');
+// dev: a device signed in with a pairing code (see /lite/pair); unpairing it ends its cookie straight away
+function sessionCookie(req, user, dev) {
+  const payload = Buffer.from(JSON.stringify({ sub: user.id, exp: Date.now() + COOKIE_HOURS * 3.6e6, dev })).toString('base64url');
   const secure = /https/.test(req.headers['cf-visitor'] || '') ? '; Secure' : '';
   return `${COOKIE}=${payload}.${sign(payload)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_HOURS * 3600}${secure}`;
 }
 
-function cookieUserId(req) {
+function sessionPayload(req) {
   const raw =
     (req.headers.cookie || '')
       .split(/;\s*/)
@@ -201,9 +202,10 @@ function cookieUserId(req) {
   if (!payload || !sig) return null;
   const expected = Buffer.from(sign(payload));
   if (expected.length !== Buffer.byteLength(sig) || !timingSafeEqual(expected, Buffer.from(sig))) return null;
-  const { sub, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
-  return exp > Date.now() ? sub : null;
+  const p = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  return p.exp > Date.now() && (!p.dev || own(pairedDevices, p.dev)?.sub === p.sub) ? p : null;
 }
+const cookieUserId = (req) => sessionPayload(req)?.sub || null;
 
 async function logout(req, res) {
   res.setHeader('set-cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
@@ -5746,7 +5748,7 @@ const liteDay = (d) =>
   d ? new Date(d.slice(0, 10) + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const litePostLink = (p) =>
   `<li><a href="/lite${h(p.url)}"><b>${h(p.title)}</b></a><br><small>${h(p.publication)} · ${liteDay(p.date)}</small></li>`;
-const liteShell = (title, main) => `<!doctype html>
+const liteShell = (title, main, who) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${h(title)}</title><link rel="icon" href="/icons/favicon-32.png">
 <style>
@@ -5758,16 +5760,197 @@ ul{padding-left:20px}li{margin:0 0 12px}small,.dim{color:#b9b2a6}img{max-width:1
 .note{background:#1d1a14;border-left:4px solid #d9a441;padding:10px 14px;font:15px/1.5 Arial,sans-serif;color:#b9b2a6}
 .btn{display:inline-block;margin:0 8px 8px 0;padding:6px 12px;border:1px solid #d9a441;text-decoration:none}
 .face{display:inline-block;width:150px;margin:0 12px 16px 0;vertical-align:top;text-align:center}
+.top form{display:inline;float:right}.top button,.top .me{float:right;margin-left:12px;font:15px Arial,sans-serif}
+input,button,select{font:16px Arial,sans-serif;padding:6px}.code{font-size:28px;letter-spacing:6px;width:180px;text-align:center}
+table{border-collapse:collapse;width:100%}td{padding:6px 8px;border-bottom:1px solid #222;vertical-align:top}td.n{text-align:right;white-space:nowrap}
 </style></head><body>
-<div class="top"><a href="/lite"><b>SANKTUARY</b></a><a href="/lite/cities">CITIES</a><a href="/lite/magazine">Magazine</a></div>
+<div class="top"><a href="/lite"><b>SANKTUARY</b></a><a href="/lite/cities">CITIES</a><a href="/lite/magazine">Magazine</a>${
+  who
+    ? `<a href="/lite/files">Files</a><form method="post" action="/lite/signout"><button>Sign out</button></form><span class="me">Signed in as <b>${h(who.username)}</b></span>`
+    : `<a href="/lite/pair">Member sign-in</a>`
+}</div>
 <main>${main}</main></body></html>`;
+
+// ── Pairing: a member signs another device in with a 6-digit code (Internet Explorer can't run Clerk's sign-in) ──
+// "Sign in another device..." in the account menu makes a code for 5 minutes; typed into /lite/pair, the device gets
+// the same session cookie as the desktop (8 hours), tied to a device record. Deleting the record (Sign out on the
+// device, or "Sign out other devices" on the phone) ends it at once. The business portal still needs Clerk itself.
+const pairCodes = new Map(); // code -> { sub, username, exp }
+const pairTries = new Map(); // ip -> { n, since }
+const pairedDevices = (() => {
+  try {
+    return JSON.parse(readFileSync(join(DATA, 'devices.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+})();
+const saveDevices = () => saveJson('devices.json', pairedDevices).catch(console.error);
+
+async function pairApi(req, res, url) {
+  // Only the desktop (a real Clerk token) can sign other devices in or out, not a device signed in with a code
+  if (!req.headers.authorization) fail(401, 'Sign in required');
+  const user = await currentUser(req, url, await loadConfig());
+  const mine = () =>
+    Object.entries(pairedDevices)
+      .filter(([, d]) => d.sub === user.id)
+      .map(([id, d]) => ({ id, name: d.name, created: d.created }));
+  if (req.method === 'POST') {
+    for (const [c, p] of pairCodes) if (p.exp < Date.now() || p.sub === user.id) pairCodes.delete(c);
+    let code;
+    do code = String(randomBytes(4).readUInt32BE() % 1e6).padStart(6, '0');
+    while (pairCodes.has(code));
+    pairCodes.set(code, { sub: user.id, username: user.username, exp: Date.now() + 5 * 60_000 });
+    return json(res, { code, minutes: 5, devices: mine() });
+  }
+  if (req.method === 'DELETE') {
+    for (const { id } of mine()) delete pairedDevices[id];
+    await saveDevices();
+    return json(res, { ok: true });
+  }
+  return json(res, { devices: mine() });
+}
+
+// Member pages in Lite read the same /api the desktop uses, over the loopback with the visitor's own cookie (and
+// Cloudflare's headers, so tunnel-only rules still apply), so rights and logging stay in one place
+const SELF = `http://${/^(0\.0\.0\.0|::)?$/.test(HOST) ? '127.0.0.1' : HOST}:${PORT}`;
+async function liteApi(req, path) {
+  const headers = Object.fromEntries(
+    ['cookie', 'cf-ray', 'cf-connecting-ip', 'cf-visitor'].filter((k) => req.headers[k]).map((k) => [k, req.headers[k]]),
+  );
+  const r = await fetch(SELF + path, { headers });
+  if (!r.ok) fail(r.status, (await r.text()) || 'Not found');
+  return r;
+}
+const liteSize = (n) =>
+  n < 1024
+    ? `${n} B`
+    : n < 1048576
+      ? `${Math.round(n / 1024)} KB`
+      : n < 1073741824
+        ? `${(n / 1048576).toFixed(1)} MB`
+        : `${(n / 1073741824).toFixed(1)} GB`;
+const LITE_PICTURE = /\.(jpe?g|png|gif|webp|avif|heic|tiff?|psd|dng|cr2|cr3|nef|arw|raf|orf|rw2)$/i;
+// Uploads: the desktop's chunked upload, in ES5 (IE11 has XHR, File and Blob.slice, but no fetch or arrow functions)
+const LITE_UPLOAD = `<script>
+function liteUpload(base){var files=document.getElementById('f').files,msg=document.getElementById('msg'),i=0,CH=8388608;
+function say(t){msg.innerHTML='';msg.appendChild(document.createTextNode(t));}
+function next(){if(i>=files.length){location.reload();return;}var file=files[i++],n=Math.max(1,Math.ceil(file.size/CH)),c=0,
+id='lite'+Math.random().toString(36).slice(2,10)+(new Date()).getTime().toString(36);
+function part(){if(c>=n)return next();var x=new XMLHttpRequest();
+x.open('PUT',base+'/'+encodeURIComponent(file.name)+'?upload='+id+'&chunk='+c+'&chunks='+n+'&size='+file.size+'&chunkSize='+CH);
+x.onload=function(){if(x.status>=300)return say('Upload failed: '+x.responseText);c++;say('Uploading '+file.name+': '+Math.round(c/n*100)+'%');part();};
+x.onerror=function(){say('Upload failed: no connection');};x.send(file.slice(c*CH,(c+1)*CH));}
+part();}
+if(files.length)next();}
+</script>`;
+
+async function liteMember(req, res, url, page, who) {
+  const [, , a, space, ...rest] = url.pathname.split('/');
+  if (a === 'pair' || a === 'signout') {
+    const form = (error = '') =>
+      page(
+        'Member sign-in',
+        `<h1>Member sign-in</h1>${error ? `<p class="note">${h(error)}</p>` : ''}${who ? `<p>You're signed in as <b>${h(who.username)}</b>.</p>` : ''}<p>On your phone or computer, open Sanktuary, click your name at the top and choose <b>Sign in another device...</b> Type the 6-digit code here.</p>
+<form method="post" action="/lite/pair"><p><input class="code" name="code" maxlength="6" autocomplete="off" inputmode="numeric" autofocus></p>
+<p><label>Name this device <input name="name" value="Surface" maxlength="40"></label></p><p><button>Sign in</button></p></form>
+<p class="dim">Signed-in devices stay signed in for 8 hours. Press Sign out when you're done, especially on a shared tablet.</p>`,
+      );
+    if (req.method !== 'POST') return a === 'signout' ? fail(405, 'Use the Sign out button') : form();
+    const input = new URLSearchParams(await body(req, 10_000));
+    if (a === 'signout') {
+      const dev = sessionPayload(req)?.dev;
+      if (dev && own(pairedDevices, dev)) (delete pairedDevices[dev], await saveDevices());
+      return res.writeHead(303, { location: '/lite', 'set-cookie': `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` }).end();
+    }
+    const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
+    const t = pairTries.get(ip);
+    const tries = t && Date.now() - t.since < 10 * 60_000 ? t : { n: 0, since: Date.now() };
+    if (tries.n >= 10) return form('Too many tries. Wait 10 minutes and get a new code.');
+    pairTries.set(ip, { ...tries, n: tries.n + 1 });
+    const code = String(input.get('code') || '').replace(/\D/g, '');
+    const hit = pairCodes.get(code);
+    if (!hit || hit.exp < Date.now()) return form("That code didn't work. Codes last 5 minutes: get a new one and try again.");
+    pairCodes.delete(code);
+    const id = randomUUID();
+    pairedDevices[id] = {
+      sub: hit.sub,
+      username: hit.username,
+      name: String(input.get('name') || 'Device').slice(0, 40),
+      created: new Date().toISOString(),
+    };
+    await saveDevices();
+    return res.writeHead(303, { location: '/lite/files', 'set-cookie': sessionCookie(req, { id: hit.sub }, id) }).end();
+  }
+  if (!who) return res.writeHead(303, { location: '/lite/pair' }).end();
+  const path = rest.join('/'); // still %-encoded, as the API wants it
+  const api = `/api/files/${space}/${path}`;
+  const crumbs = [space, ...rest].filter(Boolean);
+  if (a === 'jpg') {
+    // A picture from the member's files as JPEG (the desktop's previews are WebP, which IE can't show)
+    const buf = Buffer.from(await (await liteApi(req, `${api}?preview=1600`)).arrayBuffer());
+    const jpg = await sharp(buf).jpeg({ quality: 82 }).toBuffer();
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' });
+    return res.end(jpg);
+  }
+  if (a === 'open') {
+    const name = decodeURIComponent(rest[rest.length - 1] || '');
+    const up = `/lite/files/${crumbs.slice(0, -1).join('/')}`;
+    const view = LITE_PICTURE.test(name)
+      ? `<p><img src="/lite/jpg/${h(space)}/${h(path)}" alt=""></p>`
+      : /\.(mp3|m4a|aac)$/i.test(name)
+        ? `<p><audio controls src="${h(api)}"></audio></p>`
+        : /\.(mp4|m4v)$/i.test(name)
+          ? `<p><video controls style="max-width:100%" src="${h(api)}"></video></p>`
+          : `<p class="dim">This kind of file can't be shown here. Download it to open it.</p>`;
+    return page(
+      name,
+      `<p><a href="${h(up)}">&larr; Back</a></p><h1>${h(name)}</h1>${view}<p><a class="btn" href="${h(api)}?download">Download</a></p>`,
+    );
+  }
+  if (!space) {
+    const me = await (await liteApi(req, '/api/me')).json();
+    return page(
+      'Files',
+      `<h1>Files</h1><ul>${me.spaces
+        .map(
+          (s) =>
+            `<li>${s.online ? `<a href="/lite/files/${h(encodeURIComponent(s.id))}"><b>${h(s.name)}</b></a>` : `<b>${h(s.name)}</b> <small>(drive not connected)</small>`}</li>`,
+        )
+        .join('')}</ul>`,
+    );
+  }
+  const list = await (await liteApi(req, `${api}?list`)).json();
+  const rows = list.entries
+    .filter((e) => !e.name.startsWith('.'))
+    .sort((x, y) => y.isDir - x.isDir || x.name.localeCompare(y.name))
+    .map((e) => {
+      const to = `${crumbs.join('/')}/${encodeURIComponent(e.name)}`;
+      return `<tr><td>${e.isDir ? '&#128193; ' : ''}<a href="/lite/${e.isDir ? 'files' : 'open'}/${h(to)}">${h(e.name)}</a></td><td class="n"><small>${e.isDir ? '' : liteSize(e.size)}</small></td><td class="n"><small>${liteDay(e.modified)}</small></td></tr>`;
+    })
+    .join('');
+  const canUpload = ['upload', 'edit'].includes(list.rights) && !list.combined;
+  return page(
+    'Files',
+    `<p><a href="/lite/files">Files</a> / ${crumbs
+      .map((c, i) => `<a href="/lite/files/${h(crumbs.slice(0, i + 1).join('/'))}">${h(decodeURIComponent(c))}</a>`)
+      .join(
+        ' / ',
+      )}</p>${list.lockedBy ? `<p class="note">${h(list.lockedBy.user)} has "${h(list.lockedBy.project)}" checked out, so it can't be changed here.</p>` : ''}${
+      canUpload
+        ? `<p><input type="file" id="f" multiple> <button type="button" onclick="liteUpload('${h(api.replace(/\/$/, ''))}')">Upload</button> <span id="msg" class="dim"></span></p>${LITE_UPLOAD}`
+        : ''
+    }<table>${rows || '<tr><td class="dim">This folder is empty.</td></tr>'}</table>`,
+  );
+}
 
 async function litePage(req, res, url) {
   const [, , a, b, c] = url.pathname.split('/');
+  const who = sessionPayload(req) && (await currentUser(req, url, await loadConfig()).catch(() => null));
   const page = (title, main) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-    res.end(liteShell(title, main));
+    res.end(liteShell(title, main, who));
   };
+  if (['pair', 'signout', 'files', 'open', 'jpg'].includes(a)) return liteMember(req, res, url, page, who);
   if (a === 'img') {
     if (!LITE_IMG[b] || !/^[\w-]+\.jpg$/.test(c || '')) fail(404, 'Not found');
     const file = LITE_IMG[b][1](c.slice(0, -4));
@@ -5875,7 +6058,11 @@ async function litePage(req, res, url) {
       .join('');
   return page(
     'Sanktuary',
-    `<p class="note">You're on Sanktuary Lite, made for older browsers like Internet Explorer. The full Sanktuary desktop, member sign-in, the Darkroom, the map and the live sky need a newer browser (Edge, Chrome, Firefox or Safari).</p>
+    `<p class="note">You're on Sanktuary Lite, made for older browsers like Internet Explorer. ${
+      who
+        ? `Your files are under <a href="/lite/files">Files</a>.`
+        : `Members can <a href="/lite/pair">sign in with a code</a> from their phone.`
+    } The full desktop, the video editor, the map and the live sky need a newer browser (Edge, Chrome, Firefox or Safari).</p>
 <h1>Sanktuary</h1><p>${h((await loadFront()).intro)}</p>
 <h2>CITIES</h2><p><a class="btn" href="/lite/cities">All stories</a><a class="btn" href="/lite/magazine">Read the magazine</a></p><ul>${posts.map(litePostLink).join('')}</ul>${heart}${
       releases.length
@@ -8839,6 +9026,7 @@ const routes = [
   ['/portfolio', htmlPage(PORTFOLIO_PAGE)],
   ['/magazine', magazinePage],
   ['/lite', litePage],
+  ['/api/pair', pairApi],
   ['/api/stories', storiesApi],
   ['/s/', publicShare],
   ['/sign/', signPage],
