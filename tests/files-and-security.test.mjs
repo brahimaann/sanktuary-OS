@@ -1450,6 +1450,24 @@ try {
       postPage.includes('<meta property="og:description" content="Singing since she was two." />'),
   );
   check(
+    'search engines read the post itself, its canonical address and its JSON-LD',
+    postPage.includes('<h1>Lyric</h1>') &&
+      postPage.includes('<link rel="canonical" href="') &&
+      /"@type":"BlogPosting","headline":"Lyric"/.test(postPage) &&
+      !postPage.includes('id="app">Loading...'),
+  );
+  const sitemap = await (await fetch(B + '/sitemap.xml')).text();
+  check('the sitemap lists published posts', sitemap.includes('/cities/lyric</loc>') && sitemap.includes('/cities/heart</loc>'));
+  check('robots.txt points at the sitemap', /Sitemap: .*\/sitemap\.xml/.test(await (await fetch(B + '/robots.txt')).text()));
+  const home = await (await fetch(B + '/')).text();
+  check(
+    'the desktop page names Sanktuary for search engines and carries the front page as plain HTML',
+    home.includes('"@type":"Organization"') &&
+      home.includes('"@type":"WebSite"') &&
+      home.includes('<h1>Sanktuary</h1>') &&
+      home.includes('href="/cities/lyric"'),
+  );
+  check(
     'section pages have their own title',
     (await (await fetch(B + '/cities/heart')).text()).includes('<title>Heart of the Cities · CITIES</title>'),
   );
@@ -3172,6 +3190,7 @@ ${thisYear}-03;Comma Song;0,456`,
   check('modern browsers still get the desktop', (await fetch(B + '/', { redirect: 'manual' })).status === 200);
   const lite = await (await fetch(B + '/lite', { headers: IE })).text();
   check('Sanktuary Lite renders without script', lite.includes('Sanktuary Lite') && !/<script/i.test(lite));
+  check('Lite points search engines at the full page', /<link rel="canonical" href="[^"]*\/">/.test(lite));
   check('Lite pictures only from their folders', (await fetch(B + '/lite/img/blog/..%2F..%2Fconfig.jpg')).status === 404);
 } finally {
   srv.kill();

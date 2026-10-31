@@ -4252,6 +4252,7 @@ async function blogApi(req, res, url) {
         const base = slugify(x.name) || x.id;
         x.slug = Object.values(db.people).some((o) => o.slug === base) ? `${base}-${x.id.slice(0, 4)}` : base;
       }
+      if (input.published && x.published) indexNow(`/cities/heart/${x.slug}`);
       x.updated = new Date().toISOString();
     };
     db.people ??= {};
@@ -4305,6 +4306,7 @@ async function blogApi(req, res, url) {
         const taken = new Set([...Object.values(db.posts).map((x) => x.slug), ...BLOG_RESERVED]);
         p.slug = taken.has(base) ? `${base}-${p.id.slice(0, 4)}` : base;
       }
+      if (input.published && p.published) indexNow(`/cities/${p.slug}`);
       p.updated = new Date().toISOString();
     };
     if (req.method === 'POST' && !id) {
@@ -5652,18 +5654,37 @@ const BLOG_SECTIONS = {
   videos: ['Videos', 'New videos from Twin Cities creators.'],
   moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
 };
-const metaTags = ({ title, text, image, link }) =>
+// Search engines read the same tags: the address to list (canonical) and, as JSON-LD, what the page is about
+const metaTags = ({ title, text, image, link, canonical = link, site = 'CITIES · Sanktuary', type = 'article', ld = [] }) =>
   [
     `<title>${escAttr(title)}</title>`,
     `<meta name="description" content="${escAttr(text)}" />`,
-    `<meta property="og:site_name" content="CITIES · Sanktuary" />`,
-    `<meta property="og:type" content="article" />`,
+    `<link rel="canonical" href="${escAttr(canonical)}" />`,
+    `<meta property="og:site_name" content="${escAttr(site)}" />`,
+    `<meta property="og:type" content="${type}" />`,
     `<meta property="og:title" content="${escAttr(title)}" />`,
     `<meta property="og:description" content="${escAttr(text)}" />`,
     `<meta property="og:url" content="${escAttr(link)}" />`,
     image ? `<meta property="og:image" content="${escAttr(image)}" />` : '',
     `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />`,
+    ...ld.filter(Boolean).map((x) => `<script type="application/ld+json">${jsonLd({ '@context': 'https://schema.org', ...x })}</script>`),
   ].join('\n    ');
+const jsonLd = (x) => JSON.stringify(x).replace(/</g, '\\u003c'); // never closes the script tag early
+// Who publishes everything here, for search engines (the logo and profiles beside the name in results)
+const orgLd = async (origin) => ({
+  '@type': 'Organization',
+  '@id': origin + '/#org',
+  name: 'Sanktuary',
+  alternateName: ['Sanktuary Studio', 'sanktuary.studio'],
+  url: origin + '/',
+  logo: origin + '/icons/icon-512.png',
+  description: (await loadFront()).intro,
+  areaServed: 'Minneapolis–Saint Paul, Minnesota',
+  sameAs: String((await loadFront()).portfolio?.links || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^https:\/\/\S+$/.test(l)),
+});
 
 async function blogPage(req, res, url) {
   if (/^\/blog(\/|$)/.test(url.pathname)) {
@@ -5689,6 +5710,22 @@ async function blogPage(req, res, url) {
         title: `${x.name} · CITIES`,
         text: [x.role, x.info].filter(Boolean).join('. ').slice(0, 200) || BLOG_SECTIONS.heart[1],
         image: x.portraits?.[0] || null,
+        ld: [
+          {
+            '@type': 'ProfilePage',
+            url: origin + url.pathname,
+            isPartOf: { '@type': 'Blog', name: 'CITIES', url: origin + '/cities' },
+            mainEntity: {
+              '@type': 'Person',
+              name: x.name,
+              jobTitle: x.role || undefined,
+              description: x.info || undefined,
+              image: x.portraits?.[0] ? origin + x.portraits[0] : undefined,
+              homeLocation: 'Minneapolis–Saint Paul, Minnesota',
+              sameAs: (x.links || []).filter((l) => /^https:\/\//.test(l)),
+            },
+          },
+        ],
       };
   } else if (a) {
     const db = await loadBlog();
@@ -5697,9 +5734,38 @@ async function blogPage(req, res, url) {
       ? ownPostView(own)
       : b && (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === `/cities/${a}/${b}`);
     if (post) meta = { title: `${post.title} · CITIES`, text: post.excerpt.slice(0, 200), image: post.image };
+    // A Substack piece is listed under its own address, so search engines never see our copy as a duplicate
+    if (post && !own) meta.canonical = post.external || undefined;
+    if (own) {
+      const image = post.image?.startsWith('/') ? origin + post.image : post.image;
+      meta.ld = [
+        {
+          '@type': 'BlogPosting',
+          headline: post.title,
+          description: post.excerpt.slice(0, 300),
+          image: image || undefined,
+          datePublished: post.date,
+          dateModified: own.updated || post.date,
+          author: { '@type': 'Person', name: post.author || 'CITIES' },
+          publisher: { '@type': 'Organization', name: 'Sanktuary', url: origin + '/', logo: origin + '/icons/icon-512.png' },
+          mainEntityOfPage: origin + url.pathname,
+          isPartOf: { '@type': 'Blog', name: 'CITIES', url: origin + '/cities' },
+          about: post.people.map((x) => ({ '@type': 'Person', name: x.name, url: origin + x.url })),
+        },
+      ];
+    }
   }
+  meta.ld ??= [
+    await orgLd(origin),
+    { '@type': 'Blog', name: 'CITIES', url: origin + '/cities', publisher: { '@id': origin + '/#org' }, inLanguage: 'en' },
+  ];
   if (meta.image?.startsWith('/')) meta.image = origin + meta.image;
-  const html = (await readFile(BLOG_PAGE, 'utf8')).replace('<!--meta-->', metaTags({ ...meta, link: origin + url.pathname }));
+  // The story itself is in the page too, not only fetched by its script: search engines that don't run scripts
+  // (Bing, mostly) read it from here, and the script draws its own view over it as before
+  const body = await liteMain('cities', a, b, '').catch(() => null);
+  const html = (await readFile(BLOG_PAGE, 'utf8'))
+    .replace('<!--meta-->', metaTags({ ...meta, link: origin + url.pathname }))
+    .replace('id="app">Loading...', () => `id="app">${body ? body[1] : 'Loading...'}`);
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
@@ -5728,6 +5794,71 @@ async function magazinePage(req, res, url) {
   res.end((await readFile(MAGAZINE_PAGE, 'utf8')).replace('<!--meta-->', metaTags(meta)));
 }
 
+// ── Search engines: robots.txt, the sitemap of every public page, and IndexNow ──
+// Private pages already answer with "noindex"; robots.txt only keeps crawlers off pages that are never public.
+function robots(req, res) {
+  res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' });
+  res.end(
+    ['User-agent: *', ...['/write', '/s/', '/b/', '/sign/', '/invoice/', '/apps/', '/share-target'].map((p) => `Disallow: ${p}`)]
+      .concat('', `Sitemap: ${siteOrigin(req)}/sitemap.xml`, '')
+      .join('\n'),
+  );
+}
+async function sitemap(req, res) {
+  const origin = siteOrigin(req);
+  const db = await loadBlog();
+  const live = (x) => x.published && !x.deleted;
+  const urls = [
+    ['/'],
+    ['/cities'],
+    ...Object.keys(BLOG_SECTIONS).map((k) => [`/cities/${k}`]),
+    ['/magazine'],
+    ['/portfolio'],
+    ['/shop'],
+    ...Object.values(db.posts)
+      .filter((p) => live(p) && p.slug)
+      .map((p) => [`/cities/${p.slug}`, p.updated || p.published]),
+    ...Object.values(db.people || {})
+      .filter((x) => live(x) && x.slug)
+      .map((x) => [`/cities/heart/${x.slug}`, x.updated]),
+    ...Object.values((await publicTracks()).releases)
+      .filter(publicRelease)
+      .map((r) => [`/release/${r.slug}`]),
+    ...Object.values((await loadStories()).stories)
+      .filter((st) => st.public && !st.deleted && st.slug)
+      .map((st) => [`/story/${st.slug}`]),
+  ];
+  res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' });
+  res.end(
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
+      .map(([u, at]) => `<url><loc>${escAttr(origin + u)}</loc>${at ? `<lastmod>${at.slice(0, 10)}</lastmod>` : ''}</url>`)
+      .join('\n')}\n</urlset>\n`,
+  );
+}
+// IndexNow tells Bing (and Yandex, Seznam, Naver) the moment a page is published instead of waiting for a crawl.
+// Set INDEXNOW_KEY (any 8-128 letters, digits or dashes); the key is served at /indexnow.txt to prove the site is ours.
+const INDEXNOW_KEY = /^[\w-]{8,128}$/.test(process.env.INDEXNOW_KEY || '') ? process.env.INDEXNOW_KEY : '';
+function indexNowKey(req, res) {
+  if (!INDEXNOW_KEY) fail(404, 'Not found');
+  res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+  res.end(INDEXNOW_KEY);
+}
+function indexNow(path) {
+  const origin = SITE_ORIGINS[0];
+  if (!INDEXNOW_KEY || !/^https:\/\//.test(origin || '')) return;
+  fetch('https://api.indexnow.org/indexnow', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({
+      host: new URL(origin).host,
+      key: INDEXNOW_KEY,
+      keyLocation: `${origin}/indexnow.txt`,
+      urlList: [origin + path],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch((err) => console.error('IndexNow:', err.message));
+}
+
 // ── /lite: the public side for old browsers (Internet Explorer 11, e.g. a Surface RT, which can't get another one) ──
 // The desktop (React 19, Clerk, Tailwind 4, WebGL) and the public pages' scripts need a modern browser, so IE got a
 // blank page. Here the server renders everything and the page has no script: CITIES posts and people, the magazine,
@@ -5744,11 +5875,11 @@ const liteImg = (src) => {
 const h = (v) => escAttr(String(v ?? ''));
 const liteDay = (d) =>
   d ? new Date(d.slice(0, 10) + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
-const litePostLink = (p) =>
-  `<li><a href="/lite${h(p.url)}"><b>${h(p.title)}</b></a><br><small>${h(p.publication)} · ${liteDay(p.date)}</small></li>`;
-const liteShell = (title, main) => `<!doctype html>
+const litePostLink = (pre) => (p) =>
+  `<li><a href="${pre}${h(p.url)}"><b>${h(p.title)}</b></a><br><small>${h(p.publication)} · ${liteDay(p.date)}</small></li>`;
+const liteShell = (title, main, canonical) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${h(title)}</title><link rel="icon" href="/icons/favicon-32.png">
+<title>${h(title)}</title><link rel="icon" href="/icons/favicon-32.png"><link rel="canonical" href="${h(canonical)}">
 <style>
 body{margin:0;background:#0b0b0f;color:#f3efe8;font:18px/1.6 Georgia,'Times New Roman',serif}
 main{max-width:760px;margin:0 auto;padding:24px 20px 60px}
@@ -5764,10 +5895,6 @@ ul{padding-left:20px}li{margin:0 0 12px}small,.dim{color:#b9b2a6}img{max-width:1
 
 async function litePage(req, res, url) {
   const [, , a, b, c] = url.pathname.split('/');
-  const page = (title, main) => {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-    res.end(liteShell(title, main));
-  };
   if (a === 'img') {
     if (!LITE_IMG[b] || !/^[\w-]+\.jpg$/.test(c || '')) fail(404, 'Not found');
     const file = LITE_IMG[b][1](c.slice(0, -4));
@@ -5776,6 +5903,20 @@ async function litePage(req, res, url) {
     res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'public, max-age=86400' });
     return res.end(jpg);
   }
+  const [title, main] = await liteMain(a, b, c, '/lite');
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+  // Lite is a second copy of the public pages, so search engines are pointed at the full ones
+  const note = a
+    ? ''
+    : `<p class="note">You're on Sanktuary Lite, made for older browsers like Internet Explorer. The full Sanktuary desktop, member sign-in, the Darkroom, the map and the live sky need a newer browser (Edge, Chrome, Firefox or Safari).</p>\n`;
+  res.end(liteShell(title, note + main, siteOrigin(req) + (url.pathname.replace(/^\/lite/, '').replace(/\/$/, '') || '/')));
+}
+
+/** The public pages as plain HTML, no script: [title, body]. Lite shows them (pre = '/lite'); the full CITIES and home
+ * pages carry them too (pre = ''), for search engines that read a page without running it. */
+async function liteMain(a, b, c, pre) {
+  const page = (title, main, ld = []) => [title, main, ld];
+  const img = pre ? liteImg : (src) => src; // only IE needs the JPEG copies
   if (a === 'magazine') {
     const names = (await readdir(join(DIST, 'magazine', 'pages')).catch(() => [])).filter((n) => n.endsWith('.webp')).sort();
     const order = [
@@ -5786,7 +5927,7 @@ async function litePage(req, res, url) {
     return page(
       'CITIES Vol. 1',
       `<h1>CITIES Vol. 1</h1><p class="dim">Twin Cities artists in their own words. Scroll down to read the issue.</p>${order
-        .map((n) => `<p><img src="${liteImg(`/magazine/pages/${n}`)}" alt=""></p>`)
+        .map((n) => `<p><img src="${img(`/magazine/pages/${n}`)}" alt=""></p>`)
         .join('')}`,
     );
   }
@@ -5799,7 +5940,7 @@ async function litePage(req, res, url) {
       .map((s) => ownPostView(s));
     return page(
       `${p.name} · CITIES`,
-      `<h1>${h(p.name)}</h1>${p.role ? `<p class="dim">${h(p.role)}</p>` : ''}${p.portraits.map((u) => `<p><img src="${h(liteImg(u))}" alt=""></p>`).join('')}${[
+      `<h1>${h(p.name)}</h1>${p.role ? `<p class="dim">${h(p.role)}</p>` : ''}${p.portraits.map((u) => `<p><img src="${h(img(u))}" alt=""></p>`).join('')}${[
         p.info,
         p.note,
       ]
@@ -5808,7 +5949,7 @@ async function litePage(req, res, url) {
         .join(
           '',
         )}${p.links.length ? `<p>${p.links.map((l) => `<a class="btn" href="${h(l)}">${h(l.replace(/^https?:\/\/(www\.)?/, ''))}</a>`).join('')}</p>` : ''}${
-        stories.length ? `<h2>Stories</h2><ul>${stories.map(litePostLink).join('')}</ul>` : ''
+        stories.length ? `<h2>Stories</h2><ul>${stories.map(litePostLink(pre)).join('')}</ul>` : ''
       }`,
     );
   }
@@ -5824,7 +5965,7 @@ async function litePage(req, res, url) {
         .split(/\n{2,}/)
         .map((para) =>
           /^\/api\/blog\/images\/[\w-]+\.webp$/.test(para.trim())
-            ? `<p><img src="${liteImg(para.trim())}" alt=""></p>`
+            ? `<p><img src="${img(para.trim())}" alt=""></p>`
             : `<p>${h(para).replace(/https:\/\/[^\s<]+/g, (u) => `<a href="${u}">${u}</a>`)}</p>`,
         )
         .join('');
@@ -5832,9 +5973,9 @@ async function litePage(req, res, url) {
       `${p.title} · CITIES`,
       `<h1>${h(p.title)}</h1>${p.preface ? `<p class="dim"><i>${h(p.preface)}</i></p>` : ''}<p><small>${h(p.publication)}${
         p.author && p.author !== p.publication ? ' · ' + h(p.author) : ''
-      } · ${liteDay(p.date)}</small></p>${p.image && !body.includes(p.image) ? `<p><img src="${h(liteImg(p.image))}" alt=""></p>` : ''}${body}${
+      } · ${liteDay(p.date)}</small></p>${p.image && !body.includes(p.image) ? `<p><img src="${h(img(p.image))}" alt=""></p>` : ''}${body}${
         p.people?.length
-          ? `<h2>People in this story</h2><ul>${p.people.map((x) => `<li><a href="/lite${h(x.url)}">${h(x.name)}</a></li>`).join('')}</ul>`
+          ? `<h2>People in this story</h2><ul>${p.people.map((x) => `<li><a href="${pre}${h(x.url)}">${h(x.name)}</a></li>`).join('')}</ul>`
           : ''
       }`,
     );
@@ -5848,14 +5989,14 @@ async function litePage(req, res, url) {
     ? `<h2>Heart of the Cities</h2><div>${people
         .map(
           (x) =>
-            `<a class="face" href="/lite${h(x.url)}">${x.portrait ? `<img src="${h(liteImg(x.portrait))}" alt=""><br>` : ''}${h(x.name)}</a>`,
+            `<a class="face" href="${pre}${h(x.url)}">${x.portrait ? `<img src="${h(img(x.portrait))}" alt=""><br>` : ''}${h(x.name)}</a>`,
         )
         .join('')}</div>`
     : '';
   if (a === 'cities')
     return page(
       'CITIES',
-      `<h1>CITIES</h1><p class="dim">Stories from the Twin Cities arts scene, told by the people in it.</p>${heart}<h2>Latest</h2><ul>${posts.map(litePostLink).join('')}</ul>`,
+      `<h1>CITIES</h1><p class="dim">Stories from the Twin Cities arts scene, told by the people in it.</p>${heart}<h2>Latest</h2><ul>${posts.map(litePostLink(pre)).join('')}</ul>`,
     );
   if (a) fail(404, 'Not found');
   const today = localDate();
@@ -5875,17 +6016,30 @@ async function litePage(req, res, url) {
       .join('');
   return page(
     'Sanktuary',
-    `<p class="note">You're on Sanktuary Lite, made for older browsers like Internet Explorer. The full Sanktuary desktop, member sign-in, the Darkroom, the map and the live sky need a newer browser (Edge, Chrome, Firefox or Safari).</p>
-<h1>Sanktuary</h1><p>${h((await loadFront()).intro)}</p>
-<h2>CITIES</h2><p><a class="btn" href="/lite/cities">All stories</a><a class="btn" href="/lite/magazine">Read the magazine</a></p><ul>${posts.map(litePostLink).join('')}</ul>${heart}${
+    `<h1>Sanktuary</h1><p>${h((await loadFront()).intro)}</p>
+<h2>CITIES</h2><p><a class="btn" href="${pre}/cities">All stories</a><a class="btn" href="${pre}/magazine">Read the magazine</a></p><ul>${posts.map(litePostLink(pre)).join('')}</ul>${heart}${
       releases.length
-        ? `<h2>Music</h2>${releases.map((r) => `<p><b>${h(r.title)}</b>${r.artist ? ` · ${h(r.artist)}` : ''} <small>${liteDay(r.date)}</small><br>${storeLinks(r)}</p>`).join('')}`
+        ? `<h2>Music</h2>${releases.map((r) => `<p><b>${pre ? h(r.title) : `<a href="/release/${h(r.slug)}">${h(r.title)}</a>`}</b>${r.artist ? ` · ${h(r.artist)}` : ''} <small>${liteDay(r.date)}</small><br>${storeLinks(r)}</p>`).join('')}`
         : ''
     }${
       events.length
         ? `<h2>Coming up</h2><ul>${events.map((e) => `<li><b>${h(e.title)}</b><br><small>${liteDay(e.start)}${e.time ? ' · ' + h(e.time) : ''}${e.location ? ' · ' + h(e.location) : ''}</small></li>`).join('')}</ul>`
         : ''
     }`,
+    // Upcoming events with a place, as search engines' event listings want them
+    events
+      .filter((e) => e.location)
+      .map((e) => ({
+        '@type': 'Event',
+        name: e.title,
+        startDate: e.start,
+        endDate: e.end || undefined,
+        eventStatus: 'https://schema.org/EventScheduled',
+        eventAttendanceMode: 'https://schema.org/OfflineEventAttendanceMode',
+        location: { '@type': 'Place', name: e.location, address: e.location },
+        url: e.link || undefined,
+        organizer: { '@type': 'Organization', name: 'Sanktuary' },
+      })),
   );
 }
 
@@ -6369,16 +6523,57 @@ async function portfoliosPage(req, res, url) {
 }
 
 function htmlPage(file) {
-  return (req, res, url) => {
+  return async (req, res, url) => {
     if (!/^\/(release|portfolio)(\/[\w-]{1,80}){0,2}\/?$/.test(url.pathname)) fail(404, 'Not found');
+    const head = await publicHead(req, url);
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-cache',
       'content-security-policy':
         "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src https://www.youtube-nocookie.com",
     });
-    return pipeline(createReadStream(file), res);
+    res.end((await readFile(file, 'utf8')).replace(/<title>[^<]*<\/title>/, (t) => head || t));
   };
+}
+/** A release's or the portfolio's title, summary, cover and JSON-LD for link previews and search results. */
+async function publicHead(req, url) {
+  const origin = siteOrigin(req);
+  const [, kind, slug] = url.pathname.split('/');
+  if (kind === 'portfolio') {
+    const pf = (await loadFront()).portfolio || {};
+    const text = pf.tagline || pf.statement || (await loadFront()).intro;
+    return metaTags({
+      title: `Portfolio · ${pf.name || 'Sanktuary'}`,
+      text: text.slice(0, 300),
+      link: origin + '/portfolio',
+      site: 'Sanktuary',
+      type: 'website',
+    });
+  }
+  const r = Object.values((await publicTracks()).releases).find((x) => x.slug === slug && publicRelease(x));
+  if (!r) return null;
+  const link = `${origin}/release/${r.slug}`;
+  const image = r.cover ? `${link.replace('/release/', '/api/public/release/')}/cover` : null;
+  const by = r.artist || 'Sanktuary';
+  return metaTags({
+    title: `${r.title} · ${by}`,
+    text: (r.blurb || `${r.title} by ${by}. Listen on your favourite platform.`).slice(0, 300),
+    image,
+    link,
+    site: 'Sanktuary',
+    type: 'music.album',
+    ld: [
+      {
+        '@type': 'MusicAlbum',
+        name: r.title,
+        byArtist: { '@type': 'MusicGroup', name: by },
+        datePublished: r.date || undefined,
+        image: image || undefined,
+        url: link,
+        sameAs: RELEASE_STORES.map((s) => r.stores?.[s]).filter((u) => /^https:\/\//.test(u || '')),
+      },
+    ],
+  });
 }
 
 /** What the file window and Profile need to show about a project. */
@@ -7719,6 +7914,7 @@ function staticFile(req, res, url) {
   let file = normalize(join(DIST, decodeURIComponent(url.pathname)));
   if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
+  if (file === join(DIST, 'index.html')) return desktopPage(req, res);
   // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their
   // names, so they can be cached forever; icons, sounds etc. for a day.
   const cache =
@@ -7729,6 +7925,34 @@ function staticFile(req, res, url) {
         : 'public, max-age=86400';
   res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': cache });
   return pipeline(createReadStream(file), res);
+}
+
+// The desktop is drawn by its script, so the page also carries a plain copy of the front page (what Lite shows) for
+// search engines that read a page without running it, plus the name, summary and JSON-LD that search results use.
+// People only see that copy if the desktop takes more than two seconds to start; the desktop replaces it.
+async function desktopPage(req, res) {
+  const origin = siteOrigin(req);
+  const intro = (await loadFront()).intro;
+  const [, main, events] = await liteMain(undefined, undefined, undefined, '');
+  const head = metaTags({
+    title: 'Sanktuary Studio · Twin Cities music, art and culture',
+    text: intro,
+    image: origin + '/icons/icon-512.png',
+    link: origin + '/',
+    site: 'Sanktuary',
+    type: 'website',
+    ld: [
+      await orgLd(origin),
+      { '@type': 'WebSite', name: 'Sanktuary', alternateName: ['Sanktuary Studio', 'sanktuary.studio'], url: origin + '/' },
+      ...events,
+    ],
+  });
+  const css = `<style>#root>.ssr{position:fixed;inset:0;overflow:auto;padding:24px 20px;background:#0b0b0f;color:#f3efe8;font:17px/1.6 Georgia,serif;animation:ssr 0s 2s both}#root>.ssr>div{max-width:760px;margin:0 auto}.ssr a{color:#d9a441}.ssr img{max-width:150px;height:auto}.ssr .face{display:inline-block;margin:0 12px 12px 0;text-align:center}.ssr .btn{margin-right:12px}@keyframes ssr{from{visibility:hidden}}</style>`;
+  const html = (await readFile(join(DIST, 'index.html'), 'utf8'))
+    .replace(/<title>[^<]*<\/title>/, () => head + css)
+    .replace('<div id="root"></div>', () => `<div id="root"><div class="ssr"><div>${main}</div></div></div>`);
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+  res.end(html);
 }
 
 function json(res, value) {
@@ -8799,6 +9023,9 @@ async function youtubeApi(req, res, url) {
 
 const routes = [
   ['/healthz', healthz],
+  ['/robots.txt', robots],
+  ['/sitemap.xml', sitemap],
+  ['/indexnow.txt', indexNowKey],
   ['/api/files/', files],
   ['/api/me', me],
   ['/api/admin/', admin],
@@ -8855,6 +9082,10 @@ http
     res.setHeader('referrer-policy', 'same-origin');
     res.setHeader('x-frame-options', 'SAMEORIGIN');
     if (/https/.test(req.headers['cf-visitor'] || '')) res.setHeader('strict-transport-security', 'max-age=31536000');
+    // One address per page for search engines: www.sanktuary.studio forwards to sanktuary.studio
+    const apex = SITE_ORIGINS[0] && new URL(SITE_ORIGINS[0]);
+    if (apex && req.method === 'GET' && req.headers.host === 'www.' + apex.host)
+      return res.writeHead(301, { location: apex.origin + req.url }).end();
     // Internet Explorer can't run any of the site's pages, so its visitors go to the script-free /lite instead
     if (isOldIE(req) && req.method === 'GET' && !/^\/(lite|api)(\/|$)/.test(url.pathname) && !url.pathname.includes('.')) {
       const to = /^\/(cities|blog)(\/|$)/.test(url.pathname)
