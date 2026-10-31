@@ -213,6 +213,9 @@ const srv = spawn(process.execPath, [SERVER], {
     GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
     YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
     ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
+    // The headless Darkroom renderer only in CI: the home PC's deploy tests run against the old build, and a
+    // browser left behind there kept the tests (and so the deploy) waiting for hours
+    ...(process.env.CI ? {} : { DARKROOM_BROWSER: 'off' }),
     YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
   },
 });

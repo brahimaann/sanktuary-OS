@@ -5864,12 +5864,16 @@ const liteGrading = (q) => {
   };
 };
 // The full Darkroom: darkroom-render.html (the desktop's own shaders, src/darkroomRender.ts) in a headless browser.
-// On the home PC that's the installed Edge; DARKROOM_BROWSER can point at another Chromium. Closed after 10 idle minutes.
+// On the home PC that's the installed Edge; DARKROOM_BROWSER can point at another Chromium, or be "off" for the basic
+// version only. Closed after 10 idle minutes. Every step has a time limit: a stuck browser must never hold a request.
+const withinMs = (p, ms, what) =>
+  Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`${what} took over ${ms / 1000}s`)), ms).unref())]);
 let renderer = null;
 let rendererIdle;
 let renderQueue = Promise.resolve();
 let rendererFailed = 0; // when it last failed to start: tried again after 5 minutes, not on every picture
 function darkroomRenderer() {
+  if (process.env.DARKROOM_BROWSER === 'off') return Promise.reject(new Error('Darkroom Lite renderer is off'));
   if (!renderer && Date.now() - rendererFailed < 5 * 60_000) return Promise.reject(new Error('No headless browser for Darkroom Lite'));
   renderer ??= (async () => {
     const { chromium } = await import('playwright-core');
@@ -5881,14 +5885,20 @@ function darkroomRenderer() {
       handleSIGINT: false,
       handleSIGTERM: false,
       handleSIGHUP: false,
+      timeout: 30_000,
     });
     // The browser goes when the server does (a deploy restarting it, or the tests stopping it)
     for (const sig of ['SIGINT', 'SIGTERM'])
       process.once(sig, () => Promise.race([browser.close(), new Promise((ok) => setTimeout(ok, 3000))]).finally(() => process.exit(0)));
-    const page = await browser.newPage();
-    await page.goto(`${SELF}/darkroom-render.html`);
-    await page.waitForFunction(() => window.develop);
-    return { browser, page, looks: await page.evaluate(() => window.darkroomLooks) };
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${SELF}/darkroom-render.html`, { timeout: 20_000 });
+      await page.waitForFunction(() => window.develop, null, { timeout: 20_000 });
+      return { browser, page, looks: await page.evaluate(() => window.darkroomLooks) };
+    } catch (e) {
+      browser.close().catch(() => {}); // an old build without the render page, say: don't leave Edge running
+      throw e;
+    }
   })().catch((e) => {
     renderer = null;
     rendererFailed = Date.now();
@@ -5903,16 +5913,25 @@ function darkroomRenderer() {
   rendererIdle.unref();
   return renderer;
 }
-const darkroomLooks = async () => (await darkroomRenderer()).looks;
+const darkroomLooks = async () => {
+  const starting = darkroomRenderer();
+  try {
+    return (await withinMs(starting, 60_000, 'Starting the Darkroom renderer')).looks;
+  } catch (e) {
+    if (renderer === starting) [renderer, rendererFailed] = [null, Date.now()]; // stuck: start afresh in 5 minutes
+    throw e;
+  }
+};
 // One picture at a time: the renderer is one page, and the PC has other work to do
 const developFull = (buf, g, max) =>
   (renderQueue = renderQueue
     .catch(() => {})
     .then(async () => {
       const { page } = await darkroomRenderer();
-      const url = await page.evaluate(
-        ([src, p, m]) => window.develop(src, p, m),
-        [`data:image/webp;base64,${buf.toString('base64')}`, g, max],
+      const url = await withinMs(
+        page.evaluate(([src, p, m]) => window.develop(src, p, m), [`data:image/webp;base64,${buf.toString('base64')}`, g, max]),
+        60_000,
+        'Developing a picture',
       );
       return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
     }));
