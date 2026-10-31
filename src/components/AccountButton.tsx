@@ -2,11 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useClerk, useUser } from '@clerk/react';
 import Avatar from '../apps/Avatar';
 import RetroIcon, { IconName } from './RetroIcon';
+import { useApi } from '../utils/api';
+import { dialog } from '../utils/dialog';
 
 /** Win98-style account menu (replaces Clerk's modern UserButton popup): who you are, account settings, log off. */
 const AccountButton: React.FC = () => {
   const clerk = useClerk();
   const { user } = useUser();
+  const api = useApi();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
@@ -16,6 +19,27 @@ const AccountButton: React.FC = () => {
     document.addEventListener('pointerdown', close);
     return () => document.removeEventListener('pointerdown', close);
   }, [open]);
+
+  // A code for a device that can't sign in itself (Internet Explorer on a Surface RT): typed into /lite/pair
+  const pairDevice = async () => {
+    try {
+      const { code, minutes, devices } = await api('/api/pair', { method: 'POST' });
+      await dialog.alert(
+        `Your code: ${code.slice(0, 3)} ${code.slice(3)}\n\nOn the other device, go to ${location.host}/lite/pair and type it in. It works once, for ${minutes} minutes.` +
+          (devices.length ? `\n\nAlready signed in: ${devices.map((d: { name: string }) => d.name).join(', ')}.` : ''),
+        { title: 'Sign in another device', icon: 'info' },
+      );
+    } catch (e) {
+      dialog.alert(`Couldn't make a code: ${(e as Error).message}`);
+    }
+  };
+  const unpairAll = async () => {
+    if (!(await dialog.confirm('Sign out every device you signed in with a code?'))) return;
+    await api('/api/pair', { method: 'DELETE' }).then(
+      () => dialog.alert('Done. Those devices are signed out.'),
+      (e) => dialog.alert(`Couldn't sign them out: ${e.message}`),
+    );
+  };
 
   if (!user) return null;
   const name = user.username || user.firstName || 'you';
@@ -52,6 +76,8 @@ const AccountButton: React.FC = () => {
           </div>
           <div style={{ height: 2 }} />
           {item('Account settings...', 'gear', () => clerk.openUserProfile())}
+          {item('Sign in another device...', 'key', pairDevice)}
+          {item('Sign out other devices...', 'lock', unpairAll)}
           <div style={{ margin: '3px 2px', borderTop: '1px solid #808080', borderBottom: '1px solid #fff' }} />
           {item(`Log Off ${name}...`, 'logout', () => clerk.signOut())}
         </div>
