@@ -12,6 +12,8 @@ export default defineConfig({
       ...(process.env.FAKE_CLERK && { '@clerk/react': path.resolve(__dirname, './tests/fake-clerk.js') }),
     },
   },
+  // darkroom-render.html: the page the server develops Darkroom Lite's pictures with (src/darkroomRender.ts)
+  build: { rollupOptions: { input: ['index.html', 'darkroom-render.html'] } },
   server: {
     port: 3001,
     host: true,

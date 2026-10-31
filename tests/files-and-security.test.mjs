@@ -3216,10 +3216,21 @@ ${thisYear}-03;Comma Song;0,456`,
       body: litePhoto,
     });
     const develop = async (q) => Buffer.from(await (await liteGet(`/lite/develop/up/lite-photo.webp?${q}`)).arrayBuffer());
-    const [plain, portra] = [await develop(''), await develop('look=24&exp=0.5&sat=20')];
+    const [plain, portra] = [await develop(''), await develop('preset=24&was=0&look=24')];
     check('Darkroom Lite develops with a film stock', plain[0] === 0xff && portra[0] === 0xff && !plain.equals(portra));
+    // The desktop's own shaders, through the server's headless browser. Checked in CI (it builds first and has Chrome);
+    // the deploy tests the old build before building the new one, and the page falls back to the basic version anyway.
+    if (process.env.CI) {
+      const drPage = await (await liteGet('/lite/darkroom/up/lite-photo.webp?preset=2&glitchMode=2&glitchAmount=0.5')).text();
+      check(
+        'Darkroom Lite has every desktop look and effect',
+        drPage.includes('Chief Keef') && drPage.includes('Datamosh') && drPage.includes('glitchMode=2'),
+      );
+      const glitched = await develop('preset=2&glitchMode=2&glitchAmount=0.5&bloomAmount=0.5');
+      check('Darkroom Lite renders the desktop effects', glitched[0] === 0xff && !glitched.equals(plain));
+    }
     const savedCopy = await (
-      await fetch(B + '/lite/darkroom/up/lite-photo.webp?look=24', { method: 'POST', headers: { cookie: devCookie } })
+      await fetch(B + '/lite/darkroom/up/lite-photo.webp?preset=24', { method: 'POST', headers: { cookie: devCookie } })
     ).text();
     check('Darkroom Lite saves a copy beside the original', savedCopy.includes('lite-photo (Darkroom).jpg'));
     // Moodboard Lite: the board as a grid, adding a note and a photo

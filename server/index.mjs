@@ -5863,6 +5863,140 @@ const liteGrading = (q) => {
     grain: num('grain', 0, 100),
   };
 };
+// The full Darkroom: darkroom-render.html (the desktop's own shaders, src/darkroomRender.ts) in a headless browser.
+// On the home PC that's the installed Edge; DARKROOM_BROWSER can point at another Chromium. Closed after 10 idle minutes.
+let renderer = null;
+let rendererIdle;
+let renderQueue = Promise.resolve();
+let rendererFailed = 0; // when it last failed to start: tried again after 5 minutes, not on every picture
+function darkroomRenderer() {
+  if (!renderer && Date.now() - rendererFailed < 5 * 60_000) return Promise.reject(new Error('No headless browser for Darkroom Lite'));
+  renderer ??= (async () => {
+    const { chromium } = await import('playwright-core');
+    const browser = await chromium.launch({
+      ...(process.env.DARKROOM_BROWSER
+        ? { executablePath: process.env.DARKROOM_BROWSER }
+        : { channel: process.platform === 'win32' ? 'msedge' : 'chrome' }),
+      args: ['--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'], // WebGL even without a usable GPU
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    });
+    // The browser goes when the server does (a deploy restarting it, or the tests stopping it)
+    for (const sig of ['SIGINT', 'SIGTERM'])
+      process.once(sig, () => Promise.race([browser.close(), new Promise((ok) => setTimeout(ok, 3000))]).finally(() => process.exit(0)));
+    const page = await browser.newPage();
+    await page.goto(`${SELF}/darkroom-render.html`);
+    await page.waitForFunction(() => window.develop);
+    return { browser, page, looks: await page.evaluate(() => window.darkroomLooks) };
+  })().catch((e) => {
+    renderer = null;
+    rendererFailed = Date.now();
+    throw e;
+  });
+  clearTimeout(rendererIdle);
+  rendererIdle = setTimeout(() => {
+    const r = renderer;
+    renderer = null;
+    r?.then(({ browser }) => browser.close()).catch(() => {});
+  }, 10 * 60_000);
+  rendererIdle.unref();
+  return renderer;
+}
+const darkroomLooks = async () => (await darkroomRenderer()).looks;
+// One picture at a time: the renderer is one page, and the PC has other work to do
+const developFull = (buf, g, max) =>
+  (renderQueue = renderQueue
+    .catch(() => {})
+    .then(async () => {
+      const { page } = await darkroomRenderer();
+      const url = await page.evaluate(
+        ([src, p, m]) => window.develop(src, p, m),
+        [`data:image/webp;base64,${buf.toString('base64')}`, g, max],
+      );
+      return Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
+    }));
+// Darkroom Lite's controls, as on the desktop: [key, label, min, max, step] slider, [key, label, [options]] menu, [key, label] tick box
+const DR_SECTIONS = [
+  [
+    'Light and colour',
+    [
+      ['amount', 'Strength', 0, 1, 0.05],
+      ['contrast', 'Contrast', 0.5, 2, 0.05],
+      ['warmth', 'Warmth', -1, 1, 0.05],
+      ['fade', 'Fade (lifted blacks)', 0, 1, 0.05],
+      ['vignette', 'Vignette', 0, 1, 0.05],
+      ['clarity', 'Clarity', -0.5, 1, 0.05],
+      ['skinUniform', 'Skin uniformity', 0, 1, 0.05],
+    ],
+  ],
+  [
+    'Film',
+    [
+      ['grain', 'Grain', 0, 1, 0.05],
+      ['grainSize', 'Grain size', 0, 1, 0.05],
+      ['halation', 'Halation', 0, 1, 0.05],
+      ['iphone6Grain', 'iPhone 6 grain'],
+    ],
+  ],
+  [
+    'CCD bloom',
+    [
+      ['bloomAmount', 'Bloom', 0, 1, 0.05],
+      ['bloomTint', 'Bloom tint (cool to warm)', -1, 1, 0.1],
+      ['lensReflection', 'Lens reflection', 0, 1, 0.05],
+      ['ccdNoise', 'Sensor noise', 0, 1, 0.05],
+    ],
+  ],
+  [
+    'Blur',
+    [
+      ['blurMode', 'Blur', ['None', 'Uniform', 'Vignette', 'Pixelate']],
+      ['blurRadius', 'Radius / pixel size', 0, 25, 1],
+    ],
+  ],
+  [
+    'Glitch',
+    [
+      ['glitchMode', 'Glitch', ['None', 'Datamosh', 'VHS', 'LCD', 'Galaxy']],
+      ['glitchAmount', 'Intensity', 0, 1, 0.05],
+      ['glitchThreshold', 'Threshold (datamosh)', 0, 1, 0.05],
+    ],
+  ],
+  [
+    'JPEG',
+    [
+      ['jpegQuality', 'JPEG quality', 1, 100, 1],
+      ['resolution', 'Size before saving (smaller = mushier)', 0.05, 1, 0.05],
+      ['jpegNoise', 'JPEG noise'],
+      ['jpegSharpen', 'Oversharpen'],
+      ['pixelate2x', 'Pixelate 2x'],
+    ],
+  ],
+];
+/** The settings from a Darkroom Lite form: each control clamped to its range, unset ones at the desktop's defaults. */
+function fullGrading(q, looks) {
+  const g = { preset: looks.presets.some((x) => x.id === Number(q.get('preset'))) ? Number(q.get('preset')) : 0 };
+  for (const [key, , ...range] of DR_SECTIONS.flatMap(([, rows]) => rows)) {
+    const d = looks.defaults[key];
+    if (typeof d === 'boolean') g[key] = q.get(key) === '1';
+    else if (!q.has(key) || !Number.isFinite(Number(q.get(key)))) g[key] = d;
+    else
+      g[key] = Math.min(
+        Array.isArray(range[0]) ? range[0].length - 1 : range[1],
+        Math.max(Array.isArray(range[0]) ? 0 : range[0], Number(q.get(key))),
+      );
+  }
+  // Picking a film stock brings its grain, as on the desktop; leaving the stocks takes it away again
+  const was = Number(q.get('was'));
+  if (q.has('was') && was !== g.preset)
+    Object.assign(
+      g,
+      looks.filmGrain[g.preset] ?? (looks.filmGrain[was] ? { grain: looks.defaults.grain, grainSize: looks.defaults.grainSize } : {}),
+    );
+  return g;
+}
+
 async function developLite(buf, g, max) {
   const { data: raw, info } = await sharp(buf)
     .rotate()
@@ -6085,9 +6219,14 @@ async function liteMember(req, res, url, page, who) {
     );
   }
   if (a === 'darkroom' || a === 'develop') {
-    const g = liteGrading(url.searchParams);
+    // The desktop Darkroom itself in a headless browser when the server has one; the basic sharp version otherwise
+    const looks = await darkroomLooks().catch((e) => (console.error('Darkroom Lite renderer:', e.message), null));
+    const g = looks ? fullGrading(url.searchParams, looks) : liteGrading(url.searchParams);
     const name = decodeURIComponent(rest[rest.length - 1] || '');
-    const source = async (max) => developLite(Buffer.from(await (await liteApi(req, `${api}?preview=2400`)).arrayBuffer()), g, max);
+    const source = async (max) => {
+      const buf = Buffer.from(await (await liteApi(req, `${api}?preview=2400`)).arrayBuffer());
+      return looks ? developFull(buf, g, max) : developLite(buf, g, max);
+    };
     if (a === 'develop') {
       const jpg = await source(url.searchParams.has('download') ? 2400 : 1000);
       const headers = { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' };
@@ -6097,7 +6236,9 @@ async function liteMember(req, res, url, page, who) {
       res.writeHead(200, headers);
       return res.end(jpg);
     }
-    const query = new URLSearchParams(Object.entries(g).map(([k, v]) => [k, String(v)])).toString();
+    const query = new URLSearchParams(
+      Object.entries(g).flatMap(([k, v]) => (v === false ? [] : [[k, v === true ? '1' : String(v)]])),
+    ).toString();
     let saved = '';
     if (req.method === 'POST') {
       // Save a copy next to the original (never over it); the server picks a free name if one is taken
@@ -6115,17 +6256,48 @@ async function liteMember(req, res, url, page, who) {
         : `<p class="note">Saved as <b>${h(r.name)}</b> in this folder.</p>`;
     }
     const slider = (key, label, min, max, step) =>
-      `<p><label>${label} <input type="range" name="${key}" min="${min}" max="${max}" step="${step}" value="${g[key]}" onchange="this.form.submit()"></label> <small>${g[key]}</small></p>`;
+      `<p><label>${label} <input type="range" name="${key}" min="${min}" max="${max}" step="${step}" value="${g[key]}" onchange="this.form.submit()"></label> <small>${+g[key].toFixed(2)}</small></p>`;
+    const select = (key, label, options) =>
+      `<p><label>${label} <select name="${key}" onchange="this.form.submit()">${options
+        .map((o, i) => `<option value="${i}"${g[key] === i ? ' selected' : ''}>${o}</option>`)
+        .join('')}</select></label></p>`;
+    const controls = looks
+      ? `<input type="hidden" name="was" value="${g.preset}"><p><label>Look <select name="preset" onchange="this.form.submit()">${[
+          ['swag', 'Swag'],
+          ['goth', 'Goth'],
+          ['camera', '1-click cameras'],
+          ['film', 'Film stocks'],
+        ]
+          .map(
+            ([cat, title]) =>
+              `<optgroup label="${title}">${looks.presets
+                .filter((x) => x.category === cat && (x.id || cat === 'swag'))
+                .map((x) => `<option value="${x.id}"${x.id === g.preset ? ' selected' : ''}>${h(x.name)}</option>`)
+                .join('')}</optgroup>`,
+          )
+          .join('')}</select></label></p>${DR_SECTIONS.map(
+          ([title, rows]) =>
+            `<h2>${title}</h2>${rows
+              .map(([key, label, ...rest]) =>
+                Array.isArray(rest[0])
+                  ? select(key, label, rest[0])
+                  : rest.length
+                    ? slider(key, label, ...rest)
+                    : `<p><label><input type="checkbox" name="${key}" value="1"${g[key] ? ' checked' : ''} onclick="this.form.submit()"> ${label}</label></p>`,
+              )
+              .join('')}`,
+        ).join('')}`
+      : `<p><label>Look <select name="look" onchange="this.form.submit()">${[[0, 'None'], ...Object.entries(LITE_STOCKS)]
+          .map(([id, n]) => `<option value="${id}"${+id === g.look ? ' selected' : ''}>${h(n)}</option>`)
+          .join(
+            '',
+          )}</select></label></p>${slider('exp', 'Exposure', -2, 2, 0.25)}${slider('con', 'Contrast', -100, 100, 10)}${slider('warm', 'Warmth', -100, 100, 10)}${slider('sat', 'Saturation', -100, 100, 10)}${slider('grain', 'Grain', 0, 100, 10)}`;
     return page(
       `${name} · Darkroom`,
       `<p><a href="/lite/open/${h(space)}/${h(path)}">&larr; Back</a></p><h1>Darkroom</h1>${saved}
 <p><img src="/lite/develop/${h(space)}/${h(path)}?${h(query)}" alt=""></p>
-<form method="get"><p><label>Look <select name="look" onchange="this.form.submit()">${[[0, 'None'], ...Object.entries(LITE_STOCKS)]
-        .map(([id, n]) => `<option value="${id}"${+id === g.look ? ' selected' : ''}>${h(n)}</option>`)
-        .join('')}</select></label></p>
-${slider('exp', 'Exposure', -2, 2, 0.25)}${slider('con', 'Contrast', -100, 100, 10)}${slider('warm', 'Warmth', -100, 100, 10)}${slider('sat', 'Saturation', -100, 100, 10)}${slider('grain', 'Grain', 0, 100, 10)}
-<p><button>Preview</button> <a class="btn" href="/lite/darkroom/${h(space)}/${h(path)}">Reset</a></p></form>
-<form method="post" action="?${h(query)}"><p><button>Save a copy</button> <a class="btn" href="/lite/develop/${h(space)}/${h(path)}?${h(query)}&amp;download">Download</a></p></form>
+<form method="post" action="?${h(query)}"><p><button>Save a copy</button> <a class="btn" href="/lite/develop/${h(space)}/${h(path)}?${h(query)}&amp;download">Download</a> <a class="btn" href="/lite/darkroom/${h(space)}/${h(path)}">Reset</a></p></form>
+<form method="get">${controls}<p><button>Preview</button></p></form>
 <p class="dim">Changes show after a second or two: your home server develops the picture, not this device.</p>`,
     );
   }
