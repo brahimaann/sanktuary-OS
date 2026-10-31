@@ -4345,6 +4345,433 @@ async function blogApi(req, res, url) {
   fail(404, 'Unknown blog action');
 }
 
+// ── /api/scout: watches Twin Cities feeds, calendars and listing pages for leads — data/scout.json ──
+// Admins add sources (RSS/Atom feeds, .ics calendars, or listing pages such as an opportunities board). Every 6 hours
+// Scout reads them and turns what's new into leads: an event, an opportunity or a story idea. Nothing is published:
+// an admin accepts a lead into a private Timeline entry, an Opportunity or a CITIES draft, or dismisses it.
+// Scout reads only what a site's robots.txt allows and never touches Instagram, Facebook, TikTok, X, Threads or
+// LinkedIn: their terms forbid scraping. Artists there can be followed by adding their website, newsletter or calendar.
+const SCOUT_KINDS = ['event', 'opportunity', 'story'];
+const SCOUT_UA = 'SanktuaryScout/1.0 (+https://sanktuary.studio)';
+const SCOUT_HOURS = 6;
+const SCOUT_CLOSED = /(^|\.)(instagram\.com|facebook\.com|fb\.com|fb\.me|tiktok\.com|threads\.net|x\.com|twitter\.com|linkedin\.com)$/i;
+const SCOUT_LOCAL = process.env.SCOUT_ALLOW_LOCAL === '1'; // tests serve sources from 127.0.0.1
+// Ones checked by hand on 2026-10-31 (robots.txt allows them); added once, so a removed one stays removed
+const SCOUT_SEED = [
+  {
+    url: 'https://springboardforthearts.org/opportunities/',
+    name: 'Springboard for the Arts',
+    kind: 'opportunity',
+    pattern: '/opportunity/',
+  },
+  { url: 'https://www.walkerart.org/calendar/', name: 'Walker Art Center', kind: 'event', pattern: '/whats-on/' },
+  { url: 'https://racketmn.com/rss/', name: 'Racket', kind: 'story', match: 'art|music|show|album|gallery|dance|theater|film|festival' },
+  {
+    url: 'https://sahanjournal.com/feed/',
+    name: 'Sahan Journal',
+    kind: 'story',
+    match: 'art|music|artist|culture|festival|museum|film|fashion',
+  },
+];
+let scoutDb = null;
+let scoutSaved = Promise.resolve();
+const loadScout = async () => {
+  if (scoutDb) return scoutDb;
+  scoutDb = await readJson('scout.json', { sources: [], leads: {}, seeded: [] });
+  for (const s of SCOUT_SEED.filter((s) => !scoutDb.seeded.includes(s.url))) {
+    scoutDb.sources.push({ id: randomUUID().slice(0, 8), match: '', pattern: '', ...s, added: new Date().toISOString(), seen: [] });
+    scoutDb.seeded.push(s.url);
+  }
+  return scoutDb;
+};
+const saveScout = () => (scoutSaved = scoutSaved.then(() => saveJson('scout.json', scoutDb)).catch(console.error));
+
+function scoutUrl(input) {
+  let u;
+  try {
+    u = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
+  } catch {
+    fail(400, "That doesn't look like a link");
+  }
+  if (SCOUT_CLOSED.test(u.hostname))
+    fail(400, `${u.hostname} forbids scraping in its terms and blocks it. Add the artist's own site, newsletter or calendar instead.`);
+  if (SCOUT_LOCAL && u.hostname === '127.0.0.1') return u.href;
+  if (u.protocol !== 'https:') fail(400, 'Sources must be https');
+  if (/^(localhost|[\d.]+|\[.*\]|.*\.(local|lan|internal|ts\.net))$/i.test(u.hostname)) fail(400, 'Sources must be public websites');
+  return u.href;
+}
+
+const robotsCache = new Map(); // origin -> { at, rules: [[allow, path]] | null (all blocked) }
+/** Whether robots.txt lets Scout read this URL (our own group if there is one, else "*"; longest rule wins). */
+async function robotsAllow(href) {
+  const u = new URL(href);
+  let hit = robotsCache.get(u.origin);
+  if (!hit || Date.now() - hit.at > 864e5) {
+    let rules = [];
+    try {
+      const r = await fetch(`${u.origin}/robots.txt`, { headers: { 'user-agent': SCOUT_UA }, signal: AbortSignal.timeout(10_000) });
+      if (r.status >= 500)
+        rules = null; // the site is down: ask again later rather than guess
+      else if (r.ok) {
+        const groups = []; // [{ agents, rules }]
+        let g = null;
+        for (const line of (await r.text()).slice(0, 500_000).split(/\r?\n/)) {
+          const [, key, val] = line.replace(/#.*/, '').match(/^\s*([\w-]+)\s*:\s*(.*?)\s*$/) || [];
+          if (!key) continue;
+          const k = key.toLowerCase();
+          if (k === 'user-agent') {
+            if (!g || g.rules.length) groups.push((g = { agents: [], rules: [] }));
+            g.agents.push(val.toLowerCase());
+          } else if (g && (k === 'allow' || k === 'disallow') && val) g.rules.push([k === 'allow', val]);
+        }
+        rules =
+          (
+            groups.find((x) => x.agents.some((a) => a !== '*' && 'sanktuaryscout'.includes(a))) ||
+            groups.find((x) => x.agents.includes('*'))
+          )?.rules || [];
+      }
+    } catch {
+      rules = null;
+    }
+    robotsCache.set(u.origin, (hit = { at: Date.now(), rules }));
+  }
+  if (!hit.rules) return false;
+  const path = u.pathname + u.search;
+  const matches = (p) =>
+    new RegExp(
+      '^' +
+        p
+          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\*/g, '.*')
+          .replace(/\\\$$/, '$'),
+    ).test(path);
+  const best = hit.rules.filter(([, p]) => matches(p)).sort((a, b) => b[1].length - a[1].length || b[0] - a[0])[0];
+  return !best || best[0];
+}
+
+async function scoutFetch(href) {
+  if (!(await robotsAllow(href))) throw new Error("the site's robots.txt asks robots not to read this page");
+  const r = await fetch(href, { headers: { 'user-agent': SCOUT_UA }, signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.text()).slice(0, 3_000_000);
+}
+
+const OPP_WORDS =
+  /\b(call for|open call|grants?|residenc(y|ies)|fellowships?|hiring|jobs?|commissions?|rf[pq]|submissions?|apply|applications?)\b/i;
+const EVENT_WORDS = /\b(shows?|concerts?|exhibitions?|opening|festival|performances?|screenings?|tickets|tour|live at)\b/i;
+const guessKind = (s, lead) =>
+  s.kind ||
+  (OPP_WORDS.test(lead.title + ' ' + lead.excerpt) ? 'opportunity' : lead.start || EVENT_WORDS.test(lead.title) ? 'event' : 'story');
+const isoDay = (v) => {
+  const d = v && new Date(v);
+  return d && !isNaN(d) ? localDate(d) : null;
+};
+/** "Deadline: November 15, 2026" and the like, as 2026-11-15. */
+const findDeadline = (text) =>
+  isoDay(
+    text
+      .match(/\b(?:deadline|due|apply by|closes?)\b[^.\n]{0,30}?([A-Z][a-z]+\.? \d{1,2},? \d{4}|\d{4}-\d{2}-\d{2})/i)?.[1]
+      ?.replace('.', ''),
+  );
+const absUrl = (href, base) => {
+  try {
+    const u = new URL(decodeXml(href), base);
+    return /^https?:$/.test(u.protocol) ? u.href.replace(/#.*/, '') : null;
+  } catch {
+    return null;
+  }
+};
+const meta = (html, name) =>
+  decodeXml(html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*content=["']([^"']*)`, 'i'))?.[1] || '').trim();
+/** schema.org Events in a page's JSON-LD, as leads. */
+function jsonLdEvents(html, base) {
+  const out = [];
+  for (const [, raw] of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    const all = [data].flat().flatMap((d) => d?.['@graph'] || [d]);
+    for (const e of all)
+      if (/Event$/.test([e?.['@type']].flat().join(' ')) && e.name)
+        out.push({
+          key: e.url || e['@id'] || `${e.name}|${e.startDate}`,
+          title: plainText(String(e.name)).slice(0, 200),
+          link: absUrl(String(e.url || ''), base) || base,
+          start: isoDay(e.startDate),
+          location: plainText([e.location].flat()[0]?.name || '').slice(0, 200),
+          excerpt: plainText(String(e.description || '')).slice(0, 400),
+          image: httpsOnly([e.image].flat()[0]?.url || [e.image].flat()[0] || ''),
+        });
+  }
+  return out;
+}
+
+/** What a source has right now, newest first: [{ key, title, link, excerpt, start?, location?, image? }] */
+async function scoutRead(s) {
+  const text = await scoutFetch(s.url);
+  if (/BEGIN:VCALENDAR/.test(text)) {
+    const unfold = text.replace(/\r?\n[ \t]/g, '');
+    const field = (ev, k) =>
+      ev
+        .match(new RegExp(`^${k}(?:;[^:\\n]*)?:(.*)$`, 'mi'))?.[1]
+        ?.replace(/\\([,;\\])/g, '$1')
+        .replace(/\\n/gi, ' ')
+        .trim() || '';
+    const today = localDate();
+    return [...unfold.matchAll(/BEGIN:VEVENT([\s\S]*?)END:VEVENT/g)]
+      .map(([, ev]) => {
+        const d = field(ev, 'DTSTART').match(/^(\d{4})(\d{2})(\d{2})/);
+        return {
+          key: field(ev, 'UID') || field(ev, 'SUMMARY') + field(ev, 'DTSTART'),
+          title: field(ev, 'SUMMARY').slice(0, 200),
+          link: absUrl(field(ev, 'URL'), s.url) || s.url,
+          start: d ? `${d[1]}-${d[2]}-${d[3]}` : null,
+          location: field(ev, 'LOCATION').slice(0, 200),
+          excerpt: field(ev, 'DESCRIPTION').slice(0, 400),
+        };
+      })
+      .filter((e) => e.title && e.start && e.start >= today) // only what's still coming
+      .sort((a, b) => a.start.localeCompare(b.start));
+  }
+  if (/<(rss|feed)[\s>]/i.test(text.slice(0, 2000))) {
+    return [...text.matchAll(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi)].map(([item]) => {
+      const link = absUrl(plainText(tag(item, 'link')) || item.match(/<link[^>]+href="([^"]+)"/i)?.[1] || '', s.url);
+      const excerpt = plainText(tag(item, 'description') || tag(item, 'summary') || tag(item, 'content')).slice(0, 400);
+      return {
+        key: plainText(tag(item, 'guid') || tag(item, 'id')) || link,
+        title: plainText(tag(item, 'title')).slice(0, 200),
+        link,
+        excerpt,
+        tags: plainText([...item.matchAll(/<category[^>]*>([\s\S]*?)<\/category>/gi)].map((m) => m[1]).join(' ')),
+        image: httpsOnly(
+          decodeXml(
+            item.match(/<media:content[^>]+url="([^"]+)"/i)?.[1] || item.match(/<enclosure[^>]+url="([^"]+)"[^>]*type="image/i)?.[1] || '',
+          ),
+        ),
+      };
+    });
+  }
+  // A web page: its own events if it lists them in JSON-LD, else the links on it (same site, matching the pattern)
+  const events = jsonLdEvents(text, s.url);
+  if (events.length) return events;
+  const host = new URL(s.url).host;
+  const links = new Map();
+  for (const [, href, inner] of text.matchAll(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const link = absUrl(href, s.url);
+    const title = plainText(inner).slice(0, 200);
+    if (!link || new URL(link).host !== host || link === s.url || title.length < 8) continue;
+    if (s.pattern ? !link.includes(s.pattern) : new URL(link).pathname.split('/').filter(Boolean).length < 2) continue;
+    if (!links.has(link)) links.set(link, { key: link, title, link, excerpt: '' });
+  }
+  return [...links.values()];
+}
+
+let scouting = null;
+/** Reads every source (or one) and adds what's new as leads; admins hear how many. */
+function scoutRun(only) {
+  return (scouting ??= (async () => {
+    const db = await loadScout();
+    let found = 0;
+    for (const s of db.sources.filter((s) => !only || s.id === only)) {
+      try {
+        const words = s.match && new RegExp(`\\b(${s.match.replace(/[.*+?^${}()[\]\\]/g, '\\$&')})`, 'i');
+        const seen = new Set(s.seen);
+        const fresh = (await scoutRead(s)).filter((x) => x.title && !seen.has(x.key)).slice(0, 15);
+        for (const x of fresh) {
+          s.seen.push(x.key);
+          if (words && !words.test(`${x.title} ${x.excerpt} ${x.tags || ''}`)) continue;
+          // A bare link from a listing page: read the page itself for its summary, picture, date and deadline
+          if (!x.excerpt && x.link !== s.url && (await robotsAllow(x.link))) {
+            const page = await scoutFetch(x.link).catch(() => '');
+            const ev = jsonLdEvents(page, x.link)[0];
+            Object.assign(
+              x,
+              { excerpt: meta(page, 'og:description') || meta(page, 'description'), image: httpsOnly(meta(page, 'og:image')) },
+              ev && { start: ev.start, location: ev.location },
+            );
+            x.deadline = findDeadline(plainText(page));
+            await new Promise((r) => setTimeout(r, 1500)); // one page at a time, gently
+          }
+          const lead = {
+            id: randomUUID().slice(0, 10),
+            source: s.id,
+            from: s.name,
+            title: x.title,
+            link: x.link || s.url,
+            excerpt: (x.excerpt || '').slice(0, 400),
+            image: x.image || null,
+            start: x.start || null,
+            location: x.location || '',
+            deadline: x.deadline || findDeadline(x.excerpt || ''),
+            status: 'new',
+            found: new Date().toISOString(),
+          };
+          lead.kind = guessKind(s, lead);
+          db.leads[lead.id] = lead;
+          found++;
+        }
+        s.seen = s.seen.slice(-1000);
+        Object.assign(s, { checked: new Date().toISOString(), error: null });
+      } catch (err) {
+        Object.assign(s, { checked: new Date().toISOString(), error: err.message });
+      }
+    }
+    // Dismissed and accepted leads go after 60 days (their sources remember them, so they don't come back)
+    const old = new Date(Date.now() - 60 * 864e5).toISOString();
+    for (const l of Object.values(db.leads)) if (l.status !== 'new' && l.found < old) delete db.leads[l.id];
+    saveScout();
+    if (found) {
+      emit('scout', {}, (u) => u.admin);
+      for (const a of (await loadConfig()).admins)
+        await notify(a, `Scout found ${found} new lead${found === 1 ? '' : 's'} (Admin Panel > Scout).`, {});
+    }
+    return found;
+  })().finally(() => (scouting = null)));
+}
+setTimeout(() => scoutRun().catch(console.error), 5 * 60_000).unref();
+setInterval(() => scoutRun().catch(console.error), SCOUT_HOURS * 3.6e6).unref();
+
+async function scoutApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  if (!user.admin) fail(403, 'Administrators only');
+  const me = user.username;
+  const db = await loadScout();
+  const [, , , what, id, action] = url.pathname.split('/');
+  const sourceView = ({ seen, ...s }) => ({
+    ...s,
+    leads: Object.values(db.leads).filter((l) => l.source === s.id && l.status === 'new').length,
+  });
+  const changed = () => (saveScout(), emit('scout', {}, (u) => u.admin));
+
+  if (req.method === 'GET' && !what)
+    return json(res, {
+      sources: db.sources.map(sourceView),
+      leads: Object.values(db.leads)
+        .filter((l) => l.status === 'new')
+        .sort((a, b) => b.found.localeCompare(a.found)),
+      kinds: SCOUT_KINDS,
+    });
+  if (req.method === 'POST' && what === 'check') return json(res, { found: await scoutRun(id) });
+
+  if (what === 'sources') {
+    if (req.method === 'POST' && !id) {
+      const input = await jsonBody(req);
+      const href = scoutUrl(String(input.url || '').trim());
+      if (db.sources.some((s) => s.url === href)) fail(409, 'Scout already watches that');
+      if (!(await robotsAllow(href))) fail(400, "That site's robots.txt asks robots not to read it, so Scout leaves it alone");
+      const s = {
+        id: randomUUID().slice(0, 8),
+        url: href,
+        name:
+          String(input.name || '')
+            .trim()
+            .slice(0, 80) || new URL(href).hostname.replace(/^www\./, ''),
+        kind: SCOUT_KINDS.includes(input.kind) ? input.kind : null, // null: guessed per lead
+        match: String(input.match || '')
+          .trim()
+          .slice(0, 200), // only leads mentioning one of these words (a|b|c)
+        pattern: String(input.pattern || '')
+          .trim()
+          .slice(0, 100), // on a page: only links containing this
+        added: new Date().toISOString(),
+        seen: [],
+      };
+      db.sources.push(s);
+      changed();
+      await scoutRun(s.id);
+      return json(res, sourceView(s));
+    }
+    if (req.method === 'DELETE') {
+      db.sources = db.sources.filter((s) => s.id !== id);
+      for (const l of Object.values(db.leads)) if (l.source === id && l.status === 'new') delete db.leads[l.id];
+      changed();
+      return json(res, { ok: true });
+    }
+  }
+
+  if (what === 'leads') {
+    const l = (own(db.leads, id) && db.leads[id].status === 'new' && db.leads[id]) || fail(404, 'No such lead');
+    const input = await jsonBody(req);
+    if (req.method === 'POST' && action === 'dismiss') {
+      l.status = 'dismissed';
+      changed();
+      return json(res, { ok: true });
+    }
+    if (req.method === 'POST' && action === 'accept') {
+      const as = SCOUT_KINDS.includes(input.as) ? input.as : l.kind;
+      const now = new Date().toISOString();
+      const note = `Found by Scout in ${l.from}: ${l.link}${l.excerpt ? `\n\n${l.excerpt}` : ''}`;
+      let made;
+      if (as === 'event') {
+        // A private Timeline entry; make it public there once the details are checked
+        const start = dateOrNull(input.start ?? l.start) || fail(400, 'Give the event a date');
+        const tdb = await loadTimeline();
+        made = {
+          id: randomUUID().slice(0, 10),
+          title: l.title.slice(0, 100),
+          kind: 'Event',
+          status: 'Planned',
+          start,
+          end: null,
+          time: '',
+        };
+        Object.assign(made, { people: [], location: l.location, notes: note, link: httpsOnly(l.link) || '', folder: null, release: null });
+        Object.assign(made, { members: null, public: false, owner: me, followers: [me], created: now });
+        tdb.items[made.id] = made;
+        saveTimeline();
+        emit('timeline', { id: made.id }, () => true);
+      } else if (as === 'opportunity') {
+        const odb = await loadOpps();
+        const kind = /residenc/i.test(l.title)
+          ? 'Residency'
+          : /call|submission/i.test(l.title)
+            ? 'Open call'
+            : /grant|fellowship/i.test(l.title)
+              ? 'Grant'
+              : /job|hiring/i.test(l.title)
+                ? 'Job'
+                : 'Other';
+        made = {
+          id: randomUUID().slice(0, 10),
+          title: l.title.slice(0, 120),
+          org: l.from.slice(0, 120),
+          amount: '',
+          notes: note,
+          link: httpsOnly(l.link) || '',
+        };
+        Object.assign(made, { deadline: dateOrNull(input.deadline ?? l.deadline), kind, fields: [], people: {}, by: me, created: now });
+        odb.items[made.id] = made;
+        saveOpps();
+        emit('opportunities', {}, () => true);
+        const text = `New ${kind.toLowerCase()}: ${made.title} (${made.org})${made.deadline ? `, due ${made.deadline}` : ''}. Posted by ${me}.`;
+        for (const u of await currentMembers()) if (u !== me) await notify(u, text, { opportunity: made.id });
+      } else {
+        // A CITIES draft holding the lead; it waits in Admin Panel > CITIES until someone writes and publishes it
+        const bdb = await loadBlog();
+        made = {
+          id: randomUUID().slice(0, 10),
+          title: l.title.slice(0, 200),
+          body: `Story lead. ${note}${l.image ? `\n\nPicture on their page: ${l.image}` : ''}`,
+          author: me,
+          owner: me,
+          line: 'heart',
+        };
+        Object.assign(made, { image: null, published: null, created: now }); // pictures are uploaded, never hotlinked
+        bdb.posts[made.id] = made;
+        saveBlog();
+      }
+      Object.assign(l, { status: 'accepted', made: { as, id: made.id } });
+      changed();
+      return json(res, l.made);
+    }
+  }
+  fail(404, 'Unknown scout action');
+}
+
 // ── /api/public: the front door for visitors without an account — data/front.json ──
 // The Welcome window shows the intro (edited in the Admin Panel), the latest writing, upcoming timeline entries
 // and releases that were explicitly marked public, and a "Join the Village" form. Nothing is public by default.
@@ -8815,6 +9242,7 @@ const routes = [
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
   ['/api/opportunities', opportunitiesApi],
+  ['/api/scout', scoutApi],
   ['/api/outreach', outreachApi],
   ['/api/youtube', youtubeApi],
   ['/api/mail', mailApi],
