@@ -1,7 +1,7 @@
 # Auto-deploy for the live site. Runs every 2 minutes from the "Sanktuary OS auto-deploy" scheduled task.
 # When GitHub main has a commit that isn't live yet: pull (fast-forward only), install, test, build into a
 # separate folder, then swap it in and restart the server. Any failure leaves the current site running.
-# Log: data\deploy.log   Last result (shown in Admin Panel > Health): data\deploy.json
+# Log: data\deploy.log (full output of the last step: data\deploy-output.log)   Last result (shown in Admin Panel > Health): data\deploy.json
 $ErrorActionPreference = 'Continue' # native tools write progress to stderr; failures are detected by exit code
 $proj = Split-Path $PSScriptRoot -Parent
 Set-Location $proj
@@ -14,6 +14,7 @@ function Save($ok, $commit, $msg) {
 }
 function Run($what, [scriptblock]$cmd) {
   $out = & $cmd 2>&1 | Out-String
+  Set-Content (Join-Path $data 'deploy-output.log') $out # the whole output: the last 15 lines below can be all warnings
   if ($LASTEXITCODE -ne 0) { throw "$what failed:`n$($out.Trim() -split "`n" | Select-Object -Last 15 | Out-String)" }
 }
 
