@@ -424,6 +424,7 @@ async function files(req, res, url) {
     if (q.has('preview')) return thumb(res, file, [800, 1600].includes(Number(q.get('preview'))) ? Number(q.get('preview')) : 2400);
     if (file !== target) return stream(req, res, q, file, transfer);
     if (q.has('zip')) return zipFolder(res, target, target === root ? space.name : basename(target), transfer);
+    if (q.has('bundle')) return setBundle(res, target, transfer);
     return stream(req, res, q, target, transfer);
   }
   const log = (action, extra = {}) =>
@@ -676,20 +677,19 @@ async function zipFolder(res, dir, name, transfer) {
   const sizing = folderSize(dir);
   const size = await Promise.race([sizing, new Promise((r) => setTimeout(() => r(0), 400))]);
   // "./name" so a file called e.g. "--use-compress-program=..." can never be read as a tar option
-  const tar = spawn(TAR, [
-    '--format',
-    'zip',
-    '--options',
-    'zip:compression=store',
+  return sendZip(res, name, size, sizing, transfer, 'downloaded folder (zip)', tmp, [
     '--exclude',
     '.sk-*',
-    '-cf',
-    '-',
     '-C',
     dir,
     ...items.filter((n) => !fixed.includes(n)).map((n) => `./${n}`),
     ...(tmp ? ['-C', tmp, ...fixed.map((n) => `./${n}`)] : []),
   ]);
+}
+
+/** Streams a stored (uncompressed) zip made by tar from `args`; `tmp` (staged files) is removed once it's sent. */
+function sendZip(res, name, size, sizing, transfer, label, tmp, args) {
+  const tar = spawn(TAR, ['--format', 'zip', '--options', 'zip:compression=store', '-cf', '-', ...args]);
   if (tmp) tar.on('close', () => rm(tmp, { recursive: true, force: true }).catch(() => {}));
   tar.stderr.resume();
   tar.on('error', (e) => res.destroy(e)); // tar missing: end this download, don't crash the whole server
@@ -699,8 +699,44 @@ async function zipFolder(res, dir, name, transfer) {
     'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name + '.zip')}`,
     ...(size ? { 'x-total-bytes': size } : {}),
   });
-  sizing.then((bytes) => transfer('downloaded folder (zip)', bytes));
+  sizing.then((bytes) => transfer(label, bytes));
   return pipeline(tar.stdout, res);
+}
+
+// One Ableton set with what it uses: a folder holding many sets that share Samples (Recorded, Imported,
+// Processed...) downloads one set at a time with only its own samples and recordings, relinked so it opens
+// straight away. Samples it uses from outside the folder are listed in "Missing samples.txt".
+async function setBundle(res, file, transfer) {
+  if (extname(file).toLowerCase() !== '.als' || !(await stat(file).catch(() => null))?.isFile()) fail(400, 'Pick an Ableton set (.als)');
+  const raw = await readFile(file);
+  if (raw.length > SCAN_MAX) fail(413, 'That set is too big to read');
+  const dir = dirname(file);
+  const name = basename(file);
+  const files = await projectFiles(dir);
+  let xml;
+  try {
+    xml = alsXml(raw);
+  } catch {
+    fail(400, "That set can't be read");
+  }
+  const { used, missing } = setRefs(xml, files);
+  const tmp = await mkdtemp(join(os.tmpdir(), 'sk-set-'));
+  await writeFile(join(tmp, name), gzipSync(Buffer.from(relinkSet(xml, files)[0], 'utf8')));
+  if (missing.length)
+    await writeFile(
+      join(tmp, 'Missing samples.txt'),
+      `${name} also uses these samples, which aren't in its project folder:\r\n\r\n${missing.join('\r\n')}\r\n`,
+    );
+  // The file list goes through -T (a set can use hundreds of samples: too many for one command line); its -C
+  // lines switch folders. Every name starts with "./", so none can be read as "-C".
+  const list = ['-C', dir, ...used.map((r) => `./${r}`), '-C', tmp, `./${name}`, ...(missing.length ? ['./Missing samples.txt'] : [])];
+  await writeFile(join(tmp, '.list'), list.join('\n') + '\n');
+  let size = raw.length;
+  for (const r of used) size += (await stat(join(dir, r)).catch(() => ({ size: 0 }))).size;
+  return sendZip(res, basename(name, extname(name)), size, Promise.resolve(size), transfer, 'downloaded set with its samples (zip)', tmp, [
+    '-T',
+    join(tmp, '.list'),
+  ]);
 }
 
 // ── Projects: check-out / check-in, turns and followers — data/projects.json ──
@@ -913,16 +949,16 @@ async function missingFiles(dir) {
 // Ableton sample links: every reference to a file that's somewhere in the project folder (Samples/, or anywhere
 // else in it) is pointed at that copy, project-relative, which is what Live's own "Collect All and Save" writes.
 // References that already resolve inside the folder are left alone. Live 11 / 12 .als files.
-/** The files in a project folder: lower-case name -> path inside it (Samples/ first), and every such path. */
+/** The files in a project folder: lower-case name -> path inside it (Samples/ first), and lower-case path -> path. */
 async function projectFiles(dir) {
   const byName = new Map();
-  const rels = new Set();
+  const rels = new Map(); // lower-case path -> path
   const all = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => []);
   for (const e of all) {
     if (!e.isFile() || HIDDEN.test(e.name)) continue;
     const rel = relative(dir, join(e.parentPath, e.name)).split(sep).join('/');
     if (/^(backup|ableton project info)\//i.test(rel) || rel.split('/').some((p) => HIDDEN.test(p))) continue;
-    rels.add(rel.toLowerCase());
+    rels.set(rel.toLowerCase(), rel);
     const k = e.name.toLowerCase();
     if (!byName.has(k) || (/^samples\//i.test(rel) && !/^samples\//i.test(byName.get(k)))) byName.set(k, rel);
   }
@@ -946,6 +982,24 @@ function relinkSet(xml, { byName, rels }) {
       .replace(/<RelativePath Value="[^"]*"\s*\/>/, `<RelativePath Value="${rel}" />`);
   });
   return [next, n];
+}
+
+/** What one set uses: the files in its project folder (paths inside it) and the outside ones it would be missing. */
+function setRefs(xml, { byName, rels }) {
+  const used = new Set();
+  const missing = new Set();
+  for (const [ref] of xml.matchAll(/<FileRef>[\s\S]*?<\/FileRef>/g)) {
+    const path = decodeXml(ref.match(/<Path Value="([^"]*)"/)?.[1] || '');
+    // Live 11 / 12 keep the relative path as a string; Live 10 as <RelativePathElement Dir="..."/> plus <Name>
+    const name = path.split(/[\\/]/).pop() || decodeXml(ref.match(/<Name Value="([^"]*)"/)?.[1] || '');
+    if (!name) continue;
+    const dirs = [...ref.matchAll(/<RelativePathElement[^>]*Dir="([^"]*)"/g)].map((m) => decodeXml(m[1]));
+    const rel = decodeXml(ref.match(/<RelativePath Value="([^"]*)"/)?.[1] || '') || [...dirs, name].join('/');
+    const have = rels.get(rel.replace(/^\.\//, '').toLowerCase()) || byName.get(name.toLowerCase());
+    if (have) used.add(have);
+    else if (!LIBRARY.test(path || rel)) missing.add(name); // library sounds: everyone has their own copy
+  }
+  return { used: [...used], missing: [...missing] };
 }
 
 // "Add the missing files": the files someone picked were uploaded into the project's Samples/Imported folder;

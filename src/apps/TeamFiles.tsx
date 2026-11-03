@@ -469,9 +469,12 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   // (Chrome/Edge on a computer); elsewhere the browser's own download takes over. Folders come as a .zip.
   // before() runs once the save location is picked (the picker needs the click, so it has to come first),
   // e.g. to lock a project for check-out; returning false stops the download.
+  // An Ableton set comes as a .zip with the samples and recordings it uses from its project folder, relinked.
   const download = async (e: Entry, purpose?: 'view' | 'playground' | 'checkout', before?: () => Promise<boolean>) => {
-    const name = e.isDir ? `${e.name}.zip` : e.name;
-    const href = `${url([...path, e.name])}?${e.isDir ? 'zip' : 'download'}${purpose ? `&purpose=${purpose}` : ''}`;
+    const set = !e.isDir && /\.als$/i.test(e.name);
+    const name = e.isDir ? `${e.name}.zip` : set ? `${e.name.slice(0, -4)}.zip` : e.name;
+    const how = e.isDir ? 'zip' : set ? 'bundle' : 'download';
+    const href = `${url([...path, e.name])}?${how}${purpose ? `&purpose=${purpose}` : ''}`;
     const plain = async () => {
       if (before && !(await before())) return;
       const a = document.createElement('a'); // the browser's own download (phones, Safari, Firefox)
@@ -756,7 +759,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         <button
           style={button}
           disabled={!pick || busy}
-          title="Folders download as a .zip"
+          title="Folders download as a .zip; an Ableton set comes zipped with its samples and recordings"
           onClick={() => pick && (pick.project ? setProjectFor({ entry: pick, mode: 'download' }) : download(pick))}
         >
           <IconLabel icon="download">Download</IconLabel>
