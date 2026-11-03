@@ -651,6 +651,28 @@ async function zipFolder(res, dir, name, transfer) {
   const items = (await readdir(dir)).filter((n) => !HIDDEN.test(n));
   if (!items.length) fail(404, 'This folder is empty');
   // Start sending straight away; the size is only for the progress bar, so wait at most 0.4 s for it
+  // An Ableton project downloads ready to open: its sets point at the samples in its own folder (relinked copies
+  // go in the zip; the sets on the drive stay as they are)
+  const sets = items.filter((n) => extname(n).toLowerCase() === '.als');
+  const fixed = [];
+  let tmp = null;
+  if (sets.length) {
+    const files = await projectFiles(dir);
+    for (const n of sets) {
+      const raw = await readFile(join(dir, n)).catch(() => null);
+      if (!raw || raw.length > SCAN_MAX) continue;
+      let next, changed;
+      try {
+        [next, changed] = relinkSet(alsXml(raw), files);
+      } catch {
+        continue; // not a readable set: zipped as it is
+      }
+      if (!changed) continue;
+      tmp ??= await mkdtemp(join(os.tmpdir(), 'sk-zip-'));
+      await writeFile(join(tmp, n), gzipSync(Buffer.from(next, 'utf8')));
+      fixed.push(n);
+    }
+  }
   const sizing = folderSize(dir);
   const size = await Promise.race([sizing, new Promise((r) => setTimeout(() => r(0), 400))]);
   // "./name" so a file called e.g. "--use-compress-program=..." can never be read as a tar option
@@ -665,8 +687,10 @@ async function zipFolder(res, dir, name, transfer) {
     '-',
     '-C',
     dir,
-    ...items.map((n) => `./${n}`),
+    ...items.filter((n) => !fixed.includes(n)).map((n) => `./${n}`),
+    ...(tmp ? ['-C', tmp, ...fixed.map((n) => `./${n}`)] : []),
   ]);
+  if (tmp) tar.on('close', () => rm(tmp, { recursive: true, force: true }).catch(() => {}));
   tar.stderr.resume();
   tar.on('error', (e) => res.destroy(e)); // tar missing: end this download, don't crash the whole server
   res.on('close', () => tar.kill());
@@ -886,30 +910,54 @@ async function missingFiles(dir) {
   return [...missing].slice(0, 50);
 }
 
+// Ableton sample links: every reference to a file that's somewhere in the project folder (Samples/, or anywhere
+// else in it) is pointed at that copy, project-relative, which is what Live's own "Collect All and Save" writes.
+// References that already resolve inside the folder are left alone. Live 11 / 12 .als files.
+/** The files in a project folder: lower-case name -> path inside it (Samples/ first), and every such path. */
+async function projectFiles(dir) {
+  const byName = new Map();
+  const rels = new Set();
+  const all = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => []);
+  for (const e of all) {
+    if (!e.isFile() || HIDDEN.test(e.name)) continue;
+    const rel = relative(dir, join(e.parentPath, e.name)).split(sep).join('/');
+    if (/^(backup|ableton project info)\//i.test(rel) || rel.split('/').some((p) => HIDDEN.test(p))) continue;
+    rels.add(rel.toLowerCase());
+    const k = e.name.toLowerCase();
+    if (!byName.has(k) || (/^samples\//i.test(rel) && !/^samples\//i.test(byName.get(k)))) byName.set(k, rel);
+  }
+  return { byName, rels };
+}
+const alsXml = (raw) => (raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw, { maxOutputLength: 512 * 1024 ** 2 }) : raw).toString('utf8');
+/** The set with its references repointed at the project's own files, and how many were changed. */
+function relinkSet(xml, { byName, rels }) {
+  let n = 0;
+  const next = xml.replace(/<FileRef>[\s\S]*?<\/FileRef>/g, (ref) => {
+    const path = ref.match(/<Path Value="([^"]*)"/)?.[1] || '';
+    const base = decodeXml(path).split(/[\\/]/).pop();
+    const have = base && byName.get(base.toLowerCase());
+    if (!have) return ref;
+    const relNow = decodeXml(ref.match(/<RelativePath Value="([^"]*)"/)?.[1] || '');
+    if (/<RelativePathType Value="3"/.test(ref) && rels.has(relNow.toLowerCase())) return ref; // already inside
+    n++;
+    const rel = have.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return ref
+      .replace(/<RelativePathType Value="\d+"\s*\/>/, '<RelativePathType Value="3" />')
+      .replace(/<RelativePath Value="[^"]*"\s*\/>/, `<RelativePath Value="${rel}" />`);
+  });
+  return [next, n];
+}
+
 // "Add the missing files": the files someone picked were uploaded into the project's Samples/Imported folder;
-// point every Ableton sample reference with the same file name at them (project-relative), which is what
-// Live's own "Collect All and Save" writes. Live 11 / 12 .als files; the untouched set goes to Backup/ first.
+// at check-in the set is relinked to them (and to anything else in the folder). The untouched set goes to Backup/.
 async function relinkAbleton(stageDir) {
-  const imported = join(stageDir, 'Samples', 'Imported');
-  const have = new Set((await readdir(imported).catch(() => [])).map((n) => n.toLowerCase()));
-  if (!have.size) return 0;
+  const files = await projectFiles(stageDir);
   let changed = 0;
   for (const name of await readdir(stageDir)) {
     if (extname(name).toLowerCase() !== '.als') continue;
     const file = join(stageDir, name);
     const raw = await readFile(file);
-    const xml = (raw[0] === 0x1f && raw[1] === 0x8b ? gunzipSync(raw) : raw).toString('utf8');
-    let n = 0;
-    const next = xml.replace(/<FileRef>[\s\S]*?<\/FileRef>/g, (ref) => {
-      const path = ref.match(/<Path Value="([^"]*)"/)?.[1] || '';
-      const base = decodeXml(path).split(/[\\/]/).pop();
-      if (!base || !have.has(base.toLowerCase()) || /<RelativePath Value="Samples\/Imported\//.test(ref)) return ref;
-      n++;
-      const rel = `Samples/Imported/${base.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}`;
-      return ref
-        .replace(/<RelativePathType Value="\d+"\s*\/>/, '<RelativePathType Value="3" />')
-        .replace(/<RelativePath Value="[^"]*"\s*\/>/, `<RelativePath Value="${rel}" />`);
-    });
+    const [next, n] = relinkSet(alsXml(raw), files);
     if (!n) continue;
     await mkdir(join(stageDir, 'Backup'), { recursive: true });
     await writeFile(join(stageDir, 'Backup', `${basename(name, '.als')} [before Sanktuary relink ${stamp()}].als`), raw);
@@ -7462,7 +7510,7 @@ async function rawPreview(file, size) {
     if ((le && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) {
       const seen = new Set();
       const walk = (ifd, depth) => {
-        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8;) {
+        for (; ifd > 0 && ifd + 2 <= b.length && !seen.has(ifd) && depth < 8; ) {
           seen.add(ifd);
           const n = u16(ifd);
           if (ifd + 2 + n * 12 + 4 > b.length) return;

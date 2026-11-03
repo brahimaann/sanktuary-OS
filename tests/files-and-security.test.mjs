@@ -1,6 +1,6 @@
 // Regression + security tests for the file API and boards, against temp data and a fake Clerk.
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
 import { statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1143,6 +1143,27 @@ try {
     'zip treats "--version" as a file, not a tar option',
     zip.status === 200 && zbytes.subarray(0, 2).toString() === 'PK' && zbytes.includes('--version') && zbytes.includes('song.txt'),
   );
+
+  // Ableton project zips open ready to go: sets are repointed at the samples in the project's own Samples folder
+  const songD = join(drive, 'team', 'Song D');
+  mkdirSync(join(songD, 'Samples', 'Processed'), { recursive: true });
+  writeFileSync(join(songD, 'Samples', 'Processed', 'kick & 808.wav'), 'KICK');
+  writeFileSync(join(songD, 'Samples', 'hat.wav'), 'HAT');
+  const setD = `<Ableton>${liveRef('C:/Users/brahi/Desktop/kick &amp; 808.wav', '../../Desktop/kick &amp; 808.wav', 1)}${liveRef('C:/x/Song D/Samples/hat.wav', 'Samples/hat.wav', 3)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}</Ableton>`;
+  writeFileSync(join(songD, 'Song D.als'), gzipSync(setD));
+  const zipD = await fetch(B + '/api/files/view/Song%20D?zip', { headers: { cookie: cookie('alice') } });
+  const outD = mkdtempSync(join(tmpdir(), 'sk-zipd-'));
+  writeFileSync(join(outD, 'd.zip'), Buffer.from(await zipD.arrayBuffer()));
+  execFileSync('bsdtar', ['-xf', join(outD, 'd.zip'), '-C', outD]);
+  const zippedSet = gunzipSync(readFileSync(join(outD, 'Song D.als'))).toString();
+  check(
+    'zipped set points at the sample in its Samples folder',
+    zippedSet.includes('<RelativePathType Value="3" /><RelativePath Value="Samples/Processed/kick &amp; 808.wav" />'),
+  );
+  check('links already inside the project stay', zippedSet.includes('<RelativePath Value="Samples/hat.wav" />'));
+  check('samples the project lacks are left as they were', zippedSet.includes('<RelativePath Value="../gone.wav" />'));
+  check('the samples come along in the zip', readFileSync(join(outD, 'Samples', 'Processed', 'kick & 808.wav'), 'utf8') === 'KICK');
+  check('the set on the drive is untouched', gunzipSync(readFileSync(join(songD, 'Song D.als'))).toString() === setD);
 
   // Light audio previews: WAV -> 256 kbps MP3, made once and cached; crafted files refused
   // stereo 16-bit 44.1 kHz, like a real bounce
