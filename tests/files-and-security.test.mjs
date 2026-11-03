@@ -1,6 +1,6 @@
 // Regression + security tests for the file API and boards, against temp data and a fake Clerk.
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHmac, createSign, generateKeyPairSync } from 'node:crypto';
 import { statSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1143,6 +1143,68 @@ try {
     'zip treats "--version" as a file, not a tar option',
     zip.status === 200 && zbytes.subarray(0, 2).toString() === 'PK' && zbytes.includes('--version') && zbytes.includes('song.txt'),
   );
+
+  // Ableton project zips open ready to go: sets are repointed at the samples in the project's own Samples folder
+  const songD = join(drive, 'team', 'Song D');
+  mkdirSync(join(songD, 'Samples', 'Processed'), { recursive: true });
+  writeFileSync(join(songD, 'Samples', 'Processed', 'kick & 808.wav'), 'KICK');
+  writeFileSync(join(songD, 'Samples', 'hat.wav'), 'HAT');
+  const setD = `<Ableton>${liveRef('C:/Users/brahi/Desktop/kick &amp; 808.wav', '../../Desktop/kick &amp; 808.wav', 1)}${liveRef('C:/x/Song D/Samples/hat.wav', 'Samples/hat.wav', 3)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}</Ableton>`;
+  writeFileSync(join(songD, 'Song D.als'), gzipSync(setD));
+  const zipD = await fetch(B + '/api/files/view/Song%20D?zip', { headers: { cookie: cookie('alice') } });
+  const outD = mkdtempSync(join(tmpdir(), 'sk-zipd-'));
+  writeFileSync(join(outD, 'd.zip'), Buffer.from(await zipD.arrayBuffer()));
+  execFileSync('bsdtar', ['-xf', join(outD, 'd.zip'), '-C', outD]);
+  const zippedSet = gunzipSync(readFileSync(join(outD, 'Song D.als'))).toString();
+  check(
+    'zipped set points at the sample in its Samples folder',
+    zippedSet.includes('<RelativePathType Value="3" /><RelativePath Value="Samples/Processed/kick &amp; 808.wav" />'),
+  );
+  check('links already inside the project stay', zippedSet.includes('<RelativePath Value="Samples/hat.wav" />'));
+  check('samples the project lacks are left as they were', zippedSet.includes('<RelativePath Value="../gone.wav" />'));
+  check('the samples come along in the zip', readFileSync(join(outD, 'Samples', 'Processed', 'kick & 808.wav'), 'utf8') === 'KICK');
+  check('the set on the drive is untouched', gunzipSync(readFileSync(join(songD, 'Song D.als'))).toString() === setD);
+
+  // A folder of many sets sharing Samples: one set downloads with only the samples and recordings it uses
+  const sets = join(drive, 'team', 'Sets');
+  mkdirSync(join(sets, 'Samples', 'Recorded'), { recursive: true });
+  mkdirSync(join(sets, 'Samples', 'Imported'), { recursive: true });
+  writeFileSync(join(sets, 'Samples', 'Recorded', 'vox 0001.wav'), 'VOX');
+  writeFileSync(join(sets, 'Samples', 'Recorded', 'other take.wav'), 'OTHER');
+  writeFileSync(join(sets, 'Samples', 'Imported', 'kick.wav'), 'KICK');
+  const setA = `<Ableton>${liveRef('C:/Beats/Sets/Samples/Recorded/vox 0001.wav', 'Samples/Recorded/vox 0001.wav', 3)}${liveRef('C:/Users/brahi/Desktop/kick.wav', '../Desktop/kick.wav', 1)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}${liveRef('C:/ProgramData/Ableton/Live 12 Suite/Resources/Core Library/Samples/clap.wav', 'clap.wav', 6)}</Ableton>`;
+  writeFileSync(join(sets, 'WAIT.als'), gzipSync(setA));
+  writeFileSync(
+    join(sets, 'XAXA.als'),
+    gzipSync(`<Ableton>${liveRef('C:/x/other take.wav', 'Samples/Recorded/other take.wav', 3)}</Ableton>`),
+  );
+  const bundle = await fetch(B + '/api/files/view/Sets/WAIT.als?bundle', { headers: { cookie: cookie('alice') } });
+  const outB = mkdtempSync(join(tmpdir(), 'sk-bundle-'));
+  writeFileSync(join(outB, 'b.zip'), Buffer.from(await bundle.arrayBuffer()));
+  const inB = execFileSync('bsdtar', ['-tf', join(outB, 'b.zip')])
+    .toString()
+    .split('\n')
+    .filter(Boolean)
+    .sort();
+  check(
+    'a set downloads with just its own samples and recordings',
+    JSON.stringify(inB) ===
+      JSON.stringify(['./Missing samples.txt', './Samples/Imported/kick.wav', './Samples/Recorded/vox 0001.wav', './WAIT.als']),
+    inB,
+  );
+  execFileSync('bsdtar', ['-xf', join(outB, 'b.zip'), '-C', outB]);
+  check(
+    'the bundled set is relinked to its samples',
+    gunzipSync(readFileSync(join(outB, 'WAIT.als')))
+      .toString()
+      .includes('<RelativePath Value="Samples/Imported/kick.wav" />'),
+  );
+  const missingTxt = readFileSync(join(outB, 'Missing samples.txt'), 'utf8');
+  check(
+    'samples from outside the folder are listed, library sounds are not',
+    missingTxt.includes('gone.wav') && !missingTxt.includes('clap.wav'),
+  );
+  check('only sets can be bundled', (await call('alice', '/api/files/view/Sets/Samples/Imported/kick.wav?bundle')).status === 400);
 
   // Light audio previews: WAV -> 256 kbps MP3, made once and cached; crafted files refused
   // stereo 16-bit 44.1 kHz, like a real bounce
