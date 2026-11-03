@@ -316,7 +316,7 @@ const shell: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   fontSize: 11,
   overflow: 'hidden',
@@ -326,7 +326,7 @@ const menuBar: React.CSSProperties = {
   display: 'flex',
   gap: 0,
   padding: '2px 4px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   flexShrink: 0,
 };
@@ -361,7 +361,7 @@ const ticker: React.CSSProperties = {
 };
 const transportBar: React.CSSProperties = {
   padding: '4px 6px 2px',
-  background: 'linear-gradient(180deg, #d4d0c8 0%, #c0c0c0 100%)',
+  background: 'linear-gradient(180deg, #d4d0c8 0%, #fff 100%)',
   flexShrink: 0,
 };
 const seekBarTrack: React.CSSProperties = {
@@ -375,7 +375,7 @@ const seekBarTrack: React.CSSProperties = {
 };
 const seekBarFill: React.CSSProperties = {
   height: '100%',
-  background: '#000080',
+  background: '#000',
   transition: 'width 0.15s linear',
 };
 const seekBarThumb: React.CSSProperties = {
@@ -383,7 +383,7 @@ const seekBarThumb: React.CSSProperties = {
   top: -2,
   width: 10,
   height: 14,
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #e0e0e0',
   cursor: 'pointer',
   transform: 'translateX(-50%)',
@@ -405,7 +405,7 @@ const tBtn: React.CSSProperties = {
   height: 24,
   fontSize: 12,
   cursor: 'pointer',
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #e0e0e0',
   display: 'flex',
   alignItems: 'center',
@@ -433,14 +433,14 @@ const volumeTrack: React.CSSProperties = {
 };
 const volumeFill: React.CSSProperties = {
   height: '100%',
-  background: '#000080',
+  background: '#000',
   transition: 'width 0.1s',
 };
 const statusBarStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   flexShrink: 0,
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   height: 20,
 };

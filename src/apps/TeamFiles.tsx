@@ -1004,7 +1004,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             style={{
               position: 'absolute',
               inset: 8,
-              background: '#c0c0c0',
+              background: '#fff',
               border: '2px outset #fff',
               display: 'flex',
               flexDirection: 'column',
@@ -1121,8 +1121,8 @@ const ProgressBar: React.FC<{ t: Transfer }> = ({ t }) => {
             width: `${pct ?? 100}%`,
             background:
               pct === null
-                ? 'repeating-linear-gradient(90deg, #000080 0 8px, transparent 8px 10px) 0 0 / 40px 100%'
-                : 'repeating-linear-gradient(90deg, #000080 0 8px, transparent 8px 10px)',
+                ? 'repeating-linear-gradient(90deg, #000 0 8px, transparent 8px 10px) 0 0 / 40px 100%'
+                : 'repeating-linear-gradient(90deg, #000 0 8px, transparent 8px 10px)',
             transition: 'width 0.3s',
           }}
         />
@@ -1187,7 +1187,7 @@ export const LogOn: React.FC<{ name: string }> = ({ name }) => {
       </label>
       {needCode && (
         <>
-          <div style={{ color: '#000080' }}>{needCode}</div>
+          <div style={{ color: '#000' }}>{needCode}</div>
           <label style={field}>
             Code:
             <input
@@ -1230,7 +1230,7 @@ const favMenu: React.CSSProperties = {
   maxWidth: 'calc(100% - 8px)',
   maxHeight: 320,
   overflowY: 'auto',
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #fff',
   boxShadow: '2px 2px 0 #000',
   display: 'flex',
@@ -1259,15 +1259,15 @@ const th: React.CSSProperties = {
   textAlign: 'left',
   fontWeight: 400,
   padding: '1px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #808080',
   borderBottom: '1px solid #808080',
 };
 const td: React.CSSProperties = { padding: isTouch ? '8px 6px' : '1px 6px', whiteSpace: 'nowrap', cursor: 'default', userSelect: 'none' };
-const selectedStyle: React.CSSProperties = { background: '#000080', color: '#fff' };
-const dropHover: React.CSSProperties = { outline: '2px dotted #000080', outlineOffset: -2, background: '#c8d0ff' };
+const selectedStyle: React.CSSProperties = { background: '#000', color: '#fff' };
+const dropHover: React.CSSProperties = { outline: '2px dotted #000', outlineOffset: -2, background: '#c8d0ff' };
 const sep: React.CSSProperties = {
   width: 2,
   alignSelf: 'stretch',
@@ -1283,7 +1283,7 @@ const dragGhost: React.CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '2px 6px',
-  background: '#000080',
+  background: '#000',
   color: '#fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   fontSize: 11,
@@ -1309,8 +1309,8 @@ const dropOverlay: React.CSSProperties = {
   textAlign: 'center',
   padding: 16,
   background: 'rgba(0,0,128,0.15)',
-  border: '2px dashed #000080',
-  color: '#000080',
+  border: '2px dashed #000',
+  color: '#000',
   fontWeight: 700,
   pointerEvents: 'none',
 };

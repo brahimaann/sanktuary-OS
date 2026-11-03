@@ -114,7 +114,7 @@ const STATUS_COLORS: Record<string, string> = {
   Idea: '#808080',
   Writing: '#800080',
   Recording: '#a05000',
-  Mixing: '#000080',
+  Mixing: '#000',
   Mastering: '#008080',
   Done: '#008000',
 };
@@ -566,7 +566,7 @@ const TracksApp: React.FC = () => {
           gap: 4,
           padding: '0 2px',
           position: 'relative',
-          outline: dragging ? '2px dashed #000080' : undefined,
+          outline: dragging ? '2px dashed #000' : undefined,
           outlineOffset: -2,
         }}
         onDragOver={(e) => {
@@ -611,7 +611,7 @@ const TracksApp: React.FC = () => {
                   <tr
                     key={t.id}
                     onClick={() => setTrackId(t.id === trackId ? null : t.id)}
-                    style={t.id === trackId ? { background: '#000080', color: '#fff' } : undefined}
+                    style={t.id === trackId ? { background: '#000', color: '#fff' } : undefined}
                   >
                     <td style={td}>{isPlaylist ? i + 1 : t.n}</td>
                     <td style={{ ...td, fontWeight: 700 }}>
@@ -849,7 +849,7 @@ const Library: React.FC<{
             <div
               style={{
                 aspectRatio: '1',
-                border: '2px outset #c0c0c0',
+                border: '2px outset #fff',
                 background: cover ? `#000 url("${cover}") center / cover` : STATUS_COLORS.Mixing,
                 color: '#fff',
                 display: 'flex',
@@ -873,7 +873,7 @@ const Library: React.FC<{
                   right: 4,
                   bottom: 4,
                   fontSize: 12,
-                  background: '#c0c0c0',
+                  background: '#fff',
                   color: '#000',
                   border: '2px outset #fff',
                   padding: '1px 6px',
@@ -1012,7 +1012,7 @@ const TrackPage: React.FC<{
       style={{
         ...listBox,
         flex: 1,
-        background: '#c0c0c0',
+        background: '#fff',
         padding: 8,
         display: 'flex',
         flexDirection: 'column',
@@ -1556,8 +1556,8 @@ const BmiSheet: React.FC<{ track: Track; release: Release; onSave: (bmi: Bmi) =>
         zIndex: 20,
       }}
     >
-      <div style={{ width: 'min(720px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#c0c0c0', border: '2px outset #fff' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+      <div style={{ width: 'min(720px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#fff', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
           BMI sheet: {track.title}
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2012,8 +2012,8 @@ const ReadinessPanel: React.FC<{ release: Release; ready: Readiness | null; onUp
         zIndex: 20,
       }}
     >
-      <div style={{ width: 'min(560px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#c0c0c0', border: '2px outset #fff' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+      <div style={{ width: 'min(560px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#fff', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
           Ready to release? {release.title}
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -2087,8 +2087,8 @@ const PageSetup: React.FC<{ release: Release; onSave: (body: PageBody) => void; 
         zIndex: 20,
       }}
     >
-      <div style={{ width: 'min(460px, 96%)', background: '#c0c0c0', border: '2px outset #fff' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+      <div style={{ width: 'min(460px, 96%)', background: '#fff', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
           Public page for {release.title}
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2214,7 +2214,7 @@ const th: React.CSSProperties = {
   textAlign: 'left',
   fontWeight: 400,
   padding: '1px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderRight: '1px solid #808080',
   borderBottom: '1px solid #808080',
 };

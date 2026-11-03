@@ -132,7 +132,7 @@ const Board: React.FC = () => {
           return (
             <div key={o.id} style={{ padding: '8px 10px', borderBottom: '1px solid #ddd', opacity: past || o.mine === 'no' ? 0.55 : 1 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                <span style={{ background: '#000080', color: '#fff', padding: '0 5px', fontSize: 10 }}>{o.kind}</span>
+                <span style={{ background: '#000', color: '#fff', padding: '0 5px', fontSize: 10 }}>{o.kind}</span>
                 <b style={{ fontSize: 13 }}>{o.title}</b>
                 {o.org && <span style={{ color: '#444' }}>{o.org}</span>}
                 {o.amount && <span style={{ color: '#006000', fontWeight: 700 }}>{o.amount}</span>}
@@ -155,7 +155,7 @@ const Board: React.FC = () => {
                 {STATUS.map(([s, label]) => (
                   <button
                     key={s}
-                    style={{ ...button, ...(o.mine === s ? { background: '#000080', color: '#fff' } : {}) }}
+                    style={{ ...button, ...(o.mine === s ? { background: '#000', color: '#fff' } : {}) }}
                     onClick={() => patch(o, { status: o.mine === s ? null : s })}
                     title={s === 'interested' || s === 'applying' ? "You'll be reminded a week and a day before the deadline" : undefined}
                   >
@@ -232,8 +232,8 @@ const PostForm: React.FC<{ fields: string[]; kinds: string[]; onDone: (msg?: str
         zIndex: 20,
       }}
     >
-      <div style={{ width: 'min(480px, 96%)', maxHeight: '96%', overflow: 'auto', background: '#c0c0c0', border: '2px outset #fff' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+      <div style={{ width: 'min(480px, 96%)', maxHeight: '96%', overflow: 'auto', background: '#fff', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
           Post an opportunity
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -267,7 +267,7 @@ const PostForm: React.FC<{ fields: string[]; kinds: string[]; onDone: (msg?: str
             Deadline
             <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input style={{ ...field_, width: 130 }} value={v.when} onChange={set('when')} placeholder="oct 31 (optional)" />
-              <span style={{ color: v.when && !parsed ? '#a00000' : '#000080' }}>
+              <span style={{ color: v.when && !parsed ? '#a00000' : '#000' }}>
                 {parsed ? `→ ${describeWhen({ ...parsed, time: '' })}` : v.when ? "can't read that yet" : ''}
               </span>
             </span>

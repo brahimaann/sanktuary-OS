@@ -113,7 +113,7 @@ const shell: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   fontSize: 11,
   overflow: 'hidden',
@@ -122,7 +122,7 @@ const toolbar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   padding: '4px 8px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   flexShrink: 0,
 };
@@ -140,7 +140,7 @@ const grid: React.CSSProperties = {
 };
 const card: React.CSSProperties = {
   background: '#f0f0f0',
-  border: '1px solid #c0c0c0',
+  border: '1px solid #fff',
   borderRadius: 0,
   cursor: 'default',
   overflow: 'hidden',
@@ -214,7 +214,7 @@ const statusBar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   flexShrink: 0,
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   height: 20,
 };

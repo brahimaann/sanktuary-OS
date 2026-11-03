@@ -54,7 +54,7 @@ const Producer: React.FC = () => {
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, overflow: 'auto', background: '#c0c0c0', borderTop: '1px solid #fff', padding: 8 }}>
+      <div style={{ flex: 1, overflow: 'auto', background: '#fff', borderTop: '1px solid #fff', padding: 8 }}>
         {tab === 'analyze' && <AnalyzeTab current={mine} onDone={adopt} />}
         {tab === 'compare' && <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />}
         {tab === 'tempo' && <TempoTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />}
@@ -111,7 +111,7 @@ const Picker: React.FC<{
         fromDevice(e.dataTransfer.files[0]);
       }}
       style={{
-        border: `2px dashed ${over ? '#000080' : '#808080'}`,
+        border: `2px dashed ${over ? '#000' : '#808080'}`,
         background: over ? '#e8e8ff' : '#dcdcdc',
         padding: 12,
         display: 'flex',
@@ -134,7 +134,7 @@ const Picker: React.FC<{
           </button>
         )}
       </div>
-      {busy && <div style={{ color: '#000080' }}>{busy}</div>}
+      {busy && <div style={{ color: '#000' }}>{busy}</div>}
       {err && <div style={{ color: '#a00000' }}>{err}</div>}
       <input
         ref={input}
@@ -258,7 +258,7 @@ const Bands: React.FC<{ bands: { name: string; db: number }[]; other?: { name: s
         <div key={b.name} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 60px', gap: 6, alignItems: 'center', marginBottom: 2 }}>
           <span>{b.name}</span>
           <div style={{ background: '#fff', border: '1px solid #808080', height: other ? 14 : 10, position: 'relative' }}>
-            <div style={{ position: 'absolute', left: 0, top: 0, height: other ? '50%' : '100%', width: w(b.db), background: '#000080' }} />
+            <div style={{ position: 'absolute', left: 0, top: 0, height: other ? '50%' : '100%', width: w(b.db), background: '#000' }} />
             {other && (
               <div style={{ position: 'absolute', left: 0, bottom: 0, height: '50%', width: w(other[i].db), background: '#808080' }} />
             )}
@@ -708,7 +708,7 @@ const th: React.CSSProperties = {
   textAlign: 'left',
   fontWeight: 400,
   padding: '1px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
 };
 const td: React.CSSProperties = { padding: '2px 6px', borderBottom: '1px solid #ddd', background: '#fff', whiteSpace: 'nowrap' };

@@ -306,7 +306,7 @@ const ProjectPanel: React.FC<{
           e.target.value = '';
         }}
       />
-      {msg && <div style={{ color: /^(Checked|Upload|Check-in c)/.test(msg) ? '#000080' : '#a00000' }}>{msg}</div>}
+      {msg && <div style={{ color: /^(Checked|Upload|Check-in c)/.test(msg) ? '#000' : '#a00000' }}>{msg}</div>}
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         {asking ? (
           <button style={button} onClick={() => setAsking(false)}>
@@ -416,7 +416,7 @@ const overlay: React.CSSProperties = {
   position: 'absolute',
   inset: 8,
   zIndex: 5,
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #fff',
   display: 'flex',
   flexDirection: 'column',
@@ -428,7 +428,7 @@ const button: React.CSSProperties = {
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '2px 8px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #000',

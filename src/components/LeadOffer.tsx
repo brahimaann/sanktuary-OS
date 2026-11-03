@@ -60,7 +60,7 @@ const LeadOffer: React.FC = () => {
         bottom: 44,
         width: 'min(340px, calc(100% - 24px))',
         zIndex: 99990,
-        background: '#c0c0c0',
+        background: '#fff',
         border: '2px outset #fff',
         boxShadow: '2px 2px 0 #000',
         fontSize: 12,
@@ -70,7 +70,7 @@ const LeadOffer: React.FC = () => {
         style={{
           display: 'flex',
           alignItems: 'center',
-          background: 'linear-gradient(90deg,#000080,#1084d0)',
+          background: 'linear-gradient(90deg,#000,#000)',
           color: '#fff',
           fontWeight: 700,
           padding: '2px 4px',
@@ -86,7 +86,7 @@ const LeadOffer: React.FC = () => {
             lineHeight: '10px',
             padding: 0,
             border: '2px outset #fff',
-            background: '#c0c0c0',
+            background: '#fff',
             fontWeight: 700,
           }}
         >
@@ -97,7 +97,7 @@ const LeadOffer: React.FC = () => {
         <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <b>Check your email</b>
           <div>We sent a link to confirm. The guides come right after.</div>
-          <button onClick={close} style={{ alignSelf: 'flex-end', padding: '2px 12px', border: '2px outset #fff', background: '#c0c0c0' }}>
+          <button onClick={close} style={{ alignSelf: 'flex-end', padding: '2px 12px', border: '2px outset #fff', background: '#fff' }}>
             OK
           </button>
         </div>
@@ -138,11 +138,11 @@ const LeadOffer: React.FC = () => {
             <button
               type="submit"
               disabled={!f.consent}
-              style={{ padding: '2px 12px', border: '2px outset #fff', background: '#c0c0c0', fontWeight: 700 }}
+              style={{ padding: '2px 12px', border: '2px outset #fff', background: '#fff', fontWeight: 700 }}
             >
               Send me the guides
             </button>
-            <button type="button" onClick={close} style={{ padding: '2px 10px', border: '2px outset #fff', background: '#c0c0c0' }}>
+            <button type="button" onClick={close} style={{ padding: '2px 10px', border: '2px outset #fff', background: '#fff' }}>
               No thanks
             </button>
           </div>

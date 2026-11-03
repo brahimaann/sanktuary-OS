@@ -69,7 +69,7 @@ class WindowErrorBoundary extends React.Component<{ children: React.ReactNode },
     if (!error) return this.props.children;
     const stale = isStaleBuild(error);
     return (
-      <div className="w-full h-full bg-[#c0c0c0] p-4 text-xs flex flex-col gap-2">
+      <div className="w-full h-full bg-white p-4 text-xs flex flex-col gap-2">
         <b>{stale ? 'Sanktuary was just updated.' : 'This window hit a problem.'}</b>
         <div>
           {stale
@@ -79,7 +79,7 @@ class WindowErrorBoundary extends React.Component<{ children: React.ReactNode },
         {!stale && <div className="text-gray-700 break-all">{String(error.message).slice(0, 300)}</div>}
         <div className="flex gap-2">
           <button
-            className="px-3 py-1 border-2 border-outset bg-[#c0c0c0]"
+            className="px-3 py-1 border-2 border-outset bg-white"
             onClick={() => (stale ? location.reload() : this.setState({ error: null }))}
           >
             {stale ? 'Reload' : 'Try again'}
@@ -241,7 +241,7 @@ export const App: React.FC = () => {
       <WindowErrorBoundary>
         <Suspense
           fallback={
-            <div className="w-full h-full flex items-center justify-center bg-[#c0c0c0] font-mono text-xs text-gray-700">
+            <div className="w-full h-full flex items-center justify-center bg-white font-mono text-xs text-gray-700">
               <div className="border border-t-white border-l-white border-r-gray-800 border-b-gray-800 p-2 bg-[#d4d0c8] shadow-sm">
                 Loading...
               </div>

@@ -171,8 +171,8 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
         zIndex: 20,
       }}
     >
-      <div style={{ width: 'min(700px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#c0c0c0', border: '2px outset #fff' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+      <div style={{ width: 'min(700px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#fff', border: '2px outset #fff' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
           Campaign: {release.title}
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>

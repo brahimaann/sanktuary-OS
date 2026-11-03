@@ -542,7 +542,7 @@ const Overview: React.FC<{ b: B; clientName: (id: string | null) => string }> = 
 const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div style={{ ...box, minWidth: 150, flex: 1, background: '#fff' }}>
     <div style={{ color: '#444' }}>{label}</div>
-    <div style={{ fontSize: 18, fontWeight: 700, color: '#000080' }}>{value}</div>
+    <div style={{ fontSize: 18, fontWeight: 700, color: '#000' }}>{value}</div>
   </div>
 );
 
@@ -574,7 +574,7 @@ function ListAndEdit<T extends { id: string }>(props: {
               <tr
                 key={r.id}
                 onClick={() => setOpenId(r.id === openId ? null : r.id)}
-                style={r.id === openId ? { background: '#000080', color: '#fff' } : undefined}
+                style={r.id === openId ? { background: '#000', color: '#fff' } : undefined}
               >
                 {props.columns.map(([h, f]) => (
                   <td key={h} style={td}>
@@ -1399,7 +1399,7 @@ const AccessLog: React.FC<{ b: B }> = ({ b }) => {
     <div
       style={{
         background: '#000',
-        color: '#c0c0c0',
+        color: '#fff',
         fontFamily: 'Consolas, "Courier New", monospace',
         fontSize: 12,
         padding: 8,
@@ -1427,7 +1427,7 @@ const AccessLog: React.FC<{ b: B }> = ({ b }) => {
 const page: React.CSSProperties = {
   flex: 1,
   overflow: 'auto',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #404040',
@@ -1450,7 +1450,7 @@ const th: React.CSSProperties = {
   textAlign: 'left',
   fontWeight: 400,
   padding: '2px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderRight: '1px solid #808080',
   borderBottom: '1px solid #808080',
   whiteSpace: 'nowrap',

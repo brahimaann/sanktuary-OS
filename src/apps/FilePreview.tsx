@@ -474,7 +474,7 @@ const Comments: React.FC<{
                   {c.t !== null && (
                     <button
                       onClick={() => onSeek(c.t!)}
-                      style={{ ...button, padding: '0 4px', marginRight: 4, color: '#000080', fontWeight: 700 }}
+                      style={{ ...button, padding: '0 4px', marginRight: 4, color: '#000', fontWeight: 700 }}
                       title="Jump to this moment"
                     >
                       {clock(c.t)}
@@ -490,7 +490,7 @@ const Comments: React.FC<{
                           {replied(c, u) ? (
                             <span style={{ color: '#006000' }}>✓ replied</span>
                           ) : c.ask!.heard[u] ? (
-                            <span style={{ color: '#000080' }}>✓ listened</span>
+                            <span style={{ color: '#000' }}>✓ listened</span>
                           ) : (
                             <span style={{ color: '#808080' }}>○ not yet</span>
                           )}
@@ -705,7 +705,7 @@ const AudioPreview: React.FC<{
     const played = duration ? now / duration : 0;
     peaks.forEach((p, i) => {
       const bh = Math.max(1, (p / top) * wave * 0.9);
-      g.fillStyle = i / peaks.length < played ? '#000080' : '#a0a0a0';
+      g.fillStyle = i / peaks.length < played ? '#000' : '#a0a0a0';
       g.fillRect(i * bar, (wave - bh) / 2, Math.max(1, bar - 1), bh);
     });
     if (!duration) return;
@@ -718,7 +718,7 @@ const AudioPreview: React.FC<{
     }
     // Ruler: a tick about every 60 px, labelled m:ss
     const step = RULER_STEPS.find((s) => (s / duration) * w >= 60 * devicePixelRatio) || 600;
-    g.fillStyle = '#c0c0c0';
+    g.fillStyle = '#fff';
     g.fillRect(0, wave, w, ruler);
     g.fillStyle = '#000';
     g.font = `${10 * devicePixelRatio}px Arial`;
@@ -880,7 +880,7 @@ const AudioPreview: React.FC<{
         gap: 6,
         padding: 10,
         boxSizing: 'border-box',
-        background: '#c0c0c0',
+        background: '#fff',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -981,7 +981,7 @@ const AudioPreview: React.FC<{
               top: 0,
               bottom: 14,
               left: `${(hover / duration) * 100}%`,
-              borderLeft: '1px dashed #000080',
+              borderLeft: '1px dashed #000',
               pointerEvents: 'none',
             }}
           >
@@ -1001,9 +1001,7 @@ const AudioPreview: React.FC<{
           </div>
         )}
         {note && (
-          <div
-            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000080' }}
-          >
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#000' }}>
             {note}
           </div>
         )}
@@ -1088,7 +1086,7 @@ async function sheetsToHtml(data: ArrayBuffer): Promise<{ tabs: [string, string]
 
 const DOC_CSS =
   'body{font:14px/1.5 Georgia,serif;margin:24px;color:#111;background:#fff}img{max-width:100%}' +
-  'table{border-collapse:collapse;font:12px Arial,sans-serif}td,th{border:1px solid #c0c0c0;padding:2px 6px;white-space:nowrap}' +
+  'table{border-collapse:collapse;font:12px Arial,sans-serif}td,th{border:1px solid #fff;padding:2px 6px;white-space:nowrap}' +
   'tr:first-child td{background:#e8e8e8;font-weight:bold;position:sticky;top:0}';
 
 /**
@@ -1126,7 +1124,7 @@ const OfficePreview: React.FC<{ src: string; render: (data: ArrayBuffer) => Prom
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {tabs.length > 1 && (
-        <div style={{ display: 'flex', gap: 2, padding: 2, background: '#c0c0c0', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 2, padding: 2, background: '#fff', overflowX: 'auto' }}>
           {tabs.map(([n], i) => (
             <button key={n} style={{ ...button, fontWeight: i === tab ? 700 : 400 }} onClick={() => setTab(i)}>
               {n}
@@ -1222,8 +1220,8 @@ const YouTubePost: React.FC<{ space: string; path: string; name: string; onClose
         justifyContent: 'center',
       }}
     >
-      <div style={{ width: 'min(460px, 96%)', background: '#c0c0c0', border: '2px outset #fff', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+      <div style={{ width: 'min(460px, 96%)', background: '#fff', border: '2px outset #fff', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
           Post to YouTube
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>

@@ -167,7 +167,7 @@ export const NotificationTray: React.FC = () => {
         <span className={unread ? 'sk-bell-ring' : undefined} style={{ display: 'inline-flex' }}>
           <RetroIcon name="bell" size={15} />
         </span>
-        {unread > 0 && <b style={{ color: '#000080' }}>{unread}</b>}
+        {unread > 0 && <b style={{ color: '#000' }}>{unread}</b>}
       </button>
       {/* Anchored to the taskbar (the tray's positioned parent), so it stays on the CRT screen, just above the clock */}
       {
@@ -283,7 +283,7 @@ export const NotificationTray: React.FC = () => {
 };
 
 const win: React.CSSProperties = {
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #fff',
   boxShadow: '2px 2px 0 rgba(0,0,0,0.5)',
   font: '11px "MS Sans Serif", Arial, sans-serif',
@@ -297,13 +297,13 @@ const titleBar: React.CSSProperties = {
   padding: '2px 4px',
   color: '#fff',
   fontWeight: 700,
-  background: 'linear-gradient(90deg, #000080, #1084d0)',
+  background: 'linear-gradient(90deg, #000, #000)',
 };
 const btn: React.CSSProperties = {
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '2px 8px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #000',

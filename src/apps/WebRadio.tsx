@@ -9,9 +9,6 @@ interface RadioTrack {
 const RADIO_TRACKS: RadioTrack[] = [
   { title: 'Yellow Diamonds (Demo)', artist: 'mrnd', url: '/audio/yellow_diamonds_demo.mp3' },
   { title: 'Trophies', artist: 'Drake', url: '/audio/drake_trophies.mp3' },
-  { title: 'Windows 98 Sound (Lofi Ambient)', artist: 'retro', url: '/audio/The Microsoft Sound.wav' },
-  { title: 'Classic Tada (Retro Synth)', artist: 'Windows 98', url: '/audio/TADA.WAV' },
-  { title: 'Chord Chill', artist: 'Windows 98', url: '/audio/CHORD.WAV' },
 ];
 
 export const WebRadio: React.FC = () => {
@@ -124,7 +121,7 @@ export const WebRadio: React.FC = () => {
   };
 
   return (
-    <div className="web-radio bg-[#c0c0c0] w-full h-full p-2 flex flex-col justify-between font-sans text-xs select-none text-black">
+    <div className="web-radio bg-white w-full h-full p-2 flex flex-col justify-between font-sans text-xs select-none text-black">
       {/* Upper Display Box */}
       <div
         className="bg-[#000000] text-[#00ff00] p-2 font-mono flex flex-col justify-between border-2 border-inset rounded h-[90px]"
@@ -171,19 +168,19 @@ export const WebRadio: React.FC = () => {
         <div className="flex gap-1">
           <button
             onClick={handlePrev}
-            className="w-[32px] h-[25px] border border-outset bg-[#c0c0c0] active:border-inset outline-none font-bold"
+            className="w-[32px] h-[25px] border border-outset bg-white active:border-inset outline-none font-bold"
           >
             |&lt;
           </button>
           <button
             onClick={handlePlayPause}
-            className="w-[48px] h-[25px] border border-outset bg-[#c0c0c0] active:border-inset outline-none font-bold"
+            className="w-[48px] h-[25px] border border-outset bg-white active:border-inset outline-none font-bold"
           >
             {isPlaying ? 'PAUSE' : 'PLAY'}
           </button>
           <button
             onClick={handleNext}
-            className="w-[32px] h-[25px] border border-outset bg-[#c0c0c0] active:border-inset outline-none font-bold"
+            className="w-[32px] h-[25px] border border-outset bg-white active:border-inset outline-none font-bold"
           >
             &gt;|
           </button>
@@ -221,7 +218,7 @@ export const WebRadio: React.FC = () => {
                   setIsPlaying(true);
                 }}
                 className={`px-2 py-1 cursor-default flex justify-between ${
-                  isCurrent ? 'bg-[#000080] text-white font-bold' : 'hover:bg-gray-200'
+                  isCurrent ? 'bg-black text-white font-bold' : 'hover:bg-gray-200'
                 }`}
               >
                 <span>{track.title}</span>

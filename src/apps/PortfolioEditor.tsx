@@ -132,7 +132,7 @@ const PortfolioEditor: React.FC<{ who: string; value: Portfolio; onChange: (patc
             style={{
               gridColumn: x.size === 'wide' ? 'span 2' : undefined,
               gridRow: x.size === 'tall' ? 'span 2' : undefined,
-              background: x.id === sel ? '#000080' : '#fff',
+              background: x.id === sel ? '#000' : '#fff',
               color: x.id === sel ? '#fff' : '#000',
               opacity: drag === x.id ? 0.4 : 1,
               border: '2px outset #fff',

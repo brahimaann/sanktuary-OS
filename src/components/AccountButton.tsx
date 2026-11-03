@@ -51,7 +51,7 @@ const AccountButton: React.FC = () => {
         setOpen(false);
         onClick();
       }}
-      onPointerEnter={(e) => Object.assign(e.currentTarget.style, { background: '#000080', color: '#fff' })}
+      onPointerEnter={(e) => Object.assign(e.currentTarget.style, { background: '#000', color: '#fff' })}
       onPointerLeave={(e) => Object.assign(e.currentTarget.style, { background: '', color: '' })}
     >
       <RetroIcon name={icon} size={16} />
@@ -93,7 +93,7 @@ const btn: React.CSSProperties = {
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '1px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #000',
@@ -112,7 +112,7 @@ const menu: React.CSSProperties = {
   marginTop: 2,
   minWidth: 190,
   zIndex: 50,
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #fff',
   boxShadow: '1px 1px 0 #000',
   padding: 2,

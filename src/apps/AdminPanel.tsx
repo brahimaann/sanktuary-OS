@@ -157,7 +157,7 @@ const AdminPanel: React.FC = () => {
                   style={{
                     padding: '3px 6px',
                     cursor: 'pointer',
-                    background: tab === t ? '#000080' : 'transparent',
+                    background: tab === t ? '#000' : 'transparent',
                     color: tab === t ? '#fff' : 'inherit',
                   }}
                 >
@@ -679,7 +679,7 @@ const FolderPicker: React.FC<{ drive: string; driveName: string; start: string; 
     >
       <div
         style={{
-          background: '#c0c0c0',
+          background: '#fff',
           border: '2px outset #fff',
           padding: 8,
           width: 360,
@@ -1138,7 +1138,7 @@ const ShopTab: React.FC = () => {
           <div
             key={p.id}
             onClick={() => setOpenPool(p.id === openPool ? null : p.id)}
-            style={{ ...pickRow, background: p.id === openPool ? '#000080' : '#fff', color: p.id === openPool ? '#fff' : '#000' }}
+            style={{ ...pickRow, background: p.id === openPool ? '#000' : '#fff', color: p.id === openPool ? '#fff' : '#000' }}
           >
             <b>{p.title}</b> · {usd(p.raised)}
             {p.goal ? ` of ${usd(p.goal)}` : ''} · {p.supporters} supporters · {p.public ? 'public' : 'members only'}
@@ -1245,7 +1245,7 @@ const ShopTab: React.FC = () => {
           <div
             key={p.id}
             onClick={() => setOpenProduct(p.id === openProduct ? null : p.id)}
-            style={{ ...pickRow, background: p.id === openProduct ? '#000080' : '#fff', color: p.id === openProduct ? '#fff' : '#000' }}
+            style={{ ...pickRow, background: p.id === openProduct ? '#000' : '#fff', color: p.id === openProduct ? '#fff' : '#000' }}
           >
             <b>{p.title}</b> · {usd(p.price)} · {p.kind} · {p.stock === null ? 'unlimited' : `${p.stock} left`} ·{' '}
             {p.active ? 'on sale' : 'hidden'}
@@ -2106,7 +2106,7 @@ const BlogTab: React.FC = () => {
             style={{
               padding: '3px 6px',
               cursor: 'default',
-              background: p.id === openId ? '#000080' : '#fff',
+              background: p.id === openId ? '#000' : '#fff',
               color: p.id === openId ? '#fff' : '#000',
               borderBottom: '1px solid #eee',
             }}
@@ -2276,7 +2276,7 @@ const BlogTab: React.FC = () => {
             style={{
               padding: '3px 6px',
               cursor: 'default',
-              background: x.id === personId ? '#000080' : '#fff',
+              background: x.id === personId ? '#000' : '#fff',
               color: x.id === personId ? '#fff' : '#000',
               borderBottom: '1px solid #eee',
             }}
@@ -2419,7 +2419,7 @@ const LogTab: React.FC = () => {
       <div
         style={{
           background: '#000',
-          color: '#c0c0c0',
+          color: '#fff',
           fontFamily: 'Consolas, "Courier New", monospace',
           fontSize: 12,
           padding: 8,
@@ -2750,7 +2750,7 @@ const SpacesTab: React.FC<{
                 </select>
               </label>
             </div>
-            <p style={{ ...hint, marginTop: 6, color: '#000080' }}>
+            <p style={{ ...hint, marginTop: 6, color: '#000' }}>
               {who.length ? `Gets in: ${who.join(', ')}.` : 'Nobody but admins gets in yet.'} Admins always have full access.
             </p>
           </fieldset>
@@ -2814,7 +2814,7 @@ const Dot: React.FC<{ ok: boolean | null }> = ({ ok }) => (
       borderRadius: '50%',
       marginRight: 4,
       border: '1px solid #404040',
-      background: ok === null ? '#c0c0c0' : ok ? '#00c000' : '#e00000',
+      background: ok === null ? '#fff' : ok ? '#00c000' : '#e00000',
     }}
   />
 );
@@ -2822,7 +2822,7 @@ const Dot: React.FC<{ ok: boolean | null }> = ({ ok }) => (
 const page: React.CSSProperties = {
   flex: 1,
   overflow: 'auto',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #404040',
@@ -2837,7 +2837,7 @@ const th: React.CSSProperties = {
   textAlign: 'left',
   fontWeight: 400,
   padding: '2px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderRight: '1px solid #808080',
   borderBottom: '1px solid #808080',
   whiteSpace: 'nowrap',

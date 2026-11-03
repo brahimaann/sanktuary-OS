@@ -124,7 +124,7 @@ const Tour: React.FC<{ member: boolean }> = ({ member }) => {
         <div style={{ color: '#666', fontSize: 10 }}>
           Step {i + 1} of {steps.length}
         </div>
-        <b style={{ color: '#000080' }}>{s.title}</b>
+        <b style={{ color: '#000' }}>{s.title}</b>
         <div style={{ marginTop: 4, lineHeight: 1.45 }}>{s.text}</div>
       </div>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -185,7 +185,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <img src="/images/icons/network-32x32.png" alt="" style={{ width: 32, height: 32 }} />
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#000080' }}>Welcome to Sanktuary</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#000' }}>Welcome to Sanktuary</div>
             <div style={{ color: '#444' }}>Twin Cities · music · art · fashion · film</div>
           </div>
         </div>
@@ -280,7 +280,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
                       style={{
                         height: '100%',
                         width: `${Math.min(100, (p.raised / p.goal) * 100)}%`,
-                        background: 'repeating-linear-gradient(90deg,#000080 0 8px,transparent 8px 10px)',
+                        background: 'repeating-linear-gradient(90deg,#000 0 8px,transparent 8px 10px)',
                       }}
                     />
                   </div>

@@ -177,7 +177,7 @@ const AfricaOnlyTV: React.FC = () => {
               <button style={fbBtn} onClick={openExternal}>
                 Open AfricaOnly.TV in browser
               </button>
-              <button style={{ ...fbBtn, background: '#c0c0c0', color: '#000', border: '2px outset #e0e0e0' }} onClick={refresh}>
+              <button style={{ ...fbBtn, background: '#fff', color: '#000', border: '2px outset #e0e0e0' }} onClick={refresh}>
                 Try Again
               </button>
             </div>
@@ -207,7 +207,7 @@ const shell: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: 'Arial, sans-serif',
   fontSize: 11,
   overflow: 'hidden',
@@ -217,7 +217,7 @@ const toolbar: React.CSSProperties = {
   alignItems: 'center',
   gap: 2,
   padding: '2px 4px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   flexWrap: 'nowrap',
   flexShrink: 0,
@@ -227,7 +227,7 @@ const navBtn: React.CSSProperties = {
   height: 22,
   fontSize: 12,
   cursor: 'pointer',
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #e0e0e0',
   display: 'flex',
   alignItems: 'center',
@@ -272,7 +272,7 @@ const goBtn: React.CSSProperties = {
   height: 18,
   fontSize: 10,
   cursor: 'pointer',
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #e0e0e0',
   padding: '0 6px',
   marginLeft: 2,
@@ -284,12 +284,12 @@ const progressBar: React.CSSProperties = {
   right: 0,
   height: 3,
   zIndex: 10,
-  background: '#c0c0c0',
+  background: '#fff',
   overflow: 'hidden',
 };
 const progressFill: React.CSSProperties = {
   height: '100%',
-  background: '#000080',
+  background: '#000',
   animation: 'ie-progress 1.6s linear infinite',
   width: '40%',
 };
@@ -307,7 +307,7 @@ const fbBtn: React.CSSProperties = {
   padding: '4px 14px',
   fontSize: 11,
   cursor: 'pointer',
-  background: '#000080',
+  background: '#000',
   color: '#fff',
   border: '2px outset #4040a0',
   fontFamily: 'Arial, sans-serif',
@@ -315,7 +315,7 @@ const fbBtn: React.CSSProperties = {
 const statusBar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #ffffff',
   flexShrink: 0,
   height: 20,

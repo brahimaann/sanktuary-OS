@@ -190,7 +190,7 @@ const Directory: React.FC = () => {
                       alignItems: 'center',
                       padding: '3px 6px',
                       cursor: 'default',
-                      ...(open === i ? { background: '#000080', color: '#fff' } : {}),
+                      ...(open === i ? { background: '#000', color: '#fff' } : {}),
                     }}
                   >
                     {section === 'people' && d.people[i].avatar ? (
@@ -382,7 +382,7 @@ const TreeRow: React.FC<{ ico: string; text: string; indent?: boolean; active: b
       paddingLeft: indent ? 18 : 4,
       cursor: 'default',
       whiteSpace: 'nowrap',
-      ...(active ? { background: '#000080', color: '#fff' } : {}),
+      ...(active ? { background: '#000', color: '#fff' } : {}),
     }}
   >
     <img src={icon(ico, 16)} alt="" width={16} height={16} />

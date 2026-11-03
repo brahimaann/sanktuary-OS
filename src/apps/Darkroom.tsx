@@ -326,7 +326,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
     strip.width = slideCount * w + (slideCount - 1) * gap;
     strip.height = h;
     const x = strip.getContext('2d')!;
-    x.fillStyle = '#c0c0c0';
+    x.fillStyle = '#fff';
     x.fillRect(0, 0, strip.width, h);
     for (let i = 0; i < slideCount; i++) x.drawImage(slideCanvas(i, 0.5), i * (w + gap), 0);
     setCarouselOut(strip);
@@ -865,7 +865,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             fontSize: 11,
             padding,
             fontWeight: params.preset === p.id ? 700 : 400,
-            background: params.preset === p.id ? '#000080' : '#c0c0c0',
+            background: params.preset === p.id ? '#000' : '#fff',
             color: params.preset === p.id ? '#fff' : '#000',
           }}
           title={p.desc}
@@ -906,7 +906,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
           style={{
             ...button,
             fontWeight: compare ? 700 : 400,
-            background: compare ? '#000080' : '#c0c0c0',
+            background: compare ? '#000' : '#fff',
             color: compare ? '#fff' : '#000',
           }}
           disabled={!source}
@@ -924,7 +924,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
           ↷ Redo
         </button>
         <button
-          style={{ ...button, background: dirty ? '#008080' : '#c0c0c0', color: dirty ? '#fff' : '#000', fontWeight: 700 }}
+          style={{ ...button, background: dirty ? '#008080' : '#fff', color: dirty ? '#fff' : '#000', fontWeight: 700 }}
           disabled={!source || !dirty || activeTab === 'carousel'} // carousel slides are exported, not saved as a version
           onClick={save}
           title="Keep this edit. Other tabs then edit on top of it; switching tabs without saving drops it."
@@ -993,7 +993,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               }}
             />
           ) : (
-            <div style={{ color: '#c0c0c0', textAlign: 'center', padding: 16 }}>
+            <div style={{ color: '#fff', textAlign: 'center', padding: 16 }}>
               <b>No photo open</b>
               <div style={{ fontSize: 11, marginTop: 4 }}>
                 Open a photo from your device, browse server files, or create a multi-image collage.
@@ -1004,7 +1004,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                   <input type="file" accept="image/*" hidden onChange={(e) => openLocal(e.target.files?.[0])} />
                 </label>
                 <button
-                  style={{ ...button, fontWeight: 700, background: '#000080', color: '#fff' }}
+                  style={{ ...button, fontWeight: 700, background: '#000', color: '#fff' }}
                   onClick={() => setShowServerPicker('open')}
                 >
                   Browse Server Files...
@@ -1027,7 +1027,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 position: 'absolute',
                 top: 8,
                 left: 8,
-                background: '#000080',
+                background: '#000',
                 color: '#fff',
                 padding: '2px 8px',
                 fontSize: 11,
@@ -1046,7 +1046,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
             flex: '0 0 auto',
             minHeight: 160,
             maxHeight: 240,
-            background: '#c0c0c0',
+            background: '#fff',
             borderTop: '2px outset #fff',
             display: 'flex',
             flexDirection: 'column',
@@ -1074,7 +1074,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                     ...button,
                     borderBottom: active ? 'none' : button.borderBottom,
                     fontWeight: active ? 700 : 400,
-                    background: active ? '#c0c0c0' : '#e0e0e0',
+                    background: active ? '#fff' : '#e0e0e0',
                     position: 'relative',
                     top: active ? 1 : 0,
                     padding: '3px 8px',
@@ -1150,7 +1150,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                           fontSize: 11,
                           padding: '2px 8px',
                           fontWeight: collageGrid === g.id ? 700 : 400,
-                          background: collageGrid === g.id ? '#000080' : '#c0c0c0',
+                          background: collageGrid === g.id ? '#000' : '#fff',
                           color: collageGrid === g.id ? '#fff' : '#000',
                         }}
                         title={g.desc}
@@ -1177,7 +1177,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                           fontSize: 11,
                           padding: '2px 8px',
                           fontWeight: collageAspect === a.id ? 700 : 400,
-                          background: collageAspect === a.id ? '#000080' : '#c0c0c0',
+                          background: collageAspect === a.id ? '#000' : '#fff',
                           color: collageAspect === a.id ? '#fff' : '#000',
                         }}
                       >
@@ -1202,7 +1202,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                           fontSize: 11,
                           padding: '2px 8px',
                           fontWeight: collageFit === id ? 700 : 400,
-                          background: collageFit === id ? '#000080' : '#c0c0c0',
+                          background: collageFit === id ? '#000' : '#fff',
                           color: collageFit === id ? '#fff' : '#000',
                         }}
                       >
@@ -1230,7 +1230,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         style={{
                           ...button,
                           fontWeight: 700,
-                          background: '#000080',
+                          background: '#000',
                           color: '#fff',
                           cursor: 'pointer',
                           padding: '2px 8px',
@@ -1711,7 +1711,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <b>Skin tone:</b>
                   <button
-                    style={{ ...button, fontSize: 11, background: picking ? '#000080' : '#c0c0c0', color: picking ? '#fff' : '#000' }}
+                    style={{ ...button, fontSize: 11, background: picking ? '#000' : '#fff', color: picking ? '#fff' : '#000' }}
                     onClick={() => setPicking(!picking)}
                   >
                     {picking ? 'Now tap skin on the photo...' : 'Tap to pick'}
@@ -1830,7 +1830,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         fontSize: 11,
                         padding: '2px 8px',
                         fontWeight: params.blurMode === mId ? 700 : 400,
-                        background: params.blurMode === mId ? '#000080' : '#c0c0c0',
+                        background: params.blurMode === mId ? '#000' : '#fff',
                         color: params.blurMode === mId ? '#fff' : '#000',
                       }}
                     >
@@ -1870,7 +1870,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         fontSize: 11,
                         padding: '2px 8px',
                         fontWeight: params.glitchMode === gId ? 700 : 400,
-                        background: params.glitchMode === gId ? '#000080' : '#c0c0c0',
+                        background: params.glitchMode === gId ? '#000' : '#fff',
                         color: params.glitchMode === gId ? '#fff' : '#000',
                       }}
                     >
@@ -1957,7 +1957,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         ...button,
                         fontSize: 11,
                         fontWeight: carMode === m ? 700 : 400,
-                        background: carMode === m ? '#000080' : '#c0c0c0',
+                        background: carMode === m ? '#000' : '#fff',
                         color: carMode === m ? '#fff' : '#000',
                       }}
                       onClick={() => setCarMode(m)}
@@ -2094,7 +2094,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                         fontSize: 11,
                         padding: '3px 8px',
                         fontWeight: pos === i ? 700 : 400,
-                        background: pos === i ? '#000080' : '#c0c0c0',
+                        background: pos === i ? '#000' : '#fff',
                         color: pos === i ? '#fff' : '#000',
                       }}
                     >
@@ -2109,9 +2109,7 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
       </div>
 
       {/* ── Status Bar ── */}
-      <div
-        style={{ padding: '2px 6px', borderTop: '1px solid #808080', minHeight: 18, fontSize: 11, background: '#c0c0c0', color: '#222' }}
-      >
+      <div style={{ padding: '2px 6px', borderTop: '1px solid #808080', minHeight: 18, fontSize: 11, background: '#fff', color: '#222' }}>
         {status || 'Ready.'}
       </div>
 

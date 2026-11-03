@@ -178,7 +178,7 @@ export const DialogHost: React.FC = () => {
 
 const box: React.CSSProperties = {
   width: 'min(380px, 92%)',
-  background: '#c0c0c0',
+  background: '#fff',
   color: '#000',
   padding: 2,
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
@@ -196,12 +196,12 @@ const titleBar: React.CSSProperties = {
   padding: '2px 3px 2px 5px',
   color: '#fff',
   fontWeight: 700,
-  background: 'linear-gradient(to right, #000080, #1084d0)',
+  background: 'linear-gradient(to right, #000, #000)',
 };
 const btn: React.CSSProperties = {
   minWidth: 75,
   padding: '4px 10px',
-  background: '#c0c0c0',
+  background: '#fff',
   color: '#000',
   fontFamily: 'inherit',
   fontSize: 11,

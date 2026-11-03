@@ -28,7 +28,7 @@ const today = () => new Date().toLocaleDateString('en-CA');
 const daysSince = (d: string) => Math.round((Date.parse(today()) - Date.parse(d)) / 864e5);
 const STATUS_COLORS: Record<string, string> = {
   'To pitch': '#808080',
-  Pitched: '#000080',
+  Pitched: '#000',
   Replied: '#806000',
   Yes: '#006000',
   No: '#800000',

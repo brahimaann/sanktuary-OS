@@ -204,7 +204,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
               textAlign: 'center',
               cursor: 'default',
               userSelect: 'none',
-              background: selected === b.id ? '#000080' : undefined,
+              background: selected === b.id ? '#000' : undefined,
               color: selected === b.id ? '#fff' : undefined,
             }}
           >

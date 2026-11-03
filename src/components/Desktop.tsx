@@ -648,9 +648,15 @@ export const Desktop: React.FC = () => {
       className="desktop folder-view absolute left-0 top-0 w-full h-[calc(100%-30px)] select-none overflow-hidden isolate"
       style={{
         backgroundColor: bgColor,
-        backgroundImage: wallpaper && !liveSky ? `url(${wallpaper})` : 'none',
-        backgroundSize: 'cover', // fills the whole screen at every size (phones used to get bars)
-        backgroundRepeat: 'no-repeat',
+        // No wallpaper on white = the S machine's dotted desktop
+        backgroundImage:
+          wallpaper && !liveSky
+            ? `url(${wallpaper})`
+            : !wallpaper && bgColor === '#ffffff'
+              ? 'radial-gradient(#000 0.9px, transparent 1px)'
+              : 'none',
+        backgroundSize: wallpaper ? 'cover' : '4px 4px', // cover fills the whole screen at every size (phones used to get bars)
+        backgroundRepeat: wallpaper ? 'no-repeat' : 'repeat',
         backgroundPosition: 'center',
         touchAction: 'none', // Prevents default gestures like pinch-to-zoom on desktop
       }}
@@ -703,7 +709,7 @@ export const Desktop: React.FC = () => {
             <div className="icon-wrapper w-[32px] h-[32px] relative flex justify-center items-center">
               <img src={icon.icon} alt="" className="w-[32px] h-[32px] select-none pointer-events-none image-render-pixelated" />
               <div
-                className="selection-effect absolute top-0 left-0 w-[32px] h-[32px] bg-[#000080] opacity-[0.5] rounded"
+                className="selection-effect absolute top-0 left-0 w-[32px] h-[32px] bg-black opacity-[0.5] rounded"
                 style={{
                   display: isSelected ? 'block' : 'none',
                   mixBlendMode: 'color-burn',
@@ -715,11 +721,14 @@ export const Desktop: React.FC = () => {
               />
             </div>
             <span
-              className="title text-xs mt-1 px-1 text-white select-none"
+              className="title mt-1 px-1 select-none"
+              // A white label on the dotted desktop; selected = inverted, like the first desktops
               style={{
-                backgroundColor: isSelected ? '#000080' : 'transparent',
-                border: isSelected ? '1px dotted #ffffff' : '1px solid transparent',
-                textShadow: isSelected ? 'none' : '1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000',
+                backgroundColor: isSelected ? '#000' : '#fff',
+                color: isSelected ? '#fff' : '#000',
+                fontFamily: "'Pixelify Sans', sans-serif",
+                fontSize: 13,
+                lineHeight: 1.1,
               }}
             >
               {icon.title}
@@ -745,7 +754,7 @@ export const Desktop: React.FC = () => {
       {/* Custom Context Menu */}
       {contextMenu && (
         <div
-          className="context-menu absolute bg-[#c0c0c0] text-black border-2 border-outset p-[2px] z-[99999] select-none text-[11px] font-sans flex flex-col w-[150px] shadow"
+          className="context-menu absolute bg-white text-black border-2 border-outset p-[2px] z-[99999] select-none text-[11px] font-sans flex flex-col w-[150px] shadow"
           style={{
             left: `${contextMenu.x}px`,
             top: `${contextMenu.y}px`,
@@ -756,12 +765,12 @@ export const Desktop: React.FC = () => {
               saveCells({}); // back to the default order
               setContextMenu(null);
             }}
-            className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default"
+            className="hover:bg-black hover:text-white px-3 py-1 cursor-default"
           >
             Arrange Icons
           </div>
           <div className="px-3 py-1 cursor-default text-gray-500 opacity-60">Line Up Icons</div>
-          <div onClick={() => window.location.reload()} className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default">
+          <div onClick={() => window.location.reload()} className="hover:bg-black hover:text-white px-3 py-1 cursor-default">
             Refresh
           </div>
           <div className="h-[1px] bg-gray-400 my-1"></div>
@@ -774,20 +783,20 @@ export const Desktop: React.FC = () => {
             onMouseEnter={() => setActiveSubMenu('new')}
             onMouseLeave={() => setActiveSubMenu(null)}
             className={`px-3 py-1 cursor-default flex justify-between items-center relative ${
-              activeSubMenu === 'new' ? 'bg-[#000080] text-white' : 'hover:bg-[#000080] hover:text-white'
+              activeSubMenu === 'new' ? 'bg-black text-white' : 'hover:bg-black hover:text-white'
             }`}
           >
             <span>New</span>
             <span>▶</span>
 
             {activeSubMenu === 'new' && (
-              <div className="absolute bg-[#c0c0c0] text-black border-2 border-outset p-[2px] left-[144px] -top-1 w-[130px] flex flex-col z-[100000]">
+              <div className="absolute bg-white text-black border-2 border-outset p-[2px] left-[144px] -top-1 w-[130px] flex flex-col z-[100000]">
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
                     handleCreateNewFolder();
                   }}
-                  className="hover:bg-[#000080] hover:text-white px-2 py-1 cursor-default flex items-center gap-2"
+                  className="hover:bg-black hover:text-white px-2 py-1 cursor-default flex items-center gap-2"
                 >
                   <img src="/images/icons/folder-16x16.png" className="w-3.5 h-3.5" alt="" />
                   <span>Folder</span>
@@ -797,7 +806,7 @@ export const Desktop: React.FC = () => {
                     e.stopPropagation();
                     handleCreateNewTextFile();
                   }}
-                  className="hover:bg-[#000080] hover:text-white px-2 py-1 cursor-default flex items-center gap-2"
+                  className="hover:bg-black hover:text-white px-2 py-1 cursor-default flex items-center gap-2"
                 >
                   <img src="/images/icons/notepad-16x16.png" className="w-3.5 h-3.5" alt="" />
                   <span>Text Document</span>
@@ -819,7 +828,7 @@ export const Desktop: React.FC = () => {
               });
               setContextMenu(null);
             }}
-            className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default"
+            className="hover:bg-black hover:text-white px-3 py-1 cursor-default"
           >
             Properties
           </div>
@@ -829,7 +838,7 @@ export const Desktop: React.FC = () => {
       {/* Icon Right-Click Context Menu */}
       {iconContextMenu && (
         <div
-          className="context-menu absolute bg-[#c0c0c0] text-black border-2 border-outset p-[2px] z-[99999] select-none text-[11px] font-sans flex flex-col w-[140px] shadow"
+          className="context-menu absolute bg-white text-black border-2 border-outset p-[2px] z-[99999] select-none text-[11px] font-sans flex flex-col w-[140px] shadow"
           style={{
             left: `${iconContextMenu.x}px`,
             top: `${iconContextMenu.y}px`,
@@ -840,7 +849,7 @@ export const Desktop: React.FC = () => {
               handleIconDoubleClick(iconContextMenu.icon);
               setIconContextMenu(null);
             }}
-            className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default font-bold"
+            className="hover:bg-black hover:text-white px-3 py-1 cursor-default font-bold"
           >
             Open
           </div>
@@ -849,7 +858,7 @@ export const Desktop: React.FC = () => {
               <div className="h-[1px] bg-gray-400 my-1"></div>
               <div
                 onClick={() => handleDeleteIcon(iconContextMenu.icon)}
-                className="hover:bg-[#000080] hover:text-white px-3 py-1 cursor-default"
+                className="hover:bg-black hover:text-white px-3 py-1 cursor-default"
               >
                 Delete
               </div>
@@ -861,12 +870,12 @@ export const Desktop: React.FC = () => {
       {/* Custom Win98 Confirm Dialog Modal */}
       {confirmDialog && confirmDialog.isOpen && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-[999999] select-none">
-          <div className="os-window outset-deep bg-[#c0c0c0] w-[350px] text-black shadow-xl p-[2px]">
-            <div className="window-titlebar flex items-center justify-between px-2 py-1 font-bold text-white bg-gradient-to-r from-[#000080] to-[#1084d0] text-xs">
+          <div className="os-window outset-deep bg-white w-[350px] text-black shadow-xl p-[2px]">
+            <div className="window-titlebar flex items-center justify-between px-2 py-1 font-bold text-white bg-gradient-to-r from-black to-[#000] text-xs">
               <span className="truncate">{confirmDialog.title}</span>
               <button
                 onClick={() => setConfirmDialog(null)}
-                className="w-4 h-3.5 bg-[#c0c0c0] text-black flex items-center justify-center text-xs font-bold border border-outset active:border-inset"
+                className="w-4 h-3.5 bg-white text-black flex items-center justify-center text-xs font-bold border border-outset active:border-inset"
               >
                 ✕
               </button>
@@ -882,16 +891,16 @@ export const Desktop: React.FC = () => {
               />
               <p className="text-xs leading-relaxed text-black break-words flex-1">{confirmDialog.message}</p>
             </div>
-            <div className="flex justify-end gap-2 px-3 py-2 bg-[#c0c0c0]">
+            <div className="flex justify-end gap-2 px-3 py-2 bg-white">
               <button
                 onClick={() => confirmDialog.onConfirm()}
-                className="px-4 py-1 text-xs text-black border outset-deep bg-[#c0c0c0] active:inset-deep font-sans outline-none min-w-[60px] cursor-pointer"
+                className="px-4 py-1 text-xs text-black border outset-deep bg-white active:inset-deep font-sans outline-none min-w-[60px] cursor-pointer"
               >
                 Yes
               </button>
               <button
                 onClick={() => setConfirmDialog(null)}
-                className="px-4 py-1 text-xs text-black border outset-deep bg-[#c0c0c0] active:inset-deep font-sans outline-none min-w-[60px] cursor-pointer"
+                className="px-4 py-1 text-xs text-black border outset-deep bg-white active:inset-deep font-sans outline-none min-w-[60px] cursor-pointer"
               >
                 No
               </button>

@@ -152,10 +152,10 @@ export const SoundRecorder: React.FC = () => {
     setSaving(null);
   };
 
-  const btn = 'h-8 px-2 border-2 bg-[#c0c0c0] disabled:opacity-50 outline-none';
+  const btn = 'h-8 px-2 border-2 bg-white disabled:opacity-50 outline-none';
   const outset = { borderColor: '#fff #808080 #808080 #fff' };
   return (
-    <div className="sound-recorder flex flex-col gap-2 p-2 bg-[#c0c0c0] w-full h-full text-xs text-black select-none font-sans">
+    <div className="sound-recorder flex flex-col gap-2 p-2 bg-white w-full h-full text-xs text-black select-none font-sans">
       <div className="flex items-center gap-3">
         {(['audio', 'video'] as const).map((m) => (
           <label key={m} className="flex items-center gap-1">

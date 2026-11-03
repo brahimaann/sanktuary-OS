@@ -550,7 +550,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
               </button>
             ))}
           </div>
-          <span style={{ color: when && !parsed ? '#a00000' : '#000080', fontSize: 11 }}>
+          <span style={{ color: when && !parsed ? '#a00000' : '#000', fontSize: 11 }}>
             {parsed
               ? `→ ${describeWhen(kind === 'release' || kind === 'song' ? { ...parsed, time: '' } : parsed)}`
               : when

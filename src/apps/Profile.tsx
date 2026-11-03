@@ -228,7 +228,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
-                    background: isSelected ? '#000080' : hasVal ? '#e6f4ea' : '#c0c0c0',
+                    background: isSelected ? '#000' : hasVal ? '#e6f4ea' : '#fff',
                     color: isSelected ? '#fff' : '#000',
                     fontWeight: hasVal ? 700 : 400,
                   }}

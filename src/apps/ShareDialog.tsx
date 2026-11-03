@@ -221,7 +221,7 @@ export const PublicLinks: React.FC<{ item?: Ref; board?: string; onClose: () => 
           ))}
         </div>
       )}
-      {msg && <div style={{ color: msg === 'Link copied.' ? '#000080' : '#a00000', wordBreak: 'break-all' }}>{msg}</div>}
+      {msg && <div style={{ color: msg === 'Link copied.' ? '#000' : '#a00000', wordBreak: 'break-all' }}>{msg}</div>}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button style={button} onClick={onClose}>
           Close
@@ -235,7 +235,7 @@ export const dlg: React.CSSProperties = {
   width: 'min(380px, 100%)',
   maxHeight: '100%',
   overflow: 'auto',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '2px solid #fff',
   borderLeft: '2px solid #fff',
   borderRight: '2px solid #000',

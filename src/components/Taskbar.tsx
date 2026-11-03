@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@clerk/react';
 import { useWindowManager, AppType } from '../wm/manager';
 import sound from '../utils/sound';
+import SMark from './SMark';
 import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
 import { openStudio } from '../apps/Studio';
@@ -165,7 +166,7 @@ export const Taskbar: React.FC = () => {
   };
 
   return (
-    <div className="taskbar absolute bottom-0 left-0 right-0 h-[30px] flex items-center bg-[#c0c0c0] border-t-2 border-white select-none z-[99999]">
+    <div className="taskbar absolute bottom-0 left-0 right-0 h-[30px] flex items-center bg-white border-t-2 border-black select-none z-[99999]">
       {/* Start Button */}
       <button
         ref={startButtonRef}
@@ -174,8 +175,10 @@ export const Taskbar: React.FC = () => {
           startMenuOpen ? 'inset-deep' : ''
         }`}
       >
-        <img src="/images/start-logo.png" alt="WinLogo" className="w-4 h-4 mr-1 image-render-pixelated" />
-        Start
+        <span className="mr-1 flex">
+          <SMark size={16} />
+        </span>
+        Sanktuary
       </button>
 
       <div className="taskbar-divider h-5 w-[2px] mx-1 border-l border-gray-600 border-r border-white" />
@@ -200,8 +203,8 @@ export const Taskbar: React.FC = () => {
 
       {/* Tray */}
       <div
-        className="tray flex items-center h-[22px] px-2 m-[2px] bg-[#c0c0c0] border-2 border-inset text-xs text-black"
-        style={{ borderStyle: 'solid', borderColor: '#808080 #fff #fff #808080' }}
+        className="tray flex items-center h-[22px] px-2 m-[2px] bg-white border-2 border-inset text-xs text-black"
+        style={{ borderStyle: 'solid', borderColor: '#000' }}
       >
         <TeamsTray />
         <NotificationTray />
@@ -223,7 +226,7 @@ export const Taskbar: React.FC = () => {
         )}
         <img src="/images/icons/speaker-16x16.png" alt="Volume" className="w-4 h-4 mr-2 image-render-pixelated" />
         <span
-          className="taskbar-time cursor-pointer select-none px-1 hover:bg-[#000080] hover:text-white"
+          className="taskbar-time cursor-pointer select-none px-1 hover:bg-black hover:text-white"
           onClick={() => setCalendarOpen(!calendarOpen)}
           title="Click to view calendar & clock"
         >
@@ -271,7 +274,7 @@ export const Taskbar: React.FC = () => {
           <ul className="flex-1 list-none p-1 m-0 text-xs">
             {/* Members: the studio first. Visitors: the tour and the way in. */}
             {(isSignedIn ? STUDIO_MENU : VISITOR_MENU).map((m) => (
-              <li key={m.id} className="hover:bg-[#000080] hover:text-white group">
+              <li key={m.id} className="hover:bg-black hover:text-white group">
                 <button
                   onClick={() => launchApp(m.id, m.title, m.appType, m.icon, m.width, m.height, m.props)}
                   className={`w-full text-left py-1 px-2 flex items-center ${m.bold ? 'font-bold' : ''}`}
@@ -282,7 +285,7 @@ export const Taskbar: React.FC = () => {
               </li>
             ))}
             <hr className="my-1 border-t border-gray-400 border-b border-white" />
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() => launchApp('my-computer', 'My Computer', 'directory', '/images/icons/my-computer-16x16.png', 680, 500)}
                 className="w-full text-left py-1 px-2 flex items-center"
@@ -291,7 +294,7 @@ export const Taskbar: React.FC = () => {
                 <span>My Computer</span>
               </button>
             </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() => launchApp('notepad', 'Untitled - Notepad', 'notepad', '/images/icons/notepad-16x16.png', 480, 360)}
                 className="w-full text-left py-1 px-2 flex items-center"
@@ -300,7 +303,7 @@ export const Taskbar: React.FC = () => {
                 <span>Notepad</span>
               </button>
             </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() => launchApp('calculator', 'Calculator', 'calculator', '/images/icons/calculator-16x16.png', 260, 260)}
                 className="w-full text-left py-1 px-2 flex items-center"
@@ -309,7 +312,7 @@ export const Taskbar: React.FC = () => {
                 <span>Calculator</span>
               </button>
             </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() => launchApp('soundrec', 'Sound Recorder', 'soundrec', '/images/icons/speaker-16x16.png', 400, 360)}
                 className="w-full text-left py-1 px-2 flex items-center"
@@ -318,7 +321,7 @@ export const Taskbar: React.FC = () => {
                 <span>Sound Recorder</span>
               </button>
             </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() => launchApp('ppls-story', 'Ppls Library', 'ppls-story', '/images/icons/ppls-story-32x32.svg', 800, 600)}
                 className="w-full text-left py-1 px-2 flex items-center"
@@ -330,7 +333,7 @@ export const Taskbar: React.FC = () => {
 
             <hr className="my-1 border-t border-gray-400 border-b border-white" />
 
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() =>
                   launchApp('pinball', '3D Pinball for Windows - Space Cadet', 'iframe', '/images/icons/pinball-16x16.png', 600, 440, {
@@ -343,7 +346,7 @@ export const Taskbar: React.FC = () => {
                 <span>3D Pinball</span>
               </button>
             </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() =>
                   launchApp('paint', 'untitled - Paint', 'iframe', '/images/icons/paint-16x16.png', 800, 600, {
@@ -356,7 +359,7 @@ export const Taskbar: React.FC = () => {
                 <span>Paint</span>
               </button>
             </li>
-            <li className="hover:bg-[#000080] hover:text-white group">
+            <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() =>
                   launchApp('display-properties', 'Display Properties', 'display-properties', '/images/icons/themes-16x16.png', 360, 400)
@@ -453,7 +456,7 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         bottom: 'calc(100% + 2px)',
         zIndex: 1000001,
         width: 220,
-        background: '#c0c0c0',
+        background: '#fff',
         padding: 4,
         fontFamily: 'Tahoma, sans-serif',
         fontSize: 11,
@@ -463,7 +466,7 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       {/* Title bar */}
       <div
         style={{
-          background: '#000080',
+          background: '#000',
           color: '#fff',
           fontWeight: 700,
           padding: '2px 4px',
@@ -477,7 +480,7 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <button
           onClick={onClose}
           style={{
-            background: '#c0c0c0',
+            background: '#fff',
             color: '#000',
             border: '1px outset #fff',
             fontSize: 10,
@@ -527,7 +530,7 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             fontWeight: 700,
             fontSize: 10,
             color: '#666',
-            borderBottom: '1px solid #c0c0c0',
+            borderBottom: '1px solid #fff',
             paddingBottom: 2,
           }}
         >
@@ -547,7 +550,7 @@ const MiniCalendarPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 key={dayNum}
                 style={{
                   padding: '2px 0',
-                  background: current ? '#000080' : 'transparent',
+                  background: current ? '#000' : 'transparent',
                   color: current ? '#fff' : '#000',
                   fontWeight: current ? 700 : 400,
                   borderRadius: 1,
