@@ -1174,7 +1174,7 @@ try {
   writeFileSync(join(sets, 'Samples', 'Recorded', 'vox 0001.wav'), 'VOX');
   writeFileSync(join(sets, 'Samples', 'Recorded', 'other take.wav'), 'OTHER');
   writeFileSync(join(sets, 'Samples', 'Imported', 'kick.wav'), 'KICK');
-  const setA = `<Ableton>${liveRef('C:/Beats/Sets/Samples/Recorded/vox 0001.wav', 'Samples/Recorded/vox 0001.wav', 3)}${liveRef('C:/Users/brahi/Desktop/kick.wav', '../Desktop/kick.wav', 1)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}${liveRef('C:/ProgramData/Ableton/Live 12 Suite/Resources/Core Library/Samples/clap.wav', 'clap.wav', 6)}</Ableton>`;
+  const setA = `<Ableton>${liveRef('C:/Beats/Sets/Samples/Recorded/vox 0001.wav', 'Samples/Recorded/vox 0001.wav', 3)}${liveRef('C:/Users/brahi/Desktop/kick.wav', '../Desktop/kick.wav', 1)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}${liveRef('C:/Users/brahi/Documents/Ableton/User Library/Samples/Recorded/Vocal 2 0003.wav', '', 0)}${liveRef('C:/ProgramData/Ableton/Live 12 Suite/Resources/Core Library/Samples/clap.wav', 'clap.wav', 6)}</Ableton>`;
   writeFileSync(join(sets, 'WAIT.als'), gzipSync(setA));
   writeFileSync(
     join(sets, 'XAXA.als'),
@@ -1203,8 +1203,8 @@ try {
   );
   const missingTxt = readFileSync(join(outB, 'Missing samples.txt'), 'utf8');
   check(
-    'samples from outside the folder are listed, library sounds are not',
-    missingTxt.includes('gone.wav') && !missingTxt.includes('clap.wav'),
+    'samples from outside the folder (User Library recordings too) are listed, library sounds are not',
+    missingTxt.includes('gone.wav') && missingTxt.includes('Vocal 2 0003.wav') && !missingTxt.includes('clap.wav'),
   );
   check('only sets can be bundled', (await call('alice', '/api/files/view/Sets/Samples/Imported/kick.wav?bundle')).status === 400);
 

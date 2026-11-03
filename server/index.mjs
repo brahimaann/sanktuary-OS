@@ -924,6 +924,8 @@ async function moveProjects(space, from, to) {
 const MEDIA_REF =
   /(?:[A-Za-z]:[\\/]|\/(?:Users|Volumes)\/)[^\x00-\x1f"<>|*?]{1,300}?\.(?:wav|aiff?|mp3|flac|ogg|m4a|rx2|rex|mid|mp4|mov|mxf|avi|m4v|png|jpe?g|tiff?|psd|psb|ai|eps|pdf|svg|gif|exr|dng|cr[23]|nef|arw)(?![\w])/gi;
 const LIBRARY = /Ableton|Core Library|Program Files|Image-Line|FL Studio|Native Instruments|Splice/i; // everyone has their own copy
+// ...except what's in your own User Library's Samples (Live saves recordings there when a set isn't in a project)
+const library = (path) => LIBRARY.test(path) && !/User Library[\\/]Samples[\\/]/i.test(path);
 const SCAN_MAX = 300 * 1024 ** 2;
 
 async function missingFiles(dir) {
@@ -940,7 +942,7 @@ async function missingFiles(dir) {
     for (const text of [buf.toString('latin1'), buf.toString('utf16le'), buf.subarray(1).toString('utf16le')])
       for (const [ref] of text.matchAll(MEDIA_REF)) {
         const name = decodeXml(ref).split(/[\\/]/).pop(); // .als is XML: & arrives as &amp;
-        if (!LIBRARY.test(ref) && !have.has(name.toLowerCase())) missing.add(name);
+        if (!library(ref) && !have.has(name.toLowerCase())) missing.add(name);
       }
   }
   return [...missing].slice(0, 50);
@@ -997,7 +999,7 @@ function setRefs(xml, { byName, rels }) {
     const rel = decodeXml(ref.match(/<RelativePath Value="([^"]*)"/)?.[1] || '') || [...dirs, name].join('/');
     const have = rels.get(rel.replace(/^\.\//, '').toLowerCase()) || byName.get(name.toLowerCase());
     if (have) used.add(have);
-    else if (!LIBRARY.test(path || rel)) missing.add(name); // library sounds: everyone has their own copy
+    else if (!library(path || rel)) missing.add(name); // library sounds: everyone has their own copy
   }
   return { used: [...used], missing: [...missing] };
 }
