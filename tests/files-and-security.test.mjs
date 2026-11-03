@@ -1183,18 +1183,22 @@ try {
   const bundle = await fetch(B + '/api/files/view/Sets/WAIT.als?bundle', { headers: { cookie: cookie('alice') } });
   const outB = mkdtempSync(join(tmpdir(), 'sk-bundle-'));
   writeFileSync(join(outB, 'b.zip'), Buffer.from(await bundle.arrayBuffer()));
-  const inB = execFileSync(TAR, ['-tf', join(outB, 'b.zip')])
-    .toString()
-    .split('\n')
-    .filter(Boolean)
+  // Unpacked and walked rather than listed: tar.exe on Windows (the home server's pre-deploy run) lists differently
+  execFileSync(TAR, ['-xf', join(outB, 'b.zip'), '-C', outB]);
+  const inB = readdirSync(outB, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile() && e.name !== 'b.zip')
+    .map((e) =>
+      join(e.parentPath, e.name)
+        .slice(outB.length + 1)
+        .replace(/\\/g, '/'),
+    )
     .sort();
   check(
     'a set downloads with just its own samples and recordings',
     JSON.stringify(inB) ===
-      JSON.stringify(['./Missing samples.txt', './Samples/Imported/kick.wav', './Samples/Recorded/vox 0001.wav', './WAIT.als']),
+      JSON.stringify(['Missing samples.txt', 'Samples/Imported/kick.wav', 'Samples/Recorded/vox 0001.wav', 'WAIT.als']),
     inB,
   );
-  execFileSync(TAR, ['-xf', join(outB, 'b.zip'), '-C', outB]);
   check(
     'the bundled set is relinked to its samples',
     gunzipSync(readFileSync(join(outB, 'WAIT.als')))
