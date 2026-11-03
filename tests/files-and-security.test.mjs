@@ -1183,6 +1183,9 @@ try {
   const bundle = await fetch(B + '/api/files/view/Sets/WAIT.als?bundle', { headers: { cookie: cookie('alice') } });
   const outB = mkdtempSync(join(tmpdir(), 'sk-bundle-'));
   writeFileSync(join(outB, 'b.zip'), Buffer.from(await bundle.arrayBuffer()));
+  const bBytes = readFileSync(join(outB, 'b.zip'));
+  // Windows' own zip folders show a zip as empty when its names start with "./"
+  check('zip names have no "./" in front', bBytes.includes('Samples/Recorded/vox 0001.wav') && !bBytes.includes('./'));
   // Unpacked and walked rather than listed: tar.exe on Windows (the home server's pre-deploy run) lists differently
   execFileSync(TAR, ['-xf', join(outB, 'b.zip'), '-C', outB]);
   const inB = readdirSync(outB, { recursive: true, withFileTypes: true })

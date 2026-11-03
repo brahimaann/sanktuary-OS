@@ -656,7 +656,7 @@ async function zipFolder(res, dir, name, transfer) {
   // go in the zip; the sets on the drive stay as they are)
   const sets = items.filter((n) => extname(n).toLowerCase() === '.als');
   const fixed = [];
-  let tmp = null;
+  const tmp = await mkdtemp(join(os.tmpdir(), 'sk-zip-'));
   if (sets.length) {
     const files = await projectFiles(dir);
     for (const n of sets) {
@@ -669,28 +669,27 @@ async function zipFolder(res, dir, name, transfer) {
         continue; // not a readable set: zipped as it is
       }
       if (!changed) continue;
-      tmp ??= await mkdtemp(join(os.tmpdir(), 'sk-zip-'));
       await writeFile(join(tmp, n), gzipSync(Buffer.from(next, 'utf8')));
       fixed.push(n);
     }
   }
   const sizing = folderSize(dir);
   const size = await Promise.race([sizing, new Promise((r) => setTimeout(() => r(0), 400))]);
-  // "./name" so a file called e.g. "--use-compress-program=..." can never be read as a tar option
-  return sendZip(res, name, size, sizing, transfer, 'downloaded folder (zip)', tmp, [
-    '--exclude',
-    '.sk-*',
-    '-C',
-    dir,
-    ...items.filter((n) => !fixed.includes(n)).map((n) => `./${n}`),
-    ...(tmp ? ['-C', tmp, ...fixed.map((n) => `./${n}`)] : []),
-  ]);
+  const list = [{ cd: dir }, ...items.filter((n) => !fixed.includes(n)), ...(fixed.length ? [{ cd: tmp }, ...fixed] : [])];
+  return sendZip(res, name, size, sizing, transfer, 'downloaded folder (zip)', tmp, list, ['--exclude', '.sk-*']);
 }
 
-/** Streams a stored (uncompressed) zip made by tar from `args`; `tmp` (staged files) is removed once it's sent. */
-function sendZip(res, name, size, sizing, transfer, label, tmp, args) {
-  const tar = spawn(TAR, ['--format', 'zip', '--options', 'zip:compression=store', '-cf', '-', ...args]);
-  if (tmp) tar.on('close', () => rm(tmp, { recursive: true, force: true }).catch(() => {}));
+/**
+ * Streams a stored (uncompressed) zip of `list`: paths, with { cd: folder } entries switching folders. The list goes
+ * to tar as a file (-T), so names are never read as options and a set's hundreds of samples fit; names are stored
+ * as given, with no "./" in front (Windows' own zip folders show a zip whose names start with "./" as empty).
+ * `tmp` (the list and any staged files) is removed once it's sent.
+ */
+async function sendZip(res, name, size, sizing, transfer, label, tmp, list, extra = []) {
+  const lines = list.flatMap((n) => (typeof n === 'object' ? ['-C', n.cd] : [n === '-C' ? './-C' : n]));
+  await writeFile(join(tmp, '.list'), lines.join('\n') + '\n');
+  const tar = spawn(TAR, ['--format', 'zip', '--options', 'zip:compression=store', ...extra, '-cf', '-', '-T', join(tmp, '.list')]);
+  tar.on('close', () => rm(tmp, { recursive: true, force: true }).catch(() => {}));
   tar.stderr.resume();
   tar.on('error', (e) => res.destroy(e)); // tar missing: end this download, don't crash the whole server
   res.on('close', () => tar.kill());
@@ -727,16 +726,19 @@ async function setBundle(res, file, transfer) {
       join(tmp, 'Missing samples.txt'),
       `${name} also uses these samples, which aren't in its project folder:\r\n\r\n${missing.join('\r\n')}\r\n`,
     );
-  // The file list goes through -T (a set can use hundreds of samples: too many for one command line); its -C
-  // lines switch folders. Every name starts with "./", so none can be read as "-C".
-  const list = ['-C', dir, ...used.map((r) => `./${r}`), '-C', tmp, `./${name}`, ...(missing.length ? ['./Missing samples.txt'] : [])];
-  await writeFile(join(tmp, '.list'), list.join('\n') + '\n');
+  const list = [{ cd: dir }, ...used, { cd: tmp }, name, ...(missing.length ? ['Missing samples.txt'] : [])];
   let size = raw.length;
   for (const r of used) size += (await stat(join(dir, r)).catch(() => ({ size: 0 }))).size;
-  return sendZip(res, basename(name, extname(name)), size, Promise.resolve(size), transfer, 'downloaded set with its samples (zip)', tmp, [
-    '-T',
-    join(tmp, '.list'),
-  ]);
+  return sendZip(
+    res,
+    basename(name, extname(name)),
+    size,
+    Promise.resolve(size),
+    transfer,
+    'downloaded set with its samples (zip)',
+    tmp,
+    list,
+  );
 }
 
 // ── Projects: check-out / check-in, turns and followers — data/projects.json ──
@@ -9509,12 +9511,14 @@ async function youtubeApi(req, res, url) {
       });
       const v = await up.json().catch(() => ({}));
       if (!up.ok || !v.id) throw new Error(`YouTube didn't accept the video (${up.status})`);
-      Object.assign(job, { status: 'Done', pct: 100, url: `https://youtu.be/${v.id}` });
+      Object.assign(job, { pct: 100, url: `https://youtu.be/${v.id}` });
       if (rel) {
         rel.videoId = v.id;
         saveTracks();
       }
-      await notify(user.username, `On YouTube (${privacy}): "${title}" ${job.url}${rel ? ` · now on the ${rel.title} page` : ''}`, {});
+      const text = `On YouTube (${privacy}): "${title}" ${job.url}${rel ? ` · now on the ${rel.title} page` : ''}`;
+      await notify(user.username, text, {}).catch(console.error);
+      job.status = 'Done'; // after the notification is written, so whoever sees "Done" also finds it
     })().catch(async (e) => {
       Object.assign(job, { status: 'Failed', error: String(e.message).slice(0, 200) });
       await notify(user.username, `YouTube upload of "${title}" failed: ${job.error}`, {}).catch(() => {});
