@@ -72,7 +72,7 @@ const GROUPS = {
   Server: ['Health', 'Usage', 'Log'],
   People: ['Members'],
   Storage: ['Drives', 'Spaces', 'Backups'],
-  Website: ['Front page', 'CITIES', 'Stories', 'Mailing list', 'Shop & pool'],
+  Website: ['Front page', 'CITIES', 'Scout', 'Stories', 'Mailing list', 'Shop & pool'],
 } as const;
 type Tab = (typeof GROUPS)[keyof typeof GROUPS][number];
 // Tabs that edit the shared config, and so use the Save / Discard bar
@@ -257,6 +257,7 @@ const AdminPanel: React.FC = () => {
 
           {tab === 'Log' && <LogTab />}
           {tab === 'CITIES' && <BlogTab />}
+          {tab === 'Scout' && <ScoutTab />}
           {tab === 'Front page' && <FrontTab />}
           {tab === 'Mailing list' && <MailTab />}
           {tab === 'Usage' && <UsageTab />}
@@ -2390,6 +2391,177 @@ const BlogTab: React.FC = () => {
         </fieldset>
       )}
       {msg && <div style={{ color: '#a00000' }}>{msg}</div>}
+    </div>
+  );
+};
+
+type ScoutSource = {
+  id: string;
+  url: string;
+  name: string;
+  kind: string | null;
+  match: string;
+  pattern: string;
+  leads: number;
+  checked?: string;
+  error?: string | null;
+};
+type Lead = {
+  id: string;
+  from: string;
+  title: string;
+  link: string;
+  excerpt: string;
+  kind: 'event' | 'opportunity' | 'story';
+  start: string | null;
+  location: string;
+  deadline: string | null;
+};
+const LEAD_KINDS = { event: 'Event', opportunity: 'Opportunity', story: 'Story lead' };
+
+/** Scout: feeds, calendars and listing pages it watches, and the leads it found. Nothing here is public until an
+ *  admin accepts a lead (into a private Timeline entry, an Opportunity or a CITIES draft) and publishes it there. */
+const ScoutTab: React.FC = () => {
+  const api = useApi();
+  const [data, setData] = useState<{ sources: ScoutSource[]; leads: Lead[] } | null>(null);
+  const [add, setAdd] = useState({ url: '', name: '', kind: '', match: '', pattern: '' });
+  const [as, setAs] = useState<Record<string, { as?: string; start?: string }>>({});
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => api('/api/scout').then(setData, (e) => setMsg(e.message)), [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const run = (p: Promise<unknown>) =>
+    p.then(
+      () => (setMsg(''), load()),
+      (e) => setMsg(e.message),
+    );
+  if (!data) return <div>{msg || 'Loading...'}</div>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={hint}>
+        Scout reads these every 6 hours and brings back what's new. Keep the picks that pass the CITIES test: does it make you think, does
+        it respect people, does it show life growing? Accepted events land on the Timeline as private entries, opportunities go to the team,
+        story leads become CITIES drafts. Instagram, Facebook and TikTok forbid scraping, so follow artists through their own sites,
+        newsletters, calendars and YouTube.
+      </p>
+      {msg && <div style={{ color: '#a00' }}>{msg}</div>}
+      <fieldset style={fieldset}>
+        <legend>Leads ({data.leads.length})</legend>
+        {data.leads.map((l) => {
+          const pick = { as: l.kind, start: l.start || '', ...as[l.id] };
+          return (
+            <div key={l.id} style={{ padding: '4px 0', borderBottom: '1px solid #ddd' }}>
+              <div>
+                <b>{l.title}</b> · {l.from}
+                {l.start && ` · ${l.start}`}
+                {l.location && ` · ${l.location}`}
+                {l.deadline && ` · due ${l.deadline}`} ·{' '}
+                <a href={l.link} target="_blank" rel="noopener noreferrer">
+                  open
+                </a>
+              </div>
+              {l.excerpt && <div style={{ color: '#444', margin: '2px 0' }}>{l.excerpt}</div>}
+              <div style={row}>
+                <select style={input} value={pick.as} onChange={(e) => setAs({ ...as, [l.id]: { ...pick, as: e.target.value } })}>
+                  {Object.entries(LEAD_KINDS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+                {pick.as === 'event' && (
+                  <input
+                    type="date"
+                    style={input}
+                    value={pick.start}
+                    onChange={(e) => setAs({ ...as, [l.id]: { ...pick, start: e.target.value } })}
+                  />
+                )}
+                <button
+                  style={button}
+                  onClick={() =>
+                    run(
+                      api(`/api/scout/leads/${l.id}/accept`, {
+                        method: 'POST',
+                        body: JSON.stringify(pick.as === 'event' ? pick : { as: pick.as }),
+                      }),
+                    )
+                  }
+                >
+                  Accept
+                </button>
+                <button style={button} onClick={() => run(api(`/api/scout/leads/${l.id}/dismiss`, { method: 'POST' }))}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {!data.leads.length && <div style={{ color: '#555' }}>Nothing new. Scout checks again within 6 hours.</div>}
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Sources</legend>
+        {data.sources.map((s) => (
+          <div key={s.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+            <Dot ok={s.checked ? !s.error : null} /> <b>{s.name}</b>
+            <span style={{ color: '#555', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {s.error ? `can't read it right now (${s.error})` : s.checked ? `${s.leads} new` : 'not checked yet'} · {s.url}
+            </span>
+            <button style={button} onClick={() => (setMsg('Checking...'), run(api(`/api/scout/check/${s.id}`, { method: 'POST' })))}>
+              Check now
+            </button>
+            <button style={button} onClick={() => run(api(`/api/scout/sources/${s.id}`, { method: 'DELETE' }))}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div style={row}>
+          <input
+            style={{ ...input, flex: 1, minWidth: 200 }}
+            placeholder="Feed, .ics calendar or listing page link"
+            value={add.url}
+            onChange={(e) => setAdd({ ...add, url: e.target.value })}
+          />
+          <input style={input} placeholder="Name" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} />
+          <select style={input} value={add.kind} onChange={(e) => setAdd({ ...add, kind: e.target.value })}>
+            <option value="">Guess each lead</option>
+            {Object.entries(LEAD_KINDS).map(([k, v]) => (
+              <option key={k} value={k}>
+                All {v.toLowerCase()}s
+              </option>
+            ))}
+          </select>
+          <input
+            style={input}
+            title="Only leads that mention one of these words, e.g. art|music|festival"
+            placeholder="Words (art|music)"
+            value={add.match}
+            onChange={(e) => setAdd({ ...add, match: e.target.value })}
+          />
+          <input
+            style={input}
+            title="On a listing page: only links containing this, e.g. /opportunity/"
+            placeholder="Link pattern"
+            value={add.pattern}
+            onChange={(e) => setAdd({ ...add, pattern: e.target.value })}
+          />
+          <button
+            style={button}
+            disabled={!add.url.trim()}
+            onClick={() => {
+              setMsg('Reading the source...');
+              run(
+                api('/api/scout/sources', { method: 'POST', body: JSON.stringify(add) }).then(() =>
+                  setAdd({ url: '', name: '', kind: '', match: '', pattern: '' }),
+                ),
+              );
+            }}
+          >
+            Add source
+          </button>
+        </div>
+      </fieldset>
     </div>
   );
 };
