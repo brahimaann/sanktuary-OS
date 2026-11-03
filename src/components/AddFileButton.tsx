@@ -50,7 +50,7 @@ const AddFileButton: React.FC<{
             ...(up ? { bottom: '100%', marginBottom: 2 } : { top: '100%', marginTop: 2 }),
             zIndex: 30,
             minWidth: 190,
-            background: '#c0c0c0',
+            background: '#fff',
             border: '2px outset #fff',
             boxShadow: '1px 1px 0 #000',
           }}

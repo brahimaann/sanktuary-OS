@@ -1,33 +1,88 @@
 :root {
-  /* ── SABR 98 Custom Palette ── */
-  --sabr-title-active-start: #5c2018;
-  --sabr-title-active-end: #9b4d30;
-  --sabr-title-inactive-start: #7a6e64;
-  --sabr-title-inactive-end: #a89e94;
-  --sabr-accent: #c47a3c;
-  --sabr-accent-dark: #8b4d20;
-  --sabr-desktop-bg: #1e1612;
-  --sabr-taskbar-bg: #c0b8ae;
-  --sabr-start-btn: #c0b0a0;
-  --sabr-text-warm: #f5e6d3;
-  --sabr-highlight: #d4915a;
+  /* ── The S machine: 1-bit paper and ink, plus one signal colour (the selection, the main action, the S) ── */
+  --sk-paper: #fff;
+  --sk-ink: #000;
+  --sk-signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+  --sk-dither: radial-gradient(#000 0.9px, transparent 1px) 0 0 / 4px 4px, #fff;
+  /* Flat 2 px black frame instead of the Win98 bevels (os-gui reads these for buttons, fields and windows) */
+  --sk-frame: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M0 0h6v6H0z'/%3E%3C/svg%3E")
+    2 / 2px;
+  --button-normal-border-image: var(--sk-frame);
+  --button-active-border-image: var(--sk-frame);
+  --inset-deep-border-image: var(--sk-frame);
+  --button-default-border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M0 0h9v9H0z'/%3E%3C/svg%3E")
+    3 / 3px;
+  --button-default-active-border-image: var(--button-default-border-image);
+  --checker: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1z'/%3E%3C/svg%3E");
 
-  /* Overwrite the default OS-GUI variables system-wide */
-  --Background: var(--sabr-desktop-bg);
-  --Hilight: var(--sabr-highlight);
-  --ActiveTitle: var(--sabr-title-active-start);
-  --GradientActiveTitle: var(--sabr-title-active-end);
-  --InactiveTitle: var(--sabr-title-inactive-start);
-  --GradientInactiveTitle: var(--sabr-title-inactive-end);
-  --ButtonFace: var(--sabr-taskbar-bg);
-  --Scrollbar: var(--sabr-taskbar-bg);
-  --Menu: var(--sabr-taskbar-bg);
+  /* The os-gui theme colours, system-wide */
+  --Background: var(--sk-paper);
+  --AppWorkspace: var(--sk-paper);
+  --ActiveTitle: var(--sk-paper);
+  --GradientActiveTitle: var(--sk-paper);
+  --TitleText: var(--sk-ink);
+  --InactiveTitle: var(--sk-paper);
+  --GradientInactiveTitle: var(--sk-paper);
+  --InactiveTitleText: #808080;
+  --ActiveBorder: var(--sk-ink);
+  --InactiveBorder: var(--sk-ink);
+  --WindowFrame: var(--sk-ink);
+  --ButtonFace: var(--sk-paper);
+  --ButtonLight: var(--sk-paper);
+  --ButtonHilight: var(--sk-paper);
+  --ButtonShadow: var(--sk-ink);
+  --ButtonDkShadow: var(--sk-ink);
+  --ButtonText: var(--sk-ink);
+  --Hilight: var(--sk-ink);
+  --HilightText: var(--sk-paper);
+  --HotTrackingColor: var(--sk-ink);
+  --Menu: var(--sk-paper);
+  --MenuText: var(--sk-ink);
+  --Scrollbar: var(--sk-paper);
+  --Window: var(--sk-paper);
+  --WindowText: var(--sk-ink);
+  --InfoWindow: var(--sk-paper);
 }
 
 @import 'tailwindcss';
 
 @import './layout.css';
 @import './classic.css';
+
+@font-face {
+  font-family: 'Pixelify Sans';
+  src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Pixelify Sans';
+  src: url('/font/pixelify-sans/pixelify-sans-latin-ext.woff2') format('woff2');
+  font-weight: 400 700;
+  font-display: swap;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Silkscreen';
+  src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Silkscreen';
+  src: url('/font/silkscreen/silkscreen-latin-ext.woff2') format('woff2');
+  font-display: swap;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 /* Exact clone rules */
 * {
@@ -43,8 +98,8 @@ html {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background-color: var(--Background, #008080); /* Perfect Win98 Teal, overridden by SABR */
-  font-family: 'MS Sans Serif', Arial, sans-serif;
+  background: var(--sk-dither);
+  font-family: 'Pixelify Sans', Arial, sans-serif;
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: none;
 }
@@ -73,7 +128,7 @@ html {
   width: 100%;
 }
 .w98-mp-lcd {
-  background: #000080;
+  background: #000;
   color: #fff;
   font-weight: 700;
   padding: 5px 8px;
@@ -99,7 +154,7 @@ html {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #c0c0c0;
+  background: #fff;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
   box-shadow: inset -1px -1px #808080;
@@ -135,7 +190,7 @@ input[type='range'],
 input[type='range']::-webkit-slider-runnable-track,
 .w98-track::-webkit-slider-runnable-track {
   height: 4px;
-  background: #c0c0c0;
+  background: #fff;
   border: 1px solid;
   border-color: #808080 #fff #fff #808080;
   box-shadow: inset 1px 1px #000;
@@ -143,7 +198,7 @@ input[type='range']::-webkit-slider-runnable-track,
 input[type='range']::-moz-range-track,
 .w98-track::-moz-range-track {
   height: 4px;
-  background: #c0c0c0;
+  background: #fff;
   border: 1px solid;
   border-color: #808080 #fff #fff #808080;
   box-shadow: inset 1px 1px #000;
@@ -154,7 +209,7 @@ input[type='range']::-webkit-slider-thumb,
   width: 11px;
   height: 20px;
   margin-top: -9px;
-  background: #c0c0c0;
+  background: #fff;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
   box-shadow:
@@ -167,7 +222,7 @@ input[type='range']::-moz-range-thumb,
   width: 11px;
   height: 20px;
   border-radius: 0;
-  background: #c0c0c0;
+  background: #fff;
   border: 1px solid;
   border-color: #fff #000 #000 #fff;
   box-shadow:
@@ -200,7 +255,7 @@ button:disabled {
 @keyframes sk-blink {
   0%,
   100% {
-    background: linear-gradient(90deg, #000080, #1084d0);
+    background: linear-gradient(90deg, #000, #000);
   }
   50% {
     background: #808080;

@@ -65,8 +65,8 @@ const LocalEchoTerminal: React.FC = () => {
       type: 'info',
       content: (
         <div>
-          <div>Microsoft(R) Windows 98</div>
-          <div>&nbsp;&nbsp;&nbsp;(C)Copyright Microsoft Corp 1981-1998.</div>
+          <div>Sanktuary OS</div>
+          <div>&nbsp;&nbsp;&nbsp;(C) The Sanktuary</div>
           <div style={{ height: 6 }} />
           <div>📡 LOCAL RESONANCE SYSTEM COMMAND UTILITY [Version 1.0.4]</div>
           <div>
@@ -107,7 +107,7 @@ const LocalEchoTerminal: React.FC = () => {
   };
 
   const appendLine = (text: string, type: ConsoleItem['type'] = 'text') => {
-    let color = '#c0c0c0';
+    let color = '#fff';
     if (type === 'error') color = '#ff5555';
     else if (type === 'success') color = '#55ff55';
     else if (type === 'info') color = '#55ffff';
@@ -261,7 +261,7 @@ const LocalEchoTerminal: React.FC = () => {
         break;
       }
       case 'ver': {
-        appendLine(`Microsoft Windows 98 [Version 4.10.1998]`);
+        appendLine(`Sanktuary OS`);
         appendLine(`Local Resonance Scanning Subsystem [Version 1.0.4]`);
         break;
       }
@@ -637,14 +637,14 @@ const LocalEchoTerminal: React.FC = () => {
           outline: none;
         }
         .dos-btn:hover {
-          background: #c0c0c0;
+          background: #fff;
           border-top: 1px solid #ffffff;
           border-left: 1px solid #ffffff;
           border-bottom: 1px solid #808080;
           border-right: 1px solid #808080;
         }
         .dos-btn:active {
-          background: #c0c0c0;
+          background: #fff;
           border-top: 1px solid #808080;
           border-left: 1px solid #808080;
           border-bottom: 1px solid #ffffff;
@@ -670,7 +670,7 @@ const LocalEchoTerminal: React.FC = () => {
           background: #dfdfdf;
         }
         .dos-screen::-webkit-scrollbar-thumb {
-          background: #c0c0c0;
+          background: #fff;
           border-top: 1px solid #ffffff;
           border-left: 1px solid #ffffff;
           border-bottom: 1px solid #808080;
@@ -680,7 +680,7 @@ const LocalEchoTerminal: React.FC = () => {
         .dos-screen::-webkit-scrollbar-button {
           display: block;
           height: 16px;
-          background: #c0c0c0;
+          background: #fff;
           border-top: 1px solid #ffffff;
           border-left: 1px solid #ffffff;
           border-bottom: 1px solid #808080;
@@ -857,14 +857,14 @@ const terminalShell: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: '"Courier New", Courier, monospace',
   boxSizing: 'border-box',
   overflow: 'hidden',
 };
 
 const toolbarStyle: React.CSSProperties = {
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   display: 'flex',
   alignItems: 'center',
@@ -898,7 +898,7 @@ const monitorScreen = (fontSize: number): React.CSSProperties => ({
   padding: '8px 12px 28px 12px',
   overflowY: 'auto',
   fontSize: fontSize,
-  color: '#c0c0c0',
+  color: '#fff',
 });
 
 const screenContent: React.CSSProperties = {
@@ -912,7 +912,7 @@ const promptLine: React.CSSProperties = {
   alignItems: 'center',
   width: '100%',
   fontFamily: '"Courier New", Courier, monospace',
-  color: '#c0c0c0',
+  color: '#fff',
   marginTop: '4px',
 };
 

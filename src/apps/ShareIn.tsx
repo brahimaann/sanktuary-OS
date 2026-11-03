@@ -192,7 +192,7 @@ const ShareForm: React.FC<{ missed?: boolean }> = ({ missed }) => {
             {f.name} <span style={{ color: '#666' }}>({size(f.size)})</span>
           </div>
         ))}
-        {shared.text && <div style={{ whiteSpace: 'pre-wrap', color: '#000080' }}>{shared.text}</div>}
+        {shared.text && <div style={{ whiteSpace: 'pre-wrap', color: '#000' }}>{shared.text}</div>}
       </div>
       <div>Put it in:</div>
       {radio('track', 'A song (bounce)', !files.length || !releases.length)}

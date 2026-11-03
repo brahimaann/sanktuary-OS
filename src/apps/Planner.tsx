@@ -152,7 +152,7 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
               style={{
                 width: 250,
                 flexShrink: 0,
-                background: '#c0c0c0',
+                background: '#fff',
                 borderTop: '1px solid #fff',
                 borderLeft: '1px solid #fff',
                 borderRight: '1px solid #000',
@@ -160,7 +160,7 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
                 display: 'flex',
                 flexDirection: 'column',
                 maxHeight: '100%',
-                outline: overCol === col.id ? '2px dashed #000080' : 'none',
+                outline: overCol === col.id ? '2px dashed #000' : 'none',
               }}
             >
               <div
@@ -169,7 +169,7 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
                   alignItems: 'center',
                   gap: 4,
                   padding: '3px 4px',
-                  background: '#000080',
+                  background: '#000',
                   color: '#fff',
                   fontWeight: 700,
                 }}
@@ -292,7 +292,7 @@ const CardEditor: React.FC<{
           width: 'min(440px, 92%)',
           maxHeight: '92%',
           overflow: 'auto',
-          background: '#c0c0c0',
+          background: '#fff',
           borderTop: '2px solid #fff',
           borderLeft: '2px solid #fff',
           borderRight: '2px solid #000',
@@ -301,7 +301,7 @@ const CardEditor: React.FC<{
           flexDirection: 'column',
         }}
       >
-        <div style={{ background: '#000080', color: '#fff', fontWeight: 700, padding: '3px 6px', display: 'flex' }}>
+        <div style={{ background: '#000', color: '#fff', fontWeight: 700, padding: '3px 6px', display: 'flex' }}>
           <span style={{ flex: 1 }}>Card details</span>
           <button onClick={onClose} style={{ ...button, padding: '0 5px', minHeight: 0 }}>
             ×

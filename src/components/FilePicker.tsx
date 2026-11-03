@@ -58,10 +58,8 @@ const FilePicker: React.FC<{
         zIndex: 1000005,
       }}
     >
-      <div style={{ width: 'min(420px, 96%)', background: '#c0c0c0', border: '2px outset #fff', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000080,#1084d0)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
-          {title}
-        </div>
+      <div style={{ width: 'min(420px, 96%)', background: '#fff', border: '2px outset #fff', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>{title}</div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             Look in
@@ -101,7 +99,7 @@ const FilePicker: React.FC<{
                   alignItems: 'center',
                   padding: '3px 6px',
                   cursor: 'default',
-                  ...(chosen === e.name ? { background: '#000080', color: '#fff' } : {}),
+                  ...(chosen === e.name ? { background: '#000', color: '#fff' } : {}),
                 }}
               >
                 <img src={fileIcon(e.name, e.isDir)} alt="" style={{ width: 16, height: 16 }} />
@@ -132,7 +130,7 @@ const btn: React.CSSProperties = {
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '2px 10px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #000',

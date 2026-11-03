@@ -59,7 +59,7 @@ const Network: React.FC = () => {
                 display: 'flex',
                 gap: 8,
                 padding: 6,
-                border: '1px solid #c0c0c0',
+                border: '1px solid #fff',
                 cursor: 'default',
                 opacity: s.online ? 1 : 0.55,
                 userSelect: 'none',
@@ -84,7 +84,7 @@ const Network: React.FC = () => {
                         style={{
                           height: '100%',
                           width: `${Math.min(100, (used / total) * 100)}%`,
-                          background: used / total > 0.9 ? '#a00000' : '#000080',
+                          background: used / total > 0.9 ? '#a00000' : '#000',
                         }}
                       />
                     </div>

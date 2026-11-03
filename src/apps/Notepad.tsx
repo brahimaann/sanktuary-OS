@@ -85,49 +85,49 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
   };
 
   return (
-    <div className="notepad flex flex-col h-full bg-[#c0c0c0] text-black text-xs font-sans select-text">
+    <div className="notepad flex flex-col h-full bg-white text-black text-xs font-sans select-text">
       {/* Menu Bar */}
-      <div className="menus flex items-center bg-[#c0c0c0] px-1 border-b border-gray-400 select-none">
+      <div className="menus flex items-center bg-white px-1 border-b border-gray-400 select-none">
         <div className="group relative">
-          <button className="menu-button px-2 py-1 hover:bg-[#000080] hover:text-white outline-none">File</button>
-          <div className="hidden group-hover:block absolute left-0 top-[18px] bg-[#c0c0c0] border-2 border-outset w-[100px] z-[999] shadow">
-            <button onClick={handleNew} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+          <button className="menu-button px-2 py-1 hover:bg-black hover:text-white outline-none">File</button>
+          <div className="hidden group-hover:block absolute left-0 top-[18px] bg-white border-2 border-outset w-[100px] z-[999] shadow">
+            <button onClick={handleNew} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               New
             </button>
-            <button onClick={handleOpen} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+            <button onClick={handleOpen} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               Open...
             </button>
-            <button onClick={handleSave} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+            <button onClick={handleSave} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               Save
             </button>
-            <button onClick={handleSaveAs} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+            <button onClick={handleSaveAs} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               Save As...
             </button>
             <hr className="my-1 border-t border-gray-400 border-b border-white" />
-            <button onClick={() => closeWindow('notepad')} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+            <button onClick={() => closeWindow('notepad')} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               Exit
             </button>
           </div>
         </div>
 
         <div className="group relative">
-          <button className="menu-button px-2 py-1 hover:bg-[#000080] hover:text-white outline-none">Edit</button>
-          <div className="hidden group-hover:block absolute left-0 top-[18px] bg-[#c0c0c0] border-2 border-outset w-[120px] z-[999] shadow">
-            <button onClick={() => setContent('')} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+          <button className="menu-button px-2 py-1 hover:bg-black hover:text-white outline-none">Edit</button>
+          <div className="hidden group-hover:block absolute left-0 top-[18px] bg-white border-2 border-outset w-[120px] z-[999] shadow">
+            <button onClick={() => setContent('')} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               Clear All
             </button>
-            <button onClick={insertDateTime} className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white">
+            <button onClick={insertDateTime} className="w-full text-left px-3 py-1 hover:bg-black hover:text-white">
               Time/Date
             </button>
           </div>
         </div>
 
         <div className="group relative">
-          <button className="menu-button px-2 py-1 hover:bg-[#000080] hover:text-white outline-none">Help</button>
-          <div className="hidden group-hover:block absolute left-0 top-[18px] bg-[#c0c0c0] border-2 border-outset w-[120px] z-[999] shadow">
+          <button className="menu-button px-2 py-1 hover:bg-black hover:text-white outline-none">Help</button>
+          <div className="hidden group-hover:block absolute left-0 top-[18px] bg-white border-2 border-outset w-[120px] z-[999] shadow">
             <button
-              onClick={() => dialog.alert(`Windows 98 Notepad\nExact React Clone`)}
-              className="w-full text-left px-3 py-1 hover:bg-[#000080] hover:text-white"
+              onClick={() => dialog.alert('Sanktuary Notepad')}
+              className="w-full text-left px-3 py-1 hover:bg-black hover:text-white"
             >
               About Notepad
             </button>
@@ -148,7 +148,7 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
       </div>
 
       {/* Status Bar */}
-      <div className="status-bar h-5 px-2 bg-[#c0c0c0] border-t border-gray-400 flex justify-end items-center text-[10px] text-gray-700 font-sans">
+      <div className="status-bar h-5 px-2 bg-white border-t border-gray-400 flex justify-end items-center text-[10px] text-gray-700 font-sans">
         <div className="border-l border-gray-500 pl-2 h-4 flex items-center pr-4">{statusText}</div>
       </div>
     </div>

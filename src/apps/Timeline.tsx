@@ -37,7 +37,7 @@ interface Entry {
 const KIND_COLORS: Record<string, string> = {
   Shoot: '#a05000',
   Artwork: '#800080',
-  Video: '#000080',
+  Video: '#000',
   Event: '#008080',
   Drop: '#a00000',
   Other: '#808080',
@@ -137,7 +137,7 @@ const TimelineApp: React.FC = () => {
         }
         style={{
           ...row,
-          ...(i.id === openId ? { background: '#000080', color: '#fff' } : {}),
+          ...(i.id === openId ? { background: '#000', color: '#fff' } : {}),
           opacity: past || i.status === 'Cancelled' || i.done ? 0.55 : 1,
         }}
         title={
@@ -216,11 +216,11 @@ const TimelineApp: React.FC = () => {
 const TodayLine: React.FC<{ refEl: React.RefObject<HTMLDivElement | null> }> = ({ refEl }) => (
   <div
     ref={refEl}
-    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px', color: '#000080', fontWeight: 700, scrollMarginTop: 24 }}
+    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px', color: '#000', fontWeight: 700, scrollMarginTop: 24 }}
   >
     <RetroIcon name="forward" />
     Today, {new Date().toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}
-    <span style={{ flex: 1, borderTop: '2px solid #000080' }} />
+    <span style={{ flex: 1, borderTop: '2px solid #000' }} />
   </div>
 );
 
@@ -271,7 +271,7 @@ const EntryPanel: React.FC<{
         position: 'absolute',
         inset: 0,
         zIndex: 5,
-        background: '#c0c0c0',
+        background: '#fff',
         padding: 8,
         display: 'flex',
         flexDirection: 'column',
@@ -466,7 +466,7 @@ const listBox: React.CSSProperties = { overflow: 'auto', background: '#fff', bor
 const monthHead: React.CSSProperties = {
   position: 'sticky',
   top: 0,
-  background: '#c0c0c0',
+  background: '#fff',
   padding: '2px 6px',
   fontWeight: 700,
   borderBottom: '1px solid #808080',

@@ -42,7 +42,7 @@ const PplsThreadViewer: React.FC<PplsThreadViewerProps> = ({ threadId }) => {
               onClick={() => setActiveTab(tab)}
               style={{
                 ...tabBtn,
-                background: isActive ? '#c0c0c0' : '#d4d0c8',
+                background: isActive ? '#fff' : '#d4d0c8',
                 fontWeight: isActive ? 700 : 400,
                 borderBottom: isActive ? '2px solid transparent' : '1.5px solid #808080',
                 marginTop: isActive ? 0 : 2,
@@ -118,7 +118,7 @@ const container: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   fontSize: 11,
   padding: 6,

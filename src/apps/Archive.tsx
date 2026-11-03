@@ -80,7 +80,7 @@ export const Archive: React.FC = () => {
               fontSize: 11,
               padding: '2px 8px',
               fontWeight: filter === f ? 700 : 400,
-              background: filter === f ? '#000080' : '#c0c0c0',
+              background: filter === f ? '#000' : '#fff',
               color: filter === f ? '#fff' : '#000',
             }}
           >

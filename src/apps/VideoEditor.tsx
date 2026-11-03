@@ -174,7 +174,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     songPeaks.forEach((p, i) => {
       const bh = (p / top) * h;
       const s = (i / songPeaks.length) * songLength;
-      g.fillStyle = s >= songAt && s < songAt + duration ? '#000080' : '#a0a0a0';
+      g.fillStyle = s >= songAt && s < songAt + duration ? '#000' : '#a0a0a0';
       g.fillRect(i * bar, (h - bh) / 2, Math.max(1, bar - 0.5), bh);
     });
     g.fillStyle = '#c00000';

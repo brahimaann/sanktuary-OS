@@ -13,8 +13,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         variables: {
           borderRadius: '0px',
           fontFamily: '"MS Sans Serif", Arial, sans-serif',
-          colorPrimary: '#000080',
-          colorBackground: '#c0c0c0',
+          colorPrimary: '#000',
+          colorBackground: '#fff',
           colorForeground: '#000000',
           colorInput: '#ffffff',
         },

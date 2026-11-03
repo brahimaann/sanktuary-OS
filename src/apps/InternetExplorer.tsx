@@ -181,7 +181,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
           <span
             style={{
               ...menuItem,
-              background: showFavMenu ? 'var(--sabr-title-active-start)' : 'transparent',
+              background: showFavMenu ? '#000' : 'transparent',
               color: showFavMenu ? '#fff' : '#000',
             }}
             onClick={() => {
@@ -198,10 +198,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
                 <div
                   key={fav.url}
                   style={favItem}
-                  onMouseEnter={(e) => (
-                    (e.currentTarget.style.background = 'var(--sabr-title-active-start)'),
-                    (e.currentTarget.style.color = '#fff')
-                  )}
+                  onMouseEnter={(e) => ((e.currentTarget.style.background = '#000'), (e.currentTarget.style.color = '#fff'))}
                   onMouseLeave={(e) => ((e.currentTarget.style.background = 'transparent'), (e.currentTarget.style.color = '#000'))}
                   onClick={() => navigate(fav.url)}
                 >
@@ -312,7 +309,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
                   key={fav.url}
                   style={favSidebarItem}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'var(--sabr-title-active-start)';
+                    e.currentTarget.style.background = '#000';
                     e.currentTarget.style.color = '#fff';
                   }}
                   onMouseLeave={(e) => {
@@ -358,9 +355,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
 
       {/* ── Status Bar ── */}
       <div style={statusBar}>
-        <div style={statusLeft}>
-          {isLoading ? <span style={{ color: 'var(--sabr-title-active-start)' }}>⏳ {statusText}</span> : <span>✓ {statusText}</span>}
-        </div>
+        <div style={statusLeft}>{isLoading ? <span style={{ color: '#000' }}>⏳ {statusText}</span> : <span>✓ {statusText}</span>}</div>
         <div style={statusRight}>
           <span style={{ marginRight: 8, fontSize: 9 }}>🔒 Internet</span>
         </div>
@@ -386,7 +381,7 @@ const shell: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   fontSize: 11,
   overflow: 'hidden',
@@ -398,7 +393,7 @@ const menuBar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   padding: '2px 4px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   flexShrink: 0,
   userSelect: 'none',
@@ -417,7 +412,7 @@ const toolbar: React.CSSProperties = {
   alignItems: 'center',
   gap: 2,
   padding: '3px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   flexShrink: 0,
   userSelect: 'none',
@@ -461,7 +456,7 @@ const addressBar: React.CSSProperties = {
   alignItems: 'center',
   gap: 6,
   padding: '3px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '2px solid #808080',
   flexShrink: 0,
 };
@@ -487,7 +482,7 @@ const addressInput: React.CSSProperties = {
 
 const goBtn: React.CSSProperties = {
   padding: '1px 8px',
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px solid',
   borderColor: '#fff #808080 #808080 #fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
@@ -513,13 +508,13 @@ const iframeStyle: React.CSSProperties = {
 
 const progressBar: React.CSSProperties = {
   height: 3,
-  background: '#c0c0c0',
+  background: '#fff',
   flexShrink: 0,
 };
 
 const progressFill: React.CSSProperties = {
   height: '100%',
-  background: 'var(--sabr-title-active-start)',
+  background: '#000',
   transition: 'width 0.1s linear',
 };
 
@@ -528,7 +523,7 @@ const statusBar: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '1px 6px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #808080',
   flexShrink: 0,
   fontSize: 10,
@@ -554,7 +549,7 @@ const favDropdown: React.CSSProperties = {
   position: 'absolute',
   top: 20,
   left: 0,
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px solid',
   borderColor: '#fff #808080 #808080 #fff',
   width: 220,
@@ -564,7 +559,7 @@ const favDropdown: React.CSSProperties = {
 
 const favHeader: React.CSSProperties = {
   padding: '4px 8px',
-  background: 'var(--sabr-title-active-start)',
+  background: '#000',
   color: '#fff',
   fontSize: 11,
   fontWeight: 700,
@@ -584,7 +579,7 @@ const favItem: React.CSSProperties = {
 const favSidebar: React.CSSProperties = {
   width: 200,
   flexShrink: 0,
-  background: '#c0c0c0',
+  background: '#fff',
   borderRight: '2px solid #808080',
   display: 'flex',
   flexDirection: 'column',
@@ -595,7 +590,7 @@ const favSidebarHeader: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
-  background: 'var(--sabr-title-active-start)',
+  background: '#000',
   color: '#fff',
   padding: '4px 8px',
   fontWeight: 700,
@@ -604,7 +599,7 @@ const favSidebarHeader: React.CSSProperties = {
 };
 
 const favSidebarClose: React.CSSProperties = {
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px solid',
   borderColor: '#fff #808080 #808080 #fff',
   color: '#000',

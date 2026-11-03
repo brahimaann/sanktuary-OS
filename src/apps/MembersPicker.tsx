@@ -55,14 +55,14 @@ const MembersPicker: React.FC<{
           maxHeight: '90%',
           display: 'flex',
           flexDirection: 'column',
-          background: '#c0c0c0',
+          background: '#fff',
           borderTop: '2px solid #fff',
           borderLeft: '2px solid #fff',
           borderRight: '2px solid #000',
           borderBottom: '2px solid #000',
         }}
       >
-        <div style={{ background: '#000080', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>{title}</div>
+        <div style={{ background: '#000', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>{title}</div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0 }}>
           {allowEveryone && (
             <>

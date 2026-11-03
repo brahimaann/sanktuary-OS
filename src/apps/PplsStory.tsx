@@ -1038,8 +1038,7 @@ const PplsStory: React.FC = () => {
               }}
               style={{
                 ...regionTab,
-                background:
-                  selectedRegion === r && navMode === 'index' ? (r === 'All' ? '#c0c0c0' : REGION_META[r as Region].color) : '#c0c0c0',
+                background: selectedRegion === r && navMode === 'index' ? (r === 'All' ? '#fff' : REGION_META[r as Region].color) : '#fff',
                 color: selectedRegion === r && r !== 'All' && navMode === 'index' ? '#fff' : '#000',
                 borderBottom: selectedRegion === r && navMode === 'index' ? '2px solid transparent' : '2px solid #808080',
                 fontWeight: selectedRegion === r && navMode === 'index' ? 700 : 400,
@@ -1087,7 +1086,7 @@ const PplsStory: React.FC = () => {
               }}
               style={{
                 ...sidebarTab,
-                background: navMode === 'index' ? '#fff' : '#c0c0c0',
+                background: navMode === 'index' ? '#fff' : '#fff',
                 borderBottom: navMode === 'index' ? 'none' : '1.5px solid #808080',
                 fontWeight: navMode === 'index' ? 700 : 400,
               }}
@@ -1106,7 +1105,7 @@ const PplsStory: React.FC = () => {
               }}
               style={{
                 ...sidebarTab,
-                background: navMode === 'threads' ? '#fff' : '#c0c0c0',
+                background: navMode === 'threads' ? '#fff' : '#fff',
                 borderBottom: navMode === 'threads' ? 'none' : '1.5px solid #808080',
                 fontWeight: navMode === 'threads' ? 700 : 400,
               }}
@@ -1128,7 +1127,7 @@ const PplsStory: React.FC = () => {
                       onClick={() => setSelectedEventId(evt.id)}
                       style={{
                         ...indexItem,
-                        background: isSelected ? 'var(--sabr-title-active-start)' : 'transparent',
+                        background: isSelected ? '#000' : 'transparent',
                         color: isSelected ? '#fff' : '#000',
                       }}
                     >
@@ -1161,7 +1160,7 @@ const PplsStory: React.FC = () => {
                       }}
                       style={{
                         ...threadHeader,
-                        background: isThreadSelected ? 'var(--sabr-title-active-start)' : '#e0e0e0',
+                        background: isThreadSelected ? '#000' : '#e0e0e0',
                         color: isThreadSelected ? '#fff' : '#000',
                       }}
                     >
@@ -1180,7 +1179,7 @@ const PplsStory: React.FC = () => {
                               onClick={() => setSelectedEventId(evt.id)}
                               style={{
                                 ...indexItem,
-                                background: isEventSelected ? 'var(--sabr-title-active-start)' : 'transparent',
+                                background: isEventSelected ? '#000' : 'transparent',
                                 color: isEventSelected ? '#fff' : '#000',
                                 paddingLeft: 12,
                                 borderBottom: '1px solid #d0d0d0',
@@ -1318,7 +1317,7 @@ const PplsStory: React.FC = () => {
             width: 120,
             borderLeft: '1px solid #808080',
             justifyContent: 'center',
-            background: showPulsePanel ? '#fff' : '#c0c0c0',
+            background: showPulsePanel ? '#fff' : '#fff',
             cursor: 'pointer',
             fontWeight: 700,
           }}
@@ -1339,7 +1338,7 @@ const PplsStory: React.FC = () => {
             </button>
           </div>
           <div style={pulsePanelBody}>
-            <div style={{ fontSize: 9, color: '#666', marginBottom: 8, borderBottom: '1px solid #c0c0c0', paddingBottom: 4 }}>
+            <div style={{ fontSize: 9, color: '#666', marginBottom: 8, borderBottom: '1px solid #fff', paddingBottom: 4 }}>
               Click an alert to open in Notepad & focus historical context.
             </div>
             {CIVIC_ALERTS.map((alert) => (
@@ -1367,7 +1366,7 @@ const shell: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  background: '#c0c0c0',
+  background: '#fff',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
   fontSize: 11,
   overflow: 'hidden',
@@ -1379,7 +1378,7 @@ const menuBar: React.CSSProperties = {
   display: 'flex',
   gap: 0,
   padding: '2px 4px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderBottom: '1px solid #808080',
   flexShrink: 0,
   alignItems: 'center',
@@ -1420,7 +1419,7 @@ const retroBtn: React.CSSProperties = {
   height: 22,
   fontSize: 12,
   fontWeight: 'bold',
-  background: '#c0c0c0',
+  background: '#fff',
   color: '#000',
   border: '2px outset #ffffff',
   cursor: 'pointer',
@@ -1435,7 +1434,7 @@ const regionTabs: React.CSSProperties = {
   display: 'flex',
   gap: 0,
   padding: '0 2px',
-  background: '#c0c0c0',
+  background: '#fff',
 };
 
 const regionTab: React.CSSProperties = {
@@ -1471,13 +1470,13 @@ const sliderInput: React.CSSProperties = {
   flex: 1,
   height: 14,
   cursor: 'pointer',
-  accentColor: 'var(--sabr-title-active-start)',
+  accentColor: '#000',
 };
 
 const sliderValue: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
-  color: 'var(--sabr-title-active-start)',
+  color: '#000',
   minWidth: 70,
   textAlign: 'right',
   fontFamily: 'monospace',
@@ -1496,7 +1495,7 @@ const indexPane: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   borderRight: '2px solid #808080',
-  background: '#c0c0c0',
+  background: '#fff',
 };
 
 const sidebarTabs: React.CSSProperties = {
@@ -1703,9 +1702,9 @@ const actionBtn: React.CSSProperties = {
   padding: '4px 14px',
   fontSize: 11,
   fontWeight: 700,
-  background: 'var(--sabr-title-active-start)',
+  background: '#000',
   color: '#fff',
-  border: '2px outset var(--sabr-title-active-end)',
+  border: '2px outset #000',
   cursor: 'pointer',
   fontFamily: '"MS Sans Serif", Arial, sans-serif',
 };
@@ -1714,7 +1713,7 @@ const actionBtnAlt: React.CSSProperties = {
   padding: '4px 14px',
   fontSize: 11,
   fontWeight: 700,
-  background: '#c0c0c0',
+  background: '#fff',
   color: '#000',
   border: '2px outset #e0e0e0',
   cursor: 'pointer',
@@ -1724,7 +1723,7 @@ const actionBtnAlt: React.CSSProperties = {
 const actionBtnSmall: React.CSSProperties = {
   padding: '3px 8px',
   fontSize: 10,
-  background: '#c0c0c0',
+  background: '#fff',
   color: '#444',
   border: '1px outset #e0e0e0',
   cursor: 'pointer',
@@ -1746,7 +1745,7 @@ const statusBar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   flexShrink: 0,
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   height: 20,
 };
@@ -1768,7 +1767,7 @@ const pulsePanel: React.CSSProperties = {
   right: 4,
   bottom: 22,
   width: 280,
-  background: '#c0c0c0',
+  background: '#fff',
   border: '2px outset #ffffff',
   zIndex: 1000,
   boxShadow: '3px 3px 0 rgba(0,0,0,0.3)',
@@ -1777,7 +1776,7 @@ const pulsePanel: React.CSSProperties = {
 };
 
 const pulsePanelHeader: React.CSSProperties = {
-  background: 'var(--sabr-title-active-start)',
+  background: '#000',
   color: '#fff',
   padding: '4px 8px',
   display: 'flex',
@@ -1788,7 +1787,7 @@ const pulsePanelHeader: React.CSSProperties = {
 };
 
 const pulseCloseBtn: React.CSSProperties = {
-  background: '#c0c0c0',
+  background: '#fff',
   border: '1px outset #ffffff',
   fontSize: 10,
   width: 14,

@@ -280,8 +280,8 @@ export const useWindowManager = create<WindowManagerState>((set) => ({
     }),
 
   setStartMenuOpen: (open) => set({ startMenuOpen: open }),
-  wallpaper: '/images/custom-wallpaper.webp',
-  bgColor: '#008080',
+  wallpaper: '', // the S machine's dotted desktop (see Desktop.tsx)
+  bgColor: '#ffffff',
   setWallpaper: (wp) => set({ wallpaper: wp }),
   setBgColor: (color) => set({ bgColor: color }),
 }));

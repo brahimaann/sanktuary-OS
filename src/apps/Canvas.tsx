@@ -641,7 +641,7 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
                 top: dropping.y - 90,
                 width: 240,
                 height: 180,
-                border: `${2 / view.z}px dashed #000080`,
+                border: `${2 / view.z}px dashed #000`,
                 background: 'rgba(0,0,128,0.06)',
                 pointerEvents: 'none',
               }}
@@ -730,7 +730,7 @@ const ItemView: React.FC<{
     height: item.h,
     zIndex: item.z,
     boxSizing: 'border-box',
-    outline: selected ? `${2 / zoom}px solid #000080` : 'none',
+    outline: selected ? `${2 / zoom}px solid #000` : 'none',
     outlineOffset: 2 / zoom,
     cursor: 'move',
     userSelect: 'none',
@@ -800,7 +800,7 @@ const ItemView: React.FC<{
         style={{
           width: '100%',
           height: '100%',
-          background: '#c0c0c0',
+          background: '#fff',
           borderTop: '1px solid #fff',
           borderLeft: '1px solid #fff',
           borderRight: '1px solid #000',
@@ -865,7 +865,7 @@ const ItemView: React.FC<{
             bottom: -6 / zoom,
             width: 12 / zoom,
             height: 12 / zoom,
-            background: '#000080',
+            background: '#000',
             border: `${1 / zoom}px solid #fff`,
             cursor: 'nwse-resize',
           }}
@@ -883,7 +883,7 @@ const ItemView: React.FC<{
             height: 16 / zoom,
             borderRadius: '50%',
             background: '#fff',
-            border: `${2 / zoom}px solid #000080`,
+            border: `${2 / zoom}px solid #000`,
             cursor: 'crosshair',
             boxSizing: 'border-box',
           }}
@@ -927,7 +927,7 @@ const Edges: React.FC<{
   return (
     <svg style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible', pointerEvents: 'none', zIndex: 0 }}>
       <defs>
-        {['#333', '#000080'].map((c) => (
+        {['#333', '#000'].map((c) => (
           <marker
             key={c}
             id={`sk-arrow-${c.slice(1)}`}
@@ -949,7 +949,7 @@ const Edges: React.FC<{
             y1={l.y1}
             x2={l.x2}
             y2={l.y2}
-            stroke={l.sel ? '#000080' : '#333'}
+            stroke={l.sel ? '#000' : '#333'}
             strokeWidth={l.sel ? w * 1.6 : w}
             markerEnd={`url(#sk-arrow-${l.sel ? '000080' : '333'})`}
           />
@@ -977,7 +977,7 @@ const Edges: React.FC<{
               y1={p.y}
               x2={linking!.x}
               y2={linking!.y}
-              stroke="#000080"
+              stroke="#000"
               strokeWidth={w}
               strokeDasharray={`${6 / zoom} ${4 / zoom}`}
               markerEnd="url(#sk-arrow-000080)"

@@ -97,7 +97,7 @@ const PushSettings: React.FC = () => {
           )}
         </div>
       )}
-      {msg && <div style={{ color: '#000080' }}>{msg}</div>}
+      {msg && <div style={{ color: '#000' }}>{msg}</div>}
     </div>
   );
 };
@@ -106,7 +106,7 @@ const button: React.CSSProperties = {
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '2px 8px',
-  background: '#c0c0c0',
+  background: '#fff',
   borderTop: '1px solid #fff',
   borderLeft: '1px solid #fff',
   borderRight: '1px solid #000',

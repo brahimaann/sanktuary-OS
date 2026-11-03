@@ -190,12 +190,12 @@ export const Calculator: React.FC<CalculatorProps> = ({ isFocused = false }) => 
   }, [isFocused, display, equation, pendingOp, resetDisplayOnNextInput, memory]);
 
   return (
-    <div className="calculator flex flex-col p-2 bg-[#c0c0c0] w-full h-full text-xs select-none">
+    <div className="calculator flex flex-col p-2 bg-white w-full h-full text-xs select-none">
       {/* Menus */}
       <div className="flex border-b border-gray-400 pb-1 mb-2 font-sans">
-        <span className="mr-3 cursor-default hover:bg-[#000080] hover:text-white px-1">Edit</span>
-        <span className="mr-3 cursor-default hover:bg-[#000080] hover:text-white px-1">View</span>
-        <span className="cursor-default hover:bg-[#000080] hover:text-white px-1">Help</span>
+        <span className="mr-3 cursor-default hover:bg-black hover:text-white px-1">Edit</span>
+        <span className="mr-3 cursor-default hover:bg-black hover:text-white px-1">View</span>
+        <span className="cursor-default hover:bg-black hover:text-white px-1">Help</span>
       </div>
 
       {/* Screen Display */}
@@ -210,16 +210,16 @@ export const Calculator: React.FC<CalculatorProps> = ({ isFocused = false }) => 
       <div className="flex flex-1 gap-2">
         {/* Memory Column */}
         <div className="flex flex-col justify-between w-[36px] gap-1">
-          <button onClick={handleMC} className="h-full border border-outset font-bold text-red-800 bg-[#c0c0c0] active:border-inset">
+          <button onClick={handleMC} className="h-full border border-outset font-bold text-red-800 bg-white active:border-inset">
             MC
           </button>
-          <button onClick={handleMR} className="h-full border border-outset font-bold text-red-800 bg-[#c0c0c0] active:border-inset">
+          <button onClick={handleMR} className="h-full border border-outset font-bold text-red-800 bg-white active:border-inset">
             MR
           </button>
-          <button onClick={handleMS} className="h-full border border-outset font-bold text-red-800 bg-[#c0c0c0] active:border-inset">
+          <button onClick={handleMS} className="h-full border border-outset font-bold text-red-800 bg-white active:border-inset">
             MS
           </button>
-          <button onClick={handleMPlus} className="h-full border border-outset font-bold text-red-800 bg-[#c0c0c0] active:border-inset">
+          <button onClick={handleMPlus} className="h-full border border-outset font-bold text-red-800 bg-white active:border-inset">
             M+
           </button>
         </div>
@@ -228,113 +228,80 @@ export const Calculator: React.FC<CalculatorProps> = ({ isFocused = false }) => 
         <div className="flex-1 flex flex-col gap-1">
           {/* Back, CE, C Row */}
           <div className="flex gap-1 h-[28px]">
-            <button
-              onClick={handleBackspace}
-              className="flex-1 border border-outset text-red-800 bg-[#c0c0c0] font-sans active:border-inset"
-            >
+            <button onClick={handleBackspace} className="flex-1 border border-outset text-red-800 bg-white font-sans active:border-inset">
               Back
             </button>
-            <button onClick={handleCE} className="flex-1 border border-outset text-red-800 bg-[#c0c0c0] font-sans active:border-inset">
+            <button onClick={handleCE} className="flex-1 border border-outset text-red-800 bg-white font-sans active:border-inset">
               CE
             </button>
-            <button onClick={handleClear} className="flex-1 border border-outset text-red-800 bg-[#c0c0c0] font-sans active:border-inset">
+            <button onClick={handleClear} className="flex-1 border border-outset text-red-800 bg-white font-sans active:border-inset">
               C
             </button>
           </div>
 
           {/* Core Keys Layout Grid */}
           <div className="flex-1 grid grid-cols-5 gap-1">
-            <button
-              onClick={() => handleDigit('7')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('7')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               7
             </button>
-            <button
-              onClick={() => handleDigit('8')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('8')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               8
             </button>
-            <button
-              onClick={() => handleDigit('9')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('9')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               9
             </button>
-            <button onClick={() => handleOp('/')} className="border border-outset text-red-800 bg-[#c0c0c0] font-bold active:border-inset">
+            <button onClick={() => handleOp('/')} className="border border-outset text-red-800 bg-white font-bold active:border-inset">
               /
             </button>
-            <button onClick={handleSqrt} className="border border-outset text-blue-900 bg-[#c0c0c0] active:border-inset">
+            <button onClick={handleSqrt} className="border border-outset text-blue-900 bg-white active:border-inset">
               sqrt
             </button>
 
-            <button
-              onClick={() => handleDigit('4')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('4')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               4
             </button>
-            <button
-              onClick={() => handleDigit('5')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('5')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               5
             </button>
-            <button
-              onClick={() => handleDigit('6')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('6')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               6
             </button>
-            <button onClick={() => handleOp('*')} className="border border-outset text-red-800 bg-[#c0c0c0] font-bold active:border-inset">
+            <button onClick={() => handleOp('*')} className="border border-outset text-red-800 bg-white font-bold active:border-inset">
               *
             </button>
-            <button onClick={handlePercent} className="border border-outset text-blue-900 bg-[#c0c0c0] active:border-inset">
+            <button onClick={handlePercent} className="border border-outset text-blue-900 bg-white active:border-inset">
               %
             </button>
 
-            <button
-              onClick={() => handleDigit('1')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('1')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               1
             </button>
-            <button
-              onClick={() => handleDigit('2')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('2')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               2
             </button>
-            <button
-              onClick={() => handleDigit('3')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('3')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               3
             </button>
-            <button onClick={() => handleOp('-')} className="border border-outset text-red-800 bg-[#c0c0c0] font-bold active:border-inset">
+            <button onClick={() => handleOp('-')} className="border border-outset text-red-800 bg-white font-bold active:border-inset">
               -
             </button>
-            <button onClick={handleOneOverX} className="border border-outset text-blue-900 bg-[#c0c0c0] active:border-inset">
+            <button onClick={handleOneOverX} className="border border-outset text-blue-900 bg-white active:border-inset">
               1/x
             </button>
 
-            <button
-              onClick={() => handleDigit('0')}
-              className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset"
-            >
+            <button onClick={() => handleDigit('0')} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               0
             </button>
-            <button onClick={handleSign} className="border border-outset text-blue-900 bg-[#c0c0c0] active:border-inset">
+            <button onClick={handleSign} className="border border-outset text-blue-900 bg-white active:border-inset">
               +/-
             </button>
-            <button onClick={handleDecimal} className="border border-outset text-blue-900 bg-[#c0c0c0] font-bold active:border-inset">
+            <button onClick={handleDecimal} className="border border-outset text-blue-900 bg-white font-bold active:border-inset">
               .
             </button>
-            <button onClick={() => handleOp('+')} className="border border-outset text-red-800 bg-[#c0c0c0] font-bold active:border-inset">
+            <button onClick={() => handleOp('+')} className="border border-outset text-red-800 bg-white font-bold active:border-inset">
               +
             </button>
-            <button onClick={handleEquals} className="border border-outset text-red-800 bg-[#c0c0c0] font-bold active:border-inset">
+            <button onClick={handleEquals} className="border border-outset text-red-800 bg-white font-bold active:border-inset">
               =
             </button>
           </div>

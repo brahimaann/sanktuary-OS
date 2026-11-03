@@ -356,7 +356,7 @@ export const RefChip: React.FC<{ r: Ref; onOpen?: () => void; onRemove?: () => v
       gap: 4,
       margin: '2px 4px 2px 0',
       padding: '1px 6px',
-      background: '#c0c0c0',
+      background: '#fff',
       borderTop: '1px solid #fff',
       borderLeft: '1px solid #fff',
       borderRight: '1px solid #000',
