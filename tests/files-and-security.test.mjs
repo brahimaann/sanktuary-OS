@@ -235,6 +235,8 @@ const call = async (u, path, method = 'GET', body, raw = false) => {
 };
 let pass = 0;
 const failed = [];
+// The server zips with bsdtar: Windows ships it as tar.exe (the home server runs these tests before each deploy)
+const TAR = process.platform === 'win32' ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'bsdtar';
 const check = (name, ok, extra = '') => {
   ok ? pass++ : failed.push(name);
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  (' + extra + ')' : ''}`);
@@ -1154,7 +1156,7 @@ try {
   const zipD = await fetch(B + '/api/files/view/Song%20D?zip', { headers: { cookie: cookie('alice') } });
   const outD = mkdtempSync(join(tmpdir(), 'sk-zipd-'));
   writeFileSync(join(outD, 'd.zip'), Buffer.from(await zipD.arrayBuffer()));
-  execFileSync('bsdtar', ['-xf', join(outD, 'd.zip'), '-C', outD]);
+  execFileSync(TAR, ['-xf', join(outD, 'd.zip'), '-C', outD]);
   const zippedSet = gunzipSync(readFileSync(join(outD, 'Song D.als'))).toString();
   check(
     'zipped set points at the sample in its Samples folder',
@@ -1172,7 +1174,7 @@ try {
   writeFileSync(join(sets, 'Samples', 'Recorded', 'vox 0001.wav'), 'VOX');
   writeFileSync(join(sets, 'Samples', 'Recorded', 'other take.wav'), 'OTHER');
   writeFileSync(join(sets, 'Samples', 'Imported', 'kick.wav'), 'KICK');
-  const setA = `<Ableton>${liveRef('C:/Beats/Sets/Samples/Recorded/vox 0001.wav', 'Samples/Recorded/vox 0001.wav', 3)}${liveRef('C:/Users/brahi/Desktop/kick.wav', '../Desktop/kick.wav', 1)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}${liveRef('C:/ProgramData/Ableton/Live 12 Suite/Resources/Core Library/Samples/clap.wav', 'clap.wav', 6)}</Ableton>`;
+  const setA = `<Ableton>${liveRef('C:/Beats/Sets/Samples/Recorded/vox 0001.wav', 'Samples/Recorded/vox 0001.wav', 3)}${liveRef('C:/Users/brahi/Desktop/kick.wav', '../Desktop/kick.wav', 1)}${liveRef('D:/Loops/gone.wav', '../gone.wav', 1)}${liveRef('C:/Users/brahi/Documents/Ableton/User Library/Samples/Recorded/Vocal 2 0003.wav', '', 0)}${liveRef('C:/ProgramData/Ableton/Live 12 Suite/Resources/Core Library/Samples/clap.wav', 'clap.wav', 6)}</Ableton>`;
   writeFileSync(join(sets, 'WAIT.als'), gzipSync(setA));
   writeFileSync(
     join(sets, 'XAXA.als'),
@@ -1181,7 +1183,7 @@ try {
   const bundle = await fetch(B + '/api/files/view/Sets/WAIT.als?bundle', { headers: { cookie: cookie('alice') } });
   const outB = mkdtempSync(join(tmpdir(), 'sk-bundle-'));
   writeFileSync(join(outB, 'b.zip'), Buffer.from(await bundle.arrayBuffer()));
-  const inB = execFileSync('bsdtar', ['-tf', join(outB, 'b.zip')])
+  const inB = execFileSync(TAR, ['-tf', join(outB, 'b.zip')])
     .toString()
     .split('\n')
     .filter(Boolean)
@@ -1192,7 +1194,7 @@ try {
       JSON.stringify(['./Missing samples.txt', './Samples/Imported/kick.wav', './Samples/Recorded/vox 0001.wav', './WAIT.als']),
     inB,
   );
-  execFileSync('bsdtar', ['-xf', join(outB, 'b.zip'), '-C', outB]);
+  execFileSync(TAR, ['-xf', join(outB, 'b.zip'), '-C', outB]);
   check(
     'the bundled set is relinked to its samples',
     gunzipSync(readFileSync(join(outB, 'WAIT.als')))
@@ -1201,8 +1203,8 @@ try {
   );
   const missingTxt = readFileSync(join(outB, 'Missing samples.txt'), 'utf8');
   check(
-    'samples from outside the folder are listed, library sounds are not',
-    missingTxt.includes('gone.wav') && !missingTxt.includes('clap.wav'),
+    'samples from outside the folder (User Library recordings too) are listed, library sounds are not',
+    missingTxt.includes('gone.wav') && missingTxt.includes('Vocal 2 0003.wav') && !missingTxt.includes('clap.wav'),
   );
   check('only sets can be bundled', (await call('alice', '/api/files/view/Sets/Samples/Imported/kick.wav?bundle')).status === 400);
 
