@@ -9511,12 +9511,14 @@ async function youtubeApi(req, res, url) {
       });
       const v = await up.json().catch(() => ({}));
       if (!up.ok || !v.id) throw new Error(`YouTube didn't accept the video (${up.status})`);
-      Object.assign(job, { status: 'Done', pct: 100, url: `https://youtu.be/${v.id}` });
+      Object.assign(job, { pct: 100, url: `https://youtu.be/${v.id}` });
       if (rel) {
         rel.videoId = v.id;
         saveTracks();
       }
-      await notify(user.username, `On YouTube (${privacy}): "${title}" ${job.url}${rel ? ` · now on the ${rel.title} page` : ''}`, {});
+      const text = `On YouTube (${privacy}): "${title}" ${job.url}${rel ? ` · now on the ${rel.title} page` : ''}`;
+      await notify(user.username, text, {}).catch(console.error);
+      job.status = 'Done'; // after the notification is written, so whoever sees "Done" also finds it
     })().catch(async (e) => {
       Object.assign(job, { status: 'Failed', error: String(e.message).slice(0, 200) });
       await notify(user.username, `YouTube upload of "${title}" failed: ${job.error}`, {}).catch(() => {});
