@@ -154,6 +154,7 @@ const TracksApp: React.FC = () => {
   const { me } = useMe();
   const [data, setData] = useState<{ releases: Release[]; tracks: Track[]; statuses: string[]; kinds: string[] } | null>(null);
   const [releaseId, setReleaseId] = useState(''); // '' = the library
+  const [songsView, setSongsView] = useState(false); // the library as one list of every song, by where it's at
   const [trackId, setTrackId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
@@ -402,6 +403,13 @@ const TracksApp: React.FC = () => {
             <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
               New playlist...
             </button>
+            <button
+              style={{ ...button, ...(songsView ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+              onClick={() => setSongsView((v) => !v)}
+              title="Every song in one list: mixed, mastered, out, and what each needs next"
+            >
+              {songsView ? 'Covers' : 'All songs'}
+            </button>
           </>
         )}
         {release && tracks.some((t) => t.bounce) && (
@@ -577,7 +585,17 @@ const TracksApp: React.FC = () => {
         onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setDragging(false)}
         onDrop={drop}
       >
-        {!release ? (
+        {!release && songsView ? (
+          <AllSongs
+            tracks={data.tracks}
+            releases={releases}
+            onOpen={(t) => {
+              setReleaseId(t.release);
+              setTrackId(t.id);
+            }}
+            onStatus={(t, status) => run(() => api(`/api/tracks/track/${t.id}`, { method: 'PATCH', body: JSON.stringify({ status }) }))}
+          />
+        ) : !release ? (
           <Library
             releases={releases}
             tracks={data.tracks}
@@ -893,6 +911,119 @@ const Library: React.FC<{
           </button>
         );
       })}
+    </div>
+  );
+};
+
+const STREAMING = LINKS.slice(LINKS.findIndex(([k]) => k === 'spotify')).map(([k]) => k);
+const STEPS = ['To finish', 'To mix', 'To master', 'Ready to drop', 'Out'] as const;
+/** Where a song is: mixed once it's at Mastering, mastered at Done, out once it streams or its release day has passed. */
+const songStage = (t: Track, r?: Release) => {
+  const mixed = ['Mastering', 'Done'].includes(t.status);
+  const mastered = t.status === 'Done';
+  const streams = STREAMING.some((k) => t.links?.[k]);
+  const dropped = !!r?.date && !['Folder', 'Playlist'].includes(r.kind) && daysUntil(r.date) <= 0;
+  const out = streams || (mastered && dropped);
+  const step: (typeof STEPS)[number] = out
+    ? 'Out'
+    : mastered
+      ? 'Ready to drop'
+      : mixed
+        ? 'To master'
+        : t.status === 'Mixing'
+          ? 'To mix'
+          : 'To finish';
+  return { mixed, mastered, out, step };
+};
+
+/** Every song from every project, with mixed / mastered / out ticks and what it needs next, so the team sees the work. */
+const AllSongs: React.FC<{
+  tracks: Track[];
+  releases: Release[];
+  onOpen: (t: Track) => void;
+  onStatus: (t: Track, status: string) => void;
+}> = ({ tracks, releases, onOpen, onStatus }) => {
+  const [step, setStep] = useState('');
+  const [q, setQ] = useState('');
+  const rel = new Map(releases.map((r) => [r.id, r]));
+  const rows = tracks
+    .filter((t) => rel.has(t.release) && rel.get(t.release)!.kind !== 'Playlist')
+    .map((t) => ({ t, r: rel.get(t.release)!, ...songStage(t, rel.get(t.release)) }));
+  const count = (s: string) => rows.filter((x) => x.step === s).length;
+  const shown = rows
+    .filter((x) => (!step || x.step === step) && (!q || `${x.t.title} ${x.r.title}`.toLowerCase().includes(q.toLowerCase())))
+    .sort((a, b) => STEPS.indexOf(a.step) - STEPS.indexOf(b.step) || a.r.title.localeCompare(b.r.title) || a.t.n - b.t.n);
+  const tick = (on: boolean, title: string, set?: () => void) => (
+    <td style={{ ...td, textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+      <input type="checkbox" checked={on} disabled={!set} onChange={set} title={title} />
+    </td>
+  );
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+        {['', ...STEPS].map((s) => (
+          <button
+            key={s}
+            style={{ ...button, ...(step === s ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+            onClick={() => setStep(s)}
+          >
+            {s || 'All'} ({s ? count(s) : rows.length})
+          </button>
+        ))}
+        <input
+          style={{ ...input, marginLeft: 'auto', width: 140 }}
+          placeholder="Find a song"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
+      <div style={{ ...listBox, flex: 1 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['Song', 'Project', 'Status', 'Mixed', 'Mastered', 'Out', 'Next'].map((h) => (
+                <th key={h} style={th}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map(({ t, r, mixed, mastered, out, step: s }) => (
+              <tr key={t.id} onClick={() => onOpen(t)} title={`Open ${t.title}`} style={{ cursor: 'pointer' }}>
+                <td style={{ ...td, fontWeight: 700 }}>
+                  {t.title}
+                  {t.bounce ? ' ♪' : ''}
+                </td>
+                <td style={td}>{r.title}</td>
+                <td style={td}>
+                  <StatusChip s={t.status} />
+                </td>
+                {tick(mixed, mixed ? 'Mixed (untick: back to Mixing)' : 'Tick when the mix is done: moves it to Mastering', () =>
+                  onStatus(t, mixed ? 'Mixing' : 'Mastering'),
+                )}
+                {tick(mastered, mastered ? 'Mastered (untick: back to Mastering)' : 'Tick when the master is done: moves it to Done', () =>
+                  onStatus(t, mastered ? 'Mastering' : 'Done'),
+                )}
+                {tick(
+                  out,
+                  out ? 'Out: it has a streaming link or its release day has passed' : 'Open the song and add its Spotify (or other) link',
+                )}
+                <td style={{ ...td, fontWeight: s === 'Out' ? 400 : 700 }}>{s === 'Out' ? 'Out ✓' : s}</td>
+              </tr>
+            ))}
+            {!shown.length && (
+              <tr>
+                <td style={td} colSpan={7}>
+                  {rows.length
+                    ? 'No songs here.'
+                    : 'No songs yet. Open a project (Covers) and click Add track..., or drop a folder of bounces.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
