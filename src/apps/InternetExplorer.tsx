@@ -203,7 +203,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
                   onClick={() => navigate(fav.url)}
                 >
                   <img
-                    src="/images/icons/internet-explorer-16x16.png"
+                    src="/images/icons/internet-explorer-16x16.png?v=2"
                     alt=""
                     style={{ width: 14, height: 14, marginRight: 6, imageRendering: 'pixelated' }}
                     onError={(e) => (e.currentTarget.style.display = 'none')}
@@ -218,7 +218,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
         <span style={menuItem}>Help</span>
         <div style={{ flex: 1 }} />
         <img
-          src="/images/icons/internet-explorer-16x16.png"
+          src="/images/icons/internet-explorer-16x16.png?v=2"
           alt="IE"
           style={{ width: 22, height: 22, marginRight: 6, imageRendering: 'pixelated' }}
           onError={(e) => (e.currentTarget.style.display = 'none')}
@@ -322,7 +322,7 @@ export const InternetExplorer: React.FC<InternetExplorerProps> = ({ src = DEFAUL
                   }}
                 >
                   <img
-                    src="/images/icons/internet-explorer-16x16.png"
+                    src="/images/icons/internet-explorer-16x16.png?v=2"
                     alt=""
                     style={{ width: 14, height: 14, marginRight: 6, imageRendering: 'pixelated', flexShrink: 0 }}
                     onError={(e) => (e.currentTarget.style.display = 'none')}

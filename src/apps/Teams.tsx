@@ -85,7 +85,7 @@ const BuddyList: React.FC = () => {
     openWindow({
       id: `chat-${channel}`,
       title,
-      icon: '/images/icons/outlook-express-16x16.png',
+      icon: '/images/icons/outlook-express-16x16.png?v=2',
       appType: 'chat',
       appProps: { channel },
       width: 460,
@@ -96,7 +96,7 @@ const BuddyList: React.FC = () => {
     openWindow({
       id: `profile-${username || 'me'}`,
       title: username && username !== me ? `${displayName(byName[username], username)} — Info` : 'My Profile',
-      icon: '/images/icons/my-documents-16x16.png',
+      icon: '/images/icons/my-documents-16x16.png?v=2',
       appType: 'profile',
       appProps: { username },
       width: 420,

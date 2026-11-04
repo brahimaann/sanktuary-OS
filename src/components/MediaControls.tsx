@@ -71,7 +71,7 @@ const MediaControls: React.FC<{ media: React.RefObject<HTMLMediaElement | null>;
           <RetroIcon name="stop" size={13} />
         </button>
         <span className="w98-mp-sep" />
-        <img src="/images/icons/speaker-16x16.png" alt="Volume" width={16} height={16} />
+        <img src="/images/icons/speaker-16x16.png?v=2" alt="Volume" width={16} height={16} />
         <input
           className="w98-track"
           type="range"

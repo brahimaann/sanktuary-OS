@@ -24,7 +24,7 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
       id: `video-${video.id}`,
       title: `${video.title} — Media Player`,
       appType: 'video-player',
-      icon: '/images/icons/media-player-16x16.png',
+      icon: '/images/icons/media-player-16x16.png?v=2',
       appProps: { videoSrc: video.src, videoTitle: video.title, videoArtist: video.artist },
       width: 640,
       height: 480,
@@ -36,7 +36,7 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
       {/* ── Toolbar ── */}
       <div style={toolbar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
-          <img src="/images/icons/folder-16x16.png" style={{ width: 16, height: 16 }} alt="" />
+          <img src="/images/icons/folder-16x16.png?v=2" style={{ width: 16, height: 16 }} alt="" />
           <span style={{ fontWeight: 700, fontSize: 12 }}>{collection.name}</span>
           <span style={{ color: '#666', fontSize: 11, marginLeft: 4 }}>— {collection.subtitle}</span>
         </div>
@@ -75,7 +75,7 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
                   alt=""
                   style={thumbImg}
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/images/icons/media-player-32x32.png';
+                    (e.target as HTMLImageElement).src = '/images/icons/media-player-32x32.png?v=2';
                     (e.target as HTMLImageElement).style.objectFit = 'contain';
                     (e.target as HTMLImageElement).style.padding = '12px';
                   }}

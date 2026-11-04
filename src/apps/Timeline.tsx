@@ -98,7 +98,7 @@ const TimelineApp: React.FC = () => {
     openWindow({
       id: 'new',
       title: 'New',
-      icon: '/images/icons/file-32x32.png',
+      icon: '/images/icons/file-32x32.png?v=2',
       appType: 'new',
       width: 460,
       height: 420,

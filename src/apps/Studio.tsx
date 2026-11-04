@@ -28,7 +28,7 @@ export function openStudio(openWindow: ReturnType<typeof useWindowManager.getSta
   openWindow({
     id: 'studio',
     title: 'Studio',
-    icon: '/images/icons/media-player-16x16.png',
+    icon: '/images/icons/media-player-16x16.png?v=2',
     appType: 'studio',
     appProps: { tab },
     width: 960,

@@ -21,13 +21,13 @@ interface MenuItem {
 }
 const icon = (n: string) => `/images/icons/${n}`;
 const STUDIO_MENU: MenuItem[] = [
-  { id: 'new', label: 'New...', title: 'New', appType: 'new', icon: icon('file-32x32.png'), width: 460, height: 420, bold: true },
+  { id: 'new', label: 'New...', title: 'New', appType: 'new', icon: icon('file-32x32.png?v=2'), width: 460, height: 420, bold: true },
   {
     id: 'sanktuary-network',
     label: 'Team Files',
     title: 'Team Files',
     appType: 'network',
-    icon: icon('network-32x32.png'),
+    icon: icon('network-32x32.png?v=2'),
     width: 560,
     height: 420,
   },
@@ -36,22 +36,38 @@ const STUDIO_MENU: MenuItem[] = [
     label: 'Studio (music, calendar, boards, opportunities)',
     title: 'Studio',
     appType: 'studio',
-    icon: icon('media-player-32x32.png'),
+    icon: icon('media-player-32x32.png?v=2'),
     width: 960,
     height: 620,
     props: { tab: 'music' },
   },
-  { id: 'moodboards', label: 'Moodboards', title: 'Moodboards', appType: 'boards', icon: icon('paint-32x32.png'), width: 560, height: 420 },
+  {
+    id: 'moodboards',
+    label: 'Moodboards',
+    title: 'Moodboards',
+    appType: 'boards',
+    icon: icon('paint-32x32.png?v=2'),
+    width: 560,
+    height: 420,
+  },
   {
     id: 'producer',
     label: 'Producer',
     title: 'Producer',
     appType: 'producer',
-    icon: icon('convert-audio-32x32.png'),
+    icon: icon('convert-audio-32x32.png?v=2'),
     width: 720,
     height: 560,
   },
-  { id: 'teams', label: 'Messages', title: 'Messages', appType: 'teams', icon: icon('outlook-express-32x32.png'), width: 300, height: 520 },
+  {
+    id: 'teams',
+    label: 'Messages',
+    title: 'Messages',
+    appType: 'teams',
+    icon: icon('outlook-express-32x32.png?v=2'),
+    width: 300,
+    height: 520,
+  },
 ];
 const VISITOR_MENU: MenuItem[] = [
   {
@@ -59,7 +75,7 @@ const VISITOR_MENU: MenuItem[] = [
     label: 'Welcome & tour',
     title: 'Welcome to Sanktuary',
     appType: 'welcome',
-    icon: icon('help-32x32.png'),
+    icon: icon('help-32x32.png?v=2'),
     width: 520,
     height: 560,
     bold: true,
@@ -70,11 +86,19 @@ const VISITOR_MENU: MenuItem[] = [
     label: 'Producer',
     title: 'Producer',
     appType: 'producer',
-    icon: icon('convert-audio-32x32.png'),
+    icon: icon('convert-audio-32x32.png?v=2'),
     width: 720,
     height: 560,
   },
-  { id: 'profile-me', label: 'Log On...', title: 'Log On', appType: 'profile', icon: icon('logoff-32x32.png'), width: 420, height: 520 },
+  {
+    id: 'profile-me',
+    label: 'Log On...',
+    title: 'Log On',
+    appType: 'profile',
+    icon: icon('logoff-32x32.png?v=2'),
+    width: 420,
+    height: 520,
+  },
 ];
 
 export const Taskbar: React.FC = () => {
@@ -105,7 +129,7 @@ export const Taskbar: React.FC = () => {
       id: 'ppls-local-echo',
       title: '📡 Local Echo Detector',
       appType: 'ppls-local-echo',
-      icon: '/images/icons/my-computer-16x16.png',
+      icon: '/images/icons/my-computer-16x16.png?v=2',
       width: 460,
       height: 350,
     });
@@ -217,10 +241,10 @@ export const Taskbar: React.FC = () => {
             }}
             title="📡 Click to check local history echo"
           >
-            <img src="/images/icons/mail-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
+            <img src="/images/icons/mail-16x16.png?v=2" alt="" className="w-4 h-4 image-render-pixelated" />
           </button>
         )}
-        <img src="/images/icons/speaker-16x16.png" alt="Volume" className="w-4 h-4 mr-2 image-render-pixelated" />
+        <img src="/images/icons/speaker-16x16.png?v=2" alt="Volume" className="w-4 h-4 mr-2 image-render-pixelated" />
         <span
           className="taskbar-time cursor-pointer select-none px-1 hover:bg-black hover:text-white"
           onClick={() => setCalendarOpen(!calendarOpen)}
@@ -235,7 +259,7 @@ export const Taskbar: React.FC = () => {
               id: 'profile-me',
               title: isSignedIn ? 'My Account' : 'Log On',
               appType: 'profile',
-              icon: icon('logoff-32x32.png'),
+              icon: icon('logoff-32x32.png?v=2'),
               width: 420,
               height: 520,
             })
@@ -245,7 +269,7 @@ export const Taskbar: React.FC = () => {
           title={isSignedIn ? 'My account' : 'Log on'}
           aria-label={isSignedIn ? 'My account' : 'Log on'}
         >
-          <img src="/images/icons/logoff-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
+          <img src="/images/icons/logoff-16x16.png?v=2" alt="" className="w-4 h-4 image-render-pixelated" />
         </button>
       </div>
 
@@ -283,46 +307,46 @@ export const Taskbar: React.FC = () => {
             <hr className="my-1 border-t border-gray-400 border-b border-white" />
             <li className="hover:bg-black hover:text-white group">
               <button
-                onClick={() => launchApp('my-computer', 'My Computer', 'directory', '/images/icons/my-computer-16x16.png', 680, 500)}
+                onClick={() => launchApp('my-computer', 'My Computer', 'directory', '/images/icons/my-computer-16x16.png?v=2', 680, 500)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/my-computer-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/my-computer-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>My Computer</span>
               </button>
             </li>
             <li className="hover:bg-black hover:text-white group">
               <button
-                onClick={() => launchApp('notepad', 'Untitled - Notepad', 'notepad', '/images/icons/notepad-16x16.png', 480, 360)}
+                onClick={() => launchApp('notepad', 'Untitled - Notepad', 'notepad', '/images/icons/notepad-16x16.png?v=2', 480, 360)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/notepad-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/notepad-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Notepad</span>
               </button>
             </li>
             <li className="hover:bg-black hover:text-white group">
               <button
-                onClick={() => launchApp('calculator', 'Calculator', 'calculator', '/images/icons/calculator-16x16.png', 260, 260)}
+                onClick={() => launchApp('calculator', 'Calculator', 'calculator', '/images/icons/calculator-16x16.png?v=2', 260, 260)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/calculator-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/calculator-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Calculator</span>
               </button>
             </li>
             <li className="hover:bg-black hover:text-white group">
               <button
-                onClick={() => launchApp('soundrec', 'Sound Recorder', 'soundrec', '/images/icons/speaker-16x16.png', 400, 360)}
+                onClick={() => launchApp('soundrec', 'Sound Recorder', 'soundrec', '/images/icons/speaker-16x16.png?v=2', 400, 360)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/speaker-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/speaker-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Sound Recorder</span>
               </button>
             </li>
             <li className="hover:bg-black hover:text-white group">
               <button
-                onClick={() => launchApp('ppls-story', 'Ppls Library', 'ppls-story', '/images/icons/ppls-story-32x32.svg', 800, 600)}
+                onClick={() => launchApp('ppls-story', 'Ppls Library', 'ppls-story', '/images/icons/ppls-story-32x32.svg?v=2', 800, 600)}
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/ppls-story-32x32.svg" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/ppls-story-32x32.svg?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Ppls Library</span>
               </button>
             </li>
@@ -332,37 +356,44 @@ export const Taskbar: React.FC = () => {
             <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() =>
-                  launchApp('pinball', '3D Pinball for Windows - Space Cadet', 'iframe', '/images/icons/pinball-16x16.png', 600, 440, {
+                  launchApp('pinball', '3D Pinball for Windows - Space Cadet', 'iframe', '/images/icons/pinball-16x16.png?v=2', 600, 440, {
                     src: '/programs/pinball/space-cadet.html',
                   })
                 }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/pinball-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/pinball-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>3D Pinball</span>
               </button>
             </li>
             <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() =>
-                  launchApp('paint', 'untitled - Paint', 'iframe', '/images/icons/paint-16x16.png', 800, 600, {
+                  launchApp('paint', 'untitled - Paint', 'iframe', '/images/icons/paint-16x16.png?v=2', 800, 600, {
                     src: '/programs/jspaint/index.html',
                   })
                 }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/paint-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/paint-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Paint</span>
               </button>
             </li>
             <li className="hover:bg-black hover:text-white group">
               <button
                 onClick={() =>
-                  launchApp('display-properties', 'Display Properties', 'display-properties', '/images/icons/themes-16x16.png', 360, 400)
+                  launchApp(
+                    'display-properties',
+                    'Display Properties',
+                    'display-properties',
+                    '/images/icons/themes-16x16.png?v=2',
+                    360,
+                    400,
+                  )
                 }
                 className="w-full text-left py-1 px-2 flex items-center"
               >
-                <img src="/images/icons/themes-32x32.png" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                <img src="/images/icons/themes-32x32.png?v=2" alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
                 <span>Display Properties</span>
               </button>
             </li>
@@ -392,7 +423,7 @@ const TeamsTray: React.FC = () => {
         openWindow({
           id: 'teams',
           title: 'Messages',
-          icon: '/images/icons/outlook-express-16x16.png',
+          icon: '/images/icons/outlook-express-16x16.png?v=2',
           appType: 'teams',
           width: 300,
           height: 520,
@@ -401,7 +432,7 @@ const TeamsTray: React.FC = () => {
       title={`${unread} new message(s) — open Messages`}
       className="mr-2 cursor-pointer border-none bg-transparent outline-none flex items-center gap-1"
     >
-      <img src="/images/icons/mail-16x16.png" alt="" style={{ width: 16, height: 16 }} />
+      <img src="/images/icons/mail-16x16.png?v=2" alt="" style={{ width: 16, height: 16 }} />
       <b>{unread}</b>
     </button>
   );

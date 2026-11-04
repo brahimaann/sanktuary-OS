@@ -181,7 +181,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           id: `notepad-${item.name.replace(/[^a-zA-Z0-9]/g, '-')}`,
           title: `${item.name} - Notepad`,
           appType: 'notepad',
-          icon: '/images/icons/notepad-16x16.png',
+          icon: '/images/icons/notepad-16x16.png?v=2',
           width: 480,
           height: 360,
           appProps: { filePath: fullPath },
@@ -191,7 +191,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           id: `soundrec-${item.name.replace(/[^a-zA-Z0-9]/g, '-')}`,
           title: `${item.name} - Sound Recorder`,
           appType: 'soundrec',
-          icon: '/images/icons/speaker-16x16.png',
+          icon: '/images/icons/speaker-16x16.png?v=2',
           width: 280,
           height: 160,
           appProps: { filePath: fullPath },
@@ -207,7 +207,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
       id: `network-link-${link.id}`,
       title: `${link.title} - Internet Explorer`,
       appType: 'internet-explorer',
-      icon: '/images/icons/internet-explorer-16x16.png',
+      icon: '/images/icons/internet-explorer-16x16.png?v=2',
       width: 900,
       height: 640,
       appProps: { src: link.url },
@@ -299,7 +299,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           disabled={historyIndex === 0}
           className="flex items-center gap-1 px-2 py-1 border border-outset disabled:opacity-50 active:border-inset outline-none"
         >
-          <img src="/images/icons/back-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
+          <img src="/images/icons/back-16x16.png?v=2" alt="" className="w-4 h-4 image-render-pixelated" />
           <span>Back</span>
         </button>
         <button
@@ -308,10 +308,10 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
           className="flex items-center gap-1 px-2 py-1 border border-outset disabled:opacity-50 active:border-inset outline-none"
         >
           <span>Forward</span>
-          <img src="/images/icons/forward-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
+          <img src="/images/icons/forward-16x16.png?v=2" alt="" className="w-4 h-4 image-render-pixelated" />
         </button>
         <button onClick={handleUp} className="flex items-center gap-1 px-2 py-1 border border-outset active:border-inset outline-none">
-          <img src="/images/icons/up-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
+          <img src="/images/icons/up-16x16.png?v=2" alt="" className="w-4 h-4 image-render-pixelated" />
           <span>Up</span>
         </button>
       </div>
@@ -338,7 +338,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
         <div className="flex-1 bg-white flex overflow-hidden">
           {/* Left Info Panel */}
           <div className="w-[180px] bg-white p-4 flex flex-col justify-start border-r border-[#808080] select-none">
-            <img src="/images/icons/network-32x32.png" alt="" className="w-12 h-12 image-render-pixelated" />
+            <img src="/images/icons/network-32x32.png?v=2" alt="" className="w-12 h-12 image-render-pixelated" />
             <h1 className="text-xl font-bold font-sans mt-3 leading-tight break-words">
               Network
               <br />
@@ -366,7 +366,7 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
                   }`}
                 >
                   <img
-                    src="/images/icons/network-32x32.png"
+                    src="/images/icons/network-32x32.png?v=2"
                     alt=""
                     className="w-8 h-8 select-none pointer-events-none image-render-pixelated"
                   />
@@ -396,12 +396,12 @@ export const Explorer: React.FC<ExplorerProps> = ({ path: initialPath = 'C:/', w
               const ext = item.name.split('.').pop()?.toLowerCase();
               const icon =
                 item.type === 'dir'
-                  ? '/images/icons/folder-32x32.png'
+                  ? '/images/icons/folder-32x32.png?v=2'
                   : ext === 'txt'
-                    ? '/images/icons/notepad-file-32x32.png'
+                    ? '/images/icons/notepad-file-32x32.png?v=2'
                     : ext === 'wav'
-                      ? '/images/icons/speaker-32x32.png'
-                      : '/images/icons/folder-open-32x32.png';
+                      ? '/images/icons/speaker-32x32.png?v=2'
+                      : '/images/icons/folder-open-32x32.png?v=2';
 
               return (
                 <div

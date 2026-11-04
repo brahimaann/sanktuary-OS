@@ -155,7 +155,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     openWindow({
       id: `space-${f.space}-${f.path}`,
       title: f.name || f.spaceName || 'Files',
-      icon: '/images/icons/folder-16x16.png',
+      icon: '/images/icons/folder-16x16.png?v=2',
       appType: 'team-files',
       appProps: { app: f.space, initialPath: to },
     });
@@ -1157,7 +1157,7 @@ export const LogOn: React.FC<{ name: string }> = ({ name }) => {
   return (
     <form onSubmit={submit} style={{ ...shell, padding: 16, gap: 10 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <img src="/images/icons/network-32x32.png" alt="" style={{ width: 32, height: 32 }} />
+        <img src="/images/icons/network-32x32.png?v=2" alt="" style={{ width: 32, height: 32 }} />
         <div>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Enter Network Password</div>
           <div>{name} is for Sanktuary members. Log on with your username and password.</div>

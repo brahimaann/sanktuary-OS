@@ -36,7 +36,7 @@ export function getThumbnail(video: Video): string {
   if (video.thumbnail) return video.thumbnail;
   const id = ytId(video.src);
   if (id) return `https://img.youtube.com/vi/${id}/mqdefault.jpg`;
-  return '/images/icons/video-32x32.png';
+  return '/images/icons/video-32x32.png?v=2';
 }
 
 // ──────────────────────────────────────────────

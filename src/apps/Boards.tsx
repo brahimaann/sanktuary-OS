@@ -49,7 +49,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
       ? openWindow({
           id: `planner-${b.id}`,
           title: b.name,
-          icon: '/images/icons/task-16x16.png',
+          icon: '/images/icons/task-16x16.png?v=2',
           appType: 'planner',
           appProps: { boardId: b.id },
           width: 1000,
@@ -58,7 +58,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
       : openWindow({
           id: `canvas-${b.id}`,
           title: b.name,
-          icon: '/images/icons/paint-16x16.png',
+          icon: '/images/icons/paint-16x16.png?v=2',
           appType: 'canvas',
           appProps: { boardId: b.id, name: b.name },
           width: 1000,
@@ -208,7 +208,11 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
               color: selected === b.id ? '#fff' : undefined,
             }}
           >
-            <img src={plans ? '/images/icons/task-32x32.png' : '/images/icons/paint-32x32.png'} alt="" style={{ width: 32, height: 32 }} />
+            <img
+              src={plans ? '/images/icons/task-32x32.png?v=2' : '/images/icons/paint-32x32.png?v=2'}
+              alt=""
+              style={{ width: 32, height: 32 }}
+            />
             <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>
               {b.members ? '🔒 ' : ''}
               {b.name}

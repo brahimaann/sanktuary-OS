@@ -816,7 +816,7 @@ const ItemView: React.FC<{
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <img
-            src={item.type === 'link' ? '/images/icons/internet-explorer-32x32.png' : fileIcon(item.name || '', false, 32)}
+            src={item.type === 'link' ? '/images/icons/internet-explorer-32x32.png?v=2' : fileIcon(item.name || '', false, 32)}
             alt=""
             style={{ width: 32, height: 32, flexShrink: 0 }}
           />

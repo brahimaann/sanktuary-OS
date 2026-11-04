@@ -117,7 +117,7 @@ export const NotificationTray: React.FC = () => {
       openWindow({
         id: `chat-${n.channel}`,
         title: dm ? `${n.channel.split('~').find((u) => u !== liveUser()) || 'Chat'} — Instant Message` : `#${n.channel}`,
-        icon: '/images/icons/outlook-express-16x16.png',
+        icon: '/images/icons/outlook-express-16x16.png?v=2',
         appType: 'chat',
         appProps: { channel: n.channel },
         width: 460,
@@ -144,7 +144,7 @@ export const NotificationTray: React.FC = () => {
       openWindow({
         id: 'profile-me',
         title: 'My Profile',
-        icon: '/images/icons/my-documents-16x16.png',
+        icon: '/images/icons/my-documents-16x16.png?v=2',
         appType: 'profile',
         appProps: {},
         width: 420,

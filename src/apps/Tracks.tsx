@@ -305,7 +305,7 @@ const TracksApp: React.FC = () => {
     openWindow({
       id: 'new',
       title: 'New',
-      icon: '/images/icons/file-32x32.png',
+      icon: '/images/icons/file-32x32.png?v=2',
       appType: 'new',
       width: 460,
       height: 420,
@@ -1217,7 +1217,7 @@ const TrackPage: React.FC<{
                   openWindow({
                     id: `preview-${t.bounce!.space}-${t.bounce!.path}`,
                     title: parts[parts.length - 1],
-                    icon: '/images/icons/media-player-16x16.png',
+                    icon: '/images/icons/media-player-16x16.png?v=2',
                     appType: 'file-preview',
                     appProps: {
                       app: t.bounce!.space,

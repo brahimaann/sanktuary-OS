@@ -38,22 +38,22 @@ const VISITOR_TOUR: Step[] = [
   {
     title: 'My Computer: who we are',
     text: 'The directory: the people in the collective, what we have out and coming, events, writing, the shop.',
-    open: win('my-computer', 'My Computer', 'directory', 'my-computer-16x16.png', 680, 500),
+    open: win('my-computer', 'My Computer', 'directory', 'my-computer-16x16.png?v=2', 680, 500),
   },
   {
     title: 'Producer: tools for making music',
     text: 'Drop in a song to get its tempo, key and loudness, compare your mix with a reference, get delay and reverb times for your tempo, and read chains, tips and free tools. Your file stays on your device.',
-    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png', 720, 560),
+    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png?v=2', 720, 560),
   },
   {
     title: 'Read CITIES',
     text: 'Our journal of the Twin Cities arts scene: profiles and case studies, essays, field notes and videos.',
-    open: win('blog', 'CITIES', 'iframe', 'news-16x16.png', 760, 560, { src: '/cities' }),
+    open: win('blog', 'CITIES', 'iframe', 'news-16x16.png?v=2', 760, 560, { src: '/cities' }),
   },
   {
     title: 'Shop',
     text: 'Merch and digital releases. Payments go through Stripe.',
-    open: win('shop', 'Shop', 'iframe', 'favorites-16x16.png', 760, 560, { src: '/shop' }),
+    open: win('shop', 'Shop', 'iframe', 'favorites-16x16.png?v=2', 760, 560, { src: '/shop' }),
   },
   {
     title: 'Join the Team',
@@ -64,42 +64,42 @@ const MEMBER_TOUR: Step[] = [
   {
     title: 'New... adds anything',
     text: 'A release, a song, a shoot, a show, a drop. It asks two or three things and understands dates like "next sat 8pm". Releases get their folders made for you.',
-    open: win('new', 'New', 'new', 'file-32x32.png', 460, 420),
+    open: win('new', 'New', 'new', 'file-32x32.png?v=2', 460, 420),
   },
   {
     title: 'Team Files: the shared drives',
     text: 'Upload by dragging files in, drag to move, right-click for more. Projects (Ableton, FL, Premiere, After Effects, PSD, AI) open read-only; Download asks whether you are just looking, trying things out, or checking it out so nobody else edits at the same time.',
-    open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png', 560, 420),
+    open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png?v=2', 560, 420),
   },
   {
     title: 'Studio > Music: tracks fill themselves in',
     text: 'Drop bounces into a release\'s folder (or onto Tracks): "03 Song v4.wav" becomes track 3 with v4 as its bounce. Projects, stems, BPM and the cover are linked by name.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'music' }),
+    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'music' }),
   },
   {
     title: 'Studio > Calendar: shoots, shows, drops',
     text: 'One calendar for everything with a date, release days included. People on an entry get reminded the day before.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'calendar' }),
+    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'calendar' }),
   },
   {
     title: 'Studio > Opportunities: grants, calls, gigs',
     text: 'Post a grant, residency, open call or gig with its link and deadline and the whole team hears about it. Mark Interested or Applying to get reminded a week and a day before it closes; Copy portfolio link fills the "work samples" box.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png', 960, 620, { tab: 'opportunities' }),
+    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'opportunities' }),
   },
   {
     title: 'Moodboards',
     text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Planner.',
-    open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png', 560, 420),
+    open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png?v=2', 560, 420),
   },
   {
     title: 'Messages',
     text: 'Channels and direct messages. Attach files from your phone or from the drives.',
-    open: win('teams', 'Messages', 'teams', 'outlook-express-16x16.png', 300, 520),
+    open: win('teams', 'Messages', 'teams', 'outlook-express-16x16.png?v=2', 300, 520),
   },
   {
     title: 'Producer',
     text: 'Tempo, key and loudness of any bounce (from your device or Team Files), a reference comparison, delay and reverb times, and a guide. Save the tempo and key straight onto a track.',
-    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png', 720, 560),
+    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png?v=2', 720, 560),
   },
   {
     title: 'Edit photos',
@@ -108,7 +108,7 @@ const MEMBER_TOUR: Step[] = [
   {
     title: 'Your profile and your phone',
     text: 'Set your picture and links, choose whether you show in the public directory, see your projects and turn on notifications. On Android, Add to Home screen puts Sanktuary in your share menu.',
-    open: win('profile-me', 'My Profile', 'profile', 'my-documents-16x16.png', 420, 520),
+    open: win('profile-me', 'My Profile', 'profile', 'my-documents-16x16.png?v=2', 420, 520),
   },
 ];
 
@@ -172,7 +172,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
     openWindow({
       id: 'blog',
       title: 'CITIES',
-      icon: '/images/icons/news-16x16.png',
+      icon: '/images/icons/news-16x16.png?v=2',
       appType: 'iframe',
       appProps: { src },
       width: 760,
@@ -183,7 +183,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
     <div style={{ ...shell, overflow: 'auto' }}>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <img src="/images/icons/network-32x32.png" alt="" style={{ width: 32, height: 32 }} />
+          <img src="/images/icons/network-32x32.png?v=2" alt="" style={{ width: 32, height: 32 }} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, color: '#000' }}>Welcome to Sanktuary</div>
             <div style={{ color: '#444' }}>Twin Cities · music · art · fashion · film</div>
@@ -246,7 +246,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
                   openWindow({
                     id: 'shop',
                     title: 'Shop',
-                    icon: '/images/icons/favorites-16x16.png',
+                    icon: '/images/icons/favorites-16x16.png?v=2',
                     appType: 'iframe',
                     appProps: { src: '/shop' },
                     width: 760,
@@ -318,7 +318,7 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
               openWindow({
                 id: 'profile-me',
                 title: 'Log On',
-                icon: '/images/icons/network-16x16.png',
+                icon: '/images/icons/network-16x16.png?v=2',
                 appType: 'profile',
                 width: 420,
                 height: 520,

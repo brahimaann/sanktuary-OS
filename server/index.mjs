@@ -8450,13 +8450,13 @@ function staticFile(req, res, url) {
   if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
   // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their
-  // names, so they can be cached forever; icons, sounds etc. for a day.
+  // names, so they can be cached forever; icons, sounds etc. for an hour, so a redrawn icon shows up the same day.
   const cache =
     file.endsWith('index.html') || file.endsWith('sw.js')
       ? 'no-cache'
       : url.pathname.startsWith('/assets/')
         ? 'public, max-age=31536000, immutable'
-        : 'public, max-age=86400';
+        : 'public, max-age=3600';
   res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': cache });
   return pipeline(createReadStream(file), res);
 }
