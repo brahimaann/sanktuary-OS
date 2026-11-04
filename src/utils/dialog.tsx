@@ -124,7 +124,9 @@ export const DialogHost: React.FC = () => {
     >
       <div role="dialog" aria-modal="true" aria-label={req.title} style={box}>
         <div style={titleBar}>
-          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{req.title}</span>
+          <span style={{ flex: 1, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ background: '#fff', padding: '0 8px' }}>{req.title}</span>
+          </span>
           <button
             aria-label="Close"
             onClick={() => close(false)}
@@ -176,27 +178,27 @@ export const DialogHost: React.FC = () => {
   );
 };
 
+// The S machine alert: flat black frame, hard shadow, striped title bar like the windows
 const box: React.CSSProperties = {
   width: 'min(380px, 92%)',
   background: '#fff',
   color: '#000',
-  padding: 2,
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
-  fontSize: 11,
-  borderTop: '2px solid #fff',
-  borderLeft: '2px solid #fff',
-  borderRight: '2px solid #000',
-  borderBottom: '2px solid #000',
-  boxShadow: '2px 2px 0 rgba(0,0,0,0.3)',
+  fontFamily: "'Pixelify Sans', sans-serif",
+  fontSize: 13,
+  border: '2px solid #000',
+  boxShadow: '3px 3px 0 #000',
 };
 const titleBar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 4,
-  padding: '2px 3px 2px 5px',
-  color: '#fff',
-  fontWeight: 700,
-  background: 'linear-gradient(to right, #000, #000)',
+  padding: 4,
+  height: 24,
+  boxSizing: 'border-box',
+  borderBottom: '2px solid #000',
+  fontFamily: "'Silkscreen', monospace",
+  fontSize: 12,
+  background: 'repeating-linear-gradient(#000 0 1px, #fff 1px 3px) content-box #fff',
 };
 const btn: React.CSSProperties = {
   minWidth: 75,
@@ -204,11 +206,7 @@ const btn: React.CSSProperties = {
   background: '#fff',
   color: '#000',
   fontFamily: 'inherit',
-  fontSize: 11,
+  fontSize: 13,
   cursor: 'pointer',
-  borderTop: '1px solid #fff',
-  borderLeft: '1px solid #fff',
-  borderRight: '1px solid #000',
-  borderBottom: '1px solid #000',
-  boxShadow: 'inset -1px -1px #808080, inset 1px 1px #dfdfdf',
+  border: '2px solid #000',
 };
