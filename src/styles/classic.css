@@ -324,8 +324,50 @@
   padding: 0 2px;
   box-sizing: content-box;
 }
+/* Window buttons are bare pixel symbols, no box: minus, square, cross. Hover inverts them. */
 .os-window .window-button {
+  border: 0 !important;
+  border-image: none !important;
+  background: transparent;
+  box-shadow: none !important;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.os-window .window-button:enabled:hover {
+  background: #000;
+}
+.os-window .window-button:enabled:hover .window-button-icon::before {
+  background-color: #fff;
+}
+.os-window .window-button-icon {
+  --sprite-x: 0 !important;
+  --sprite-y: 0;
+}
+.os-window .window-action-minimize .window-button-icon {
+  --sprite-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='10' shape-rendering='crispEdges'%3E%3Crect x='2' y='7' width='8' height='2'/%3E%3C/svg%3E");
+}
+.os-window .window-action-maximize .window-button-icon,
+.os-window .window-action-restore .window-button-icon {
+  --sprite-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='10' shape-rendering='crispEdges'%3E%3Crect x='1' y='0' width='10' height='2'/%3E%3Crect x='1' y='2' width='1' height='8'/%3E%3Crect x='10' y='2' width='1' height='8'/%3E%3Crect x='1' y='9' width='10' height='1'/%3E%3C/svg%3E");
+}
+.os-window .window-action-close .window-button-icon {
+  --sprite-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='10' shape-rendering='crispEdges'%3E%3Crect x='1' y='0' width='2' height='1'/%3E%3Crect x='2' y='1' width='2' height='1'/%3E%3Crect x='3' y='2' width='2' height='1'/%3E%3Crect x='4' y='3' width='2' height='1'/%3E%3Crect x='5' y='4' width='2' height='1'/%3E%3Crect x='6' y='5' width='2' height='1'/%3E%3Crect x='7' y='6' width='2' height='1'/%3E%3Crect x='8' y='7' width='2' height='1'/%3E%3Crect x='9' y='8' width='2' height='1'/%3E%3Crect x='9' y='0' width='2' height='1'/%3E%3Crect x='8' y='1' width='2' height='1'/%3E%3Crect x='7' y='2' width='2' height='1'/%3E%3Crect x='6' y='3' width='2' height='1'/%3E%3Crect x='5' y='4' width='2' height='1'/%3E%3Crect x='4' y='5' width='2' height='1'/%3E%3Crect x='3' y='6' width='2' height='1'/%3E%3Crect x='2' y='7' width='2' height='1'/%3E%3Crect x='1' y='8' width='2' height='1'/%3E%3C/svg%3E");
+}
+.os-window .window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  padding-left: 6px;
   background: #fff;
+}
+.os-window .window-titlebar .icon {
+  margin: 0 !important;
+  padding: 0 6px 0 2px;
 }
 
 /* Selections and the main action wear the signal colour; text on it stays black */

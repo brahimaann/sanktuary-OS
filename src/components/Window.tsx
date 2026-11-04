@@ -161,31 +161,34 @@ export const Window: React.FC<WindowProps> = ({
         <div className="window-title-area">
           <span className="window-title">{title}</span>
         </div>
-        <button
-          className="window-button window-action-minimize"
-          aria-label="Minimize"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => minimizeWindow(id)}
-        >
-          <span className="window-button-icon" />
-        </button>
-        <button
-          className="window-button window-action-maximize"
-          aria-label={isMaximized ? 'Restore' : 'Maximize'}
-          disabled={!resizable}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => resizable && maximizeWindow(id)}
-        >
-          <span className="window-button-icon" />
-        </button>
-        <button
-          className="window-button window-action-close window-close-button"
-          aria-label="Close"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => closeWindow(id)}
-        >
-          <span className="window-button-icon" />
-        </button>
+        {/* White plate behind the buttons, so the title-bar stripes stop short of them like they do for the title */}
+        <div className="window-controls">
+          <button
+            className="window-button window-action-minimize"
+            aria-label="Minimize"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => minimizeWindow(id)}
+          >
+            <span className="window-button-icon" />
+          </button>
+          <button
+            className="window-button window-action-maximize"
+            aria-label={isMaximized ? 'Restore' : 'Maximize'}
+            disabled={!resizable}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => resizable && maximizeWindow(id)}
+          >
+            <span className="window-button-icon" />
+          </button>
+          <button
+            className="window-button window-action-close window-close-button"
+            aria-label="Close"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => closeWindow(id)}
+          >
+            <span className="window-button-icon" />
+          </button>
+        </div>
       </div>
 
       <div className="window-content" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

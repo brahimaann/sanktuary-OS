@@ -185,6 +185,7 @@ export const Folder: React.FC<{ items: DesktopIconDef[] }> = ({ items }) => {
         <button
           key={d.id}
           className="w-[80px] p-1 flex flex-col items-center gap-1 text-center text-[11px] leading-tight [overflow-wrap:anywhere]"
+          style={{ border: 0, borderImage: 'none', background: 'transparent' }} // icons in a folder, not buttons
           onClick={() => openWindow(windowFor(d))}
         >
           <img src={d.icon} alt="" className="w-[32px] h-[32px] image-render-pixelated" />
@@ -649,13 +650,8 @@ export const Desktop: React.FC = () => {
       style={{
         backgroundColor: bgColor,
         // No wallpaper on white = the S machine's dotted desktop
-        backgroundImage:
-          wallpaper && !liveSky
-            ? `url(${wallpaper})`
-            : !wallpaper && bgColor === '#ffffff'
-              ? 'radial-gradient(#000 0.9px, transparent 1px)'
-              : 'none',
-        backgroundSize: wallpaper ? 'cover' : '4px 4px', // cover fills the whole screen at every size (phones used to get bars)
+        backgroundImage: wallpaper && !liveSky ? `url(${wallpaper})` : !wallpaper && bgColor === '#ffffff' ? 'var(--sk-dots)' : 'none',
+        backgroundSize: wallpaper ? 'cover' : '6px 6px', // cover fills the whole screen at every size (phones used to get bars)
         backgroundRepeat: wallpaper ? 'no-repeat' : 'repeat',
         backgroundPosition: 'center',
         touchAction: 'none', // Prevents default gestures like pinch-to-zoom on desktop
