@@ -327,6 +327,18 @@
 .os-window .window-button {
   background: #fff;
 }
+.os-window .window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  padding-left: 6px;
+  background: #fff;
+}
+.os-window .window-titlebar .icon {
+  margin: 0 !important;
+  padding: 0 6px 0 2px;
+}
 
 /* Selections and the main action wear the signal colour; text on it stays black */
 .sk-signal {
