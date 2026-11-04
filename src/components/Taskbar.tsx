@@ -171,14 +171,11 @@ export const Taskbar: React.FC = () => {
       <button
         ref={startButtonRef}
         onClick={handleStartButtonClick}
-        className={`start-button flex items-center h-[22px] px-1 m-[2px] font-bold text-black outline-none ${
-          startMenuOpen ? 'inset-deep' : ''
-        }`}
+        aria-label="Sanktuary"
+        title="Sanktuary"
+        className={`start-button flex items-center justify-center h-[22px] px-2 m-[2px] outline-none ${startMenuOpen ? 'inset-deep' : ''}`}
       >
-        <span className="mr-1 flex">
-          <SMark size={16} />
-        </span>
-        Sanktuary
+        <SMark size={16} />
       </button>
 
       <div className="taskbar-divider h-5 w-[2px] mx-1 border-l border-gray-600 border-r border-white" />
