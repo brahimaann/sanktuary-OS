@@ -75,7 +75,6 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const [when, setWhen] = useState('');
   const [where, setWhere] = useState('');
   const [releaseKind, setReleaseKind] = useState('Album');
-  const [trackCount, setTrackCount] = useState(7);
 
   // Multi-artist and Multi-writer Chip States
   const [artistInput, setArtistInput] = useState('');
@@ -125,14 +124,6 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   useEffect(() => {
     if (kind && kind !== 'release') setMakeFolder(FOLDER_BY_DEFAULT.includes(kind));
   }, [kind]);
-
-  // Adjust default track counts when release kind changes
-  useEffect(() => {
-    if (releaseKind === 'Album') setTrackCount(10);
-    else if (releaseKind === 'EP') setTrackCount(5);
-    else if (releaseKind === 'Single') setTrackCount(1);
-    else if (releaseKind === 'Folder') setTrackCount(0); // demos, beats: songs come from what's dropped in
-  }, [releaseKind]);
 
   const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && RANK[s.rights] >= RANK.upload);
   const spaceId = spaces.some((s) => s.id === space) ? space : spaces[0]?.id || '';
@@ -240,16 +231,8 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           setup: folderMode === 'new',
           ...credits(),
         });
-
-        // Dynamic track expander: generate placeholder tracks if count > 0 and not Single
-        if (releaseKind !== 'Single' && trackCount > 0) {
-          setBusy(`Generating ${trackCount} tracks...`);
-          for (let i = 1; i <= trackCount; i++) {
-            await post('/api/tracks/track', { release: r.id, title: `Track ${i}` });
-          }
-        }
-
-        setMsg(`Created ${r.title} with ${trackCount} track(s).`);
+        // No placeholder tracks: songs come from what's dropped in (or moved here from New songs) as they're made
+        setMsg(`Created ${r.title}.`);
         openTracks(r.id);
       } else if (kind === 'song') {
         let r = release;
@@ -499,19 +482,6 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
               ))}
             </select>
           </label>
-          {!['Single', 'Folder'].includes(releaseKind) && (
-            <div style={row}>
-              <span style={cap}>Tracks</span>
-              <button style={{ ...button, padding: '1px 6px', fontSize: 11 }} onClick={() => setTrackCount((c) => Math.max(1, c - 1))}>
-                -
-              </button>
-              <b style={{ minWidth: 24, textAlign: 'center' }}>{trackCount}</b>
-              <button style={{ ...button, padding: '1px 6px', fontSize: 11 }} onClick={() => setTrackCount((c) => Math.min(30, c + 1))}>
-                +
-              </button>
-              <span style={{ fontSize: 10, color: '#666' }}>Will automatically create Track 1..{trackCount} in Tracks.</span>
-            </div>
-          )}
         </>
       )}
 

@@ -777,6 +777,23 @@ try {
     !fts.some((t) => t.title === 'gh') && fts.find((t) => t.id === hand.id)?.bounce?.path.endsWith('gh v2.wav'),
     fts.map((t) => `${t.title}=${t.bounce?.path}`).join(', '),
   );
+  // A song moves to another project later; its bounce stays in the old folder and a rescan leaves it alone
+  const later = JSON.parse((await newRel('bob', { title: 'Later Album', kind: 'Album' })).text);
+  const movedSong = JSON.parse((await call('bob', `/api/tracks/track/${hand.id}`, 'PATCH', { release: later.id })).text);
+  check('a song moves to another project', movedSong.release === later.id && movedSong.n === 1);
+  await call('bob', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST');
+  check(
+    'a rescan does not bring a moved song back',
+    !(await tracksOf('bob', folderAlbum.id)).some((t) => /^gh/i.test(t.title) || t.title === 'Golden Hour'),
+  );
+  check(
+    'a song cannot move into a playlist',
+    (await call('bob', `/api/tracks/track/${hand.id}`, 'PATCH', { release: pl.id })).status === 400,
+  );
+  check(
+    'carol cannot move it into a project she cannot see',
+    (await call('carol', `/api/tracks/track/${hand.id}`, 'PATCH', { release: album.id })).status === 404,
+  );
   check(
     'mkdir with parents makes the whole path',
     (await call('bob', '/api/files/up/Timeline/2027-01-01 Shoot?mkdir&parents', 'POST')).status === 200 &&

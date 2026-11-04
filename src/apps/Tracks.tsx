@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import RetroIcon, { IconLabel } from '../components/RetroIcon';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
-import { droppedItems, uploadFiles } from '../utils/upload';
+import { droppedItems, uploadFiles, UploadItem } from '../utils/upload';
 import { useLiveEvent } from '../utils/live';
 import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
@@ -155,6 +155,8 @@ const TracksApp: React.FC = () => {
   const [data, setData] = useState<{ releases: Release[]; tracks: Track[]; statuses: string[]; kinds: string[] } | null>(null);
   const [releaseId, setReleaseId] = useState(''); // '' = the library
   const [songsView, setSongsView] = useState(false); // the library as one list of every song, by where it's at
+  const [adding, setAdding] = useState<UploadItem[] | null>(null); // songs dropped or picked: new, or new versions?
+  const songPicker = useRef<HTMLInputElement>(null);
   const [trackId, setTrackId] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const [sharing, setSharing] = useState(false);
@@ -326,6 +328,8 @@ const TracksApp: React.FC = () => {
     if (busy) return;
     const items = await droppedItems(e.dataTransfer); // reads the drop's entries before its first await
     if (!items.length) return;
+    // Loose songs: one quick question (new, or a new version of one already here?), then straight in
+    if (!isPlaylist && !listenOnly && items.every((i) => !i.sub?.length && AUDIO.test(i.name))) return setAdding(items);
     const tops = new Set(items.map((i) => i.sub?.[0] ?? ''));
     const oneFolder = tops.size === 1 && !tops.has('') ? [...tops][0] : null;
     let target = release;
@@ -333,18 +337,9 @@ const TracksApp: React.FC = () => {
       oneFolder &&
       (!release || (await dialog.confirm(`Make "${oneFolder}" a new release?`, { ok: 'New release', cancel: `Add to ${release.title}` })))
     ) {
-      const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && ['upload', 'edit'].includes(s.rights));
-      let last = '';
-      try {
-        last = localStorage.getItem('sk_new_space') || '';
-      } catch {}
-      const space = spaces.find((s) => s.id === last) || spaces[0];
+      const space = uploadSpace();
       if (!space) return setMsg("You can't add files to any team space. Ask an admin for upload rights.");
-      const name =
-        oneFolder
-          .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
-          .trim()
-          .replace(/[. ]+$/, '') || 'New release';
+      const name = folderSafe(oneFolder) || 'New release';
       try {
         target = await api('/api/tracks/release', {
           method: 'POST',
@@ -358,7 +353,7 @@ const TracksApp: React.FC = () => {
     }
     if (!target?.folder) return setMsg('Link this release to a folder first (Folder... in the toolbar), then drop files on it.');
     const f = target.folder;
-    items.forEach((i) => !i.sub?.length && /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i.test(i.name) && (i.sub = ['Bounces']));
+    items.forEach((i) => !i.sub?.length && AUDIO.test(i.name) && (i.sub = ['Bounces']));
     setBusy(true);
     try {
       await uploadFiles(getToken, f.space, f.path.split('/'), items, (s, n) =>
@@ -371,6 +366,74 @@ const TracksApp: React.FC = () => {
       setMsg(`Upload stopped: ${(err as Error).message}`);
     } finally {
       setBusy(false);
+    }
+  };
+  const uploadSpace = () => {
+    const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && ['upload', 'edit'].includes(s.rights));
+    let last = '';
+    try {
+      last = localStorage.getItem('sk_new_space') || '';
+    } catch {}
+    return spaces.find((s) => s.id === last) || spaces[0];
+  };
+  /** A project's folder, made in a team space (Releases/<title>) if it has none yet. */
+  const folderOf = async (r: Release): Promise<FileRef> => {
+    if (r.folder) return r.folder;
+    const space = uploadSpace();
+    if (!space) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
+    const x = await api(`/api/tracks/release/${r.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ folder: { space: space.id, path: `Releases/${folderSafe(r.title) || r.id}` }, setup: true }),
+    });
+    return x.folder;
+  };
+  /** Dropped or picked songs. New ones land in the open project (or New songs) titled by their file name;
+   * a new version replaces the song's bounce. Everything else (album, BMI, links) comes later on the song's page. */
+  const addSongs = async (items: UploadItem[], picks: (string | null)[], artists: string) => {
+    setAdding(null);
+    setBusy(true);
+    try {
+      const fresh = items.filter((_, i) => !picks[i]);
+      if (fresh.length) {
+        let target = release && !isPlaylist ? release : releases.find(isInbox);
+        if (!target) {
+          const space = uploadSpace();
+          if (!space) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
+          target = await api('/api/tracks/release', {
+            method: 'POST',
+            body: JSON.stringify({ title: INBOX, kind: 'Folder', folder: { space: space.id, path: `Releases/${INBOX}` }, setup: true }),
+          });
+        }
+        const f = await folderOf(target!);
+        await uploadFiles(getToken, f.space, [...f.path.split('/'), 'Bounces'], fresh, (s, n) =>
+          setMsg(`Uploading ${fresh.length} song(s)... ${Math.round((s / n) * 100)}%`),
+        );
+        const found: Found = await api(`/api/tracks/release/${target!.id}?scan`, { method: 'POST' });
+        if (artists) {
+          const now: { tracks: Track[] } = await api('/api/tracks');
+          for (const t of now.tracks.filter((t) => t.release === target!.id && !t.credits && found.added.includes(t.title)))
+            await api(`/api/tracks/track/${t.id}`, { method: 'PATCH', body: JSON.stringify({ credits: `Artists: ${artists}` }) });
+        }
+        setTimeout(() => setMsg(`Added to ${target!.title}. ${foundText(found)}`));
+      }
+      for (const [i, id] of picks.entries()) {
+        const t = id && byId.get(id);
+        if (!t) continue;
+        const f = await folderOf(releaseOf(t));
+        const [saved] = await uploadFiles(getToken, f.space, [...f.path.split('/'), 'Bounces'], [items[i]], (s, n) =>
+          setMsg(`Uploading the new version of ${t.title}... ${Math.round((s / n) * 100)}%`),
+        );
+        await api(`/api/tracks/track/${t.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ bounce: { space: f.space, path: `${f.path}/Bounces/${saved}` } }),
+        });
+        setTimeout(() => setMsg(`New version of ${t.title} added.`));
+      }
+    } catch (err) {
+      setMsg(`Upload stopped: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+      load();
     }
   };
   const addTrack = async () => {
@@ -397,8 +460,16 @@ const TracksApp: React.FC = () => {
           </button>
         ) : (
           <>
-            <button style={button} onClick={newRelease}>
-              <IconLabel icon="plus">New project...</IconLabel>
+            <button
+              style={{ ...button, fontWeight: 700 }}
+              disabled={busy}
+              onClick={() => songPicker.current?.click()}
+              title="Or drop songs anywhere here. The file name becomes the title; the rest comes later."
+            >
+              <IconLabel icon="plus">Add songs...</IconLabel>
+            </button>
+            <button style={button} onClick={newRelease} title="An album, EP or single to gather songs into">
+              New project...
             </button>
             <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
               New playlist...
@@ -430,7 +501,15 @@ const TracksApp: React.FC = () => {
         )}
         {release && !listenOnly && !isPlaylist && (
           <>
-            <button style={{ ...button, fontWeight: 700 }} onClick={addTrack}>
+            <button
+              style={{ ...button, fontWeight: 700 }}
+              disabled={busy}
+              onClick={() => songPicker.current?.click()}
+              title="Or drop songs here. The file name becomes the title."
+            >
+              <IconLabel icon="plus">Add songs...</IconLabel>
+            </button>
+            <button style={button} onClick={addTrack} title="A song with no file yet, just a title">
               <IconLabel icon="note">Add track...</IconLabel>
             </button>
             {ready && (
@@ -716,6 +795,13 @@ const TracksApp: React.FC = () => {
             track={track}
             release={releaseOf(track)}
             playlists={playlists}
+            projects={releases.filter((r) => r.kind !== 'Playlist')}
+            onMove={(to) =>
+              run(async () => {
+                await api(`/api/tracks/track/${track.id}`, { method: 'PATCH', body: JSON.stringify({ release: to }) });
+                setReleaseId(to);
+              })
+            }
             onAddToPlaylist={(pl) => (pl ? addToPlaylist(pl, track.id) : newPlaylist(track.id))}
             focus={focus}
             statuses={data.statuses}
@@ -748,6 +834,28 @@ const TracksApp: React.FC = () => {
               patchRelease(body);
             }}
             onClose={() => setPageSetup(false)}
+          />
+        )}
+        <input
+          ref={songPicker}
+          type="file"
+          multiple
+          accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const files = [...(e.target.files || [])];
+            e.target.value = '';
+            if (files.length) setAdding(files.map((file) => ({ file, name: file.name })));
+          }}
+        />
+        {adding && (
+          <AddSongs
+            items={adding}
+            tracks={data.tracks.filter((t) => releaseOf(t) && releaseOf(t).kind !== 'Playlist')}
+            releaseOf={releaseOf}
+            into={release && !isPlaylist ? release.title : INBOX}
+            onAdd={addSongs}
+            onClose={() => setAdding(null)}
           />
         )}
         {campaign && release && <Campaign release={release} tracks={tracks} onClose={() => setCampaign(false)} />}
@@ -838,7 +946,7 @@ const Library: React.FC<{
   if (!releases.length)
     return (
       <div style={{ ...listBox, flex: 1, padding: 16 }}>
-        No projects yet. Click <b>New project...</b> to start one (an album, EP or single), or drop a folder of bounces here.
+        No songs yet. Drop your songs here (or click <b>Add songs...</b>): each file becomes a song named after it.
       </div>
     );
   const sorted = [...releases].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
@@ -911,6 +1019,132 @@ const Library: React.FC<{
           </button>
         );
       })}
+    </div>
+  );
+};
+
+const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
+const INBOX = 'New songs'; // where dropped songs wait until they find their album
+const isInbox = (r: Release) => r.kind === 'Folder' && r.title === INBOX;
+const folderSafe = (name: string) =>
+  name
+    .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
+    .trim()
+    .replace(/[. ]+$/, '');
+/** "03 Summer Nights v2 (master).wav" -> "summernights": to guess which song a new version belongs to. */
+const songKey = (name: string) =>
+  name
+    .replace(/\.[^.]+$/, '')
+    .toLowerCase()
+    .replace(/^\d{1,2}[\s._-]+/, '')
+    .replace(/\b(v\d+|version\s*\d+|final|master(ed)?|mix(ed)?|rough|demo|bounce)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+/** The one question when songs come in: new songs, or a new version of one already here (and which)? */
+const AddSongs: React.FC<{
+  items: UploadItem[];
+  tracks: Track[];
+  releaseOf: (t: Track) => Release;
+  into: string;
+  onAdd: (items: UploadItem[], picks: (string | null)[], artists: string) => void;
+  onClose: () => void;
+}> = ({ items, tracks, releaseOf, into, onAdd, onClose }) => {
+  const guess = (name: string) => {
+    const k = songKey(name);
+    return (k && tracks.find((t) => songKey(t.title) === k)?.id) || '';
+  };
+  const guesses = items.map((i) => guess(i.name));
+  const [update, setUpdate] = useState(guesses.some(Boolean));
+  const [picks, setPicks] = useState<string[]>(guesses);
+  const [artists, setArtists] = useState(() => {
+    try {
+      return localStorage.getItem('sk_song_artists') || '';
+    } catch {
+      return '';
+    }
+  });
+  const sorted = [...tracks].sort((a, b) => a.title.localeCompare(b.title));
+  const go = () => {
+    try {
+      localStorage.setItem('sk_song_artists', artists.trim());
+    } catch {}
+    onAdd(items, update ? picks.map((p) => p || null) : items.map(() => null), artists.trim());
+  };
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.25)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20,
+      }}
+    >
+      <div style={{ width: 'min(460px, 96%)', background: '#fff', border: '2px outset #fff' }}>
+        <div style={{ background: '#000', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+          Add {items.length} song{items.length === 1 ? '' : 's'}
+        </div>
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="radio" checked={!update} onChange={() => setUpdate(false)} />
+            New song{items.length === 1 ? '' : 's'}
+          </label>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="radio" checked={update} disabled={!tracks.length} onChange={() => setUpdate(true)} />A new version of a song
+            already here
+          </label>
+          {update ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflow: 'auto' }}>
+              {items.map((it, i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.name}>
+                    {it.name}
+                  </span>
+                  <select
+                    style={{ ...input, maxWidth: 220 }}
+                    value={picks[i]}
+                    onChange={(e) => setPicks(picks.map((p, j) => (j === i ? e.target.value : p)))}
+                  >
+                    <option value="">(a new song)</option>
+                    {sorted.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title} · {releaseOf(t)?.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#555' }}>
+              Each one is named after its file and goes into <b>{into}</b>. Album, credits and release details come later on the song's
+              page.
+            </div>
+          )}
+          {(!update || picks.some((p) => !p)) && (
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              Artists
+              <input
+                style={{ ...input, flex: 1 }}
+                value={artists}
+                onChange={(e) => setArtists(e.target.value)}
+                placeholder="e.g. Hima, Prince"
+                onKeyDown={(e) => e.key === 'Enter' && go()}
+              />
+            </label>
+          )}
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button style={{ ...button, fontWeight: 700 }} onClick={go}>
+              Add
+            </button>
+            <button style={button} onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1015,9 +1249,7 @@ const AllSongs: React.FC<{
             {!shown.length && (
               <tr>
                 <td style={td} colSpan={7}>
-                  {rows.length
-                    ? 'No songs here.'
-                    : 'No songs yet. Open a project (Covers) and click Add track..., or drop a folder of bounces.'}
+                  {rows.length ? 'No songs here.' : 'No songs yet. Drop your songs here, or click Add songs.'}
                 </td>
               </tr>
             )}
@@ -1050,7 +1282,23 @@ const TrackPage: React.FC<{
   focus?: { where: string; n: number } | null; // from the guided strip's Go
   playlists: Release[];
   onAddToPlaylist: (playlistId: string) => void; // '' = a new playlist
-}> = ({ track: t, release, statuses, canRemove, overlay, onChange, onClose, setMsg, focus, playlists, onAddToPlaylist }) => {
+  projects: Release[];
+  onMove: (releaseId: string) => void;
+}> = ({
+  track: t,
+  release,
+  statuses,
+  canRemove,
+  overlay,
+  onChange,
+  onClose,
+  setMsg,
+  focus,
+  playlists,
+  onAddToPlaylist,
+  projects,
+  onMove,
+}) => {
   const api = useApi();
   const openRef = useOpenRef();
   const { openWindow } = useWindowManager();
@@ -1200,6 +1448,23 @@ const TrackPage: React.FC<{
             </option>
           ))}
           <option value="new">New playlist...</option>
+        </select>
+        <select
+          style={input}
+          value=""
+          title="Move this song into an album, EP or single (its files stay where they are)"
+          onChange={(e) => e.target.value && onMove(e.target.value)}
+        >
+          <option value="" disabled>
+            Move to project...
+          </option>
+          {projects
+            .filter((p) => p.id !== release.id)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title} ({p.kind})
+              </option>
+            ))}
         </select>
       </div>
 

@@ -2077,6 +2077,21 @@ async function tracksApi(req, res, url) {
         t.alerted = null;
         log(t.deadline ? `set the deadline to ${t.deadline}` : 'cleared the deadline');
       }
+      if (input.release !== undefined && input.release !== t.release) {
+        // Move it to another project (a song starts in New songs and finds its album later); its files stay put
+        const to =
+          (own(db.releases, input.release) &&
+            !db.releases[input.release].deleted &&
+            canSeeRelease(user, db.releases[input.release]) &&
+            db.releases[input.release]) ||
+          fail(404, 'No such project');
+        editRelease(user, to);
+        if (to.kind === 'Playlist') fail(400, 'Add songs to a playlist with Add to playlist');
+        t.release = to.id;
+        t.n = Object.values(db.tracks).reduce((m, x) => (x.release === to.id && !x.deleted && x !== t ? Math.max(m, x.n) : m), 0) + 1;
+        log(`moved it from ${r.title} to ${to.title}`);
+        changed(to);
+      }
       if (input.status !== undefined && input.status !== t.status) {
         t.status = TRACK_STATUSES.includes(input.status) ? input.status : fail(400, 'Bad status');
         log(`moved it to ${t.status}`);
@@ -2306,7 +2321,11 @@ async function scanReleaseNow(r, by) {
   const db = await loadTracks();
   const live = () => Object.values(db.tracks).filter((t) => t.release === r.id && !t.deleted);
   const byKey = new Map(live().map((t) => [songName(t.title, false).key, t]));
-  const byBounce = new Map(live().flatMap((t) => (t.bounce ? [[`${t.bounce.space}|${t.bounce.path}`, t]] : [])));
+  // Any song's bounce, whichever project it's in now: a song moved out of New songs keeps its file there, and a
+  // rescan must not bring it back as a new track (its newer versions still find it)
+  const byBounce = new Map(
+    Object.values(db.tracks).flatMap((t) => (t.bounce && !t.deleted ? [[`${t.bounce.space}|${t.bounce.path}`, t]] : [])),
+  );
   const now = new Date().toISOString();
   const log = (t, action) => {
     t.history = [{ at: now, user: by, action }, ...t.history].slice(0, 100);
