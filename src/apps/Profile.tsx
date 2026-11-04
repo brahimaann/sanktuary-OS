@@ -149,7 +149,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
               openWindow({
                 id: `chat-${dmId(self, who)}`,
                 title: `${displayName(p, who)} — Instant Message`,
-                icon: '/images/icons/outlook-express-16x16.png',
+                icon: '/images/icons/outlook-express-16x16.png?v=2',
                 appType: 'chat',
                 appProps: { channel: dmId(self, who) },
                 width: 460,

@@ -203,7 +203,7 @@ const LocalEchoTerminal: React.FC = () => {
       id: `ppls-local-echo-doc-${echo.id}`,
       title: `${echo.title} - Echo Notepad`,
       appType: 'notepad',
-      icon: '/images/icons/notepad-16x16.png',
+      icon: '/images/icons/notepad-16x16.png?v=2',
       appProps: { filePath: vfsPath },
       width: 500,
       height: 380,

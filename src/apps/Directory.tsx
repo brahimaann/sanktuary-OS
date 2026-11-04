@@ -45,7 +45,7 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'posts', label: 'Writing', icon: 'news' },
   { id: 'products', label: 'Shop', icon: 'favorites-folder' },
 ];
-const icon = (name: string, size: 16 | 32) => `/images/icons/${name}-${size}x${size}.png`;
+const icon = (name: string, size: 16 | 32) => `/images/icons/${name}-${size}x${size}.png?v=2`;
 const day = (d: string) =>
   new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;

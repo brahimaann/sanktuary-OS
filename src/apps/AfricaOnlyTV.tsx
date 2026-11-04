@@ -117,7 +117,11 @@ const AfricaOnlyTV: React.FC = () => {
         {/* Address bar */}
         <span style={addrLabel}>Address</span>
         <div style={addrBox}>
-          <img src="/images/icons/internet-explorer-16x16.png" style={{ width: 16, height: 16, marginRight: 4, flexShrink: 0 }} alt="" />
+          <img
+            src="/images/icons/internet-explorer-16x16.png?v=2"
+            style={{ width: 16, height: 16, marginRight: 4, flexShrink: 0 }}
+            alt=""
+          />
           <input
             style={addrInput}
             value={address}
@@ -167,7 +171,11 @@ const AfricaOnlyTV: React.FC = () => {
         {/* Fallback page — shown when site blocks embedding */}
         {blocked && (
           <div style={fallback}>
-            <img src="/images/icons/internet-explorer-32x32.png" style={{ width: 48, height: 48, imageRendering: 'pixelated' }} alt="" />
+            <img
+              src="/images/icons/internet-explorer-32x32.png?v=2"
+              style={{ width: 48, height: 48, imageRendering: 'pixelated' }}
+              alt=""
+            />
             <div style={{ fontWeight: 'bold', marginTop: 12, fontSize: 14 }}>This page cannot be displayed</div>
             <div style={{ color: '#555', fontSize: 11, marginTop: 6, maxWidth: 340, textAlign: 'center', lineHeight: 1.5 }}>
               <strong>AfricaOnly.TV</strong> has security settings that prevent it from being embedded inside another window

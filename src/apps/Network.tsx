@@ -20,7 +20,7 @@ const Network: React.FC = () => {
     openWindow({
       id: `space-${s.id}`,
       title: s.name,
-      icon: '/images/icons/folder-16x16.png',
+      icon: '/images/icons/folder-16x16.png?v=2',
       appType: 'team-files',
       appProps: { app: s.id },
     });
@@ -67,7 +67,7 @@ const Network: React.FC = () => {
               title={s.online ? 'Open' : 'Drive is unplugged'}
             >
               <img
-                src={s.id === 'me' ? '/images/icons/my-documents-32x32.png' : '/images/icons/hard-disk-drive-32x32.png'}
+                src={s.id === 'me' ? '/images/icons/my-documents-32x32.png?v=2' : '/images/icons/hard-disk-drive-32x32.png?v=2'}
                 alt=""
                 style={{ width: 32, height: 32 }}
               />

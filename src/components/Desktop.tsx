@@ -22,7 +22,7 @@ interface DesktopIconDef {
   height?: number;
 }
 
-const I = (name: string) => `/images/icons/${name}-32x32.png`;
+const I = (name: string) => `/images/icons/${name}-32x32.png?v=2`;
 const app = {
   new: { id: 'new', title: 'New...', icon: I('file'), appType: 'new', width: 460, height: 420 },
   // Studio: Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
@@ -38,7 +38,7 @@ const app = {
   calendar: {
     id: 'calendar',
     title: 'Calendar',
-    icon: '/images/icons/calendar-32x32.svg',
+    icon: '/images/icons/calendar-32x32.svg?v=2',
     appType: 'studio',
     appProps: { tab: 'calendar' },
     width: 960,
@@ -51,7 +51,7 @@ const app = {
   rapidraw: {
     id: 'rapidraw',
     title: 'SANKTUARY RAW',
-    icon: '/images/icons/paint-file-32x32-higher-color.png',
+    icon: '/images/icons/paint-file-32x32-higher-color.png?v=2',
     appType: 'iframe',
     appProps: { src: '/apps/rapidraw/' },
     width: 1100,
@@ -209,7 +209,7 @@ export const Desktop: React.FC = () => {
     openWindow({
       id: 'welcome-page',
       title: 'Welcome to Sanktuary',
-      icon: '/images/icons/network-16x16.png',
+      icon: '/images/icons/network-16x16.png?v=2',
       appType: 'iframe',
       appProps: { src: '/welcome' },
       width: 900,
@@ -229,7 +229,7 @@ export const Desktop: React.FC = () => {
     openWindow({
       id: 'welcome',
       title: 'Welcome to Sanktuary',
-      icon: '/images/icons/help-16x16.png',
+      icon: '/images/icons/help-16x16.png?v=2',
       appType: 'welcome',
       appProps: { tour: true },
       width: 520,
@@ -246,7 +246,7 @@ export const Desktop: React.FC = () => {
     openWindow({
       id: 'share-in',
       title: 'Share to Sanktuary',
-      icon: '/images/icons/network-16x16.png',
+      icon: '/images/icons/network-16x16.png?v=2',
       appType: 'share-in',
       appProps: { missed: q.get('share') === 'missed' },
       width: 440,
@@ -281,7 +281,7 @@ export const Desktop: React.FC = () => {
         const title = file.name;
         const id = `vfs-desktop-${title.replace(/[^a-zA-Z0-9]/g, '-')}`;
         const isTxt = title.endsWith('.txt');
-        const icon = isTxt ? '/images/icons/notepad-file-32x32.png' : '/images/icons/folder-32x32.png';
+        const icon = isTxt ? '/images/icons/notepad-file-32x32.png?v=2' : '/images/icons/folder-32x32.png?v=2';
         const appType = isTxt ? 'notepad' : 'explorer';
         const appProps = isTxt ? { filePath: `C:/Desktop/${title}` } : { path: `C:/Desktop/${title}` };
         return {
@@ -791,7 +791,7 @@ export const Desktop: React.FC = () => {
                   }}
                   className="hover:bg-black hover:text-white px-2 py-1 cursor-default flex items-center gap-2"
                 >
-                  <img src="/images/icons/folder-16x16.png" className="w-3.5 h-3.5" alt="" />
+                  <img src="/images/icons/folder-16x16.png?v=2" className="w-3.5 h-3.5" alt="" />
                   <span>Folder</span>
                 </div>
                 <div
@@ -801,7 +801,7 @@ export const Desktop: React.FC = () => {
                   }}
                   className="hover:bg-black hover:text-white px-2 py-1 cursor-default flex items-center gap-2"
                 >
-                  <img src="/images/icons/notepad-16x16.png" className="w-3.5 h-3.5" alt="" />
+                  <img src="/images/icons/notepad-16x16.png?v=2" className="w-3.5 h-3.5" alt="" />
                   <span>Text Document</span>
                 </div>
               </div>
@@ -815,7 +815,7 @@ export const Desktop: React.FC = () => {
                 id: 'display-properties',
                 title: 'Display Properties',
                 appType: 'display-properties',
-                icon: '/images/icons/themes-16x16.png',
+                icon: '/images/icons/themes-16x16.png?v=2',
                 width: 360,
                 height: 400,
               });
@@ -875,7 +875,7 @@ export const Desktop: React.FC = () => {
             </div>
             <div className="p-4 flex items-center gap-3">
               <img
-                src="/images/icons/msg-warning-32x32.png"
+                src="/images/icons/msg-warning-32x32.png?v=2"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
                 }}

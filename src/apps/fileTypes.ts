@@ -50,7 +50,7 @@ const ICONS: Record<FileKind | 'folder', string> = {
 };
 
 export const fileIcon = (name: string, isDir: boolean, size: 16 | 32 = 16) =>
-  `/images/icons/${ICONS[isDir ? 'folder' : fileKind(name)]}-${size}x${size}.png`;
+  `/images/icons/${ICONS[isDir ? 'folder' : fileKind(name)]}-${size}x${size}.png?v=2`;
 
 export const formatSize = (b: number) =>
   b < 1024

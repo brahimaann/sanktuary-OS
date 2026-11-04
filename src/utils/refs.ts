@@ -33,11 +33,11 @@ export function refFromDrop(dt: DataTransfer): Ref | null {
 
 export const refIcon = (r: Ref) =>
   r.kind === 'folder'
-    ? '/images/icons/folder-16x16.png'
+    ? '/images/icons/folder-16x16.png?v=2'
     : r.kind === 'board'
-      ? '/images/icons/paint-16x16.png'
+      ? '/images/icons/paint-16x16.png?v=2'
       : r.kind === 'plan'
-        ? '/images/icons/task-16x16.png'
+        ? '/images/icons/task-16x16.png?v=2'
         : fileIcon(r.name || r.title || '', false);
 
 /** Opens a ref in the right window. */
@@ -61,7 +61,7 @@ export function useOpenRef() {
       openWindow({
         id: `space-${r.app}-${path.join('/')}`,
         title: r.name || r.title,
-        icon: '/images/icons/folder-16x16.png',
+        icon: '/images/icons/folder-16x16.png?v=2',
         appType: 'team-files',
         appProps: { app: r.app, initialPath: path },
       });
@@ -69,7 +69,7 @@ export function useOpenRef() {
       openWindow({
         id: `canvas-${r.boardId}`,
         title: r.title,
-        icon: '/images/icons/paint-16x16.png',
+        icon: '/images/icons/paint-16x16.png?v=2',
         appType: 'canvas',
         appProps: { boardId: r.boardId },
         width: 1000,
@@ -79,7 +79,7 @@ export function useOpenRef() {
       openWindow({
         id: `planner-${r.boardId}`,
         title: r.title,
-        icon: '/images/icons/task-16x16.png',
+        icon: '/images/icons/task-16x16.png?v=2',
         appType: 'planner',
         appProps: { boardId: r.boardId },
         width: 1000,

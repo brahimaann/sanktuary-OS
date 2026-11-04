@@ -147,7 +147,7 @@
   position: relative;
 }
 .desktop-icon.shortcut .icon-wrapper:after {
-  content: var(--shortcut-icon, url('/images/icons/shortcut-32x32.png'));
+  content: var(--shortcut-icon, url('/images/icons/shortcut-32x32.png?v=2'));
   position: absolute;
   left: 0;
   top: 0;

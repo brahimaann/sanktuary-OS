@@ -126,7 +126,7 @@ const ShareForm: React.FC<{ missed?: boolean }> = ({ missed }) => {
         openWindow({
           id: `canvas-${b.id}`,
           title: b.name,
-          icon: '/images/icons/paint-16x16.png',
+          icon: '/images/icons/paint-16x16.png?v=2',
           appType: 'canvas',
           appProps: { boardId: b.id, name: b.name },
           width: 1000,
@@ -140,7 +140,7 @@ const ShareForm: React.FC<{ missed?: boolean }> = ({ missed }) => {
         openWindow({
           id: `chat-${c.id}`,
           title: c.name,
-          icon: '/images/icons/outlook-express-16x16.png',
+          icon: '/images/icons/outlook-express-16x16.png?v=2',
           appType: 'chat',
           appProps: { channel: c.id },
           width: 460,

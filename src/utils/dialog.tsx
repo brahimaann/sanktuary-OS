@@ -137,7 +137,7 @@ export const DialogHost: React.FC = () => {
         </div>
         <div style={{ display: 'flex', gap: 12, padding: '14px 14px 8px', alignItems: 'flex-start' }}>
           <img
-            src={`/images/icons/${req.icon}-32x32-8bpp.png`}
+            src={`/images/icons/${req.icon}-32x32-8bpp.png?v=2`}
             alt=""
             style={{ width: 32, height: 32, flexShrink: 0, imageRendering: 'pixelated' }}
           />
