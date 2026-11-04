@@ -218,7 +218,7 @@ export const Taskbar: React.FC = () => {
             }}
             title="📡 Click to check local history echo"
           >
-            📟
+            <img src="/images/icons/mail-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
           </button>
         )}
         <img src="/images/icons/speaker-16x16.png" alt="Volume" className="w-4 h-4 mr-2 image-render-pixelated" />
@@ -246,7 +246,7 @@ export const Taskbar: React.FC = () => {
           title={isSignedIn ? 'My account' : 'Log on'}
           aria-label={isSignedIn ? 'My account' : 'Log on'}
         >
-          🔑
+          <img src="/images/icons/logoff-16x16.png" alt="" className="w-4 h-4 image-render-pixelated" />
         </button>
       </div>
 
