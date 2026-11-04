@@ -777,6 +777,23 @@ try {
     !fts.some((t) => t.title === 'gh') && fts.find((t) => t.id === hand.id)?.bounce?.path.endsWith('gh v2.wav'),
     fts.map((t) => `${t.title}=${t.bounce?.path}`).join(', '),
   );
+  // A song moves to another project later; its bounce stays in the old folder and a rescan leaves it alone
+  const later = JSON.parse((await newRel('bob', { title: 'Later Album', kind: 'Album' })).text);
+  const movedSong = JSON.parse((await call('bob', `/api/tracks/track/${hand.id}`, 'PATCH', { release: later.id })).text);
+  check('a song moves to another project', movedSong.release === later.id && movedSong.n === 1);
+  await call('bob', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST');
+  check(
+    'a rescan does not bring a moved song back',
+    !(await tracksOf('bob', folderAlbum.id)).some((t) => /^gh/i.test(t.title) || t.title === 'Golden Hour'),
+  );
+  check(
+    'a song cannot move into a playlist',
+    (await call('bob', `/api/tracks/track/${hand.id}`, 'PATCH', { release: pl.id })).status === 400,
+  );
+  check(
+    'carol cannot move it into a project she cannot see',
+    (await call('carol', `/api/tracks/track/${hand.id}`, 'PATCH', { release: album.id })).status === 404,
+  );
   check(
     'mkdir with parents makes the whole path',
     (await call('bob', '/api/files/up/Timeline/2027-01-01 Shoot?mkdir&parents', 'POST')).status === 200 &&
@@ -1134,6 +1151,15 @@ try {
 
   // Caching: page always re-checked, built assets cached forever
   check('page is no-cache', (await fetch(B + '/')).headers.get('cache-control') === 'no-cache');
+  // Icons keep their names when redrawn: browsers re-check them (a quick 304 when unchanged) instead of keeping a day-old copy
+  const testIcon = join(SERVER, '..', '..', 'dist', 'images', 'zz-test-icon.png'); // the server's own dist
+  mkdirSync(join(testIcon, '..'), { recursive: true });
+  writeFileSync(testIcon, 'png');
+  const icon = await fetch(B + '/images/zz-test-icon.png');
+  const iconAgain = await fetch(B + '/images/zz-test-icon.png', { headers: { 'if-modified-since': icon.headers.get('last-modified') } });
+  rmSync(testIcon, { force: true });
+  check('icons are re-checked, not kept for a day', icon.status === 200 && icon.headers.get('cache-control') === 'no-cache');
+  check('an unchanged icon is a 304', iconAgain.status === 304);
 
   // Folder zips: a file named like a tar option must be zipped as a file, never run as an option
   mkdirSync(join(drive, 'team', 'optfolder'), { recursive: true });
