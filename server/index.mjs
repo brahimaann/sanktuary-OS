@@ -8468,22 +8468,15 @@ function staticFile(req, res, url) {
   let file = normalize(join(DIST, decodeURIComponent(url.pathname)));
   if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
-  // Built assets have content hashes in their names, so they can be cached forever. Everything else (the page,
-  // icons, sounds) keeps its name when it changes, so browsers check it each time: a redrawn icon shows on the
-  // next reload, and an unchanged one is a quick 304.
-  const type = MIME[extname(file).toLowerCase()] || 'application/octet-stream';
-  if (url.pathname.startsWith('/assets/') && !file.endsWith('index.html')) {
-    res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=31536000, immutable' });
-    return pipeline(createReadStream(file), res);
-  }
-  const modified = new Date(Math.floor((statSyncSafe(file)?.mtimeMs || 0) / 1000) * 1000);
-  const headers = { 'content-type': type, 'cache-control': 'no-cache', 'last-modified': modified.toUTCString() };
-  const since = Date.parse(req.headers['if-modified-since'] || '');
-  if (since >= modified.getTime()) {
-    res.writeHead(304, headers);
-    return res.end();
-  }
-  res.writeHead(200, headers);
+  // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their
+  // names, so they can be cached forever; icons, sounds etc. for a day.
+  const cache =
+    file.endsWith('index.html') || file.endsWith('sw.js')
+      ? 'no-cache'
+      : url.pathname.startsWith('/assets/')
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=86400';
+  res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': cache });
   return pipeline(createReadStream(file), res);
 }
 
