@@ -366,6 +366,26 @@ try {
   check('?all shows a member the index', all.status === 200);
   check('the studio portfolio stays at /portfolio', /Portfolio · Sanktuary/.test(await (await fetch(`${B}/portfolio`)).text()));
 
+  // ── Library: anyone adds and co-signs; only whoever added it or an admin edits or removes ──
+  const book = (await call('bob', '/api/library', 'POST', { kind: 'Book', title: 'The Souls of Black Folk', blurb: 'Read it.' })).data;
+  check('a member adds a book', book.id && book.addedBy === 'bob');
+  check(
+    'a classic needs an https link',
+    (await call('bob', '/api/library', 'POST', { kind: 'Classic', title: 'x', link: 'ftp://x' })).status === 400,
+  );
+  check('carol co-signs it', (await call('carol', `/api/library/${book.id}`, 'PATCH', { cosign: true })).data.cosigns?.includes('carol'));
+  check('carol cannot edit it', (await call('carol', `/api/library/${book.id}`, 'PATCH', { blurb: 'mine now' })).status === 403);
+  check('carol cannot remove it', (await call('carol', `/api/library/${book.id}`, 'DELETE')).status === 403);
+  await call('bob', '/api/library', 'POST', { kind: 'Archive', title: 'Scrapped tape' });
+  const shelf = await (await fetch(`${B}/api/public/library`)).json();
+  check(
+    'visitors see books on the CITIES Library',
+    shelf.items.some((i) => i.title === 'The Souls of Black Folk'),
+  );
+  check('the team archive stays inside', !shelf.items.some((i) => i.title === 'Scrapped tape'));
+  check('an admin can remove it', (await call('alice', `/api/library/${book.id}`, 'DELETE')).status === 200);
+  check('removed entries leave the list', !(await call('carol', '/api/library')).data.items.some((i) => i.id === book.id));
+
   // A store that can't be read (locked, or here a folder in its place) is an error, never an empty list that the
   // next save would write over the real file
   mkdirSync(join(dir, 'data', 'outreach.json'));

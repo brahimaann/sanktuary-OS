@@ -608,6 +608,7 @@
         ['field-notes', 'Field Notes'],
         ['videos', 'Videos'],
         ['moodboard', 'Moodboard'],
+        ['library', 'Library'],
       ];
       const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spotlight' };
       const LINE_CHIP = { heart: ['#b00020', 'Heart'], essays: ['#000080', 'Essay'], 'field-notes': ['#2e7d32', 'Field note'] };
@@ -915,6 +916,37 @@
         );
       }
 
+      // Library: books we recommend and Renaissance Radio (the classics), each with why. Added by the team in Studio.
+      let allLibrary = null;
+      let shelf = 'Book';
+      async function library() {
+        sectionTabs('library');
+        document.title = 'Library · CITIES';
+        if (!allLibrary) {
+          app.textContent = 'Loading...';
+          allLibrary = await fetch('/api/public/library')
+            .then((r) => r.json())
+            .then((d) => d.items)
+            .catch(() => null);
+          if (!allLibrary) return (app.innerHTML = '<div class="empty">The Library could not load. Try again in a minute.</div>');
+        }
+        bar.innerHTML = [
+          ['Book', 'Books'],
+          ['Classic', 'Renaissance Radio'],
+        ]
+          .map(([k, name]) => `<button class="btn ${shelf === k ? 'on' : ''}" data-s="${k}">${name}</button>`)
+          .join('');
+        bar.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => ((shelf = b.dataset.s), library())));
+        const shown = allLibrary.filter((i) => i.kind === shelf);
+        app.innerHTML =
+          shown
+            .map(
+              (i) =>
+                `<div class="post" style="cursor:default"><div style="min-width:0"><h2>${esc(i.title)}</h2><div class="meta">${[i.by, i.year].filter(Boolean).map(esc).join(' · ')}${i.link ? ` · <a href="${esc(i.link)}" target="_blank" rel="noopener noreferrer">${shelf === 'Classic' ? 'Listen' : 'Find it'}</a>` : ''}</div>${i.blurb ? `<div class="excerpt" style="-webkit-line-clamp:unset;white-space:pre-wrap">${esc(i.blurb)}</div>` : ''}<div class="meta" style="margin-top:6px">Recommended by ${esc([i.addedBy, ...i.cosigns].join(', '))}</div></div></div>`,
+            )
+            .join('') || '<div class="empty">Nothing on this shelf yet. Check back soon.</div>';
+      }
+
       // Posts | Notes switch inside Essays
       function subTabs(on) {
         return `<a class="btn ${on === 'posts' ? 'on' : ''}" href="/cities/essays" data-nav><b>Posts</b></a><a class="btn ${on === 'notes' ? 'on' : ''}" href="/cities/notes" data-nav><b>Notes</b></a><span style="width:10px"></span>`;
@@ -987,6 +1019,7 @@
         const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
         if (path === 'notes') return notes();
         if (path === 'videos') return videos();
+        if (path === 'library') return library();
         if (path.split('/')[0] === 'moodboard') return moodboard(path.split('/')[1]);
         if (path.startsWith('heart/')) return person(path.split('/')[1]);
         const section = path === '' ? 'heart' : ['heart', 'essays', 'field-notes'].includes(path) ? path : null;

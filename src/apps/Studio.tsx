@@ -2,24 +2,24 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), to-do boards (Planner)
-// and opportunities (grants, calls, gigs) in one window.
+// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), to-do boards (Planner),
+// opportunities (grants, calls, gigs), outreach and the Library (books, classics, our archive) in one window.
 // Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
 const Tracks = lazy(() => import('./Tracks'));
 const Timeline = lazy(() => import('./Timeline'));
 const Boards = lazy(() => import('./Boards'));
 const Opportunities = lazy(() => import('./Opportunities'));
-const Archive = lazy(() => import('./Archive'));
+const Library = lazy(() => import('./Library'));
 const Outreach = lazy(() => import('./Outreach'));
 
-export type StudioTab = 'music' | 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'archive';
+export type StudioTab = 'music' | 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'library';
 const TABS: [StudioTab, string][] = [
   ['music', 'Music'],
   ['calendar', 'Calendar'],
   ['boards', 'Planner'],
   ['opportunities', 'Opportunities'],
   ['outreach', 'Outreach'],
-  ['archive', 'Archive'],
+  ['library', 'Library'],
 ];
 
 /** Opens Studio on a tab (switching the tab if Studio is already open). */
@@ -81,7 +81,7 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
                   ) : id === 'outreach' ? (
                     <Outreach />
                   ) : (
-                    <Archive />
+                    <Library />
                   )}
                 </div>
               ),
