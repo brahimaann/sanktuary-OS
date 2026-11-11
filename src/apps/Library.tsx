@@ -8,8 +8,8 @@ import { IconLabel } from '../components/RetroIcon';
 import Archive from './Archive';
 
 /**
- * Library: the team's shared culture. Books we read and recommend, music classics (Renaissance Radio) and our own
- * archive of old and scrapped projects. Every entry carries a blurb on why it's here; others co-sign what they back.
+ * Library: the team's shared culture. Books we read and recommend, Renaissance Radio (our own tracks, uploaded and
+ * played here, one after another) and our archive of old and scrapped projects. Every entry carries a blurb on why it's here; others co-sign what they back.
  */
 interface Entry {
   id: string;
@@ -22,18 +22,21 @@ interface Entry {
   cosigns: string[];
   addedBy: string;
   created: string;
+  audio?: string;
+  updated?: string;
 }
 
 const SECTIONS: [Entry['kind'], string, string][] = [
   ['Book', 'Books', 'Books we read and recommend, and why. Also shown on CITIES > Library.'],
-  ['Classic', 'Renaissance Radio', 'The classics everyone should know, linked to where they stream. Also shown on CITIES > Library.'],
+  ['Classic', 'Renaissance Radio', 'Our tracks: upload a song and it plays here, one after another. Also shown on CITIES > Library.'],
   ['Archive', 'Archive', 'Our own history: old work and scrapped projects worth keeping. Team only.'],
 ];
 const PLACEHOLDER = {
   Book: { title: 'Book title', by: 'Author', blurb: 'Why we recommend it' },
-  Classic: { title: 'Album or song', by: 'Artist', blurb: 'Why it is a classic' },
+  Classic: { title: 'Song', by: 'Artist', blurb: 'The story behind it' },
   Archive: { title: 'Project', by: 'Who made it', blurb: 'What it was, and why it stopped' },
 };
+const AUDIO = '.mp3,.m4a,.wav,.ogg';
 
 const Library: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
@@ -48,6 +51,7 @@ const LibraryApp: React.FC = () => {
   const [items, setItems] = useState<Entry[] | null>(null);
   const [kind, setKind] = useState<Entry['kind']>('Book');
   const [draft, setDraft] = useState({ title: '', by: '', year: '', link: '', blurb: '' });
+  const [track, setTrack] = useState<File | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const load = useCallback(
@@ -64,20 +68,34 @@ const LibraryApp: React.FC = () => {
   useLiveEvent('library', load);
   if (!items) return <div style={{ ...shell, padding: 16 }}>{msg || 'Loading...'}</div>;
 
-  const call = (path: string, method: string, body?: object) =>
-    api(path, { method, body: body && JSON.stringify(body) }).then(
+  const call = (path: string, method: string, body?: object | File) =>
+    api(path, { method, body: body instanceof File ? body : body && JSON.stringify(body) }).then(
       () => (setMsg(''), load()),
       (e) => {
         setMsg(e.message);
         throw e;
       },
     );
-  const add = (e: React.FormEvent) => {
+  const upload = (id: string, f: File) => {
+    setMsg(`Uploading ${f.name}...`);
+    return call(`/api/library/${id}/audio?name=${encodeURIComponent(f.name)}`, 'PUT', f);
+  };
+  const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    call('/api/library', 'POST', { ...draft, kind }).then(
-      () => setDraft({ title: '', by: '', year: '', link: '', blurb: '' }),
-      () => {},
-    );
+    try {
+      const o: Entry = await api('/api/library', { method: 'POST', body: JSON.stringify({ ...draft, kind }) });
+      setDraft({ title: '', by: '', year: '', link: '', blurb: '' });
+      setTrack(null);
+      if (track && kind !== 'Book') await upload(o.id, track);
+      else (setMsg(''), load());
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  };
+  // Radio: when a track ends, the next one with a track starts
+  const playNext = (id: string) => {
+    const rest = list.slice(list.findIndex((i) => i.id === id) + 1).find((i) => i.audio);
+    if (rest) (document.getElementById(`lib-audio-${rest.id}`) as HTMLAudioElement | null)?.play();
   };
   const mine = (i: Entry) => !!me && (i.addedBy === me.username || me.admin);
   const list = items
@@ -132,6 +150,12 @@ const LibraryApp: React.FC = () => {
           maxLength={2000}
           onChange={(e) => setDraft({ ...draft, blurb: e.target.value })}
         />
+        {kind !== 'Book' && (
+          <label style={{ ...button, display: 'inline-flex', alignItems: 'center' }}>
+            <IconLabel icon="upload">{track ? track.name : 'Track'}</IconLabel>
+            <input type="file" accept={AUDIO} hidden onChange={(e) => setTrack(e.target.files?.[0] || null)} />
+          </label>
+        )}
         <button type="submit" style={{ ...button, fontWeight: 700 }} disabled={!draft.title.trim()}>
           <IconLabel icon="plus">Add</IconLabel>
         </button>
@@ -182,6 +206,17 @@ const LibraryApp: React.FC = () => {
                     <button style={button} onClick={() => setEditing(i.id)}>
                       Edit
                     </button>
+                    {kind !== 'Book' && (
+                      <label style={button} title="Upload an MP3, M4A, WAV or OGG">
+                        <IconLabel icon="upload">{i.audio ? 'Replace track' : 'Upload track'}</IconLabel>
+                        <input
+                          type="file"
+                          accept={AUDIO}
+                          hidden
+                          onChange={(e) => e.target.files?.[0] && upload(i.id, e.target.files[0]).catch(() => {})}
+                        />
+                      </label>
+                    )}
                     <button
                       style={button}
                       onClick={async () =>
@@ -195,6 +230,16 @@ const LibraryApp: React.FC = () => {
                 )}
               </div>
               {i.blurb && <div style={{ marginTop: 3, whiteSpace: 'pre-wrap', color: '#222' }}>{i.blurb}</div>}
+              {i.audio && (
+                <audio
+                  id={`lib-audio-${i.id}`}
+                  src={`/api/library/${i.id}/audio?v=${encodeURIComponent(i.updated || '')}`}
+                  controls
+                  preload="none"
+                  onEnded={() => playNext(i.id)}
+                  style={{ display: 'block', width: '100%', maxWidth: 420, marginTop: 4 }}
+                />
+              )}
             </div>
           ),
         )}

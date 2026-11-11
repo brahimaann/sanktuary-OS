@@ -383,6 +383,15 @@ try {
     shelf.items.some((i) => i.title === 'The Souls of Black Folk'),
   );
   check('the team archive stays inside', !shelf.items.some((i) => i.title === 'Scrapped tape'));
+  const song = (await call('bob', '/api/library', 'POST', { kind: 'Classic', title: 'Yellow Diamonds' })).data;
+  const put = (u, id, name, body) =>
+    fetch(`${B}/api/library/${id}/audio?name=${encodeURIComponent(name)}`, { method: 'PUT', headers: { cookie: cookie(u) }, body });
+  check('only audio files go on the radio', (await put('bob', song.id, 'x.exe', 'MZ')).status === 400);
+  check('carol cannot swap bob’s track', (await put('carol', song.id, 'x.mp3', 'ID3')).status === 403);
+  check('bob uploads his track', (await put('bob', song.id, 'Yellow Diamonds.mp3', 'ID3fake')).status === 200);
+  const pub = (await (await fetch(`${B}/api/public/library`)).json()).items.find((i) => i.title === 'Yellow Diamonds');
+  const played = await fetch(B + pub.audio, { headers: { range: 'bytes=0-2' } });
+  check('visitors can play it', played.status === 206 && (await played.text()) === 'ID3');
   check('an admin can remove it', (await call('alice', `/api/library/${book.id}`, 'DELETE')).status === 200);
   check('removed entries leave the list', !(await call('carol', '/api/library')).data.items.some((i) => i.id === book.id));
 

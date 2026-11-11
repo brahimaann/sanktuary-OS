@@ -2762,8 +2762,11 @@ setInterval(() => trackDeadlines().catch(console.error), 3.6e6).unref();
 
 // ── /api/library: books we recommend, music classics, and our own archive (old and scrapped projects) — data/library.json ──
 // Anyone on the team adds an entry with a blurb on why it matters; others co-sign it. Whoever added it or an admin edits or
-// removes it. Classics are links out to where they stream: no audio is hosted here.
+// removes it. Radio and archive entries can carry one of our own tracks (data/library/<id>.<ext>), played in place.
 const LIB_KINDS = ['Book', 'Classic', 'Archive'];
+const LIB_AUDIO = new Set(['.mp3', '.m4a', '.wav', '.ogg']); // what browsers play
+const LIB_DIR = () => join(DATA, 'library');
+const libAudio = (o) => join(LIB_DIR(), o.id + o.audio);
 const LIB_TEXT = { title: 120, by: 120, year: 20, blurb: 2000 };
 let libDb = null;
 let libSaved = Promise.resolve();
@@ -2804,6 +2807,21 @@ async function libraryApi(req, res, url) {
     return json(res, o);
   }
   const o = (own(db.items, id) && !db.items[id].deleted && db.items[id]) || fail(404, 'No such entry');
+  const sub = url.pathname.split('/')[4];
+  if (sub === 'audio' && req.method === 'GET') return o.audio ? stream(req, res, url.searchParams, libAudio(o)) : fail(404, 'No track');
+  if (sub === 'audio' && req.method === 'PUT') {
+    if (o.addedBy !== me && !user.admin) fail(403, 'Only whoever added it or an admin can change its track');
+    if (o.kind === 'Book') fail(400, 'Books take a link, not a track');
+    const ext = extname(String(url.searchParams.get('name') || '')).toLowerCase();
+    if (!LIB_AUDIO.has(ext)) fail(400, 'Upload an MP3, M4A, WAV or OGG');
+    await mkdir(LIB_DIR(), { recursive: true });
+    const part = join(LIB_DIR(), `${o.id}.part`);
+    await pipeline(req, createWriteStream(part, BIG_BUFFER));
+    await rename(part, join(LIB_DIR(), o.id + ext)); // a failed upload leaves the old track playing
+    Object.assign(o, { audio: ext, audioName: safeName(url.searchParams.get('name')), updated: new Date().toISOString() });
+    changed();
+    return json(res, o);
+  }
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
     if (input.cosign !== undefined) o.cosigns = o.cosigns.filter((u) => u !== me).concat(input.cosign && o.addedBy !== me ? [me] : []);
@@ -4659,15 +4677,29 @@ async function publicApi(req, res, url) {
   if (req.method === 'GET' && what === 'release') return releasePublic(req, res, url);
   if (req.method === 'GET' && what === 'portfolio') return portfolioPublic(req, res);
   if (req.method === 'GET' && what === 'portfolios') return portfoliosPublic(req, res, who, ...url.pathname.split('/').slice(5));
-  if (req.method === 'GET' && what === 'library') {
+  if (req.method === 'GET' && what === 'library' && !who) {
     // CITIES' Library page: the books and classics the team recommends. The team's own archive stays inside.
     res.setHeader('cache-control', 'public, max-age=60');
     return json(res, {
       items: Object.values((await loadLibrary()).items)
         .filter((i) => !i.deleted && i.kind !== 'Archive')
         .sort((a, b) => b.cosigns.length - a.cosigns.length || b.created.localeCompare(a.created))
-        .map(({ kind, title, by, year, blurb, link, addedBy, cosigns }) => ({ kind, title, by, year, blurb, link, addedBy, cosigns })),
+        .map(({ id, kind, title, by, year, blurb, link, addedBy, cosigns, audio }) => ({
+          kind,
+          title,
+          by,
+          year,
+          blurb,
+          link,
+          addedBy,
+          cosigns,
+          audio: audio ? `/api/public/library/${id}` : null,
+        })),
     });
+  }
+  if (req.method === 'GET' && what === 'library' && who) {
+    const i = Object.values((await loadLibrary()).items).find((i) => i.id === who && !i.deleted && i.kind !== 'Archive' && i.audio);
+    return i ? stream(req, res, url.searchParams, libAudio(i)) : fail(404, 'Not found');
   }
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
@@ -5856,7 +5888,7 @@ const BLOG_SECTIONS = {
   'field-notes': ['Field Notes', 'Straight from the field: shoots, sessions and shows around the Twin Cities.'],
   videos: ['Videos', 'New videos from Twin Cities creators.'],
   moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
-  library: ['Library', 'Books we read and recommend, and the music classics everyone should know, with why.'],
+  library: ['Library', 'Books we read and recommend, and Renaissance Radio: our tracks, with the story behind them.'],
 };
 const metaTags = ({ title, text, image, link }) =>
   [

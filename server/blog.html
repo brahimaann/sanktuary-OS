@@ -916,7 +916,7 @@
         );
       }
 
-      // Library: books we recommend and Renaissance Radio (the classics), each with why. Added by the team in Studio.
+      // Library: books we recommend and Renaissance Radio (our tracks, played one after another), each with why. Added by the team in Studio.
       let allLibrary = null;
       let shelf = 'Book';
       async function library() {
@@ -942,9 +942,12 @@
           shown
             .map(
               (i) =>
-                `<div class="post" style="cursor:default"><div style="min-width:0"><h2>${esc(i.title)}</h2><div class="meta">${[i.by, i.year].filter(Boolean).map(esc).join(' · ')}${i.link ? ` · <a href="${esc(i.link)}" target="_blank" rel="noopener noreferrer">${shelf === 'Classic' ? 'Listen' : 'Find it'}</a>` : ''}</div>${i.blurb ? `<div class="excerpt" style="-webkit-line-clamp:unset;white-space:pre-wrap">${esc(i.blurb)}</div>` : ''}<div class="meta" style="margin-top:6px">Recommended by ${esc([i.addedBy, ...i.cosigns].join(', '))}</div></div></div>`,
+                `<div class="post" style="cursor:default"><div style="min-width:0"><h2>${esc(i.title)}</h2><div class="meta">${[i.by, i.year].filter(Boolean).map(esc).join(' · ')}${i.link ? ` · <a href="${esc(i.link)}" target="_blank" rel="noopener noreferrer">${shelf === 'Classic' ? 'Also on' : 'Find it'}</a>` : ''}</div>${i.blurb ? `<div class="excerpt" style="-webkit-line-clamp:unset;white-space:pre-wrap">${esc(i.blurb)}</div>` : ''}${i.audio ? `<audio src="${esc(i.audio)}" controls preload="none" style="width:100%;max-width:420px;margin-top:6px"></audio>` : ''}<div class="meta" style="margin-top:6px">Recommended by ${esc([i.addedBy, ...i.cosigns].join(', '))}</div></div></div>`,
             )
             .join('') || '<div class="empty">Nothing on this shelf yet. Check back soon.</div>';
+        // Renaissance Radio: when one track ends, the next starts
+        const players = [...app.querySelectorAll('audio')];
+        players.forEach((a, n) => (a.onended = () => players[n + 1]?.play()));
       }
 
       // Posts | Notes switch inside Essays
