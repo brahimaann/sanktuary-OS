@@ -391,6 +391,7 @@ try {
   check('bob uploads his track', (await put('bob', song.id, 'Yellow Diamonds.mp3', 'ID3fake')).status === 200);
   const pub = (await (await fetch(`${B}/api/public/library`)).json()).items.find((i) => i.title === 'Yellow Diamonds');
   const played = await fetch(B + pub.audio, { headers: { range: 'bytes=0-2' } });
+  check('a track with no station plays on Renaissance', pub.station === 'Renaissance');
   check('visitors can play it', played.status === 206 && (await played.text()) === 'ID3');
   check('an admin can remove it', (await call('alice', `/api/library/${book.id}`, 'DELETE')).status === 200);
   check('removed entries leave the list', !(await call('carol', '/api/library')).data.items.some((i) => i.id === book.id));

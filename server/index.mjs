@@ -2767,7 +2767,7 @@ const LIB_KINDS = ['Book', 'Classic', 'Archive'];
 const LIB_AUDIO = new Set(['.mp3', '.m4a', '.wav', '.ogg']); // what browsers play
 const LIB_DIR = () => join(DATA, 'library');
 const libAudio = (o) => join(LIB_DIR(), o.id + o.audio);
-const LIB_TEXT = { title: 120, by: 120, year: 20, blurb: 2000 };
+const LIB_TEXT = { title: 120, by: 120, year: 20, blurb: 2000, station: 40 }; // station: the radio's vibe, e.g. Late night
 let libDb = null;
 let libSaved = Promise.resolve();
 const loadLibrary = async () => (libDb ??= await readJson('library.json', { items: {} }));
@@ -4684,8 +4684,9 @@ async function publicApi(req, res, url) {
       items: Object.values((await loadLibrary()).items)
         .filter((i) => !i.deleted && i.kind !== 'Archive')
         .sort((a, b) => b.cosigns.length - a.cosigns.length || b.created.localeCompare(a.created))
-        .map(({ id, kind, title, by, year, blurb, link, addedBy, cosigns, audio }) => ({
+        .map(({ id, kind, title, by, year, blurb, link, addedBy, cosigns, audio, station }) => ({
           kind,
+          station: kind === 'Classic' ? station || 'Renaissance' : undefined,
           title,
           by,
           year,
