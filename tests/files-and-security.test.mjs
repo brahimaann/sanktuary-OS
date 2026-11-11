@@ -252,6 +252,11 @@ const up = (u, space, path, data, extra = '') =>
 
 try {
   // Auth + rights
+  const intro = await fetch(B + '/intro/sanktuary-intro.mp4', { headers: { range: 'bytes=0-1' } });
+  check(
+    'intro video answers byte ranges (Safari plays nothing without them)',
+    intro.status === 206 && (await intro.arrayBuffer()).byteLength === 2,
+  );
   check('no login -> 401', (await call(null, '/api/files/view/?list')).status === 401);
   check(
     'forged cookie -> 401',

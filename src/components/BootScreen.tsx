@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import sound from '../utils/sound';
 
 interface BootScreenProps {
@@ -6,71 +6,64 @@ interface BootScreenProps {
 }
 
 /* ────────────────────────────────────────────────────────
-   The S machine starting up: the pixel wordmark in a box on the dotted desktop and a short
-   progress bar, the way the first desktops said hello. It asks nothing (Log On lives in the
-   taskbar), plays once per browser session, and any key or click skips it.
+   The Sanktuary intro: a green energy ring spirals out and the pixel wordmark tunes in through
+   static (public/intro, drawn by ops/intro/sanktuary-intro.tsx). It asks nothing, plays once per
+   browser session, and any key or click skips it. If the video can't play, or the visitor asks
+   for less motion, it goes straight to the desktop.
    ──────────────────────────────────────────────────────── */
 
-const STEPS = 12;
-
 export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
-  const [step, setStep] = useState(0);
-
-  // Already played in this session: straight to the desktop
-  useEffect(() => {
-    if (sessionStorage.getItem('hq_os_booted')) onComplete();
-  }, [onComplete]);
+  const done = useRef(false);
 
   const handleComplete = () => {
+    if (done.current) return;
+    done.current = true;
     sessionStorage.setItem('hq_os_booted', 'true');
     sound.playStartup();
     onComplete();
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => (step >= STEPS ? handleComplete() : setStep((n) => n + 1)), step >= STEPS ? 250 : 90);
-    return () => clearTimeout(timer);
-  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
+    if (sessionStorage.getItem('hq_os_booted')) {
+      done.current = true;
+      onComplete();
+      return;
+    }
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) handleComplete();
+    const timer = setTimeout(handleComplete, 6000); // never hold anyone at the door
     window.addEventListener('keydown', handleComplete);
-    return () => window.removeEventListener('keydown', handleComplete);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('keydown', handleComplete);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
       onClick={handleComplete}
+      role="status"
+      aria-label="Welcome to Sanktuary"
       style={{
         width: '100%',
         height: '100%',
-        background: 'var(--sk-dither)',
+        background: '#000',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         cursor: 'pointer',
-        fontFamily: "'Pixelify Sans', sans-serif",
       }}
     >
-      <div
-        role="status"
-        style={{
-          width: 'min(360px, calc(100% - 32px))',
-          background: '#fff',
-          border: '2px solid #000',
-          boxShadow: '3px 3px 0 #000',
-          padding: '28px 28px 22px',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 18,
-        }}
+      <video
+        autoPlay
+        muted
+        playsInline
+        onEnded={handleComplete}
+        onError={handleComplete}
+        style={{ width: 'min(100%, 1280px)', imageRendering: 'pixelated' }}
       >
-        <img src="/icons/sanktuary-wordmark.svg" alt="Sanktuary" style={{ width: '100%', imageRendering: 'pixelated' }} />
-        <div style={{ fontSize: 16 }}>Welcome to Sanktuary.</div>
-        <div style={{ width: '100%', height: 12, border: '2px solid #000', padding: 1 }}>
-          <div style={{ width: `${(step / STEPS) * 100}%`, height: '100%', background: 'var(--sk-signal)' }} />
-        </div>
-      </div>
+        <source src="/intro/sanktuary-intro.webm" type="video/webm" />
+        <source src="/intro/sanktuary-intro.mp4" type="video/mp4" onError={handleComplete} />
+      </video>
     </div>
   );
 };
