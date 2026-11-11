@@ -168,11 +168,17 @@ const fakeGoogle = http
       if (req.url.startsWith('/upload?') && req.headers.authorization === 'Bearer at2')
         return j(200, {}, { location: 'http://127.0.0.1:3192/upload-session/1' });
       if (req.url === '/upload-session/1') return j(200, { id: 'abcdefghijk' });
+      // A fake OpenStreetMap tile server: counts fetches and checks we say who we are
+      if (req.url.startsWith('/tiles/')) {
+        tileHits.push(req.headers['user-agent']);
+        return res.writeHead(200, { 'content-type': 'image/png' }).end('PNGTILE');
+      }
       j(404, {});
     });
   })
   .listen(3192);
 
+const tileHits = [];
 // A fake Resend: records every email
 const mails = [];
 const fakeResend = http
@@ -213,6 +219,7 @@ const srv = spawn(process.execPath, [SERVER], {
     GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
     YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
     ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
+    TILE_SOURCE: 'http://127.0.0.1:3192/tiles',
     // The headless Darkroom renderer only in CI: the home PC's deploy tests run against the old build, and a
     // browser left behind there kept the tests (and so the deploy) waiting for hours
     ...(process.env.CI ? {} : { DARKROOM_BROWSER: 'off' }),
@@ -951,6 +958,16 @@ try {
     await call('bob', `/api/locations/${first.location}`, 'PATCH', { members: [] });
     check('a private spot is hidden from others', !(await list('carol')).some((s) => s.id === first.location));
     check('and so are its photos', (await call('carol', photo)).status === 404);
+    // Map tiles come through the server (OSM blocks browsers that send no Referer) and are fetched once
+    check('map tiles need a sign-in', (await call(null, '/api/tiles/12/987/1468.png')).status === 401);
+    check('bad tile numbers are refused', (await call('bob', '/api/tiles/3/9/1.png')).status === 400);
+    const tile1 = await call('bob', '/api/tiles/12/987/1468.png');
+    const tile2 = await call('carol', '/api/tiles/12/987/1468.png');
+    check(
+      'a map tile is fetched once, with our User-Agent, then served from disk',
+      tile1.text === 'PNGTILE' && tile2.text === 'PNGTILE' && tileHits.length === 1 && /SanktuaryOS/.test(tileHits[0]),
+      JSON.stringify(tileHits),
+    );
     check(
       'admins still see private spots',
       (await list('alice')).some((s) => s.id === first.location),
