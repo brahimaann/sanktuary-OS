@@ -1,8 +1,8 @@
 import React, { lazy, Suspense, useState } from 'react';
 import { button, shell } from './fileTypes';
 
-// Darkroom workspace: assets and review in one window. Photos (the Darkroom editor), SANKTUARY RAW, the video
-// editor, Team Files, moodboards and notes. Each tab is the full app it replaces; a tab stays loaded once opened,
+// Two tabbed windows. Darkroom is editing only: Photos (the Darkroom editor), SANKTUARY RAW and the video editor.
+// Files holds the rest: Team Files, moodboards and notes. Each tab is the full app it replaces; a tab stays loaded once opened,
 // so switching back keeps what you were doing. Opening a single photo from a file still opens the plain editor.
 const Darkroom = lazy(() => import('./Darkroom'));
 const VideoEditor = lazy(() => import('./VideoEditor'));
@@ -11,14 +11,18 @@ const Boards = lazy(() => import('./Boards'));
 const Notepad = lazy(() => import('./Notepad'));
 
 export type DarkroomTab = 'photos' | 'raw' | 'video' | 'files' | 'moodboards' | 'notes';
-const TABS: [DarkroomTab, string][] = [
-  ['photos', 'Photos'],
-  ['raw', 'RAW'],
-  ['video', 'Video'],
-  ['files', 'Team Files'],
-  ['moodboards', 'Moodboards'],
-  ['notes', 'Notes'],
-];
+const SETS: Record<'edit' | 'files', [DarkroomTab, string][]> = {
+  edit: [
+    ['photos', 'Photos'],
+    ['raw', 'RAW'],
+    ['video', 'Video'],
+  ],
+  files: [
+    ['files', 'Team Files'],
+    ['moodboards', 'Moodboards'],
+    ['notes', 'Notes'],
+  ],
+};
 
 const pane = (id: DarkroomTab) =>
   id === 'photos' ? (
@@ -35,7 +39,9 @@ const pane = (id: DarkroomTab) =>
     <Notepad />
   );
 
-const DarkroomWorkspace: React.FC<{ tab?: DarkroomTab }> = ({ tab = 'photos' }) => {
+const DarkroomWorkspace: React.FC<{ set?: 'edit' | 'files'; tab?: DarkroomTab }> = ({ set = 'edit', tab }) => {
+  const TABS = SETS[set];
+  tab = tab || TABS[0][0];
   const [active, setActive] = useState<DarkroomTab>(tab);
   const [opened, setOpened] = useState<Set<DarkroomTab>>(new Set([tab]));
   const show = (t: DarkroomTab) => {

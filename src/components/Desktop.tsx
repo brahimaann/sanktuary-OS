@@ -58,15 +58,25 @@ const app = {
     width: 1100,
     height: 720,
   },
-  // Darkroom workspace: Photos (the editor), RAW, Video, Team Files, Moodboards and Notes as tabs in one window
+  // Darkroom workspace: editing only, Photos (the editor), RAW and Video as tabs in one window
   darkroom: {
     id: 'darkroom',
     title: 'Darkroom',
     icon: I('kodak-imaging'),
     appType: 'darkroom',
-    appProps: { workspace: true },
+    appProps: { workspace: 'edit' },
     width: 1100,
     height: 720,
+  },
+  // Files: Team Files, Moodboards and Notes as tabs in one window
+  filesWorkspace: {
+    id: 'files-workspace',
+    title: 'Files',
+    icon: I('network'),
+    appType: 'darkroom',
+    appProps: { workspace: 'files' },
+    width: 760,
+    height: 520,
   },
   videoEditor: { id: 'video-editor', title: 'Video Editor', icon: I('video'), appType: 'video-editor', width: 960, height: 680 },
   notepad: { id: 'notepad', title: 'Notepad', icon: I('notepad'), appType: 'notepad', width: 480, height: 360 },
@@ -149,6 +159,7 @@ const memberIcons = (admin: boolean): DesktopIconDef[] => [
   // The four workspaces: Foundry (making), Darkroom (assets and review), Operations (projects and logistics), Ledger
   app.producer,
   app.darkroom,
+  app.filesWorkspace,
   app.studio,
   ...(admin ? [app.business] : []),
   app.teams,

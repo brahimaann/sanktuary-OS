@@ -208,8 +208,12 @@ export const App: React.FC = () => {
         content = <NewThing kind={win.appProps?.kind} />;
         break;
       case 'darkroom':
-        // The desktop's Darkroom is the workspace (tabs); a photo opened from a file gets the plain editor
-        content = win.appProps?.workspace ? <DarkroomWorkspace tab={win.appProps.tab} /> : <Darkroom {...win.appProps} />;
+        // The desktop's Darkroom and Files are tabbed workspaces; a photo opened from a file gets the plain editor
+        content = win.appProps?.workspace ? (
+          <DarkroomWorkspace set={win.appProps.workspace === 'files' ? 'files' : 'edit'} tab={win.appProps.tab} />
+        ) : (
+          <Darkroom {...win.appProps} />
+        );
         break;
       case 'video-editor':
         content = <VideoEditor clip={win.appProps?.clip} />;
