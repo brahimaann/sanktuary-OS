@@ -56,7 +56,7 @@ const Producer: React.FC = () => {
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, overflow: 'auto', background: '#fff', borderTop: '1px solid #fff', padding: 8 }}>
+      <div style={{ flex: 1, overflow: 'auto', background: '#fff', borderTop: '1px solid #fff', padding: tab === 'session' ? 0 : 8 }}>
         {tab === 'analyze' && <AnalyzeTab current={mine} onDone={adopt} />}
         {tab === 'compare' && <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />}
         {tab === 'session' && <SessionTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />}
@@ -411,9 +411,10 @@ interface Session {
   genre: string;
   checks: Record<string, boolean>;
   lyrics: string;
+  look: string;
 }
 const loadSession = (): Session => {
-  const blank = { song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '' };
+  const blank = { song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '', look: '1-bit' };
   try {
     return { ...blank, ...JSON.parse(localStorage.getItem(SESSION_KEY) || '{}') };
   } catch {
@@ -459,13 +460,26 @@ const SessionTab: React.FC<{
   const genre = GENRES.find((g) => g.name === s.genre) || GENRES[0];
   const bars = s.lyrics.split('\n').filter((l) => l.trim()).length;
   const done = CHECKS.filter((c) => s.checks[c]).length;
+  const look = LOOKS[s.look] || LOOKS['1-bit'];
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, border: rule }}>
+    <div
+      className="fk-cockpit"
+      style={{
+        ...look,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        minHeight: 0,
+        background: 'var(--fk-bg)',
+        color: 'var(--fk-ink)',
+      }}
+    >
+      <style>{COCKPIT_CSS}</style>
       <div style={{ display: 'flex', flexWrap: 'wrap', borderBottom: rule }}>
         <div style={cell}>
           <SevenSegmentDisplay value={bpm.toFixed(1)} height={22} color="#00ff66" label="BPM" />
           <input
-            style={{ ...field, width: 58 }}
+            style={{ ...sfield, width: 58 }}
             type="number"
             min={20}
             max={400}
@@ -486,7 +500,7 @@ const SessionTab: React.FC<{
         </div>
         <div style={cell}>
           <span style={label}>Key</span>
-          <select style={field} value={keySel.root} onChange={(e) => setKey({ ...keySel, root: Number(e.target.value) })}>
+          <select style={sfield} value={keySel.root} onChange={(e) => setKey({ ...keySel, root: Number(e.target.value) })}>
             {NOTE_NAMES.map((n, i) => (
               <option key={n} value={i}>
                 {n}
@@ -494,7 +508,7 @@ const SessionTab: React.FC<{
             ))}
           </select>
           <select
-            style={field}
+            style={sfield}
             value={keySel.minor ? 'minor' : 'major'}
             onChange={(e) => setKey({ ...keySel, minor: e.target.value === 'minor' })}
           >
@@ -505,7 +519,7 @@ const SessionTab: React.FC<{
         </div>
         <div style={cell}>
           <span style={label}>Rate</span>
-          <select style={field} value={s.rate} onChange={(e) => set({ rate: Number(e.target.value) })}>
+          <select style={sfield} value={s.rate} onChange={(e) => set({ rate: Number(e.target.value) })}>
             {[44100, 48000, 96000].map((r) => (
               <option key={r} value={r}>
                 {r / 1000} kHz / 24-bit
@@ -513,21 +527,32 @@ const SessionTab: React.FC<{
             ))}
           </select>
         </div>
-        <div style={{ ...cell, borderRight: 0 }}>
+        <div style={cell}>
           <span style={label}>Genre</span>
-          <select style={field} value={genre.name} onChange={(e) => set({ genre: e.target.value })}>
+          <select style={sfield} value={genre.name} onChange={(e) => set({ genre: e.target.value })}>
             {GENRES.map((g) => (
               <option key={g.name}>{g.name}</option>
             ))}
           </select>
-          <span style={{ ...mono, color: bpm < genre.bpm[0] || bpm > genre.bpm[1] ? '#000' : '#555' }}>
+          <span style={{ ...mono, color: bpm < genre.bpm[0] || bpm > genre.bpm[1] ? 'var(--fk-warn)' : 'var(--fk-dim)' }}>
             {genre.bpm[0]}-{genre.bpm[1]} BPM{bpm < genre.bpm[0] || bpm > genre.bpm[1] ? ' (outside)' : ''}
           </span>
         </div>
+        <div style={{ ...cell, borderRight: 0, marginLeft: 'auto' }}>
+          <span style={label}>Look</span>
+          {Object.keys(LOOKS).map((l) => (
+            <button
+              key={l}
+              style={{ ...button, ...(s.look === l ? { background: 'var(--sk-signal, #4b9560)', color: '#000', fontWeight: 700 } : {}) }}
+              aria-pressed={s.look === l}
+              onClick={() => set({ look: l })}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
       </div>
-      <div
-        style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', overflow: 'auto' }}
-      >
+      <div className="fk-grid">
         <section style={pane}>
           <h3 style={paneHead}>Signal math</h3>
           {valid ? (
@@ -641,7 +666,7 @@ const SessionTab: React.FC<{
             <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 3 }}>
               {scale.chords.map((c) => (
                 <span key={c.numeral} style={{ border: rule, marginRight: -1, padding: '1px 4px' }}>
-                  <span style={{ color: '#555' }}>{c.numeral}</span> <b>{c.chord}</b>
+                  <span style={{ color: 'var(--fk-dim)' }}>{c.numeral}</span> <b>{c.chord}</b>
                 </span>
               ))}
             </div>
@@ -653,7 +678,7 @@ const SessionTab: React.FC<{
           <div style={{ padding: 6, display: 'flex', gap: 4, alignItems: 'center', borderBottom: rule }}>
             <span style={label}>Song</span>
             <input
-              style={{ ...field, flex: 1, minWidth: 0 }}
+              style={{ ...sfield, flex: 1, minWidth: 0 }}
               value={s.song}
               placeholder="Untitled"
               onChange={(e) => set({ song: e.target.value })}
@@ -669,7 +694,7 @@ const SessionTab: React.FC<{
             {CHECKS.map((c) => (
               <label key={c} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '1px 0' }}>
                 <input type="checkbox" checked={!!s.checks[c]} onChange={(e) => set({ checks: { ...s.checks, [c]: e.target.checked } })} />
-                <span style={s.checks[c] ? { textDecoration: 'line-through', color: '#555' } : undefined}>{c}</span>
+                <span style={s.checks[c] ? { textDecoration: 'line-through', color: 'var(--fk-dim)' } : undefined}>{c}</span>
               </label>
             ))}
           </div>
@@ -681,7 +706,7 @@ const SessionTab: React.FC<{
               </span>
             </div>
             <textarea
-              style={{ ...field, flex: 1, minHeight: 120, resize: 'none', ...mono }}
+              style={{ ...sfield, flex: 1, minHeight: 120, resize: 'none', ...mono }}
               value={s.lyrics}
               onChange={(e) => set({ lyrics: e.target.value })}
               aria-label="Lyrics"
@@ -849,8 +874,44 @@ const field: React.CSSProperties = {
   background: '#fff',
   border: '2px inset #808080',
 };
-// Session cockpit: 1px black rules between every cell, monospace numbers, no padding to spare (S machine, 1-bit)
-const rule = '1px solid #000';
+// Session cockpit: 1px rules between every cell, monospace numbers, no padding to spare. Two looks on trial:
+// 1-bit (the S machine: black on white) and Mixed (1-bit window and controls around a dark panel with
+// phosphor-green readouts and amber warnings).
+const LOOKS: Record<string, React.CSSProperties> = {
+  '1-bit': {
+    '--fk-bg': '#fff',
+    '--fk-ink': '#000',
+    '--fk-dim': '#555',
+    '--fk-rule': '#000',
+    '--fk-head-bg': '#000',
+    '--fk-head-ink': '#fff',
+    '--fk-read': '#000',
+    '--fk-warn': '#000',
+  } as React.CSSProperties,
+  Mixed: {
+    '--fk-bg': '#0a0a0c',
+    '--fk-ink': '#d8d8d8',
+    '--fk-dim': '#8a8a8a',
+    '--fk-rule': '#3a3a3a',
+    '--fk-head-bg': '#fff',
+    '--fk-head-ink': '#000',
+    '--fk-read': '#00ff66',
+    '--fk-warn': '#ffb000',
+  } as React.CSSProperties,
+};
+// Fixed layout: the ribbon and three panes always fill the window and each pane scrolls on its own (like a DAW).
+// On a narrow window (phone, tablet in portrait) the panes stack and the cockpit scrolls instead.
+const COCKPIT_CSS = `
+.fk-cockpit { container-type: inline-size; }
+.fk-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 1fr) minmax(240px, 1.1fr) minmax(250px, 1fr); overflow: hidden; }
+.fk-grid > section { overflow: auto; }
+.fk-cockpit input[type='checkbox'] { accent-color: var(--sk-signal, #4b9560); }
+@container (max-width: 760px) {
+  .fk-grid { grid-template-columns: 1fr; overflow: auto; }
+  .fk-grid > section { overflow: visible; border-right: 0 !important; border-bottom: 1px solid var(--fk-rule); }
+}
+`;
+const rule = '1px solid var(--fk-rule)';
 const mono: React.CSSProperties = { fontFamily: 'ui-monospace, Consolas, monospace', fontVariantNumeric: 'tabular-nums' };
 const cell: React.CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', padding: '4px 6px', borderRight: rule };
 const label: React.CSSProperties = { fontWeight: 700, textTransform: 'uppercase', fontSize: 10 };
@@ -858,16 +919,17 @@ const pane: React.CSSProperties = { display: 'flex', flexDirection: 'column', bo
 const paneHead: React.CSSProperties = {
   margin: 0,
   padding: '2px 6px',
-  background: '#000',
-  color: '#fff',
+  background: 'var(--fk-head-bg)',
+  color: 'var(--fk-head-ink)',
   fontSize: 11,
   position: 'sticky',
   top: 0,
 };
 const grid: React.CSSProperties = { borderCollapse: 'collapse', width: '100%' };
 const gth: React.CSSProperties = { ...label, textAlign: 'left', padding: '2px 6px', borderBottom: rule };
-const gtd: React.CSSProperties = { padding: '1px 6px', borderBottom: '1px dotted #000', whiteSpace: 'nowrap' };
-const num: React.CSSProperties = { ...gtd, ...mono, textAlign: 'right' };
-const caption: React.CSSProperties = { padding: '2px 6px 4px', color: '#555', fontSize: 10, borderBottom: rule };
+const gtd: React.CSSProperties = { padding: '1px 6px', borderBottom: '1px dotted var(--fk-rule)', whiteSpace: 'nowrap' };
+const num: React.CSSProperties = { ...gtd, ...mono, textAlign: 'right', color: 'var(--fk-read)' };
+const caption: React.CSSProperties = { padding: '2px 6px 4px', color: 'var(--fk-dim)', fontSize: 10, borderBottom: rule };
+const sfield: React.CSSProperties = { ...field, background: 'var(--fk-bg)', color: 'var(--fk-ink)', border: rule };
 
 export default Producer;
