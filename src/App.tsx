@@ -44,6 +44,7 @@ const Nodes = lazy(() => import('./apps/Nodes'));
 const Producer = lazy(() => import('./apps/Producer'));
 const Studio = lazy(() => import('./apps/Studio'));
 const Darkroom = lazy(() => import('./apps/Darkroom'));
+const DarkroomWorkspace = lazy(() => import('./apps/DarkroomWorkspace'));
 const VideoEditor = lazy(() => import('./apps/VideoEditor'));
 
 /** After a deploy the old build's files are gone, so an app opened in a tab from before can't load. */
@@ -207,7 +208,8 @@ export const App: React.FC = () => {
         content = <NewThing kind={win.appProps?.kind} />;
         break;
       case 'darkroom':
-        content = <Darkroom {...win.appProps} />;
+        // The desktop's Darkroom is the workspace (tabs); a photo opened from a file gets the plain editor
+        content = win.appProps?.workspace ? <DarkroomWorkspace tab={win.appProps.tab} /> : <Darkroom {...win.appProps} />;
         break;
       case 'video-editor':
         content = <VideoEditor clip={win.appProps?.clip} />;

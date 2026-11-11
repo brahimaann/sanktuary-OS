@@ -58,7 +58,16 @@ const app = {
     width: 1100,
     height: 720,
   },
-  darkroom: { id: 'darkroom', title: 'Darkroom', icon: I('kodak-imaging'), appType: 'darkroom', width: 900, height: 600 },
+  // Darkroom workspace: Photos (the editor), RAW, Video, Team Files, Moodboards and Notes as tabs in one window
+  darkroom: {
+    id: 'darkroom',
+    title: 'Darkroom',
+    icon: I('kodak-imaging'),
+    appType: 'darkroom',
+    appProps: { workspace: true },
+    width: 1100,
+    height: 720,
+  },
   videoEditor: { id: 'video-editor', title: 'Video Editor', icon: I('video'), appType: 'video-editor', width: 960, height: 680 },
   notepad: { id: 'notepad', title: 'Notepad', icon: I('notepad'), appType: 'notepad', width: 480, height: 360 },
   // CITIES, the public journal; drafts from Write are published by admins in Admin Panel > CITIES
@@ -139,14 +148,7 @@ const memberIcons = (admin: boolean): DesktopIconDef[] => [
   app.new,
   // The four workspaces: Foundry (making), Darkroom (assets and review), Operations (projects and logistics), Ledger
   app.producer,
-  folder('folder-darkroom', 'Darkroom', 'kodak-imaging', [
-    app.darkroom,
-    app.rapidraw,
-    app.videoEditor,
-    app.files,
-    app.moodboards,
-    app.notepad,
-  ]),
+  app.darkroom,
   app.studio,
   ...(admin ? [app.business] : []),
   app.teams,
@@ -165,7 +167,11 @@ const visitorIcons: DesktopIconDef[] = [
   app.producer,
   folder('folder-cities', 'CITIES', 'internet-folder', [app.blog, app.magazine]),
   app.shop,
-  folder('folder-create', 'Create', 'programs-folder', [app.rapidraw, app.darkroom, app.notepad]),
+  folder('folder-create', 'Create', 'programs-folder', [
+    app.rapidraw,
+    { ...app.darkroom, appProps: {}, width: 900, height: 600 },
+    app.notepad,
+  ]),
   folder('folder-extras', 'Extras', 'folder', [app.africaonly, app.pong]),
   app.recycle,
 ];
