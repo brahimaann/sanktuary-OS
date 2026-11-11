@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), to-do boards (Planner)
+// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner)
 // and opportunities (grants, calls, gigs) in one window.
 // Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
 const Tracks = lazy(() => import('./Tracks'));
@@ -11,11 +11,13 @@ const Boards = lazy(() => import('./Boards'));
 const Opportunities = lazy(() => import('./Opportunities'));
 const Archive = lazy(() => import('./Archive'));
 const Outreach = lazy(() => import('./Outreach'));
+const Locations = lazy(() => import('./Locations'));
 
-export type StudioTab = 'music' | 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'archive';
+export type StudioTab = 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'archive';
 const TABS: [StudioTab, string][] = [
   ['music', 'Music'],
   ['calendar', 'Calendar'],
+  ['locations', 'Locations'],
   ['boards', 'Planner'],
   ['opportunities', 'Opportunities'],
   ['outreach', 'Outreach'],
@@ -74,6 +76,8 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
                     <Tracks />
                   ) : id === 'calendar' ? (
                     <Timeline />
+                  ) : id === 'locations' ? (
+                    <Locations />
                   ) : id === 'boards' ? (
                     <Boards kind="kanban" />
                   ) : id === 'opportunities' ? (

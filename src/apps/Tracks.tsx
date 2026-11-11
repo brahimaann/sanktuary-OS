@@ -1307,6 +1307,23 @@ const TrackPage: React.FC<{
   const [picking, setPicking] = useState<null | 'bounce' | 'project' | 'stems'>(null);
   const [token, setToken] = useState('');
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
+  const [comparing, setComparing] = useState<string | null>(null); // the earlier bounce playing in place of the current one
+  // A/B: swap what the player plays, keeping the moment in the song and whether it was playing
+  const abSwitch = (src: string) => {
+    const el = media.current;
+    if (!el) return;
+    const at = el.currentTime;
+    const playing = !el.paused || at === 0; // from the start: just play it
+    el.src = src;
+    el.addEventListener(
+      'loadedmetadata',
+      () => {
+        el.currentTime = Math.min(at, el.duration || at);
+        if (playing) el.play();
+      },
+      { once: true },
+    );
+  };
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [bmiOpen, setBmiOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -1346,6 +1363,7 @@ const TrackPage: React.FC<{
     page.current?.querySelector(`[data-step="${focus.where}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [focus]);
   const media = useRef<HTMLMediaElement | null>(null);
+  useEffect(() => setComparing(null), [t.id, t.bounce?.path]);
 
   useEffect(() => setDraft(t), [t]);
   useEffect(() => {
@@ -1535,16 +1553,24 @@ const TrackPage: React.FC<{
                   .sort((a, b) => b.name.localeCompare(a.name))
                   .map((v) => (
                     <div key={v.name} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span style={{ flex: 1 }}>{new Date(v.modified).toLocaleString()}</span>
+                      <span style={{ flex: 1, fontWeight: comparing === v.name ? 700 : 400 }}>
+                        {new Date(v.modified).toLocaleString()}
+                        {comparing === v.name ? ' (playing)' : ''}
+                      </span>
                       <button
                         style={button}
+                        title="Flip between this bounce and the current one at the same moment in the song"
                         onClick={() => {
-                          if (!media.current) return;
-                          media.current.src = `${fileUrl(t.bounce!.space, t.bounce!.path.split('/'))}?version=${encodeURIComponent(v.name)}&t=${token}`;
-                          media.current.play();
+                          const back = comparing === v.name;
+                          abSwitch(
+                            back
+                              ? bounceSrc!
+                              : `${fileUrl(t.bounce!.space, t.bounce!.path.split('/'))}?version=${encodeURIComponent(v.name)}&t=${token}`,
+                          );
+                          setComparing(back ? null : v.name);
                         }}
                       >
-                        Play
+                        {comparing === v.name ? 'Back to current' : 'A/B'}
                       </button>
                     </div>
                   ))}

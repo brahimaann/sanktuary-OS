@@ -18,6 +18,8 @@ interface BoardMeta {
   items: number;
   online: number;
   members?: string[] | null;
+  draft?: boolean; // only its owner sees it, admins included
+  release?: string | null; // the release (campaign) it's for
 }
 
 /** List of the team's moodboards; opens each one in its own canvas window. */
@@ -33,6 +35,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
   const [sharing, setSharing] = useState(false);
   const [linking, setLinking] = useState(false);
   const { me } = useMe();
+  const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
 
   const load = useCallback(() => {
     api(`/api/boards?kind=${kind}`).then(setBoards, (e) => setStatus(e.message));
@@ -40,6 +43,13 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
   useEffect(() => {
     if (isSignedIn) load();
   }, [isSignedIn, load]);
+  useEffect(() => {
+    if (isSignedIn)
+      api('/api/tracks').then(
+        (d) => setReleases(d.releases),
+        () => {},
+      );
+  }, [isSignedIn, api]);
 
   if (!isLoaded) return <div style={{ ...shell, padding: 16 }}>Connecting...</div>;
   if (!isSignedIn) return <LogOn name={label} />;
@@ -91,6 +101,14 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
     }
   };
   const canShare = !!pick && !!me && (pick.owner === me.username || me.admin);
+  const patch = async (body: object) => {
+    try {
+      await api(`/api/boards/${pick!.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      load();
+    } catch (e) {
+      setStatus((e as Error).message);
+    }
+  };
   const saveSharing = async (members: string[] | null) => {
     setSharing(false);
     if (!pick) return;
@@ -165,6 +183,28 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
             New month...
           </button>
         )}
+        <button
+          style={{ ...button, fontWeight: pick?.draft ? 700 : 400 }}
+          disabled={!pick || pick.owner !== me?.username}
+          onClick={() => patch({ draft: !pick!.draft })}
+          title="A draft is yours alone (admins don't see it either) until you make it live"
+        >
+          {pick?.draft ? 'Make live' : 'Draft'}
+        </button>
+        <select
+          value={pick?.release || ''}
+          disabled={!pick}
+          onChange={(e) => patch({ release: e.target.value || null })}
+          style={{ fontFamily: 'inherit', fontSize: 11, maxWidth: 160 }}
+          title="The release this board is for: it shows in that release's Campaign"
+        >
+          <option value="">(no release)</option>
+          {releases.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.title}
+            </option>
+          ))}
+        </select>
         <button style={button} onClick={load}>
           Refresh
         </button>
@@ -216,6 +256,7 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
             <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>
               {b.members ? '🔒 ' : ''}
               {b.name}
+              {b.draft ? ' (draft)' : ''}
             </div>
             <div style={{ fontSize: 10, opacity: 0.8 }}>
               {b.items} item(s){b.online ? ` · ${b.online} online` : ''}
