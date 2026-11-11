@@ -58,9 +58,20 @@ async function loadPersistedFiles(): Promise<{ path: string; content: string }[]
   }
 }
 
+// A .txt file is a note: while someone is signed in, notes are saved to their account (see attachAccount)
+const isNote = (path: string) => /\.txt$/i.test(path);
+export interface NotesRemote {
+  put(path: string, content: string): void;
+  del(path: string): void;
+}
+
 export class MemoryFileSystem {
   private root: VFSNode;
   private listeners: Set<() => void> = new Set();
+  private remote: NotesRemote | null = null;
+  private accountNotes: string[] = [];
+  private booted = false;
+  private builtIn = new Map<string, string>(); // the files every desktop starts with, so they're never uploaded as notes
 
   constructor() {
     this.root = {
@@ -88,6 +99,58 @@ export class MemoryFileSystem {
 
   private notify() {
     this.listeners.forEach((cb) => cb());
+  }
+
+  private canon(path: string): string {
+    const parts = this.normalizePath(path);
+    parts[0] = parts[0].toUpperCase();
+    return parts.join('/');
+  }
+
+  /** Keeps a user's file: in their account if it's a note and they're signed in, otherwise in this browser. */
+  private save(path: string, content: string) {
+    if (!this.remote || !isNote(path)) return void persistFile(path, content);
+    this.remote.put(this.canon(path), content);
+    this.accountNotes.push(this.canon(path));
+  }
+
+  private forget(path: string) {
+    if (this.remote && isNote(path)) this.remote.del(this.canon(path));
+    else deletePersistedFile(path);
+  }
+
+  /**
+   * Signed in: their notes come from their account and new saves go there. Notes this browser kept from before
+   * accounts held them are moved into the first account to sign in here (moveLocal), so nothing is lost.
+   */
+  async attachAccount(remote: NotesRemote, notes: Record<string, { content: string }>, moveLocal: boolean) {
+    const local = await loadPersistedFiles();
+    for (const f of local) {
+      const path = this.canon(f.path);
+      if (!isNote(path)) continue;
+      if (moveLocal && this.builtIn.get(path) !== f.content && !Object.hasOwn(notes, path)) {
+        remote.put(path, f.content);
+        notes[path] = { content: f.content };
+      }
+      if (moveLocal || Object.hasOwn(notes, path)) deletePersistedFile(f.path);
+    }
+    for (const [path, n] of Object.entries(notes)) this.writeFile(path, n.content, false);
+    this.accountNotes = Object.keys(notes);
+    this.remote = remote;
+  }
+
+  /** Signed out: their notes leave this desktop. */
+  detachAccount() {
+    if (!this.remote) return;
+    this.remote = null;
+    for (const path of this.accountNotes) {
+      const parts = this.normalizePath(path);
+      const parent = this.getNode(parts.slice(0, -1));
+      const key = parent?.children && Object.keys(parent.children).find((k) => k.toLowerCase() === parts[parts.length - 1].toLowerCase());
+      if (key) delete parent!.children![key];
+    }
+    this.accountNotes = [];
+    this.notify();
   }
 
   private normalizePath(path: string): string[] {
@@ -169,9 +232,8 @@ export class MemoryFileSystem {
       content,
       updatedAt: Date.now(),
     };
-    if (shouldPersist) {
-      persistFile(path, content);
-    }
+    if (!this.booted) this.builtIn.set(this.canon(path), content);
+    else if (shouldPersist) this.save(path, content);
     this.notify();
   }
 
@@ -254,6 +316,10 @@ export class MemoryFileSystem {
       name: actualTargetFileName,
       updatedAt: Date.now(),
     };
+    if (oldNode.type === 'file') {
+      this.forget(oldPath);
+      this.save(newPath, oldNode.content || '');
+    }
 
     this.notify();
   }
@@ -269,7 +335,7 @@ export class MemoryFileSystem {
       const matchedKey = Object.keys(parent.children).find((key) => key.toLowerCase() === fileName.toLowerCase());
       if (matchedKey && parent.children[matchedKey]) {
         delete parent.children[matchedKey];
-        deletePersistedFile(path);
+        this.forget(path);
         this.notify();
         return;
       }
@@ -373,6 +439,7 @@ export class MemoryFileSystem {
       'DEVICE=C:\\WINDOWS\\HIMEM.SYS\nDEVICE=C:\\WINDOWS\\EMM386.EXE NOEMS\nBUFFERS=15,0\nFILES=30\nDOS=HIGH,UMB\nLASTDRIVE=Z',
     );
 
+    this.booted = true;
     // Restore any user-created or edited files from persistent storage
     loadPersistedFiles().then((savedFiles) => {
       if (savedFiles && savedFiles.length > 0) {
