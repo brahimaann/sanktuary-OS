@@ -8468,6 +8468,7 @@ function staticFile(req, res, url) {
   let file = normalize(join(DIST, decodeURIComponent(url.pathname)));
   if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
+  if (MEDIA.video.test(file)) return stream(req, res, new URLSearchParams(), file); // byte ranges, which Safari needs to play video
   // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their
   // names, so they can be cached forever; icons, sounds etc. for an hour, so a redrawn icon shows up the same day.
   const cache =
