@@ -384,17 +384,32 @@ try {
   );
   check('the team archive stays inside', !shelf.items.some((i) => i.title === 'Scrapped tape'));
   const song = (await call('bob', '/api/library', 'POST', { kind: 'Classic', title: 'Yellow Diamonds' })).data;
-  const put = (u, id, name, body) =>
+  const putTrack = (u, id, name, body) =>
     fetch(`${B}/api/library/${id}/audio?name=${encodeURIComponent(name)}`, { method: 'PUT', headers: { cookie: cookie(u) }, body });
-  check('only audio files go on the radio', (await put('bob', song.id, 'x.exe', 'MZ')).status === 400);
-  check('carol cannot swap bob’s track', (await put('carol', song.id, 'x.mp3', 'ID3')).status === 403);
-  check('bob uploads his track', (await put('bob', song.id, 'Yellow Diamonds.mp3', 'ID3fake')).status === 200);
+  check('only audio files go on the radio', (await putTrack('bob', song.id, 'x.exe', 'MZ')).status === 400);
+  check('carol cannot swap bob’s track', (await putTrack('carol', song.id, 'x.mp3', 'ID3')).status === 403);
+  check('bob uploads his track', (await putTrack('bob', song.id, 'Yellow Diamonds.mp3', 'ID3fake')).status === 200);
   const pub = (await (await fetch(`${B}/api/public/library`)).json()).items.find((i) => i.title === 'Yellow Diamonds');
   const played = await fetch(B + pub.audio, { headers: { range: 'bytes=0-2' } });
   check('a track with no station plays on Renaissance', pub.station === 'Renaissance');
   check('visitors can play it', played.status === 206 && (await played.text()) === 'ID3');
   check('an admin can remove it', (await call('alice', `/api/library/${book.id}`, 'DELETE')).status === 200);
   check('removed entries leave the list', !(await call('carol', '/api/library')).data.items.some((i) => i.id === book.id));
+  // Notes are kept per account: they follow you to another device, and nobody else sees them
+  const put = (u, path, content) => call(u, '/api/notes', 'PUT', { path, content });
+  check('a note saves to your account', (await put('bob', 'C:/Desktop/idea.txt', 'hook in the bridge')).status === 200);
+  check(
+    'your note comes back on any device',
+    (await call('bob', '/api/notes')).data.notes?.['C:/Desktop/idea.txt']?.content === 'hook in the bridge',
+  );
+  check("others don't see your notes", !(await call('alice', '/api/notes')).data.notes?.['C:/Desktop/idea.txt']);
+  check('a note path must be on C:', (await put('bob', '../../config.json', 'x')).status === 400);
+  check('a note path cannot climb out', (await put('bob', 'C:/../x.txt', 'x')).status === 400);
+  await Promise.all([put('bob', 'C:/Desktop/a.txt', '1'), put('bob', 'C:/Desktop/b.txt', '2')]);
+  const both = (await call('bob', '/api/notes')).data.notes;
+  check('two quick saves both stick', both['C:/Desktop/a.txt'] && both['C:/Desktop/b.txt']);
+  await call('bob', `/api/notes?path=${encodeURIComponent('C:/Desktop/a.txt')}`, 'DELETE');
+  check('a deleted note is gone', !(await call('bob', '/api/notes')).data.notes['C:/Desktop/a.txt']);
 
   // A store that can't be read (locked, or here a folder in its place) is an error, never an empty list that the
   // next save would write over the real file

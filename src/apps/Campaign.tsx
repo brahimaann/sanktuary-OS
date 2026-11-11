@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useApi } from '../utils/api';
 import { button } from './TeamFiles';
+import { useWindowManager } from '../wm/manager';
+import { openStudio } from './Studio';
 
 /**
  * A release's campaign: plan the singles (a waterfall, one every few weeks before the release) and a 3-video
@@ -58,7 +60,7 @@ const VIDEOS: [title: string, offset: (release: string) => string, notes: string
 
 const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
   const api = useApi();
-  const [tab, setTab] = useState<'plan' | 'pitch'>('plan');
+  const [tab, setTab] = useState<'plan' | 'pitch' | 'linked'>('plan');
   const [picked, setPicked] = useState<string[]>(tracks.slice(0, 3).map((t) => t.id));
   const [weeks, setWeeks] = useState(5);
   // Singles work back from release day (the last one a few weeks before it), never starting in the past
@@ -181,6 +183,7 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
               [
                 ['plan', 'Singles & videos'],
                 ['pitch', 'Pitch kit'],
+                ['linked', 'Shoots, spots & boards'],
               ] as const
             ).map(([id, label]) => (
               <button key={id} style={{ ...button, fontWeight: tab === id ? 700 : 400 }} onClick={() => setTab(id)}>
@@ -189,6 +192,7 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
             ))}
           </div>
 
+          {tab === 'linked' && <Linked releaseId={release.id} />}
           {tab === 'plan' && (
             <>
               <fieldset style={fieldset}>
@@ -338,6 +342,113 @@ const Pitch: React.FC<{
         </div>
       ))}
     </fieldset>
+  );
+};
+
+interface Linked {
+  entries: { id: string; title: string; kind: string; start: string; status: string; place: string | null; draft: boolean }[];
+  spots: { id: string; name: string; photo: string | null; draft: boolean }[];
+  boards: { id: string; name: string; kind: 'canvas' | 'kanban'; draft: boolean }[];
+}
+
+/** Everything tied to this release across the apps: calendar entries, shoot spots, moodboards and plans. */
+const Linked: React.FC<{ releaseId: string }> = ({ releaseId }) => {
+  const api = useApi();
+  const { openWindow } = useWindowManager();
+  const [data, setData] = useState<Linked | null>(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    api(`/api/tracks/release/${releaseId}?campaign`).then(setData, (e) => setErr(e.message));
+  }, [api, releaseId]);
+  if (!data) return <div>{err || 'Loading...'}</div>;
+  const spotName = (id: string | null) => data.spots.find((s) => s.id === id)?.name;
+  const openEntry = (id: string) => {
+    openStudio(openWindow, 'calendar');
+    setTimeout(() => window.dispatchEvent(new CustomEvent('sk:timeline-entry', { detail: id })), 300);
+  };
+  const openBoard = (b: Linked['boards'][number]) =>
+    openWindow(
+      b.kind === 'kanban'
+        ? {
+            id: `planner-${b.id}`,
+            title: b.name,
+            icon: '/images/icons/task-16x16.png?v=2',
+            appType: 'planner',
+            appProps: { boardId: b.id },
+            width: 1000,
+            height: 640,
+          }
+        : {
+            id: `canvas-${b.id}`,
+            title: b.name,
+            icon: '/images/icons/paint-16x16.png?v=2',
+            appType: 'canvas',
+            appProps: { boardId: b.id, name: b.name },
+            width: 1000,
+            height: 680,
+          },
+    );
+  const row: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'center' };
+  const draft = (d: boolean) => d && <i> (draft)</i>;
+  return (
+    <>
+      <fieldset style={fieldset}>
+        <legend>On the calendar ({data.entries.length})</legend>
+        {!data.entries.length && <div>Nothing yet. In the Calendar, set an entry's Release to this one.</div>}
+        {data.entries.map((e) => (
+          <div key={e.id} style={row}>
+            <span style={{ width: 80 }}>{e.start}</span>
+            <span style={{ flex: 1 }}>
+              <b>{e.title}</b> · {e.kind}
+              {e.place && spotName(e.place) ? ` · ${spotName(e.place)}` : ''}
+              {draft(e.draft)}
+            </span>
+            <span>{e.status}</span>
+            <button style={button} onClick={() => openEntry(e.id)}>
+              Open
+            </button>
+          </div>
+        ))}
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Shoot spots ({data.spots.length})</legend>
+        {!data.spots.length && <div>None yet. In Studio &gt; Locations, set a spot's release, or book a shoot there for this release.</div>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {data.spots.map((s) => (
+            <button
+              key={s.id}
+              style={{ ...button, display: 'flex', gap: 6, alignItems: 'center' }}
+              onClick={() => openStudio(openWindow, 'locations')}
+            >
+              {s.photo && (
+                <img
+                  src={`/api/locations/photos/${encodeURIComponent(s.photo)}`}
+                  alt=""
+                  style={{ width: 28, height: 28, objectFit: 'cover' }}
+                />
+              )}
+              {s.name}
+              {draft(s.draft)}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset style={fieldset}>
+        <legend>Moodboards and plans ({data.boards.length})</legend>
+        {!data.boards.length && <div>None yet. Pick this release for a board in Moodboards or the Planner, or link one to a spot.</div>}
+        {data.boards.map((b) => (
+          <div key={b.id} style={row}>
+            <span style={{ flex: 1 }}>
+              {b.kind === 'kanban' ? 'Plan' : 'Moodboard'}: <b>{b.name}</b>
+              {draft(b.draft)}
+            </span>
+            <button style={button} onClick={() => openBoard(b)}>
+              Open
+            </button>
+          </div>
+        ))}
+      </fieldset>
+    </>
   );
 };
 

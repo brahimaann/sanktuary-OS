@@ -1860,8 +1860,11 @@ let tracksDb = null;
 let tracksSaved = Promise.resolve();
 const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { releases: {}, tracks: {} }));
 const saveTracks = () => (tracksSaved = tracksSaved.then(() => saveJson('tracks.json', tracksDb)).catch(console.error));
+// A draft (calendar entry, spot, board) is its owner's sandbox: nobody else sees it, admins included, until it goes live
 const canSeeRelease = (user, r) =>
-  !r.deleted && (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
+  !r.deleted &&
+  !(r.draft && r.owner !== user.username) &&
+  (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
 const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
@@ -1930,6 +1933,7 @@ async function tracksApi(req, res, url) {
     }
     const r = (own(db.releases, id) && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
     if (req.method === 'GET' && url.searchParams.has('ready')) return json(res, await releaseReadiness(db, r));
+    if (req.method === 'GET' && url.searchParams.has('campaign')) return json(res, await releaseCampaign(r, user));
     if (req.method !== 'GET') editRelease(user, r);
     if (req.method === 'POST' && url.searchParams.has('scan')) {
       if (!r.folder) fail(400, 'Link the release to a folder first');
@@ -1966,7 +1970,9 @@ async function tracksApi(req, res, url) {
         r.items = [
           ...new Set((Array.isArray(input.items) ? input.items : []).filter((i) => own(db.tracks, i) && !db.tracks[i].deleted)),
         ].slice(0, 500);
+      const wasDate = r.date;
       if (input.date !== undefined) r.date = dateOrNull(input.date);
+      if (r.date !== wasDate) await releaseMoved(r, wasDate, me);
       if (input.cover !== undefined) r.cover = fileRef(input.cover);
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
       if (r.public) giveSlug(db, r);
@@ -2760,6 +2766,49 @@ async function trackDeadlines() {
 }
 setInterval(() => trackDeadlines().catch(console.error), 3.6e6).unref();
 
+/** Everything tied to a release (the campaign): its calendar entries, spots and boards, as this member may see them. */
+async function releaseCampaign(r, user) {
+  const entries = Object.values((await loadTimeline()).items).filter((i) => i.release === r.id && canSeeRelease(user, i));
+  const places = new Set(entries.map((i) => i.place).filter(Boolean));
+  const spots = Object.values((await loadLocations()).items).filter(
+    (l) => (l.release === r.id || places.has(l.id)) && canSeeRelease(user, l),
+  );
+  const boardIds = new Set(spots.flatMap((l) => l.boards));
+  await mkdir(join(DATA, 'boards'), { recursive: true });
+  const boards = [];
+  for (const e of await readdir(join(DATA, 'boards'), { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const meta = (openBoards.get(e.name) || (await readJson(`boards/${e.name}/board.json`, null)))?.meta;
+    if (meta && (meta.release === r.id || boardIds.has(meta.id)) && canSeeBoard(user, meta))
+      boards.push({ id: meta.id, name: meta.name, kind: meta.kind || 'canvas', draft: !!meta.draft });
+  }
+  return {
+    entries: entries
+      .map((i) => ({ id: i.id, title: i.title, kind: i.kind, start: i.start, status: i.status, place: i.place || null, draft: !!i.draft }))
+      .sort((a, b) => a.start.localeCompare(b.start)),
+    spots: spots.map((l) => ({ id: l.id, name: l.name, photo: l.photos[0]?.file || null, draft: !!l.draft })),
+    boards,
+  };
+}
+
+/** A release date moved: one notice to everyone on its live calendar entries and following them (not the mover). */
+async function releaseMoved(r, was, me) {
+  const entries = Object.values((await loadTimeline()).items).filter((i) => i.release === r.id && !i.draft);
+  const told = new Set(entries.flatMap((i) => [...i.people, ...i.followers]));
+  told.delete(me);
+  const { admins } = await loadConfig();
+  const when = r.date ? `moved to ${r.date}` : 'has no date now';
+  for (const u of told)
+    if (canSeeRelease({ username: u, admin: admins.includes(u) }, r))
+      await notify(
+        u,
+        `"${r.title}" ${when}${was ? ` (was ${was})` : ''}, ${me}. Check its shoots and events: ${entries.length} on the calendar.`,
+        {
+          release: r.id,
+        },
+      );
+}
+
 // ── /api/library: books we recommend, music classics, and our own archive (old and scrapped projects) — data/library.json ──
 // Anyone on the team adds an entry with a blurb on why it matters; others co-sign it. Whoever added it or an admin edits or
 // removes it. Radio and archive entries can carry one of our own tracks (data/library/<id>.<ext>), played in place.
@@ -2936,7 +2985,10 @@ async function timelineApi(req, res, url) {
     if (input.people !== undefined) i.people = usernameList(input.people);
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
+    if (input.place !== undefined) i.place = input.place ? String(input.place).slice(0, 20) : null; // a spot in the location library
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
+    if (input.draft !== undefined) i.draft = !!input.draft; // only its owner sees it, nobody is told, until it goes live
+    if (i.draft) i.public = false;
     if (input.link !== undefined) {
       const v = String(input.link || '').trim();
       if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
@@ -2960,6 +3012,7 @@ async function timelineApi(req, res, url) {
       link: '',
       folder: null,
       release: null,
+      place: null,
       members: null,
       owner: me,
       followers: [me],
@@ -2972,7 +3025,8 @@ async function timelineApi(req, res, url) {
     if (m) i.members = m.filter((u) => u !== me);
     db.items[i.id] = i;
     changed(i);
-    for (const u of i.people) if (u !== me) await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
+    if (!i.draft)
+      for (const u of i.people) if (u !== me) await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
     await timelineAlerts();
     return json(res, view(i));
   }
@@ -2980,7 +3034,8 @@ async function timelineApi(req, res, url) {
   const i = (own(db.items, id) && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such entry');
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
-    const before = { status: i.status, start: i.start, people: [...i.people] };
+    const before = { status: i.status, start: i.start, people: [...i.people], draft: !!i.draft };
+    if (input.draft !== undefined && i.owner !== me) fail(403, 'Only whoever made it can keep it as a draft');
     if (input.members !== undefined) {
       if (i.owner !== me && !user.admin) fail(403, 'Only whoever made it or an admin can change who sees it');
       i.members = Array.isArray(input.members) ? usernameList(input.members) : null;
@@ -2990,13 +3045,14 @@ async function timelineApi(req, res, url) {
     apply(i, input);
     if (m) Object.assign(i, { members: m.filter((u) => u !== i.owner), public: false }); // moved onto a private release
     changed(i);
-    const told = new Set([...i.people, ...i.followers].filter((u) => u !== me));
+    if (before.draft) before.people = i.draft ? i.people : []; // a draft told nobody: going live tells everyone on it
+    const told = new Set(i.draft || before.draft ? [] : [...i.people, ...i.followers].filter((u) => u !== me));
     const news = [];
     if (i.status !== before.status) news.push(`"${i.title}" is now ${i.status} (${me}).`);
     if (i.start !== before.start) news.push(`"${i.title}" moved to ${i.start}${i.end ? ` – ${i.end}` : ''} (${me}).`);
     for (const text of news) for (const u of told) await notify(u, text, { timeline: i.id });
     for (const u of i.people)
-      if (!before.people.includes(u) && u !== me)
+      if (!before.people.includes(u) && u !== me && !i.draft)
         await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
     await timelineAlerts();
     return json(res, view(i));
@@ -3015,7 +3071,7 @@ async function timelineAlerts() {
   const db = await loadTimeline();
   const today = localDate();
   for (const i of Object.values(db.items)) {
-    if (!i.start || ['Done', 'Cancelled'].includes(i.status)) continue;
+    if (!i.start || i.draft || ['Done', 'Cancelled'].includes(i.status)) continue;
     const days = Math.round((Date.parse(i.start) - Date.parse(today)) / 864e5);
     const stage = days === 0 ? 'd0' : days === 1 ? 'd1' : days <= 3 && days > 0 ? 'd3' : null;
     if (!stage || i.alerted === `${stage}:${i.start}`) continue;
@@ -3028,6 +3084,221 @@ async function timelineAlerts() {
   }
 }
 setInterval(() => timelineAlerts().catch(console.error), 3.6e6).unref();
+
+// ── /api/locations: the shoot location library — data/locations.json + data/locations/photos/ ──
+// Spots worth shooting at: a pin on the map, why it's interesting, scouting photos (their GPS places the pin),
+// and links to the moodboards/plans for it and the calendar shoots booked there (timeline entries with `place`).
+// A dropped photo with GPS joins the spot it was taken at (within 150 m) or starts a new one.
+// Open to every member unless `members` lists who may see it (owner + admins always can), like boards and entries.
+const LOCATION_TEXT = { name: 80, why: 2000, address: 200 };
+const NEAR_M = 150;
+let locationsDb = null;
+let locationsSaved = Promise.resolve();
+const loadLocations = async () => (locationsDb ??= await readJson('locations.json', { items: {} }));
+const saveLocations = () => (locationsSaved = locationsSaved.then(() => saveJson('locations.json', locationsDb)).catch(console.error));
+const LOCATION_PHOTOS = () => join(DATA, 'locations', 'photos');
+const metres = (a, b) => {
+  const r = Math.PI / 180;
+  const x = (b.lng - a.lng) * r * Math.cos(((a.lat + b.lat) / 2) * r);
+  return Math.hypot(x, (b.lat - a.lat) * r) * 6371e3;
+};
+const coord = (v, max) => (v === null || v === '' ? null : Number.isFinite(+v) && Math.abs(+v) <= max ? +v : fail(400, 'Bad coordinates'));
+
+/** GPS position and capture time from a photo's EXIF (a TIFF block, with or without its "Exif\0\0" prefix), or null. */
+function exifInfo(buf) {
+  if (!buf?.length) return null;
+  const t = buf.indexOf('Exif\0\0') === 0 ? 6 : 0;
+  try {
+    const le = buf.toString('latin1', t, t + 2) === 'II';
+    if (!le && buf.toString('latin1', t, t + 2) !== 'MM') return null;
+    const u16 = (o) => (le ? buf.readUInt16LE(t + o) : buf.readUInt16BE(t + o));
+    const u32 = (o) => (le ? buf.readUInt32LE(t + o) : buf.readUInt32BE(t + o));
+    const tags = (ifd) => Object.fromEntries(Array.from({ length: u16(ifd) }, (_, i) => [u16(ifd + 2 + i * 12), ifd + 2 + i * 12]));
+    const ifd0 = tags(u32(4));
+    const ascii = (e, n) =>
+      buf.toString('latin1', t + (n > 4 ? u32(e + 8) : e + 8), t + (n > 4 ? u32(e + 8) : e + 8) + n).replace(/\0.*$/s, '');
+    const exif = ifd0[0x8769] && tags(u32(ifd0[0x8769] + 8));
+    const when = exif?.[0x9003] && ascii(exif[0x9003], 20).match(/^(\d{4}):(\d\d):(\d\d) (\d\d:\d\d)/);
+    const out = { taken: when ? `${when[1]}-${when[2]}-${when[3]}T${when[4]}` : null };
+    const gps = ifd0[0x8825] && tags(u32(ifd0[0x8825] + 8));
+    if (gps?.[2] && gps[4]) {
+      const dms = (e) => [0, 1, 2].reduce((v, k) => v + u32(u32(e + 8) + k * 8) / u32(u32(e + 8) + k * 8 + 4) / 60 ** k, 0);
+      const lat = dms(gps[2]) * (gps[1] && ascii(gps[1], 2) === 'S' ? -1 : 1);
+      const lng = dms(gps[4]) * (gps[3] && ascii(gps[3], 2) === 'W' ? -1 : 1);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng))
+        Object.assign(out, { lat: +lat.toFixed(6), lng: +lng.toFixed(6) });
+    }
+    return out;
+  } catch {
+    return null; // a truncated or odd EXIF block: treat the photo as having none
+  }
+}
+
+async function locationsApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const db = await loadLocations();
+  const me = user.username;
+  const [, , , id, sub, file] = url.pathname.split('/'); // /api/locations/<id>[/photos/<photo>] or /api/locations/photos/<file>
+  const see = (u) => (l) => canSeeRelease(u, l);
+  const changed = (l) => {
+    l.updated = new Date().toISOString();
+    l.updatedBy = me;
+    saveLocations();
+    emit('locations', { id: l.id }, (u) => see({ username: u.username, admin: cfg.admins.includes(u.username) })(l));
+  };
+  const blank = (input = {}) => {
+    const l = {
+      id: randomUUID().slice(0, 10),
+      name: '',
+      lat: null,
+      lng: null,
+      why: '',
+      address: '',
+      photos: [],
+      boards: [],
+      owner: me,
+      members: null,
+      created: new Date().toISOString(),
+    };
+    apply(l, input);
+    l.name = l.name.trim() || `Spot ${Object.keys(db.items).length + 1}`;
+    db.items[l.id] = l;
+    return l;
+  };
+  const apply = (l, input) => {
+    for (const [k, max] of Object.entries(LOCATION_TEXT)) if (input[k] !== undefined) l[k] = String(input[k] ?? '').slice(0, max);
+    if (input.lat !== undefined || input.lng !== undefined) {
+      l.lat = coord(input.lat ?? l.lat, 90);
+      l.lng = coord(input.lng ?? l.lng, 180);
+      if ((l.lat === null) !== (l.lng === null)) fail(400, 'A pin needs both latitude and longitude');
+    }
+    if (input.draft !== undefined) l.draft = !!input.draft;
+    if (input.boards !== undefined)
+      l.boards = [...new Set((Array.isArray(input.boards) ? input.boards : []).map(String).filter((b) => /^[\w-]{1,60}$/.test(b)))].slice(
+        0,
+        30,
+      );
+  };
+
+  // Photos: anyone who can see a spot can see its photos
+  if (id === 'photos' && req.method === 'GET') {
+    const name = safeName(sub);
+    const l = Object.values(db.items).find((l) => l.photos.some((p) => p.file === name || p.original === name));
+    if (!l || !canSeeRelease(user, l)) fail(404, 'No such photo');
+    return stream(req, res, url.searchParams, join(LOCATION_PHOTOS(), name));
+  }
+  // Upload a photo (raw body). ?to=<spot> adds it there; otherwise its GPS finds or starts the spot.
+  if (id === 'photos' && req.method === 'PUT') {
+    const name = safeName(url.searchParams.get('name'));
+    const ext = extname(name).toLowerCase();
+    const pid = randomUUID().slice(0, 12);
+    await mkdir(LOCATION_PHOTOS(), { recursive: true });
+    const original = join(LOCATION_PHOTOS(), `${pid}-original${ext}`);
+    await pipeline(req, createWriteStream(original, BIG_BUFFER));
+    let info = null;
+    let view = null;
+    try {
+      const img = sharp(original, { animated: false });
+      info = exifInfo((await img.metadata()).exif);
+      await img
+        .rotate()
+        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toFile(join(LOCATION_PHOTOS(), `${pid}.webp`));
+      view = `${pid}.webp`;
+    } catch {
+      // sharp can't read it (HEIC, RAW...): look for the EXIF block in the file itself and keep the original as the view
+      const raw = await readFile(original);
+      const at = raw.indexOf('Exif\0\0');
+      info = at >= 0 ? exifInfo(raw.subarray(at)) : null;
+    }
+    const to = url.searchParams.get('to');
+    let l = to ? own(db.items, to) : null;
+    if (to && (!l || !canSeeRelease(user, l))) fail(404, 'No such spot');
+    const gps = info?.lat !== undefined ? { lat: info.lat, lng: info.lng } : null;
+    if (!l && gps) l = Object.values(db.items).find((x) => x.lat !== null && canSeeRelease(user, x) && metres(x, gps) <= NEAR_M);
+    const made = !l;
+    if (!l) l = blank(gps || {});
+    else if (gps && l.lat === null) Object.assign(l, gps);
+    const photo = {
+      id: pid,
+      file: view || basename(original),
+      original: basename(original),
+      name,
+      by: me,
+      at: new Date().toISOString(),
+      taken: info?.taken || null,
+      ...gps,
+    };
+    l.photos.push(photo);
+    changed(l);
+    if (made) logActivity(user, 'scouted a new spot', { location: l.id, title: l.name });
+    return json(res, { location: l.id, made, gps: !!gps, photo });
+  }
+
+  if (req.method === 'GET' && !id) {
+    const tl = Object.values((await loadTimeline()).items).filter((i) => i.place && canSeeRelease(user, i));
+    const boardName = async (b) => {
+      const meta = (openBoards.get(b) || (await readJson(`boards/${b}/board.json`, null).catch(() => null)))?.meta;
+      return meta && canSeeBoard(user, meta) ? { id: b, name: meta.name, kind: meta.kind || 'canvas' } : null;
+    };
+    const items = [];
+    for (const l of Object.values(db.items).filter(see(user)))
+      items.push({
+        ...l,
+        boards: (await Promise.all(l.boards.map(boardName))).filter(Boolean),
+        shoots: tl
+          .filter((i) => i.place === l.id)
+          .map((i) => ({ id: i.id, title: i.title, kind: i.kind, start: i.start, status: i.status }))
+          .sort((a, b) => a.start.localeCompare(b.start)),
+      });
+    return json(res, { items: items.sort((a, b) => b.updated.localeCompare(a.updated)) });
+  }
+  if (req.method === 'POST' && !id) {
+    const l = blank(await jsonBody(req));
+    changed(l);
+    logActivity(user, 'scouted a new spot', { location: l.id, title: l.name });
+    return json(res, l);
+  }
+
+  const l = (own(db.items, id) && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such spot');
+  const canManage = l.owner === me || user.admin;
+  if (sub === 'photos' && req.method === 'DELETE') {
+    const p = l.photos.find((p) => p.id === file) || fail(404, 'No such photo');
+    if (p.by !== me && !canManage) fail(403, 'Only whoever added it, the spot’s owner or an admin can remove it');
+    l.photos = l.photos.filter((x) => x !== p);
+    for (const f of new Set([p.file, p.original])) await rm(join(LOCATION_PHOTOS(), safeName(f)), { force: true });
+    changed(l);
+    return json(res, { ok: true });
+  }
+  if (req.method === 'PATCH' && !sub) {
+    const input = await jsonBody(req);
+    if (input.members !== undefined) {
+      if (!canManage) fail(403, 'Only whoever added it or an admin can change who sees it');
+      l.members = Array.isArray(input.members) ? usernameList(input.members).filter((u) => u !== l.owner) : null;
+    }
+    if (input.draft !== undefined && l.owner !== me) fail(403, 'Only whoever added it can keep it as a draft');
+    if (input.release !== undefined) {
+      const r = input.release && own((await loadTracks()).releases, String(input.release));
+      if (input.release && (!r || !canSeeRelease(user, r))) fail(404, 'No such release');
+      l.release = r ? r.id : null;
+    }
+    apply(l, input);
+    if (input.name !== undefined && !l.name.trim()) fail(400, 'Give the spot a name');
+    changed(l);
+    return json(res, l);
+  }
+  if (req.method === 'DELETE' && !sub) {
+    if (!canManage) fail(403, 'Only whoever added it or an admin can delete it');
+    for (const p of l.photos)
+      for (const f of new Set([p.file, p.original])) await rm(join(LOCATION_PHOTOS(), safeName(f)), { force: true });
+    delete db.items[id];
+    changed(l);
+    return json(res, { ok: true });
+  }
+  fail(405, 'Not allowed');
+}
 
 // ── /api/business: the private business portal — data/business/ ──
 // Clients, jobs, invoices and documents, for admins only, and only with:
@@ -7860,6 +8131,35 @@ async function me(req, res, url) {
   return json(res, { username: user.username, admin: user.admin, spaces, favorites });
 }
 
+// ── /api/notes: each person's Notepad files, kept on the server so they follow them to every device ──
+// data/notes/<username>.json is { "<path>": { content, updatedAt } }; nobody else can read it, admins included.
+const NOTE_MAX = 200e3;
+const notesSaved = new Map(); // username -> the last save, so two quick saves never write over each other
+async function notesApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const file = `notes/${user.username}.json`;
+  if (req.method === 'GET') return json(res, { notes: await readJson(file, {}) });
+  const input = req.method === 'PUT' ? await jsonBody(req) : {};
+  const path = String(input.path ?? url.searchParams.get('path') ?? '');
+  if (!/^C:\/[^\x00-\x1f]{1,300}$/i.test(path) || path.split('/').includes('..')) fail(400, 'Bad note path');
+  const change = async () => {
+    const notes = await readJson(file, {});
+    if (req.method === 'DELETE') delete notes[path];
+    else if (req.method === 'PUT') {
+      const content = String(input.content ?? '');
+      if (content.length > NOTE_MAX) fail(413, 'That note is too long');
+      if (!own(notes, path) && Object.keys(notes).length >= 500) fail(400, 'You have 500 notes already; delete some first');
+      notes[path] = { content, updatedAt: Date.now() };
+    } else fail(405, 'Unknown notes action');
+    await mkdir(join(DATA, 'notes'), { recursive: true });
+    await saveJson(file, notes);
+  };
+  const done = (notesSaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
+  notesSaved.set(user.username, done);
+  await done;
+  return json(res, { ok: true });
+}
+
 // ── /api/boards: infinite canvas boards, edited live by the whole team ──
 // Each board lives in data/boards/<id>/ (board.json + assets/) on the PC's SSD, so boards work even with
 // every USB drive unplugged. Edits are per-item last-writer-wins: a client sends the whole item it changed,
@@ -7870,7 +8170,9 @@ const CURSOR_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#
 const openBoards = new Map(); // id -> { meta, items: Map, clients: Map<conn, { res, user, color }>, timer }
 
 /** Boards are open to every member unless meta.members lists who may see them (owner + admins always can). */
-const canSeeBoard = (user, meta) => !meta.members || user.admin || meta.owner === user.username || meta.members.includes(user.username);
+const canSeeBoard = (user, meta) =>
+  !(meta.draft && meta.owner !== user.username) &&
+  (!meta.members || user.admin || meta.owner === user.username || meta.members.includes(user.username));
 
 async function loadBoard(id) {
   if (!/^[\w-]{1,60}$/.test(id)) fail(400, 'Bad board id');
@@ -7966,11 +8268,21 @@ async function boardsApi(req, res, url) {
   if (!sub && req.method === 'PATCH') {
     const input = await jsonBody(req);
     if (input.name !== undefined) b.meta.name = String(input.name).trim().slice(0, 80) || b.meta.name;
-    if (input.members !== undefined) {
+    if (input.draft !== undefined) {
+      if (b.meta.owner !== user.username) fail(403, 'Only whoever made the board can keep it as a draft');
+      b.meta.draft = !!input.draft;
+    }
+    if (input.release !== undefined) {
+      const r = input.release && own((await loadTracks()).releases, String(input.release));
+      if (input.release && (!r || !canSeeRelease(user, r))) fail(404, 'No such release');
+      b.meta.release = r ? r.id : null;
+    }
+    if (input.members !== undefined || input.draft) {
       if (b.meta.owner !== user.username && !user.admin) fail(403, 'Only the creator or an admin can change who sees a board');
-      b.meta.members = Array.isArray(input.members)
-        ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))]
-        : null;
+      if (input.members !== undefined)
+        b.meta.members = Array.isArray(input.members)
+          ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))]
+          : null;
       // Anyone who just lost access is disconnected from the board
       const cfg = await loadConfig();
       for (const [conn, c] of b.clients) {
@@ -7993,7 +8305,11 @@ async function boardsApi(req, res, url) {
     openBoards.delete(id);
     await mkdir(join(DATA, 'boards-trash'), { recursive: true });
     await rename(join(DATA, 'boards', id), join(DATA, 'boards-trash', `${id}-${stamp()}`)); // recoverable
-    logActivity(user, 'deleted the board', { title: b.meta.name, boardMembers: b.meta.members ? [b.meta.owner, ...b.meta.members] : null });
+    if (!b.meta.draft)
+      logActivity(user, 'deleted the board', {
+        title: b.meta.name,
+        boardMembers: b.meta.members ? [b.meta.owner, ...b.meta.members] : null,
+      });
     return json(res, { ok: true });
   }
 
@@ -8030,7 +8346,7 @@ async function boardsApi(req, res, url) {
     for (const op of ops) {
       if (op.put && validItem(b.meta.kind || 'canvas', op.put)) {
         const before = b.items.get(op.put.id);
-        if (op.put.type === 'card' && before?.col !== op.put.col && /done/i.test(b.items.get(op.put.col)?.title || '')) {
+        if (!b.meta.draft && op.put.type === 'card' && before?.col !== op.put.col && /done/i.test(b.items.get(op.put.col)?.title || '')) {
           logActivity(user, 'finished', {
             board: id,
             boardKind: 'kanban',
@@ -9662,6 +9978,7 @@ const routes = [
   ['/healthz', healthz],
   ['/api/files/', files],
   ['/api/me', me],
+  ['/api/notes', notesApi],
   ['/api/admin/', admin],
   ['/api/boards', boardsApi],
   ['/api/logout', logout],
@@ -9675,6 +9992,7 @@ const routes = [
   ['/api/push', pushApi],
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
+  ['/api/locations', locationsApi],
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
   ['/api/library', libraryApi],

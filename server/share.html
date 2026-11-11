@@ -7,20 +7,39 @@
     <title>Shared from Sanktuary</title>
     <link rel="icon" href="/favicon.ico" />
     <style>
+      /* The S machine, as on the desktop: 1-bit paper and ink, plus one signal colour for the selection and the main action */
+      @font-face {
+        font-family: 'Pixelify Sans';
+        src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
+        font-weight: 400 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Silkscreen';
+        src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+        font-display: swap;
+      }
       :root {
-        --face: #c0c0c0;
-        --navy: #000080;
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --pixel: 'Pixelify Sans', Arial, sans-serif;
+        --label: 'Silkscreen', 'Pixelify Sans', monospace;
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
       }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important; /* Pixelify's fi ligature reads as an A; font shorthands would turn it back on */
       }
       body {
         margin: 0;
         min-height: 100vh;
-        background: #008080;
-        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
-        font-size: 13px;
-        color: #000;
+        background: var(--dots), var(--paper);
+        font-family: var(--pixel);
+        font-size: 14px;
+        color: var(--ink);
         display: flex;
         align-items: flex-start;
         justify-content: center;
@@ -28,24 +47,49 @@
       }
       .win {
         width: min(760px, 100%);
-        background: var(--face);
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 1px 1px 0 #000;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
       }
-      .title {
-        background: linear-gradient(90deg, var(--navy), #1084d0);
-        color: #fff;
-        font-weight: 700;
-        padding: 4px 6px;
+      .title,
+      .mp-title {
+        height: 28px;
+        padding: 5px 4px;
+        border-bottom: 2px solid var(--ink);
+        background: repeating-linear-gradient(var(--ink) 0 1px, var(--paper) 1px 3px) content-box var(--paper);
         display: flex;
         align-items: center;
-        gap: 6px;
+        justify-content: center;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
       }
-      .title img {
+      .title > *,
+      .mp-title > * {
+        background: var(--paper);
+        line-height: 16px;
+        padding: 0 8px;
+      }
+      .title > img + *,
+      .mp-title > img + * {
+        padding-left: 2px;
+      }
+      .title > img,
+      .mp-title > img {
+        padding: 0 2px 0 8px;
+        box-sizing: content-box;
+        image-rendering: pixelated;
         width: 16px;
         height: 16px;
-        image-rendering: pixelated;
+      }
+      .title a {
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .mp-title > span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .body {
         padding: 10px;
@@ -54,38 +98,47 @@
         gap: 8px;
       }
       .meta {
-        color: #333;
+        color: var(--dim);
       }
       .inset {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
       }
       button,
       .btn {
         font: inherit;
-        padding: 4px 12px;
+        padding: 3px 12px;
         min-height: 28px;
-        background: var(--face);
-        color: #000;
+        background: var(--paper);
+        color: var(--ink);
         text-decoration: none;
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        box-shadow: none;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
       }
+      button:hover,
+      .btn:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
       button:active,
       .btn:active {
-        border-color: #000 #fff #fff #000;
-        box-shadow: inset 1px 1px #808080;
+        background: var(--signal);
+        color: var(--ink);
+      }
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 1px;
       }
       input {
         font: inherit;
         padding: 4px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        background: var(--paper);
       }
       .crumbs {
         display: flex;
@@ -94,7 +147,7 @@
         align-items: center;
       }
       .crumbs a {
-        color: var(--navy);
+        color: var(--ink);
       }
       .list {
         max-height: 50vh;
@@ -105,15 +158,16 @@
         align-items: center;
         gap: 8px;
         padding: 6px 8px;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid #ddd;
         cursor: default;
       }
       .row:hover {
-        background: #e8e8ff;
+        background: var(--ink);
+        color: var(--paper);
       }
       .row.sel {
-        background: var(--navy);
-        color: #fff;
+        background: var(--signal);
+        color: var(--ink);
       }
       .row .n {
         flex: 1;
@@ -123,11 +177,14 @@
         white-space: nowrap;
       }
       .row .s {
-        color: #666;
+        color: var(--dim);
         white-space: nowrap;
       }
+      .row:hover .s {
+        color: #ccc;
+      }
       .row.sel .s {
-        color: #ddd;
+        color: var(--ink);
       }
       .viewer {
         padding: 8px;
@@ -149,30 +206,12 @@
         height: 60vh;
         border: 0;
       }
-      /* Win98 Media Player */
+      /* Media Player and Image Preview: small windows of their own */
       .mp {
         width: 100%;
-        background: var(--face);
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 1px 1px 0 #000;
-      }
-      .mp-title {
-        background: linear-gradient(90deg, var(--navy), #1084d0);
-        color: #fff;
-        font-weight: 700;
-        padding: 3px 5px;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .mp-title img {
-        width: 16px;
-        height: 16px;
-        image-rendering: pixelated;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
       }
       .mp-body {
         padding: 6px;
@@ -185,24 +224,22 @@
         max-height: 55vh;
         background: #000;
         display: block;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        border: 2px solid var(--ink);
       }
+      /* The display: signal-green readout on black */
       .mp-lcd {
-        background: var(--navy);
-        color: #fff;
-        font-weight: 700;
-        font-size: 13px;
+        background: var(--ink);
+        color: var(--signal);
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
         padding: 6px 8px;
         display: flex;
         justify-content: space-between;
         gap: 8px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
       }
       .mp-lcd [data-time] {
         font-variant-numeric: tabular-nums;
-        color: #dfe6ff;
+        color: var(--paper);
       }
       .mp-lcd .name {
         overflow: hidden;
@@ -226,18 +263,16 @@
         height: 14px;
       }
       .mp-btn.on {
-        border-color: #000 #fff #fff #000;
-        box-shadow: inset 1px 1px #808080;
-        background: #d4d4d4;
+        background: var(--signal);
+        color: var(--ink);
       }
       .mp-sep {
         width: 2px;
         align-self: stretch;
         margin: 2px 4px;
-        border-left: 1px solid #808080;
-        border-right: 1px solid #fff;
+        background: var(--ink);
       }
-      /* Win98 trackbar: sunken groove, raised rectangular thumb */
+      /* Trackbar: a black line with a square white thumb */
       .mp input[type='range'] {
         -webkit-appearance: none;
         appearance: none;
@@ -249,36 +284,29 @@
         padding: 0;
       }
       .mp input[type='range']::-webkit-slider-runnable-track {
-        height: 4px;
-        background: #fff;
-        border: 1px solid;
-        border-color: #808080 #fff #fff #808080;
-        box-shadow: inset 1px 1px #000;
+        height: 2px;
+        background: var(--ink);
       }
       .mp input[type='range']::-moz-range-track {
-        height: 4px;
-        background: #fff;
-        border: 1px solid;
-        border-color: #808080 #fff #fff #808080;
+        height: 2px;
+        background: var(--ink);
+        border: 0;
       }
       .mp input[type='range']::-webkit-slider-thumb {
         -webkit-appearance: none;
-        width: 11px;
-        height: 21px;
-        margin-top: -9px;
-        background: var(--face);
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
+        width: 12px;
+        height: 18px;
+        margin-top: -8px;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        border-radius: 0;
       }
       .mp input[type='range']::-moz-range-thumb {
-        width: 9px;
-        height: 19px;
+        width: 8px;
+        height: 14px;
         border-radius: 0;
-        background: var(--face);
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
       }
       .mp .seek {
         width: 100%;
@@ -288,9 +316,8 @@
       }
       /* Image Preview window */
       .ip-stage {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -331,18 +358,20 @@
         width: 24px;
         height: 24px;
         object-fit: cover;
-        border: 1px solid #808080;
-        background: #fff;
+        border: 1px solid var(--ink);
+        background: var(--paper);
       }
       .err {
         color: #a00000;
       }
       .foot {
-        color: #fff;
         text-align: center;
-        margin-top: 10px;
-        font-size: 11px;
-        opacity: 0.85;
+        margin: 12px auto 0;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+        background: var(--paper);
+        width: fit-content;
+        padding: 2px 8px;
       }
     </style>
   </head>
@@ -468,7 +497,7 @@
         isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--';
       function player(name, src, k) {
         return `<div class="mp" data-player>
-          <div class="mp-title"><img src="/images/icons/media-player-16x16.png?v=2" alt="">Media Player - ${esc(name)}</div>
+          <div class="mp-title"><img src="/images/icons/media-player-16x16.png?v=2" alt=""><span>Media Player - ${esc(name)}</span></div>
           <div class="mp-body">
             ${k === 'video' ? `<video playsinline preload="metadata" src="${src}"></video>` : `<audio preload="metadata" src="${src}"></audio>`}
             <div class="mp-lcd"><span class="name" data-state>Stopped</span><span data-time>00:00 / --:--</span></div>
@@ -491,7 +520,7 @@
         const i = images.indexOf(name);
         const nav = info.isDir && images.length > 1;
         return `<div class="mp" data-image>
-          <div class="mp-title"><img src="/images/icons/paint-16x16.png?v=2" alt="">Image Preview - ${esc(name)}</div>
+          <div class="mp-title"><img src="/images/icons/paint-16x16.png?v=2" alt=""><span>Image Preview - ${esc(name)}</span></div>
           <div class="mp-body">
             <div class="ip-stage${fit ? ' fit' : ''}"><img src="${src}" alt="${esc(name)}" data-pic></div>
             <div class="mp-row">

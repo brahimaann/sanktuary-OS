@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useWindowManager, AppType } from '../wm/manager';
 import { vfs } from '../vfs/fs';
-import { useMe } from '../utils/api';
+import { useApi, useMe } from '../utils/api';
 import { useAuth } from '@clerk/react';
 import { startLive } from '../utils/live';
 import { dialog } from '../utils/dialog';
@@ -25,10 +25,10 @@ interface DesktopIconDef {
 const I = (name: string) => `/images/icons/${name}-32x32.png?v=2`;
 const app = {
   new: { id: 'new', title: 'New...', icon: I('file'), appType: 'new', width: 460, height: 420 },
-  // Studio: Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
+  // Operations (Studio window): Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
   studio: {
     id: 'studio',
-    title: 'Studio',
+    title: 'Operations',
     icon: I('media-player'),
     appType: 'studio',
     appProps: { tab: 'music' },
@@ -47,7 +47,8 @@ const app = {
   moodboards: { id: 'moodboards', title: 'Moodboards', icon: I('paint'), appType: 'boards', width: 560, height: 420 },
   teams: { id: 'teams', title: 'Messages', icon: I('outlook-express'), appType: 'teams', width: 300, height: 520 },
   files: { id: 'sanktuary-network', title: 'Team Files', icon: I('network'), appType: 'network', width: 560, height: 420 },
-  producer: { id: 'producer', title: 'Producer', icon: I('convert-audio'), appType: 'producer', width: 720, height: 560 },
+  // Foundry: the making workspace (Producer window): Session cockpit, Analyze, Compare, To WAV, Guide
+  producer: { id: 'producer', title: 'Foundry', icon: I('convert-audio'), appType: 'producer', width: 960, height: 620 },
   rapidraw: {
     id: 'rapidraw',
     title: 'SANKTUARY RAW',
@@ -256,6 +257,34 @@ export const Desktop: React.FC = () => {
   useEffect(() => {
     if (me) startLive();
   }, [me]);
+  const api = useApi();
+  useEffect(() => {
+    // Notes (.txt files) are kept in each person's account, so the ones they made on another device show up here
+    if (!me) return vfs.detachAccount();
+    let live = true;
+    const say = (e: Error) => dialog.alert(`That note didn't save to your account: ${e.message}`);
+    const remote = {
+      put: (path: string, content: string) =>
+        api('/api/notes', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path, content }),
+        }).catch(say),
+      del: (path: string) => api(`/api/notes?path=${encodeURIComponent(path)}`, { method: 'DELETE' }).catch(say),
+    };
+    api('/api/notes').then(({ notes }) => {
+      if (!live) return;
+      let first = false; // this browser's notes from before accounts held them go to the first person who signs in
+      try {
+        first = !localStorage.getItem('sk_notes_moved');
+        localStorage.setItem('sk_notes_moved', me.username);
+      } catch {}
+      vfs.attachAccount(remote, notes, first);
+    }, console.error);
+    return () => {
+      live = false;
+    };
+  }, [me?.username]); // eslint-disable-line react-hooks/exhaustive-deps
   const [vfsIcons, setVfsIcons] = useState<DesktopIconDef[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);

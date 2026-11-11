@@ -6,20 +6,39 @@
     <!--meta-->
     <link rel="icon" href="/favicon.ico" />
     <style>
+      /* The S machine, as on the desktop: 1-bit paper and ink, plus one signal colour for the selection and the main action */
+      @font-face {
+        font-family: 'Pixelify Sans';
+        src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
+        font-weight: 400 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Silkscreen';
+        src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+        font-display: swap;
+      }
       :root {
-        --face: #c0c0c0;
-        --navy: #000080;
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --pixel: 'Pixelify Sans', Arial, sans-serif;
+        --label: 'Silkscreen', 'Pixelify Sans', monospace;
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
       }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important; /* Pixelify's fi ligature reads as an A; font shorthands would turn it back on */
       }
       body {
         margin: 0;
         min-height: 100vh;
-        background: #008080;
-        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
-        font-size: 13px;
-        color: #000;
+        background: var(--dots), var(--paper);
+        font-family: var(--pixel);
+        font-size: 14px;
+        color: var(--ink);
         display: flex;
         justify-content: center;
         padding: 24px 12px;
@@ -28,33 +47,45 @@
         width: min(820px, 100%);
       }
       .win {
-        background: var(--face);
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 1px 1px 0 #000;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
       }
       .title {
-        background: linear-gradient(90deg, var(--navy), #1084d0);
-        color: #fff;
-        font-weight: 700;
-        padding: 4px 6px;
+        height: 28px;
+        padding: 5px 4px;
+        border-bottom: 2px solid var(--ink);
+        background: repeating-linear-gradient(var(--ink) 0 1px, var(--paper) 1px 3px) content-box var(--paper);
         display: flex;
         align-items: center;
-        gap: 6px;
+        justify-content: center;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
       }
-      .title img {
+      .title > * {
+        background: var(--paper);
+        line-height: 16px;
+        padding: 0 8px;
+      }
+      .title > img + * {
+        padding-left: 2px;
+      }
+      .title > img {
+        padding: 0 2px 0 8px;
+        box-sizing: content-box;
+        image-rendering: pixelated;
         width: 16px;
         height: 16px;
       }
       .title a {
-        color: #fff;
+        color: var(--ink);
         text-decoration: none;
       }
       .bar {
         display: flex;
         gap: 6px;
         padding: 6px;
-        border-bottom: 1px solid #808080;
+        border-bottom: 2px solid var(--ink);
         align-items: center;
         flex-wrap: wrap;
       }
@@ -63,62 +94,79 @@
       }
       .btn {
         font: inherit;
-        padding: 4px 12px;
+        padding: 3px 12px;
         min-height: 28px;
-        background: var(--face);
-        color: #000;
+        background: var(--paper);
+        color: var(--ink);
         text-decoration: none;
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        box-shadow: none;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
         gap: 6px;
       }
-      .btn.on {
-        border-color: #000 #fff #fff #000;
-        box-shadow: inset 1px 1px #808080;
-        background: #d4d4d4;
+      .btn:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .btn.on,
+      .btn:active {
+        background: var(--signal);
+        color: var(--ink);
+      }
+      .btn:disabled {
+        background: var(--paper);
+        color: #808080;
+        border-color: #808080;
+        cursor: default;
+      }
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 1px;
       }
       .post {
         display: flex;
         gap: 12px;
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         padding: 10px;
-        margin-bottom: 10px;
+        margin-bottom: 12px;
         cursor: pointer;
         color: inherit;
         text-decoration: none;
       }
-      .post:hover {
-        background: #f0f0ff;
+      .post:hover,
+      .face:hover,
+      .video:hover {
+        transform: translate(-2px, -2px);
+        box-shadow: 4px 4px 0 var(--ink);
       }
       .post img {
         width: 132px;
         height: 96px;
         object-fit: cover;
         flex-shrink: 0;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
       .post h2 {
-        font:
-          700 16px Georgia,
-          serif;
+        font: 700 18px/1.2 var(--pixel);
         margin: 0 0 4px;
       }
       .meta {
-        color: #555;
-        font-size: 11px;
+        color: var(--dim);
+        font-size: 12px;
         margin-bottom: 4px;
       }
+      /* Section labels: white on black, in the pixel caps the OS uses for window titles */
       .chip {
-        color: #fff;
-        font-size: 10px;
-        padding: 0 5px;
-        margin-right: 4px;
+        background: var(--ink);
+        color: var(--paper);
+        font: 10px var(--label);
+        -webkit-font-smoothing: none;
+        padding: 1px 5px;
+        margin-right: 6px;
       }
       .excerpt {
         font:
@@ -130,18 +178,14 @@
         -webkit-box-orient: vertical;
       }
       .reader {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
         padding: 20px min(40px, 5vw);
         font:
           16px/1.65 Georgia,
           serif;
       }
       .reader h1 {
-        font:
-          700 26px/1.25 Georgia,
-          serif;
+        font: 700 30px/1.15 var(--pixel);
         margin: 0 0 6px;
       }
       .reader img.cover {
@@ -149,7 +193,7 @@
         max-height: 420px;
         object-fit: cover;
         margin: 12px 0;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
       .reader p {
         margin: 0 0 14px;
@@ -165,30 +209,28 @@
       .content blockquote {
         margin: 0 0 14px;
         padding: 4px 14px;
-        border-left: 4px solid var(--navy);
-        color: #333;
+        border-left: 4px solid var(--signal);
+        color: #222;
       }
       .content figcaption {
         font-size: 13px;
-        color: #555;
+        color: var(--dim);
         text-align: center;
       }
       .content h2,
       .content h3 {
-        font-family: Georgia, serif;
+        font-family: var(--pixel);
         margin: 22px 0 8px;
       }
-      .content a {
-        color: var(--navy);
+      .content a,
+      .reader p a {
+        color: var(--ink);
       }
       .credit {
         margin-top: 24px;
         padding-top: 12px;
-        border-top: 1px solid #ccc;
-        font:
-          13px Tahoma,
-          Arial,
-          sans-serif;
+        border-top: 2px solid var(--ink);
+        font: 14px var(--pixel);
         display: flex;
         gap: 10px;
         align-items: center;
@@ -202,7 +244,7 @@
         border: 2px solid #000;
         box-shadow: 4px 4px 0 #000;
         padding: 12px;
-        font-family: 'Courier New', monospace;
+        font-family: var(--pixel);
       }
       .radio .lcd {
         background: #000;
@@ -210,14 +252,15 @@
         padding: 12px 14px;
       }
       .radio .st {
-        color: #4b9560;
+        color: var(--signal);
+        font-family: var(--label);
         font-size: 11px;
         letter-spacing: 1px;
       }
       .radio .np {
-        font:
-          700 22px/1.2 Georgia,
-          serif;
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1.2;
         margin-top: 6px;
       }
       .radio .by {
@@ -234,7 +277,7 @@
         display: block;
         height: 100%;
         width: 0;
-        background: #4b9560;
+        background: var(--signal);
       }
       .radio .t {
         font-size: 11px;
@@ -250,9 +293,8 @@
         margin-top: 10px;
       }
       .radio .rb {
-        font:
-          700 14px 'Courier New',
-          monospace;
+        font-family: var(--label);
+        font-size: 14px;
         background: #fff;
         color: #000;
         border: 2px solid #000;
@@ -266,8 +308,9 @@
         font-size: 12px;
         padding: 4px 10px;
       }
-      .radio .rb.on {
-        background: #4b9560;
+      .radio .rb.on,
+      .radio .rb.big {
+        background: var(--signal);
       }
       .radio .story {
         margin-top: 10px;
@@ -293,40 +336,39 @@
         color: #fff;
       }
       .empty {
-        background: #fff;
+        background: var(--paper);
         padding: 16px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        border: 2px dashed var(--ink);
       }
       .foot {
-        color: #fff;
         text-align: center;
-        margin-top: 10px;
-        font-size: 11px;
-        opacity: 0.85;
+        margin: 12px auto 0;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+        background: var(--paper);
+        width: fit-content;
+        padding: 2px 8px;
       }
       .foot a {
-        color: #fff;
+        color: var(--ink);
       }
-      /* Notes wall: TheSlap-style status boxes, each a little window in its writer's colour */
+      /* Notes wall: the dotted desktop, each note a small window */
       .wall {
         margin: -10px;
         padding: 12px;
-        background:
-          radial-gradient(circle, rgba(255, 255, 255, 0.35) 2px, transparent 2.5px) 0 0 / 18px 18px,
-          #3a1c71;
+        background: var(--dots), var(--paper);
         min-height: 300px;
       }
       .note {
-        background: #fff;
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
         margin: 0 auto 14px;
         max-width: 620px;
       }
       .note .hd {
-        color: #fff;
+        background: var(--ink);
+        color: var(--paper);
         font-weight: 700;
         padding: 3px 6px;
         display: flex;
@@ -364,7 +406,7 @@
       }
       .note .txt a,
       .note .ft a {
-        color: var(--navy);
+        color: var(--ink);
       }
       .note .pics {
         display: grid;
@@ -376,16 +418,16 @@
         width: 100%;
         max-height: 360px;
         object-fit: cover;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
       .note .ft {
         display: flex;
         gap: 12px;
         align-items: center;
         padding: 4px 12px 6px;
-        border-top: 1px solid #ddd;
+        border-top: 2px solid var(--ink);
         font-size: 12px;
-        color: #444;
+        color: var(--dim);
         flex-wrap: wrap;
       }
       .note .ft .btn {
@@ -401,30 +443,28 @@
         flex-wrap: wrap;
       }
       .tabs .btn {
-        font-weight: 700;
+        font: 11px var(--label);
+        -webkit-font-smoothing: none;
       }
       .preface {
         font:
-          italic 18px/1.45 Georgia,
+          italic 19px/1.45 Georgia,
           serif;
-        color: #333;
+        color: #222;
         margin: 0 0 10px;
       }
       .reader img.photo {
         width: 100%;
         margin: 6px 0 14px;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
       .listen {
         margin-top: 22px;
         padding: 12px;
-        background: #f4f4f4;
-        border: 2px solid;
-        border-color: #fff #808080 #808080 #fff;
-        font:
-          13px Tahoma,
-          Arial,
-          sans-serif;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
+        font: 14px var(--pixel);
       }
       .listen .head {
         display: flex;
@@ -436,7 +476,7 @@
         width: 72px;
         height: 72px;
         object-fit: cover;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
       .listen .stores {
         display: flex;
@@ -452,7 +492,7 @@
         padding: 3px 0;
       }
       .listen li a {
-        color: var(--navy);
+        color: var(--ink);
         margin-left: 8px;
         font-size: 12px;
       }
@@ -463,8 +503,8 @@
       .drop {
         break-inside: avoid;
         margin-bottom: 10px;
-        background: #fff;
-        border: 1px solid #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
       }
       .drop img,
       .drop video {
@@ -490,7 +530,7 @@
       }
       .reacts {
         display: flex;
-        border-top: 1px solid #c0c0c0;
+        border-top: 2px solid var(--ink);
       }
       .reacts button {
         flex: 1;
@@ -503,7 +543,7 @@
       }
       .reacts button.on {
         filter: none;
-        background: #ffffe1;
+        background: var(--signal);
       }
       .shuffle {
         position: fixed;
@@ -550,7 +590,7 @@
         color: #fff;
       }
       .shuffle .reacts button.on {
-        background: #333;
+        background: var(--signal);
       }
       .shuffle .x {
         position: absolute;
@@ -563,9 +603,8 @@
         gap: 10px;
       }
       .video {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         cursor: pointer;
       }
       .video img {
@@ -573,6 +612,7 @@
         aspect-ratio: 16/9;
         object-fit: cover;
         display: block;
+        border-bottom: 2px solid var(--ink);
       }
       .video div {
         padding: 6px 8px;
@@ -598,18 +638,11 @@
         margin-bottom: 10px;
       }
       .face {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         color: inherit;
         text-decoration: none;
-        font:
-          13px Tahoma,
-          Arial,
-          sans-serif;
-      }
-      .face:hover {
-        background: #f0f0ff;
+        font: 14px var(--pixel);
       }
       .face img,
       .face .blank {
@@ -617,7 +650,8 @@
         width: 100%;
         aspect-ratio: 4/5;
         object-fit: cover;
-        background: #ddd;
+        background: var(--dots), #eee;
+        border-bottom: 2px solid var(--ink);
       }
       .face > div {
         padding: 4px 6px;
@@ -635,7 +669,7 @@
         width: 100%;
         aspect-ratio: 4/5;
         object-fit: cover;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
       .portraits img:first-child {
         grid-column: 1 / -1;
@@ -643,13 +677,9 @@
         max-height: 560px;
       }
       .info {
-        font:
-          14px/1.5 Tahoma,
-          Arial,
-          sans-serif;
-        background: #f4f4f4;
-        border: 2px solid;
-        border-color: #fff #808080 #808080 #fff;
+        font: 15px/1.5 var(--pixel);
+        background: var(--paper);
+        border: 2px solid var(--ink);
         padding: 10px 12px;
         margin-bottom: 16px;
       }
@@ -657,17 +687,13 @@
         margin: 0 0 8px;
       }
       .info a {
-        color: var(--navy);
+        color: var(--ink);
         margin-right: 10px;
       }
       .reader h3 {
-        font:
-          700 13px Tahoma,
-          Arial,
-          sans-serif;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #555;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+        color: var(--ink);
         margin: 22px 0 8px;
       }
       @media (max-width: 520px) {
@@ -709,7 +735,7 @@
         ['library', 'Library'],
       ];
       const KINDS = { profile: 'Profile', 'case-study': 'Case study', spotlight: 'Spotlight' };
-      const LINE_CHIP = { heart: ['#b00020', 'Heart'], essays: ['#000080', 'Essay'], 'field-notes': ['#2e7d32', 'Field note'] };
+      const LINE_CHIP = { heart: 'Heart', essays: 'Essay', 'field-notes': 'Field note' };
       const go = (href) => (history.pushState(null, '', href), route());
       function sectionTabs(on) {
         tabsEl.innerHTML = SECTIONS.map(
@@ -717,8 +743,8 @@
         ).join('');
       }
       const chip = (p) => {
-        const [bg, label] = p.source === 'substack' ? ['#ff6719', 'Substack'] : LINE_CHIP[p.line] || LINE_CHIP.heart;
-        return `<span class="chip" style="background:${bg}">${p.kind && KINDS[p.kind] ? KINDS[p.kind] : label}</span>`;
+        const label = p.source === 'substack' ? 'Substack' : LINE_CHIP[p.line] || LINE_CHIP.heart;
+        return `<span class="chip">${p.kind && KINDS[p.kind] ? KINDS[p.kind] : label}</span>`;
       };
 
       function list(section) {
@@ -741,7 +767,7 @@
         const magazine =
           section === 'heart'
             ? `<a class="post" href="/magazine"><img src="/magazine/pages/cover.webp" alt="" loading="lazy">
-                <div style="min-width:0"><div class="meta"><span class="chip" style="background:#b00020">Magazine</span>CITIES</div>
+                <div style="min-width:0"><div class="meta"><span class="chip">Magazine</span>CITIES</div>
                 <h2>CITIES Vol. 1</h2><div class="excerpt">The magazine: Twin Cities artists in their own words. Flip through the issue.</div></div></a>`
             : '';
         app.innerHTML =
@@ -817,7 +843,7 @@
         const x = await r.json();
         document.title = `${x.name} · CITIES`;
         const host = (u) => new URL(u).hostname.replace(/^www\./, '');
-        app.innerHTML = `<article class="reader"><div class="meta"><span class="chip" style="background:#b00020">Heart of the Cities</span></div><h1>${esc(x.name)}</h1>${x.role ? `<p class="preface">${esc(x.role)}</p>` : ''}
+        app.innerHTML = `<article class="reader"><div class="meta"><span class="chip">Heart of the Cities</span></div><h1>${esc(x.name)}</h1>${x.role ? `<p class="preface">${esc(x.role)}</p>` : ''}
           ${x.portraits.length ? `<div class="portraits">${x.portraits.map((u) => `<img src="${esc(u)}" alt="${esc(x.name)}" loading="lazy">`).join('')}</div>` : ''}
           ${x.info || x.links.length ? `<div class="info">${x.info ? body(x.info) : ''}${x.links.length ? `<div>${x.links.map((u) => outLink(u, host(u))).join('')}</div>` : ''}</div>` : ''}
           ${x.note ? `<div class="content">${body(x.note)}</div>` : ''}
@@ -1123,8 +1149,6 @@
         const m = Math.round((Date.now() - new Date(d)) / 60000);
         return m < 60 ? `${Math.max(1, m)}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : when(d);
       };
-      const COLORS = ['#e6007e', '#0078d7', '#ff8c00', '#00a651', '#7b2fbe', '#d4145a', '#00897b'];
-      const colorOf = (name) => COLORS[[...String(name)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % COLORS.length];
       // Note text is plain: escaped, with https links made clickable
       const linkify = (t) =>
         esc(t).replace(/https:\/\/[^\s<]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
@@ -1157,7 +1181,7 @@
           shown
             .map(
               (n) => `<div class="note">
-                    <div class="hd" style="background:${colorOf(n.author)}">${n.avatar ? `<img src="${esc(n.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span>${esc(n.author)}<br><span style="font-weight:400;font-size:11px">${esc(n.publication)}</span></span><span class="ago" title="${esc(new Date(n.date).toLocaleString())}">${ago(n.date)}</span></div>
+                    <div class="hd">${n.avatar ? `<img src="${esc(n.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span>${esc(n.author)}<br><span style="font-weight:400;font-size:11px">${esc(n.publication)}</span></span><span class="ago" title="${esc(new Date(n.date).toLocaleString())}">${ago(n.date)}</span></div>
                     <div class="txt${isLong(n.body) ? ' long' : ''}">${n.body
                       .split(/\n{2,}/)
                       .map((p) => `<p>${linkify(p.trim())}</p>`)

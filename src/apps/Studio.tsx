@@ -2,8 +2,8 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), to-do boards (Planner),
-// opportunities (grants, calls, gigs), outreach and the Library (books, classics, our archive) in one window.
+// Operations (the Studio window): Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner),
+// opportunities (grants, calls, gigs), outreach and the Library (books, Renaissance Radio, our archive) in one window.
 // Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
 const Tracks = lazy(() => import('./Tracks'));
 const Timeline = lazy(() => import('./Timeline'));
@@ -11,11 +11,13 @@ const Boards = lazy(() => import('./Boards'));
 const Opportunities = lazy(() => import('./Opportunities'));
 const Library = lazy(() => import('./Library'));
 const Outreach = lazy(() => import('./Outreach'));
+const Locations = lazy(() => import('./Locations'));
 
-export type StudioTab = 'music' | 'calendar' | 'boards' | 'opportunities' | 'outreach' | 'library';
+export type StudioTab = 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'library';
 const TABS: [StudioTab, string][] = [
   ['music', 'Music'],
   ['calendar', 'Calendar'],
+  ['locations', 'Locations'],
   ['boards', 'Planner'],
   ['opportunities', 'Opportunities'],
   ['outreach', 'Outreach'],
@@ -27,7 +29,7 @@ export function openStudio(openWindow: ReturnType<typeof useWindowManager.getSta
   window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: tab }));
   openWindow({
     id: 'studio',
-    title: 'Studio',
+    title: 'Operations',
     icon: '/images/icons/media-player-16x16.png?v=2',
     appType: 'studio',
     appProps: { tab },
@@ -74,6 +76,8 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
                     <Tracks />
                   ) : id === 'calendar' ? (
                     <Timeline />
+                  ) : id === 'locations' ? (
+                    <Locations />
                   ) : id === 'boards' ? (
                     <Boards kind="kanban" />
                   ) : id === 'opportunities' ? (

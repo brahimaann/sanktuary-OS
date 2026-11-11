@@ -7,34 +7,78 @@
     <title>Board shared from Sanktuary</title>
     <link rel="icon" href="/favicon.ico" />
     <style>
+      /* The S machine, as on the desktop: 1-bit paper and ink, plus one signal colour for the selection and the main action */
+      @font-face {
+        font-family: 'Pixelify Sans';
+        src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
+        font-weight: 400 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Silkscreen';
+        src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+        font-display: swap;
+      }
+      :root {
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --pixel: 'Pixelify Sans', Arial, sans-serif;
+        --label: 'Silkscreen', 'Pixelify Sans', monospace;
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
+      }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important; /* Pixelify's fi ligature reads as an A; font shorthands would turn it back on */
       }
       html,
       body {
         margin: 0;
         height: 100%;
         overflow: hidden;
-        background: #008080;
-        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
-        font-size: 13px;
-        color: #000;
+        background: var(--dots), var(--paper);
+        font-family: var(--pixel);
+        font-size: 14px;
+        color: var(--ink);
       }
       .win {
         position: fixed;
         inset: 0;
         display: flex;
         flex-direction: column;
-        background: #c0c0c0;
+        background: var(--paper);
       }
       .title {
-        background: linear-gradient(90deg, #000080, #1084d0);
-        color: #fff;
-        font-weight: 700;
-        padding: 4px 6px;
-        white-space: nowrap;
+        height: 28px;
+        padding: 5px 4px;
+        border-bottom: 2px solid var(--ink);
+        background: repeating-linear-gradient(var(--ink) 0 1px, var(--paper) 1px 3px) content-box var(--paper);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+      }
+      .title > * {
+        background: var(--paper);
+        line-height: 16px;
+        padding: 0 8px;
+      }
+      .title > img + * {
+        padding-left: 2px;
+      }
+      .title > img {
+        padding: 0 2px 0 8px;
+        box-sizing: content-box;
+        image-rendering: pixelated;
+      }
+      .title > span {
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .bar {
         display: flex;
@@ -42,23 +86,32 @@
         gap: 4px;
         padding: 4px;
         align-items: center;
-        border-bottom: 1px solid #808080;
+        border-bottom: 2px solid var(--ink);
       }
       button {
         font: inherit;
         padding: 4px 10px;
         min-height: 30px;
-        background: #c0c0c0;
-        color: #000;
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
+        background: var(--paper);
+        color: var(--ink);
+        text-decoration: none;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        box-shadow: none;
         cursor: pointer;
+      }
+      button:hover {
+        background: var(--ink);
+        color: var(--paper);
       }
       button:active,
       button.on {
-        border-color: #000 #fff #fff #000;
-        box-shadow: inset 1px 1px #808080;
+        background: var(--signal);
+        color: var(--ink);
+      }
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 1px;
       }
       .grow {
         flex: 1;
@@ -69,8 +122,11 @@
         overflow: hidden;
         touch-action: none;
         cursor: grab;
-        background-color: #fafafa;
-        background-image: radial-gradient(#d0d0d0 1px, transparent 1px);
+        /* the desktop's dots; one every 24 board units, so they scale with the zoom */
+        background:
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+            0 0 / 24px 24px,
+          var(--paper);
       }
       #port.placing {
         cursor: crosshair;
@@ -94,7 +150,8 @@
       }
       .note {
         padding: 10px;
-        box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.25);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
         white-space: pre-wrap;
         font-size: 14px;
       }
@@ -111,21 +168,23 @@
         pointer-events: none;
       }
       .card {
-        background: #fff;
-        border: 1px solid #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         padding: 8px;
         display: flex;
         flex-direction: column;
         gap: 4px;
       }
       .card a {
-        color: #000080;
+        color: var(--ink);
         word-break: break-all;
       }
       .status {
         padding: 2px 6px;
-        border-top: 1px solid #fff;
-        color: #333;
+        border-top: 2px solid var(--ink);
+        font: 11px var(--label);
+        -webkit-font-smoothing: none;
+        color: var(--ink);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -137,7 +196,7 @@
         align-items: center;
         justify-content: center;
         padding: 12px;
-        background: rgba(0, 0, 0, 0.25);
+        background: rgba(255, 255, 255, 0.6);
         z-index: 10;
       }
       .modal.open {
@@ -145,10 +204,9 @@
       }
       .dlg {
         width: min(380px, 100%);
-        background: #c0c0c0;
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 1px 1px 0 #000;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
       }
       .dlg form {
         padding: 10px;
@@ -162,9 +220,9 @@
         font-size: 16px; /* no zoom-on-focus on phones */
         width: 100%;
         padding: 4px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        background: #fff;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        background: var(--paper);
       }
       .row {
         display: flex;
@@ -182,7 +240,7 @@
   </head>
   <body>
     <div class="win">
-      <div class="title" id="title">Sanktuary board</div>
+      <div class="title"><span id="title">Sanktuary board</span></div>
       <div class="bar">
         <button id="fit">Fit</button>
         <button id="out" aria-label="Zoom out">−</button>
@@ -197,7 +255,7 @@
 
     <div class="modal" id="lock">
       <div class="dlg">
-        <div class="title">Protected board</div>
+        <div class="title"><span>Protected board</span></div>
         <form id="unlock">
           This board needs a password.
           <input type="password" id="pw" autocomplete="off" required />
@@ -209,7 +267,7 @@
 
     <div class="modal" id="note">
       <div class="dlg">
-        <div class="title">Add a comment</div>
+        <div class="title"><span>Add a comment</span></div>
         <form id="noteForm">
           <input id="noteName" placeholder="Your name" maxlength="60" required />
           <textarea id="noteText" rows="4" placeholder="Your comment" maxlength="1000" required></textarea>
@@ -224,7 +282,7 @@
 
     <div class="modal" id="req">
       <div class="dlg">
-        <div class="title">Request access</div>
+        <div class="title"><span>Request access</span></div>
         <form id="reqForm">
           Ask for a Sanktuary account and access to this board. The board's owner and our admins will get back to you.
           <input id="reqName" placeholder="Your name" maxlength="100" required />
@@ -281,7 +339,7 @@
           line.setAttribute('y1', a.y + a.h / 2);
           line.setAttribute('x2', b.x + b.w / 2);
           line.setAttribute('y2', b.y + b.h / 2);
-          line.setAttribute('stroke', '#555');
+          line.setAttribute('stroke', '#000');
           line.setAttribute('stroke-width', '2');
           svg.appendChild(line);
         }
