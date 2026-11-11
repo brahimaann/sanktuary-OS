@@ -271,8 +271,7 @@ const LibraryApp: React.FC = () => {
                     title={i.blurb}
                     style={{
                       borderBottom: '1px solid #ddd',
-                      background: nowId === i.id ? '#000' : undefined,
-                      color: nowId === i.id ? '#fff' : undefined,
+                      background: nowId === i.id ? 'var(--sk-signal)' : undefined, // what's on wears the signal colour
                     }}
                   >
                     <td style={cell}>
