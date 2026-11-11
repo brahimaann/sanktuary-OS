@@ -3134,6 +3134,49 @@ function exifInfo(buf) {
   }
 }
 
+// ── /api/tiles/<z>/<x>/<y>.png: map tiles for Locations, fetched once from OpenStreetMap and kept on disk ──
+// OSM blocks browsers that load its tiles without a Referer (our pages send none cross-origin), and its usage
+// policy asks heavy users to identify themselves and cache. So the server fetches with a proper User-Agent,
+// keeps each tile for a month and serves the team from that copy. Signed-in members only, so it isn't an open proxy.
+const TILE_SOURCE = process.env.TILE_SOURCE || 'https://tile.openstreetmap.org';
+const TILE_AGENT = 'SanktuaryOS/1.0 (private team map; https://github.com/brahimaann/sanktuary-OS)';
+const TILE_DAYS = 30;
+const tileFetches = new Map(); // "z/x/y" -> pending fetch, so a busy map asks OSM once per tile
+async function tilesApi(req, res, url) {
+  const m = url.pathname.match(/^\/api\/tiles\/(\d{1,2})\/(\d{1,6})\/(\d{1,6})\.png$/);
+  const [z, x, y] = m ? m.slice(1).map(Number) : [];
+  if (!m || z > 19 || x >= 2 ** z || y >= 2 ** z) throw new HttpError(400, 'Bad tile');
+  await currentUser(req, url, await loadConfig());
+  const key = `${z}/${x}/${y}`;
+  const file = join(DATA, 'tiles', `${z}`, `${x}`, `${y}.png`);
+  const fresh = await stat(file).then(
+    (s) => Date.now() - s.mtimeMs < TILE_DAYS * 864e5,
+    () => false,
+  );
+  if (!fresh) {
+    if (!tileFetches.has(key))
+      tileFetches.set(
+        key,
+        (async () => {
+          const r = await fetch(`${TILE_SOURCE}/${key}.png`, {
+            headers: { 'user-agent': TILE_AGENT },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!r.ok) throw new HttpError(502, `Map tile unavailable (${r.status})`);
+          await mkdir(dirname(file), { recursive: true });
+          await writeFile(file + '.part', Buffer.from(await r.arrayBuffer()));
+          await rename(file + '.part', file);
+        })().finally(() => tileFetches.delete(key)),
+      );
+    // A stale copy beats a broken square if OSM can't be reached right now
+    await tileFetches.get(key).catch((err) => {
+      if (!existsSync(file)) throw err.status ? err : new HttpError(502, 'Map tile unavailable');
+    });
+  }
+  res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'private, max-age=604800' });
+  createReadStream(file).pipe(res);
+}
+
 async function locationsApi(req, res, url) {
   const cfg = await loadConfig();
   const user = await currentUser(req, url, cfg);
@@ -9994,6 +10037,7 @@ const routes = [
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
   ['/api/locations', locationsApi],
+  ['/api/tiles/', tilesApi],
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
   ['/api/library', libraryApi],

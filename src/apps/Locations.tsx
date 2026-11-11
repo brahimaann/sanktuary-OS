@@ -373,7 +373,7 @@ const SpotMap: React.FC<{
       tiles.push(
         <img
           key={`${z}/${tx}/${ty}`}
-          src={`https://tile.openstreetmap.org/${z}/${((tx % n) + n) % n}/${ty}.png`}
+          src={`/api/tiles/${z}/${((tx % n) + n) % n}/${ty}.png`}
           alt=""
           draggable={false}
           style={{ position: 'absolute', left: tx * TILE - left, top: ty * TILE - top, width: TILE, height: TILE }}
