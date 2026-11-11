@@ -52,12 +52,12 @@ const STUDIO_MENU: MenuItem[] = [
   },
   {
     id: 'producer',
-    label: 'Producer',
-    title: 'Producer',
+    label: 'Foundry',
+    title: 'Foundry',
     appType: 'producer',
     icon: icon('convert-audio-32x32.png?v=2'),
-    width: 720,
-    height: 560,
+    width: 960,
+    height: 620,
   },
   {
     id: 'teams',
@@ -83,12 +83,12 @@ const VISITOR_MENU: MenuItem[] = [
   },
   {
     id: 'producer',
-    label: 'Producer',
-    title: 'Producer',
+    label: 'Foundry',
+    title: 'Foundry',
     appType: 'producer',
     icon: icon('convert-audio-32x32.png?v=2'),
-    width: 720,
-    height: 560,
+    width: 960,
+    height: 620,
   },
   {
     id: 'profile-me',

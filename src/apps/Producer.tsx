@@ -6,17 +6,19 @@ import { shell, button, statusBar } from './TeamFiles';
 import FilePicker from '../components/FilePicker';
 import { fileKind } from './fileTypes';
 import { IconLabel } from '../components/RetroIcon';
-import { GUIDE } from './producerGuide';
+import { GUIDE, GENRES, TRACKING } from './producerGuide';
 import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 
-// Producer: a companion for making music. Drop a song to get its tempo, key, loudness and tonal balance
+// Foundry (the Producer window): a companion for making music. Session is the recording cockpit: tempo, key,
+// sample rate and genre on one ribbon drive delay, reverb and compressor times, 808 notes in Hz, a vocal
+// checklist with a lyric bar count and the genre's vocal chain, all on one screen. Drop a song to get its tempo, key, loudness and tonal balance
 // (worked out in the browser: nothing is uploaded), compare a mix with a reference, get delay and reverb times
 // for the tempo, the key's scale and chords, and a guide of chains, tips and tools. Open to everyone.
-type Tab = 'analyze' | 'compare' | 'tempo' | 'convert' | 'guide';
+type Tab = 'session' | 'analyze' | 'compare' | 'convert' | 'guide';
 const TABS: [Tab, string][] = [
+  ['session', 'Session'],
   ['analyze', 'Analyze'],
   ['compare', 'Compare'],
-  ['tempo', 'Tempo & key'],
   ['convert', 'To WAV'],
   ['guide', 'Guide'],
 ];
@@ -25,7 +27,7 @@ const db = (v: number) => (Number.isFinite(v) ? v.toFixed(1) : '-∞');
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 const Producer: React.FC = () => {
-  const [tab, setTab] = useState<Tab>('analyze');
+  const [tab, setTab] = useState<Tab>('session');
   const [mine, setMine] = useState<Named | null>(null);
   const [bpm, setBpm] = useState(110);
   const [key, setKey] = useState<{ root: number; minor: boolean }>({ root: 9, minor: true });
@@ -57,7 +59,7 @@ const Producer: React.FC = () => {
       <div style={{ flex: 1, overflow: 'auto', background: '#fff', borderTop: '1px solid #fff', padding: 8 }}>
         {tab === 'analyze' && <AnalyzeTab current={mine} onDone={adopt} />}
         {tab === 'compare' && <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />}
-        {tab === 'tempo' && <TempoTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />}
+        {tab === 'session' && <SessionTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />}
         {tab === 'convert' && <ConvertTab />}
         {tab === 'guide' && <GuideTab />}
       </div>
@@ -397,13 +399,50 @@ const Slot: React.FC<{ title: string; a: Named; onClear: () => void }> = ({ titl
 );
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const CAMELOT_MAJ = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
+const CAMELOT_MIN = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
+/** Frequency of a note (0 = C) in an octave, A4 = 440 Hz. */
+export const noteHz = (root: number, octave: number) => 440 * 2 ** ((12 * (octave + 1) + root - 69) / 12);
+const CHECKS = ['Lead takes', 'Lead comp', 'Doubles L/R', 'Ad-lib lanes', 'Stacks and harmonies', 'Tuned', 'Stems bounced'];
+const SESSION_KEY = 'sk:foundry-session';
+interface Session {
+  song: string;
+  rate: number;
+  genre: string;
+  checks: Record<string, boolean>;
+  lyrics: string;
+}
+const loadSession = (): Session => {
+  const blank = { song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '' };
+  try {
+    return { ...blank, ...JSON.parse(localStorage.getItem(SESSION_KEY) || '{}') };
+  } catch {
+    return blank;
+  }
+};
 
-const TempoTab: React.FC<{
+/**
+ * Session: Foundry's recording cockpit. The ribbon (tempo, key, sample rate, genre) drives every pane at once:
+ * delay, reverb and compressor times, the key's notes in Hz, the vocal checklist and lyric bar count, and the
+ * genre's vocal chain. The session is kept on this device.
+ */
+const SessionTab: React.FC<{
   bpm: number;
   setBpm: (n: number) => void;
   keySel: { root: number; minor: boolean };
   setKey: (k: { root: number; minor: boolean }) => void;
 }> = ({ bpm, setBpm, keySel, setKey }) => {
+  const [s, setS] = useState(loadSession);
+  const set = (patch: Partial<Session>) =>
+    setS((o) => {
+      const n = { ...o, ...patch };
+      try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(n));
+      } catch {
+        /* private window: the session just isn't kept */
+      }
+      return n;
+    });
   const taps = useRef<number[]>([]);
   const tap = () => {
     const now = performance.now();
@@ -414,163 +453,269 @@ const TempoTab: React.FC<{
     }
   };
   const valid = bpm >= 20 && bpm <= 400;
+  const q = valid ? 60000 / bpm : 0;
   const scale = scaleOf(keySel.root, keySel.minor);
-  const camelotKey = (() => {
-    const maj = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
-    const min = [5, 12, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10];
-    return `${keySel.minor ? min[keySel.root] : maj[keySel.root]}${keySel.minor ? 'A' : 'B'}`;
-  })();
+  const camelotKey = `${(keySel.minor ? CAMELOT_MIN : CAMELOT_MAJ)[keySel.root]}${keySel.minor ? 'A' : 'B'}`;
+  const genre = GENRES.find((g) => g.name === s.genre) || GENRES[0];
+  const bars = s.lyrics.split('\n').filter((l) => l.trim()).length;
+  const done = CHECKS.filter((c) => s.checks[c]).length;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          background: '#dcdcdc',
-          padding: 8,
-          border: '2px groove #fff',
-        }}
-      >
-        <SevenSegmentDisplay value={bpm.toFixed(1)} height={30} color="#00ff66" label="BPM" />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 700 }}>Tempo:</span>
-            <input
-              style={{ ...field, width: 70 }}
-              type="number"
-              min={20}
-              max={400}
-              step={0.1}
-              value={bpm}
-              onChange={(e) => setBpm(Number(e.target.value))}
-            />
-            <button style={button} onClick={tap} title="Tap along with the beat">
-              Tap
-            </button>
-            <div style={{ display: 'flex', gap: 3 }}>
-              <button
-                style={{ ...button, fontSize: 11, padding: '2px 6px' }}
-                onClick={() => setBpm(Math.round(bpm * 0.5 * 10) / 10)}
-                title="Half tempo (0.5x)"
-              >
-                0.5x
-              </button>
-              <button
-                style={{ ...button, fontSize: 11, padding: '2px 6px' }}
-                onClick={() => setBpm(Math.round(bpm * 2 * 10) / 10)}
-                title="Double tempo (2x)"
-              >
-                2x
-              </button>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 700 }}>Key:</span>
-            <select style={field} value={keySel.root} onChange={(e) => setKey({ ...keySel, root: Number(e.target.value) })}>
-              {NOTE_NAMES.map((n, i) => (
-                <option key={n} value={i}>
-                  {n}
-                </option>
-              ))}
-            </select>
-            <select
-              style={field}
-              value={keySel.minor ? 'minor' : 'major'}
-              onChange={(e) => setKey({ ...keySel, minor: e.target.value === 'minor' })}
-            >
-              <option>major</option>
-              <option>minor</option>
-            </select>
-            <span style={{ fontSize: 11, color: '#333', marginLeft: 4 }}>
-              Camelot: <b>{camelotKey}</b>
-            </span>
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, border: rule }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', borderBottom: rule }}>
+        <div style={cell}>
+          <SevenSegmentDisplay value={bpm.toFixed(1)} height={22} color="#00ff66" label="BPM" />
+          <input
+            style={{ ...field, width: 58 }}
+            type="number"
+            min={20}
+            max={400}
+            step={0.1}
+            value={bpm}
+            onChange={(e) => setBpm(Number(e.target.value))}
+            aria-label="Tempo in BPM"
+          />
+          <button style={button} onClick={tap} title="Tap along with the beat">
+            Tap
+          </button>
+          <button style={button} onClick={() => setBpm(Math.round(bpm * 5) / 10)} title="Half tempo">
+            ½
+          </button>
+          <button style={button} onClick={() => setBpm(Math.round(bpm * 20) / 10)} title="Double tempo">
+            2x
+          </button>
+        </div>
+        <div style={cell}>
+          <span style={label}>Key</span>
+          <select style={field} value={keySel.root} onChange={(e) => setKey({ ...keySel, root: Number(e.target.value) })}>
+            {NOTE_NAMES.map((n, i) => (
+              <option key={n} value={i}>
+                {n}
+              </option>
+            ))}
+          </select>
+          <select
+            style={field}
+            value={keySel.minor ? 'minor' : 'major'}
+            onChange={(e) => setKey({ ...keySel, minor: e.target.value === 'minor' })}
+          >
+            <option>major</option>
+            <option>minor</option>
+          </select>
+          <span style={mono}>{camelotKey}</span>
+        </div>
+        <div style={cell}>
+          <span style={label}>Rate</span>
+          <select style={field} value={s.rate} onChange={(e) => set({ rate: Number(e.target.value) })}>
+            {[44100, 48000, 96000].map((r) => (
+              <option key={r} value={r}>
+                {r / 1000} kHz / 24-bit
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={{ ...cell, borderRight: 0 }}>
+          <span style={label}>Genre</span>
+          <select style={field} value={genre.name} onChange={(e) => set({ genre: e.target.value })}>
+            {GENRES.map((g) => (
+              <option key={g.name}>{g.name}</option>
+            ))}
+          </select>
+          <span style={{ ...mono, color: bpm < genre.bpm[0] || bpm > genre.bpm[1] ? '#000' : '#555' }}>
+            {genre.bpm[0]}-{genre.bpm[1]} BPM{bpm < genre.bpm[0] || bpm > genre.bpm[1] ? ' (outside)' : ''}
+          </span>
         </div>
       </div>
-      {valid && (
-        <>
-          <fieldset style={box}>
-            <legend>
-              <b>Delay and LFO times at {bpm} BPM</b>
-            </legend>
-            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-              <thead>
-                <tr>
-                  {['Note', 'Straight', 'Dotted', 'Triplet', 'LFO rate'].map((h) => (
-                    <th key={h} style={th}>
-                      {h}
-                    </th>
+      <div
+        style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', overflow: 'auto' }}
+      >
+        <section style={pane}>
+          <h3 style={paneHead}>Signal math</h3>
+          {valid ? (
+            <>
+              <table style={grid}>
+                <thead>
+                  <tr>
+                    {['Note', 'Straight', 'Dotted', 'Triplet', 'Samples'].map((h) => (
+                      <th key={h} style={gth}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {noteTimes(bpm)
+                    .slice(2)
+                    .map((n) => (
+                      <tr key={n.name}>
+                        <td style={gtd}>{n.name}</td>
+                        <td style={num}>{n.ms.toFixed(1)}</td>
+                        <td style={num}>{n.dotted.toFixed(1)}</td>
+                        <td style={num}>{n.triplet.toFixed(1)}</td>
+                        <td style={num}>{Math.round((n.ms / 1000) * s.rate)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+              <div style={caption}>Delay times in ms. Samples are for the straight note at {s.rate / 1000} kHz.</div>
+              <table style={grid}>
+                <thead>
+                  <tr>
+                    {['Reverb', 'Pre-delay', 'Decay'].map((h) => (
+                      <th key={h} style={gth}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reverbTimes(bpm).map((r) => (
+                    <tr key={r.name} title={`Good for ${r.use}`}>
+                      <td style={gtd}>{r.name}</td>
+                      <td style={num}>{ms(r.predelay)}</td>
+                      <td style={num}>{ms(r.decay)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={caption}>Pre-delay plus decay ends on a note, so the tail clears before the next hit.</div>
+              <table style={grid}>
+                <thead>
+                  <tr>
+                    {['Compressor release', 'ms'].map((h) => (
+                      <th key={h} style={gth}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(
+                    [
+                      ['Punchy (1/16)', q / 4],
+                      ['Smooth (1/8)', q / 2],
+                      ['Pumping bus (1/4)', q],
+                    ] as const
+                  ).map(([n, v]) => (
+                    <tr key={n}>
+                      <td style={gtd}>{n}</td>
+                      <td style={num}>{v.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <div style={caption}>Set a tempo between 20 and 400 BPM.</div>
+          )}
+          <table style={grid}>
+            <thead>
+              <tr>
+                {['808 / sub', 'Oct 0', 'Oct 1', 'Oct 2'].map((h) => (
+                  <th key={h} style={gth}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(
+                [
+                  ['Root ' + NOTE_NAMES[keySel.root], keySel.root],
+                  ['Fifth ' + NOTE_NAMES[(keySel.root + 7) % 12], (keySel.root + 7) % 12],
+                ] as const
+              ).map(([n, r]) => (
+                <tr key={n}>
+                  <td style={gtd}>{n}</td>
+                  {[0, 1, 2].map((o) => (
+                    <td key={o} style={num}>
+                      {noteHz(r, o).toFixed(1)}
+                    </td>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
-                {noteTimes(bpm).map((n) => (
-                  <tr key={n.name}>
-                    <td style={td}>{n.name}</td>
-                    <td style={td}>{ms(n.ms)}</td>
-                    <td style={td}>{ms(n.dotted)}</td>
-                    <td style={td}>{ms(n.triplet)}</td>
-                    <td style={td}>{n.hz.toFixed(2)} Hz</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </fieldset>
-          <fieldset style={box}>
-            <legend>
-              <b>Reverbs that move with the song</b>
-            </legend>
-            <div style={{ color: '#444', marginBottom: 4 }}>
-              Pre-delay keeps the dry sound clear before the reverb arrives; pre-delay + decay ends on a note, so tails die out in time.
+              ))}
+            </tbody>
+          </table>
+          <div style={caption}>Hz. Tune the 808, Drum Buss Boom or a dynamic EQ notch to the root.</div>
+          <div style={{ padding: '4px 6px', borderTop: rule }}>
+            <b>{keyName(keySel.root, keySel.minor)}</b>: <span style={mono}>{scale.notes.join(' ')}</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 3 }}>
+              {scale.chords.map((c) => (
+                <span key={c.numeral} style={{ border: rule, marginRight: -1, padding: '1px 4px' }}>
+                  <span style={{ color: '#555' }}>{c.numeral}</span> <b>{c.chord}</b>
+                </span>
+              ))}
             </div>
-            <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-              <thead>
-                <tr>
-                  {['Space', 'Pre-delay', 'Decay', 'Good for'].map((h) => (
-                    <th key={h} style={th}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {reverbTimes(bpm).map((r) => (
-                  <tr key={r.name}>
-                    <td style={td}>{r.name}</td>
-                    <td style={td}>{ms(r.predelay)}</td>
-                    <td style={td}>{ms(r.decay)}</td>
-                    <td style={td}>{r.use}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ color: '#444', marginTop: 4 }}>
-              Compressor release: try {ms(60000 / bpm / 4)} (1/16) for punch or {ms(60000 / bpm / 2)} (1/8) for smoother pumping.
+            <div style={{ marginTop: 3 }}>Mixes with {compatibleKeys(camelotKey).join(', ')}</div>
+          </div>
+        </section>
+        <section style={pane}>
+          <h3 style={paneHead}>Session</h3>
+          <div style={{ padding: 6, display: 'flex', gap: 4, alignItems: 'center', borderBottom: rule }}>
+            <span style={label}>Song</span>
+            <input
+              style={{ ...field, flex: 1, minWidth: 0 }}
+              value={s.song}
+              placeholder="Untitled"
+              onChange={(e) => set({ song: e.target.value })}
+            />
+          </div>
+          <div style={{ padding: '4px 6px', borderBottom: rule }}>
+            <div style={{ ...label, marginBottom: 2 }}>
+              Vocals{' '}
+              <span style={mono}>
+                {done}/{CHECKS.length}
+              </span>
             </div>
-          </fieldset>
-        </>
-      )}
-      <fieldset style={box}>
-        <legend>
-          <b>{keyName(keySel.root, keySel.minor)}</b> ({camelotKey})
-        </legend>
-        <div>
-          Notes: <b>{scale.notes.join(' ')}</b>
-        </div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-          {scale.chords.map((c) => (
-            <span key={c.numeral} style={{ background: '#fff', border: '1px solid #808080', padding: '2px 6px' }}>
-              <span style={{ color: '#666' }}>{c.numeral}</span> <b>{c.chord}</b>
-            </span>
-          ))}
-        </div>
-        <div style={{ marginTop: 4 }}>
-          Mixes well with: {compatibleKeys(camelotKey).join(', ')} (Camelot). Relative {keySel.minor ? 'major' : 'minor'}:{' '}
-          {keyName(keySel.minor ? (keySel.root + 3) % 12 : (keySel.root + 9) % 12, !keySel.minor)}.
-        </div>
-      </fieldset>
+            {CHECKS.map((c) => (
+              <label key={c} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '1px 0' }}>
+                <input type="checkbox" checked={!!s.checks[c]} onChange={(e) => set({ checks: { ...s.checks, [c]: e.target.checked } })} />
+                <span style={s.checks[c] ? { textDecoration: 'line-through', color: '#555' } : undefined}>{c}</span>
+              </label>
+            ))}
+          </div>
+          <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 140 }}>
+            <div style={{ ...label, marginBottom: 2 }}>
+              Lyrics, one bar per line{' '}
+              <span style={mono}>
+                {bars} bars{valid && bars ? ` · ${clock((bars * 4 * q) / 1000)}` : ''}
+              </span>
+            </div>
+            <textarea
+              style={{ ...field, flex: 1, minHeight: 120, resize: 'none', ...mono }}
+              value={s.lyrics}
+              onChange={(e) => set({ lyrics: e.target.value })}
+              aria-label="Lyrics"
+            />
+            {valid && (
+              <div style={caption}>
+                8 bars {clock((32 * q) / 1000)} · 16 bars {clock((64 * q) / 1000)} · 32 bars {clock((128 * q) / 1000)}
+              </div>
+            )}
+          </div>
+        </section>
+        <section style={{ ...pane, borderRight: 0 }}>
+          <h3 style={paneHead}>Brief: {genre.name}</h3>
+          <div style={{ padding: '4px 6px', borderBottom: rule }}>{genre.note}</div>
+          <div style={{ padding: '4px 6px', borderBottom: rule }}>
+            <div style={label}>Vocal chain</div>
+            <ol style={{ margin: '2px 0 0', paddingLeft: 18, listStyle: 'decimal' }}>
+              {genre.chain.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ol>
+          </div>
+          <div style={{ padding: '4px 6px' }}>
+            <div style={label}>Tracking</div>
+            <ul style={{ margin: '2px 0 0', paddingLeft: 18, listStyle: 'square' }}>
+              {TRACKING.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+              <li>Record at {s.rate / 1000} kHz / 24-bit and keep every take in the session at that rate.</li>
+            </ul>
+            <div style={caption}>Starting points: adjust by ear. Full chains in the Guide tab.</div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 };
@@ -704,13 +849,25 @@ const field: React.CSSProperties = {
   background: '#fff',
   border: '2px inset #808080',
 };
-const th: React.CSSProperties = {
-  textAlign: 'left',
-  fontWeight: 400,
-  padding: '1px 6px',
-  background: '#fff',
-  borderBottom: '1px solid #808080',
+// Session cockpit: 1px black rules between every cell, monospace numbers, no padding to spare (S machine, 1-bit)
+const rule = '1px solid #000';
+const mono: React.CSSProperties = { fontFamily: 'ui-monospace, Consolas, monospace', fontVariantNumeric: 'tabular-nums' };
+const cell: React.CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', padding: '4px 6px', borderRight: rule };
+const label: React.CSSProperties = { fontWeight: 700, textTransform: 'uppercase', fontSize: 10 };
+const pane: React.CSSProperties = { display: 'flex', flexDirection: 'column', borderRight: rule, minHeight: 0, overflow: 'auto' };
+const paneHead: React.CSSProperties = {
+  margin: 0,
+  padding: '2px 6px',
+  background: '#000',
+  color: '#fff',
+  fontSize: 11,
+  position: 'sticky',
+  top: 0,
 };
-const td: React.CSSProperties = { padding: '2px 6px', borderBottom: '1px solid #ddd', background: '#fff', whiteSpace: 'nowrap' };
+const grid: React.CSSProperties = { borderCollapse: 'collapse', width: '100%' };
+const gth: React.CSSProperties = { ...label, textAlign: 'left', padding: '2px 6px', borderBottom: rule };
+const gtd: React.CSSProperties = { padding: '1px 6px', borderBottom: '1px dotted #000', whiteSpace: 'nowrap' };
+const num: React.CSSProperties = { ...gtd, ...mono, textAlign: 'right' };
+const caption: React.CSSProperties = { padding: '2px 6px 4px', color: '#555', fontSize: 10, borderBottom: rule };
 
 export default Producer;

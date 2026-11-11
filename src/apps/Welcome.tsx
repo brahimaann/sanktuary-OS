@@ -41,9 +41,9 @@ const VISITOR_TOUR: Step[] = [
     open: win('my-computer', 'My Computer', 'directory', 'my-computer-16x16.png?v=2', 680, 500),
   },
   {
-    title: 'Producer: tools for making music',
-    text: 'Drop in a song to get its tempo, key and loudness, compare your mix with a reference, get delay and reverb times for your tempo, and read chains, tips and free tools. Your file stays on your device.',
-    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png?v=2', 720, 560),
+    title: 'Foundry: tools for making music',
+    text: 'A recording cockpit for your tempo and key. Drop in a song to get its tempo, key and loudness, compare your mix with a reference, get delay and reverb times for your tempo, and read chains, tips and free tools. Your file stays on your device.',
+    open: win('producer', 'Foundry', 'producer', 'convert-audio-16x16.png?v=2', 960, 620),
   },
   {
     title: 'Read CITIES',
@@ -97,9 +97,9 @@ const MEMBER_TOUR: Step[] = [
     open: win('teams', 'Messages', 'teams', 'outlook-express-16x16.png?v=2', 300, 520),
   },
   {
-    title: 'Producer',
-    text: 'Tempo, key and loudness of any bounce (from your device or Team Files), a reference comparison, delay and reverb times, and a guide. Save the tempo and key straight onto a track.',
-    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png?v=2', 720, 560),
+    title: 'Foundry',
+    text: 'A recording cockpit (delay, reverb and compressor times, 808 notes, vocal checklist, genre chains), tempo, key and loudness of any bounce (from your device or Team Files), a reference comparison and a guide. Save the tempo and key straight onto a track.',
+    open: win('producer', 'Foundry', 'producer', 'convert-audio-16x16.png?v=2', 960, 620),
   },
   {
     title: 'Edit photos',
