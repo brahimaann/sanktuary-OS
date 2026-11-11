@@ -242,6 +242,7 @@ input[type='range']:focus {
 .retro-icon {
   flex-shrink: 0;
   vertical-align: middle;
+  pointer-events: none; /* a click on the glyph is a click on its button (its innerHTML svg can be swapped mid-click) */
 }
 button:disabled .retro-icon {
   filter: drop-shadow(1px 1px 0 #fff);
