@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useWindowManager, AppType } from '../wm/manager';
 import { vfs } from '../vfs/fs';
-import { useMe } from '../utils/api';
+import { useApi, useMe } from '../utils/api';
 import { useAuth } from '@clerk/react';
 import { startLive } from '../utils/live';
 import { dialog } from '../utils/dialog';
@@ -257,6 +257,34 @@ export const Desktop: React.FC = () => {
   useEffect(() => {
     if (me) startLive();
   }, [me]);
+  const api = useApi();
+  useEffect(() => {
+    // Notes (.txt files) are kept in each person's account, so the ones they made on another device show up here
+    if (!me) return vfs.detachAccount();
+    let live = true;
+    const say = (e: Error) => dialog.alert(`That note didn't save to your account: ${e.message}`);
+    const remote = {
+      put: (path: string, content: string) =>
+        api('/api/notes', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path, content }),
+        }).catch(say),
+      del: (path: string) => api(`/api/notes?path=${encodeURIComponent(path)}`, { method: 'DELETE' }).catch(say),
+    };
+    api('/api/notes').then(({ notes }) => {
+      if (!live) return;
+      let first = false; // this browser's notes from before accounts held them go to the first person who signs in
+      try {
+        first = !localStorage.getItem('sk_notes_moved');
+        localStorage.setItem('sk_notes_moved', me.username);
+      } catch {}
+      vfs.attachAccount(remote, notes, first);
+    }, console.error);
+    return () => {
+      live = false;
+    };
+  }, [me?.username]); // eslint-disable-line react-hooks/exhaustive-deps
   const [vfsIcons, setVfsIcons] = useState<DesktopIconDef[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);

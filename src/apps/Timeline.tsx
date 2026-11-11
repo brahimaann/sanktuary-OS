@@ -27,11 +27,13 @@ interface Entry {
   link?: string;
   folder?: FileRef | null;
   release?: string | null;
+  place?: string | null; // a spot in Studio > Locations
   members?: string[] | null;
   owner?: string;
   following?: boolean;
   done?: boolean;
   public?: boolean;
+  draft?: boolean; // only its owner sees it and nobody is told, until it goes live
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -159,6 +161,7 @@ const TimelineApp: React.FC = () => {
           {i.location ? ` · ${i.location}` : ''}
           {i.people?.length ? ` · ${i.people.join(', ')}` : ''}
         </span>
+        {i.draft && <i style={{ whiteSpace: 'nowrap' }}>Draft</i>}
         {i.status && i.status !== 'Planned' && <span style={{ whiteSpace: 'nowrap' }}>{i.status}</span>}
         {i.members && '🔒'}
       </div>,
@@ -240,10 +243,16 @@ const EntryPanel: React.FC<{
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState<null | 'people' | 'members'>(null);
   const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
+  const [spots, setSpots] = useState<{ id: string; name: string; address: string }[]>([]);
+  const { openWindow } = useWindowManager();
   useEffect(() => setDraft(e), [e]);
   useEffect(() => {
     api('/api/tracks').then(
       (d) => setReleases(d.releases),
+      () => {},
+    );
+    api('/api/locations').then(
+      (d) => setSpots(d.items),
       () => {},
     );
   }, [api]);
@@ -320,9 +329,23 @@ const EntryPanel: React.FC<{
           style={{ display: 'flex', gap: 3, alignItems: 'center' }}
           title="Show it on the public calendar visitors see (title, kind, date, place, link, and the recap once it's over)"
         >
-          <input type="checkbox" checked={!!e.public} disabled={!!e.members} onChange={(ev) => save({ public: ev.target.checked })} />
+          <input
+            type="checkbox"
+            checked={!!e.public}
+            disabled={!!e.members || !!e.draft}
+            onChange={(ev) => save({ public: ev.target.checked })}
+          />
           Show publicly
         </label>
+        {me?.username === e.owner && (
+          <label
+            style={{ display: 'flex', gap: 3, alignItems: 'center' }}
+            title="Only you see a draft (admins too) and nobody gets told about it. Untick to make it live and tell the people on it."
+          >
+            <input type="checkbox" checked={!!e.draft} onChange={(ev) => save({ draft: ev.target.checked })} />
+            Draft
+          </label>
+        )}
       </div>
       <fieldset style={fieldset}>
         <legend>Who and where</legend>
@@ -336,6 +359,30 @@ const EntryPanel: React.FC<{
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ minWidth: 60 }}>Location</span>
           <input style={{ ...input, flex: 1 }} placeholder="Studio, venue, address..." {...text('location')} />
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ minWidth: 60 }}>Spot</span>
+          <select
+            value={e.place || ''}
+            onChange={(ev) => {
+              const p = spots.find((x) => x.id === ev.target.value);
+              save({ place: p?.id || null, ...(p && !e.location ? { location: p.address || p.name } : {}) });
+            }}
+            style={input}
+            title="A spot from the location library (Studio > Locations)"
+          >
+            <option value="">(not from the location library)</option>
+            {spots.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+          {e.place && (
+            <button style={button} onClick={() => openStudio(openWindow, 'locations')}>
+              <IconLabel icon="pin">See on map</IconLabel>
+            </button>
+          )}
         </div>
       </fieldset>
       <fieldset style={fieldset}>

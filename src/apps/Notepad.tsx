@@ -57,8 +57,10 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
   };
 
   const handleSaveAs = async () => {
-    const path = await dialog.prompt('Enter target path to save as:', filePath || 'C:/Desktop/untitled.txt', { title: 'Save As' });
-    if (path) {
+    // A plain name saves the note to the desktop, where its icon shows up; a full path still saves anywhere
+    const name = (await dialog.prompt('Name this note:', filePath || 'untitled', { title: 'Save As' }))?.trim();
+    if (name) {
+      const path = name.includes('/') ? name : `C:/Desktop/${/\.txt$/i.test(name) ? name : name + '.txt'}`;
       try {
         vfs.writeFile(path, content);
         setFilePath(path);
