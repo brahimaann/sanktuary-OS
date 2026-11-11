@@ -9,206 +9,343 @@
     <meta property="og:description" content="MRND music and talent, MHOTC community and the CITIES journal, and the shop." />
     <link rel="icon" href="/favicon.ico" />
     <style>
+      /* The S machine as a terminal: 1-bit paper and ink, a bitmap font, prompts and a blinking cursor,
+         pictures dithered to black and white, and one signal colour (selection and the main action).
+         Structure: a header bar, one statement, an index of the three doors, what's on now, a footer bar. */
+      @font-face {
+        font-family: 'Fixedsys Excelsior';
+        src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
+        font-display: swap;
+      }
       :root {
-        --face: #c0c0c0;
-        --navy: #000080;
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --mono: 'Fixedsys Excelsior', 'Courier New', monospace; /* a 16px bitmap font: keep sizes at 16 or 32 */
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
+        --gut: clamp(16px, 4vw, 40px);
       }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important;
       }
       body {
         margin: 0;
-        background: var(--face);
-        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
-        font-size: 13px;
-        color: #000;
+        background: var(--paper);
+        font: 16px/1.5 var(--mono);
+        -webkit-font-smoothing: none;
+        color: var(--ink);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
       a {
-        color: var(--navy);
-      }
-      /* ── Ticker: the latest, endlessly scrolling ── */
-      .ticker {
-        background: #000;
-        color: #55ff55;
-        font-family: 'Courier New', monospace;
-        overflow: hidden;
-        white-space: nowrap;
-        border-bottom: 2px solid #808080;
-      }
-      .ticker .track {
-        display: inline-flex;
-        animation: tick var(--secs, 40s) linear infinite;
-        padding: 5px 0;
-      }
-      .ticker:hover .track {
-        animation-play-state: paused;
-      }
-      .ticker a {
         color: inherit;
-        text-decoration: none;
-        padding: 0 22px;
       }
-      .ticker a:hover {
-        text-decoration: underline;
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 2px;
       }
-      .ticker b {
-        color: #ffff55;
-        font-weight: 400;
+      ::selection {
+        background: var(--signal);
+        color: var(--ink);
       }
-      @keyframes tick {
-        to {
-          transform: translateX(-50%);
+      .muted {
+        color: var(--dim);
+      }
+      /* The block cursor */
+      .cur::after {
+        content: '';
+        display: inline-block;
+        width: 0.55em;
+        height: 1em;
+        margin-left: 4px;
+        vertical-align: -0.12em;
+        background: currentColor;
+        animation: blink 1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          visibility: hidden;
         }
       }
       @media (prefers-reduced-motion: reduce) {
-        .ticker {
-          overflow-x: auto;
-        }
-        .ticker .track {
+        .cur::after {
           animation: none;
         }
       }
-      /* ── Header and tabs ── */
-      header {
-        background: linear-gradient(90deg, var(--navy), #1084d0);
-        color: #fff;
-        padding: 14px 16px 0;
+      /* ── Header bar: ink, the wordmark, [menu], Join ── */
+      .top {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 12px var(--gut);
+        background: var(--ink);
+        color: var(--paper);
+        flex-wrap: wrap;
       }
-      .brand {
-        font-size: 26px;
-        font-weight: 700;
-        letter-spacing: 6px;
-      }
-      .brand small {
+      .logo img {
         display: block;
-        font-size: 12px;
-        letter-spacing: 1px;
-        font-weight: 400;
-        opacity: 0.85;
+        width: 120px;
+        image-rendering: pixelated;
+        filter: invert(1);
       }
-      nav {
+      .top nav {
         display: flex;
-        gap: 2px;
-        margin-top: 12px;
-        overflow-x: auto;
-      }
-      nav a {
-        color: #000;
-        background: var(--face);
-        text-decoration: none;
-        padding: 6px 14px;
-        border: 2px solid;
-        border-color: #fff #000 transparent #fff;
-        white-space: nowrap;
-        font-weight: 700;
-        opacity: 0.8;
-      }
-      nav a.on {
-        opacity: 1;
-        padding-bottom: 8px;
-        margin-bottom: -2px;
-      }
-      nav .grow {
+        gap: 4px;
         flex: 1;
+        flex-wrap: wrap;
       }
+      .top nav a,
+      .join {
+        text-decoration: none;
+        padding: 2px 6px;
+        text-transform: uppercase;
+      }
+      .top nav a::before {
+        content: '[';
+      }
+      .top nav a::after {
+        content: ']';
+      }
+      .top nav a:hover,
+      .join:hover {
+        background: var(--paper);
+        color: var(--ink);
+      }
+      .top nav a.on {
+        background: var(--signal);
+        color: var(--ink);
+      }
+      .join {
+        border: 2px solid var(--paper);
+      }
+      /* ── Page ── */
       main {
-        padding: 16px;
-        max-width: 980px;
+        flex: 1;
+        width: 100%;
+        max-width: 1120px;
         margin: 0 auto;
+        padding: 32px var(--gut) 48px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 40px;
       }
-      fieldset {
-        border: 2px groove #fff;
-        margin: 0;
-        padding: 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
+      .prompt {
+        color: var(--dim);
+        margin: 0 0 8px;
       }
-      legend {
-        font-weight: 700;
+      .prompt::before {
+        content: 'C:\\SANKTUARY> ';
+        color: var(--ink);
+      }
+      .hero {
+        padding: 8px 0 0;
       }
       .intro {
-        font-size: 15px;
-        line-height: 1.5;
+        margin: 0;
+        max-width: 30ch;
+        font-size: 32px;
+        line-height: 1.25;
         white-space: pre-wrap;
       }
+      .where {
+        margin-top: 16px;
+        color: var(--dim);
+      }
+      /* Every section opens on a rule with its prompt, like a directory listing */
+      fieldset {
+        border: 0;
+        border-top: 2px solid var(--ink);
+        margin: 0;
+        padding: 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      legend {
+        float: left;
+        width: 100%;
+        padding: 10px 0 4px;
+        text-transform: uppercase;
+      }
+      legend::before {
+        content: '> ';
+      }
+      legend a {
+        text-decoration: none;
+      }
+      legend a:hover {
+        text-decoration: underline;
+      }
+      /* ── The three doors, as a dir listing ── */
+      .doors {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border-top: 2px solid var(--ink);
+      }
+      .doors a {
+        display: grid;
+        grid-template-columns: 48px 64px minmax(110px, 200px) 1fr 32px;
+        gap: 16px;
+        align-items: baseline;
+        padding: 14px 8px;
+        border-bottom: 2px solid var(--ink);
+        text-decoration: none;
+      }
+      .doors a:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .doors a:hover .muted {
+        color: var(--paper);
+      }
+      .doors b {
+        font-size: 32px;
+        font-weight: 400;
+        line-height: 1;
+      }
+      .doors .arrow {
+        text-align: right;
+      }
+      /* ── Now: what's on, released and written, one card each ── */
+      .now {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 24px 16px;
+      }
+      .item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        text-decoration: none;
+        min-width: 0;
+      }
+      .pic {
+        aspect-ratio: 4 / 3;
+        border: 2px solid var(--ink);
+        background: var(--dots), var(--paper);
+        margin-bottom: 8px;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+      /* Pictures go 1-bit: grey, a little noise, then a hard threshold (the filter is in the page body) */
+      .pic img,
+      .card img {
+        filter: url(#onebit);
+        image-rendering: pixelated;
+      }
+      .pic img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      /* No picture: the pixel S on a white tile over the dots */
+      .pic .s {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+        padding: 8px;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        filter: none;
+      }
+      .item:hover .pic {
+        transform: translate(-2px, -2px);
+        box-shadow: 4px 4px 0 var(--ink);
+      }
+      .item .k {
+        text-transform: uppercase;
+      }
+      .item .k::before {
+        content: '[';
+      }
+      .item .k::after {
+        content: ']';
+      }
+      .item .t {
+        text-transform: uppercase;
+        font-weight: 400;
+      }
+      .item:hover .t {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      /* ── The other tabs ── */
       .grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-        gap: 10px;
+        gap: 16px;
       }
       .card {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        border: 2px solid var(--ink);
         padding: 10px;
-        color: #000;
         text-decoration: none;
         display: flex;
         flex-direction: column;
         gap: 6px;
         min-width: 0;
       }
+      .card b {
+        font-weight: 400;
+        text-transform: uppercase;
+      }
       a.card:hover {
-        outline: 2px solid var(--navy);
+        transform: translate(-2px, -2px);
+        box-shadow: 4px 4px 0 var(--ink);
       }
       .card img {
         width: 100%;
         aspect-ratio: 1;
         object-fit: cover;
-        background: #ddd;
+        background: var(--dots), var(--paper);
+        border: 2px solid var(--ink);
       }
       .card .wide {
         aspect-ratio: 16/9;
       }
-      .door {
-        background: var(--navy);
-        color: #fff;
-        border-color: #fff #000 #000 #fff;
-        min-height: 130px;
-      }
-      .door b {
-        font-size: 24px;
-        letter-spacing: 3px;
-      }
-      .muted {
-        color: #555;
-      }
-      .door .muted {
-        color: #ccd;
+      b {
+        font-weight: 400;
       }
       .list {
         display: flex;
         flex-direction: column;
-        gap: 4px;
       }
       .list > * {
         display: flex;
-        gap: 8px;
+        gap: 12px;
         align-items: baseline;
         flex-wrap: wrap;
+        padding: 6px 0;
+        border-bottom: 1px dashed var(--ink);
+      }
+      .list > :last-child {
+        border-bottom: 0;
       }
       .cal {
         display: flex;
-        gap: 10px;
+        gap: 16px;
         align-items: center;
       }
       .cal .date {
         flex: none;
-        width: 56px;
+        width: 64px;
         text-align: center;
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        border: 2px solid var(--ink);
         line-height: 1.1;
         padding: 4px 0;
+        text-transform: uppercase;
       }
       .cal .date b {
         display: block;
-        font-size: 22px;
+        font-size: 32px;
+        line-height: 1;
       }
       .cal > div:last-child {
         display: flex;
@@ -218,81 +355,172 @@
       }
       .recap {
         white-space: pre-wrap;
-        line-height: 1.5;
       }
       .pill {
-        font-size: 11px;
-        border: 1px solid #808080;
-        padding: 0 4px;
-        background: #fff;
+        background: var(--ink);
+        color: var(--paper);
+        text-transform: uppercase;
+        padding: 0 6px;
       }
       .links a {
         margin-right: 8px;
       }
+      /* ── Join: fields read like a form on a terminal ── */
       form {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 6px;
+        gap: 12px;
+        max-width: 760px;
       }
       input,
       textarea,
       select,
       button {
         font: inherit;
-        font-size: 16px;
+        color: var(--ink);
+        border-radius: 0;
       }
       input,
       textarea,
       select {
-        padding: 4px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        background: #fff;
+        padding: 6px 8px;
+        border: 2px solid var(--ink);
+        background: var(--paper);
         width: 100%;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 0;
+        background: var(--ink);
+        color: var(--paper);
+      }
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--dim);
+        text-transform: uppercase;
       }
       textarea,
       .full {
         grid-column: 1 / -1;
       }
       button {
-        justify-self: end;
+        justify-self: start;
         grid-column: 1 / -1;
-        padding: 4px 16px;
-        background: var(--face);
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
+        padding: 6px 16px;
+        background: var(--signal);
+        border: 2px solid var(--ink);
         cursor: pointer;
+        text-transform: uppercase;
+      }
+      button::before {
+        content: '[ ';
+      }
+      button::after {
+        content: ' ]';
+      }
+      button:hover {
+        background: var(--ink);
+        color: var(--paper);
       }
       .hp {
         position: absolute;
         left: -9999px;
       }
+      /* ── Footer bar: the menu again, who and where ── */
+      footer {
+        background: var(--ink);
+        color: var(--paper);
+        padding: 20px var(--gut) 24px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 16px;
+        text-transform: uppercase;
+      }
+      footer div {
+        display: flex;
+        flex-direction: column;
+      }
+      footer a {
+        text-decoration: none;
+        align-self: start;
+      }
+      footer a:hover {
+        background: var(--paper);
+        color: var(--ink);
+      }
+      footer .muted {
+        color: #aaa;
+      }
       @media (max-width: 560px) {
         form {
           grid-template-columns: 1fr;
         }
-        .brand {
-          font-size: 20px;
-          letter-spacing: 3px;
+        .top {
+          gap: 10px;
+        }
+        .intro {
+          font-size: 24px;
+        }
+        .doors a {
+          grid-template-columns: 40px 1fr 16px;
+          gap: 4px 10px;
+        }
+        .doors .dir {
+          display: none;
+        }
+        .doors .muted {
+          grid-column: 2;
+        }
+        .doors .arrow {
+          grid-column: 3;
+          grid-row: 1;
+        }
+        .now {
+          grid-template-columns: 1fr 1fr;
         }
       }
     </style>
   </head>
   <body>
-    <div class="ticker" aria-label="Latest from Sanktuary"><div class="track" id="ticker"></div></div>
-    <header>
-      <div class="brand">SANKTUARY<small>Music, community and the Twin Cities arts scene</small></div>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="onebit" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0 0 0 1 0" result="grey" />
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" seed="7" result="noise" />
+        <feColorMatrix in="noise" type="matrix" values="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1" result="noise" />
+        <feComposite in="grey" in2="noise" operator="arithmetic" k2="1" k3="0.7" k4="-0.35" />
+        <feComponentTransfer>
+          <feFuncR type="discrete" tableValues="0 1" />
+          <feFuncG type="discrete" tableValues="0 1" />
+          <feFuncB type="discrete" tableValues="0 1" />
+        </feComponentTransfer>
+      </filter>
+    </svg>
+    <header class="top">
+      <a class="logo" href="/welcome" data-tab=""><img src="/icons/sanktuary-wordmark.svg" alt="Sanktuary" /></a>
       <nav>
-        <a href="/welcome" data-tab="">Home</a>
         <a href="/welcome/mrnd" data-tab="mrnd">MRND</a>
         <a href="/welcome/mhotc" data-tab="mhotc">MHOTC</a>
         <a href="/welcome/events" data-tab="events">Events</a>
+        <a href="/cities">CITIES</a>
         <a href="/shop">Shop</a>
-        <span class="grow"></span>
-        <a href="/welcome#join" data-tab="" data-join>Join</a>
       </nav>
+      <a class="join" href="/welcome#join" data-tab="" data-join>Join</a>
     </header>
     <main id="app">Loading...</main>
+    <footer>
+      <div>
+        <a href="/welcome/mrnd" data-tab="mrnd">MRND</a><a href="/welcome/mhotc" data-tab="mhotc">MHOTC</a
+        ><a href="/welcome/events" data-tab="events">Events</a><a href="/cities">CITIES</a><a href="/shop">Shop</a>
+      </div>
+      <div>
+        <a href="/welcome#join" data-tab="" data-join>Join Sanktuary</a><a href="/cities/videos">Vlogs</a
+        ><a href="/portfolios">Portfolios</a>
+      </div>
+      <div class="muted">
+        <span>Sanktuary</span><span>Twin Cities, Minnesota</span><span id="year"></span><span class="cur">C:\&gt;</span>
+      </div>
+    </footer>
 
     <script>
       const app = document.getElementById('app');
@@ -307,21 +535,35 @@
       let d = null;
       let videos = [];
 
-      // ── Ticker ──
-      function ticker() {
+      // ── Now: the latest of everything, one card each (Sala-style), at most eight ──
+      function now() {
         const out = [];
-        for (const r of d.releases.filter((r) => r.date && r.slug).slice(0, 4))
-          out.push([`/release/${r.slug}`, r.date > today ? `Out ${shortDay(r.date)}` : 'Out now', r.title]);
-        for (const p of d.products.slice(0, 3)) out.push([`/shop/${p.slug}`, 'Drop', p.title]);
-        for (const p of d.posts.slice(0, 3)) out.push([p.url, 'CITIES', p.title]);
-        for (const e of d.events.filter((e) => e.start >= today).slice(0, 3)) out.push([e.link || '/welcome/mhotc', day(e.start), e.title]);
-        for (const p of d.pools) out.push([`/pool/${p.slug}`, 'Help us get there', p.title]);
-        if (!out.length) out.push(['/welcome', 'Sanktuary', 'Welcome in']);
-        while (out.length < 8) out.push(...out); // a short list still fills the band
-        const html = out.map(([u, k, t]) => `<a ${href(u)}><b>${esc(k)}:</b> ${esc(t)}</a>`).join('<span>★</span>');
-        const t = document.getElementById('ticker');
-        t.innerHTML = `${html}<span>★</span>${html}<span>★</span>`; // twice, so the loop has no seam
-        t.style.setProperty('--secs', `${Math.max(20, out.length * 6)}s`);
+        for (const e of d.events.filter((e) => !e.past).slice(0, 2))
+          out.push({ u: e.link || '/welcome/events', tab: e.link ? null : 'events', k: e.kind || 'Event', w: day(e.start), t: e.title });
+        for (const r of d.releases.filter((r) => r.date && r.slug).slice(0, 2))
+          out.push({
+            u: `/release/${r.slug}`,
+            k: r.kind || 'Release',
+            w: r.date > today ? `Out ${shortDay(r.date)}` : 'Out now',
+            t: r.title,
+          });
+        for (const p of d.posts.slice(0, 3)) out.push({ u: p.url, k: 'CITIES', w: shortDay(p.date), t: p.title, img: p.image });
+        for (const p of d.products.slice(0, 2)) out.push({ u: `/shop/${p.slug}`, k: 'Shop', w: 'Drop', t: p.title, img: p.image });
+        for (const p of d.pools)
+          out.push({
+            u: `/pool/${p.slug}`,
+            k: 'Help us get there',
+            w: p.goal ? `${usd(p.raised)} of ${usd(p.goal)}` : usd(p.raised),
+            t: p.title,
+          });
+        if (!out.length) return '';
+        return `<fieldset><legend>Now in Sanktuary</legend><div class="now">${out
+          .slice(0, 8)
+          .map(
+            (i) =>
+              `<a class="item" ${href(i.u)}${i.tab ? ` data-tab="${i.tab}"` : ''}><div class="pic">${i.img ? `<img src="${esc(i.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<img class="s" src="/icons/s-mark.svg" alt="">'}</div><span><span class="k">${esc(i.k)}</span> <span class="muted">${esc(i.w)}</span></span><b class="t">${esc(i.t)}</b></a>`,
+          )
+          .join('')}</div></fieldset>`;
       }
 
       // ── Pieces ──
@@ -375,14 +617,17 @@
       // ── Tabs ──
       const pages = {
         '': () => `
-          ${d.intro ? `<div class="intro">${esc(d.intro)}</div>` : ''}
-          <div class="grid">
-            <a class="card door" href="/welcome/mrnd" data-tab="mrnd"><b>MRND</b><span>Music</span><span class="muted">The talent we host and our music: artists, releases, where to listen.</span></a>
-            <a class="card door" href="/welcome/mhotc" data-tab="mhotc"><b>MHOTC</b><span>Community</span><span class="muted">CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span></a>
-            <a class="card door" href="/shop"><b>SHOP</b><span>Apparel</span><span class="muted">SOTG, Merakaiya and the rest of our apparel and releases.</span></a>
-          </div>
-          ${events('<a href="/welcome/events" data-tab="events">Coming up</a>', d.events.filter((e) => !e.past).slice(0, 5))}
-          ${d.posts.length ? `<fieldset><legend>Latest from CITIES</legend>${posts(d.posts.slice(0, 3))}</fieldset>` : ''}
+          <section class="hero">
+            <p class="prompt">type intro.txt</p>
+            <p class="intro cur">${esc(d.intro || 'Sanktuary.')}</p>
+            <div class="where">MUSIC / ART / FASHION / FILM / TWIN CITIES</div>
+          </section>
+          <ol class="doors">
+            <li><a href="/welcome/mrnd" data-tab="mrnd"><span>[01]</span><span class="dir muted">&lt;DIR&gt;</span><b>MRND</b><span class="muted">Music. The talent we host and our releases, and where to listen.</span><span class="arrow">&gt;</span></a></li>
+            <li><a href="/welcome/mhotc" data-tab="mhotc"><span>[02]</span><span class="dir muted">&lt;DIR&gt;</span><b>MHOTC</b><span class="muted">Community. CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span><span class="arrow">&gt;</span></a></li>
+            <li><a href="/shop"><span>[03]</span><span class="dir muted">&lt;DIR&gt;</span><b>SHOP</b><span class="muted">Apparel. Merakaiya and the rest of our apparel and releases.</span><span class="arrow">&gt;</span></a></li>
+          </ol>
+          ${now()}
           ${join()}`,
         mrnd: () => `
           <fieldset><legend>MRND: music</legend><div>The talent we host and the music we make together.</div></fieldset>
@@ -441,12 +686,13 @@
           }`,
         events: calendar,
       };
+      document.getElementById('year').textContent = `© ${new Date().getFullYear()}`;
       const TITLES = { '': 'Welcome to Sanktuary', mrnd: 'MRND · Sanktuary', mhotc: 'MHOTC · Sanktuary', events: 'Events · Sanktuary' };
       const tabOf = () => (location.pathname.split('/')[2] || '').toLowerCase();
       function show() {
         const tab = pages[tabOf()] ? tabOf() : '';
         document.title = TITLES[tab];
-        document.querySelectorAll('nav a[data-tab]:not([data-join])').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+        document.querySelectorAll('.top nav a[data-tab]').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
         app.innerHTML = pages[tab]();
         const form = document.getElementById('joinForm');
         if (form) form.onsubmit = joinUs;
@@ -484,7 +730,6 @@
         ([dir, v]) => {
           d = dir;
           videos = v.videos || [];
-          ticker();
           show();
         },
         () => (app.textContent = 'Sanktuary is resting right now. Try again in a minute.'),
