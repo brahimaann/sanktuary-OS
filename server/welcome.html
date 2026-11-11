@@ -9,17 +9,12 @@
     <meta property="og:description" content="MRND music and talent, MHOTC community and the CITIES journal, and the shop." />
     <link rel="icon" href="/favicon.ico" />
     <style>
-      /* The S machine, kept quiet: paper, ink and one signal colour (selection and the main action).
-         Structure: a flat header, one statement, an index of the three doors, what's on now, a plain footer. */
+      /* The S machine as a terminal: 1-bit paper and ink, a bitmap font, prompts and a blinking cursor,
+         pictures dithered to black and white, and one signal colour (selection and the main action).
+         Structure: a header bar, one statement, an index of the three doors, what's on now, a footer bar. */
       @font-face {
-        font-family: 'Pixelify Sans';
-        src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
-        font-weight: 400 700;
-        font-display: swap;
-      }
-      @font-face {
-        font-family: 'Silkscreen';
-        src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+        font-family: 'Fixedsys Excelsior';
+        src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
         font-display: swap;
       }
       :root {
@@ -27,54 +22,75 @@
         --ink: #000;
         --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
         --dim: #555;
-        --pixel: 'Pixelify Sans', Arial, sans-serif;
-        --label: 'Silkscreen', 'Pixelify Sans', monospace;
+        --mono: 'Fixedsys Excelsior', 'Courier New', monospace; /* a 16px bitmap font: keep sizes at 16 or 32 */
         --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
           0 0 / 6px 6px;
         --gut: clamp(16px, 4vw, 40px);
       }
       * {
         box-sizing: border-box;
-        font-variant-ligatures: none !important; /* Pixelify's fi ligature reads as an A; font shorthands would turn it back on */
+        font-variant-ligatures: none !important;
       }
       body {
         margin: 0;
         background: var(--paper);
-        font-family: var(--pixel);
-        font-size: 14px;
-        line-height: 1.45;
+        font: 16px/1.5 var(--mono);
+        -webkit-font-smoothing: none;
         color: var(--ink);
         min-height: 100vh;
         display: flex;
         flex-direction: column;
       }
       a {
-        color: var(--ink);
+        color: inherit;
       }
       :focus-visible {
         outline: 2px solid var(--signal);
         outline-offset: 2px;
       }
-      .cap {
-        font-family: var(--label);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        -webkit-font-smoothing: none;
+      ::selection {
+        background: var(--signal);
+        color: var(--ink);
       }
-      /* ── Header: the wordmark, a flat text menu, Join ── */
+      .muted {
+        color: var(--dim);
+      }
+      /* The block cursor */
+      .cur::after {
+        content: '';
+        display: inline-block;
+        width: 0.55em;
+        height: 1em;
+        margin-left: 4px;
+        vertical-align: -0.12em;
+        background: currentColor;
+        animation: blink 1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          visibility: hidden;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cur::after {
+          animation: none;
+        }
+      }
+      /* ── Header bar: ink, the wordmark, [menu], Join ── */
       .top {
         display: flex;
         align-items: center;
-        gap: 24px;
-        padding: 16px var(--gut);
-        border-bottom: 2px solid var(--ink);
+        gap: 20px;
+        padding: 12px var(--gut);
+        background: var(--ink);
+        color: var(--paper);
         flex-wrap: wrap;
       }
       .logo img {
         display: block;
-        width: 132px;
+        width: 120px;
         image-rendering: pixelated;
+        filter: invert(1);
       }
       .top nav {
         display: flex;
@@ -85,23 +101,26 @@
       .top nav a,
       .join {
         text-decoration: none;
-        padding: 4px 8px;
-        font: 12px var(--label);
-        -webkit-font-smoothing: none;
+        padding: 2px 6px;
         text-transform: uppercase;
-        border: 2px solid transparent;
+      }
+      .top nav a::before {
+        content: '[';
+      }
+      .top nav a::after {
+        content: ']';
       }
       .top nav a:hover,
       .join:hover {
-        background: var(--ink);
-        color: var(--paper);
+        background: var(--paper);
+        color: var(--ink);
       }
       .top nav a.on {
         background: var(--signal);
         color: var(--ink);
       }
       .join {
-        border-color: var(--ink);
+        border: 2px solid var(--paper);
       }
       /* ── Page ── */
       main {
@@ -114,20 +133,29 @@
         flex-direction: column;
         gap: 40px;
       }
+      .prompt {
+        color: var(--dim);
+        margin: 0 0 8px;
+      }
+      .prompt::before {
+        content: 'C:\\SANKTUARY> ';
+        color: var(--ink);
+      }
       .hero {
-        padding: 16px 0 8px;
+        padding: 8px 0 0;
       }
       .intro {
         margin: 0;
-        max-width: 26ch;
-        font: 700 clamp(26px, 4.4vw, 46px) / 1.12 var(--pixel);
+        max-width: 30ch;
+        font-size: 32px;
+        line-height: 1.25;
         white-space: pre-wrap;
       }
       .where {
         margin-top: 16px;
         color: var(--dim);
       }
-      /* Every section opens on a rule with a small caps label, like an index card */
+      /* Every section opens on a rule with its prompt, like a directory listing */
       fieldset {
         border: 0;
         border-top: 2px solid var(--ink);
@@ -136,16 +164,16 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 12px;
       }
       legend {
         float: left;
         width: 100%;
-        padding: 10px 0 6px;
-        font: 11px var(--label);
-        -webkit-font-smoothing: none;
+        padding: 10px 0 4px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+      }
+      legend::before {
+        content: '> ';
       }
       legend a {
         text-decoration: none;
@@ -153,10 +181,7 @@
       legend a:hover {
         text-decoration: underline;
       }
-      .muted {
-        color: var(--dim);
-      }
-      /* ── The three doors, as a numbered index ── */
+      /* ── The three doors, as a dir listing ── */
       .doors {
         list-style: none;
         margin: 0;
@@ -165,10 +190,10 @@
       }
       .doors a {
         display: grid;
-        grid-template-columns: 48px minmax(120px, 220px) 1fr 24px;
+        grid-template-columns: 48px 64px minmax(110px, 200px) 1fr 32px;
         gap: 16px;
         align-items: baseline;
-        padding: 18px 8px;
+        padding: 14px 8px;
         border-bottom: 2px solid var(--ink);
         text-decoration: none;
       }
@@ -180,8 +205,9 @@
         color: var(--paper);
       }
       .doors b {
-        font: 700 clamp(22px, 3vw, 32px) / 1 var(--pixel);
-        letter-spacing: 0.06em;
+        font-size: 32px;
+        font-weight: 400;
+        line-height: 1;
       }
       .doors .arrow {
         text-align: right;
@@ -195,7 +221,7 @@
       .item {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 2px;
         text-decoration: none;
         min-width: 0;
       }
@@ -203,10 +229,22 @@
         aspect-ratio: 4 / 3;
         border: 2px solid var(--ink);
         background: var(--dots), var(--paper);
-        margin-bottom: 6px;
+        margin-bottom: 8px;
         overflow: hidden;
         display: grid;
         place-items: center;
+      }
+      /* Pictures go 1-bit: grey, a little noise, then a hard threshold (the filter is in the page body) */
+      .pic img,
+      .card img {
+        filter: url(#onebit);
+        image-rendering: pixelated;
+      }
+      .pic img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
       }
       /* No picture: the pixel S on a white tile over the dots */
       .pic .s {
@@ -216,25 +254,28 @@
         padding: 8px;
         background: var(--paper);
         border: 2px solid var(--ink);
-        image-rendering: pixelated;
-      }
-      .pic img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
+        filter: none;
       }
       .item:hover .pic {
         transform: translate(-2px, -2px);
         box-shadow: 4px 4px 0 var(--ink);
       }
+      .item .k {
+        text-transform: uppercase;
+      }
+      .item .k::before {
+        content: '[';
+      }
+      .item .k::after {
+        content: ']';
+      }
       .item .t {
         text-transform: uppercase;
-        font-size: 16px;
-        line-height: 1.2;
+        font-weight: 400;
       }
       .item:hover .t {
-        text-decoration: underline;
+        background: var(--ink);
+        color: var(--paper);
       }
       /* ── The other tabs ── */
       .grid {
@@ -245,12 +286,15 @@
       .card {
         border: 2px solid var(--ink);
         padding: 10px;
-        color: var(--ink);
         text-decoration: none;
         display: flex;
         flex-direction: column;
         gap: 6px;
         min-width: 0;
+      }
+      .card b {
+        font-weight: 400;
+        text-transform: uppercase;
       }
       a.card:hover {
         transform: translate(-2px, -2px);
@@ -266,39 +310,42 @@
       .card .wide {
         aspect-ratio: 16/9;
       }
+      b {
+        font-weight: 400;
+      }
       .list {
         display: flex;
         flex-direction: column;
       }
       .list > * {
         display: flex;
-        gap: 10px;
+        gap: 12px;
         align-items: baseline;
         flex-wrap: wrap;
-        padding: 8px 0;
-        border-bottom: 1px solid var(--ink);
+        padding: 6px 0;
+        border-bottom: 1px dashed var(--ink);
       }
       .list > :last-child {
         border-bottom: 0;
       }
       .cal {
         display: flex;
-        gap: 14px;
+        gap: 16px;
         align-items: center;
       }
       .cal .date {
         flex: none;
-        width: 56px;
+        width: 64px;
         text-align: center;
         border: 2px solid var(--ink);
         line-height: 1.1;
         padding: 4px 0;
-        font: 10px var(--label);
         text-transform: uppercase;
       }
       .cal .date b {
         display: block;
-        font: 700 22px var(--pixel);
+        font-size: 32px;
+        line-height: 1;
       }
       .cal > div:last-child {
         display: flex;
@@ -312,20 +359,17 @@
       .pill {
         background: var(--ink);
         color: var(--paper);
-        font: 10px var(--label);
-        -webkit-font-smoothing: none;
         text-transform: uppercase;
-        padding: 1px 5px;
-        align-self: center;
+        padding: 0 6px;
       }
       .links a {
         margin-right: 8px;
       }
-      /* ── Join ── */
+      /* ── Join: fields read like a form on a terminal ── */
       form {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 10px;
+        gap: 12px;
         max-width: 760px;
       }
       input,
@@ -333,7 +377,6 @@
       select,
       button {
         font: inherit;
-        font-size: 16px;
         color: var(--ink);
         border-radius: 0;
       }
@@ -345,9 +388,17 @@
         background: var(--paper);
         width: 100%;
       }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 0;
+        background: var(--ink);
+        color: var(--paper);
+      }
       input::placeholder,
       textarea::placeholder {
         color: var(--dim);
+        text-transform: uppercase;
       }
       textarea,
       .full {
@@ -356,10 +407,17 @@
       button {
         justify-self: start;
         grid-column: 1 / -1;
-        padding: 6px 22px;
+        padding: 6px 16px;
         background: var(--signal);
         border: 2px solid var(--ink);
         cursor: pointer;
+        text-transform: uppercase;
+      }
+      button::before {
+        content: '[ ';
+      }
+      button::after {
+        content: ' ]';
       }
       button:hover {
         background: var(--ink);
@@ -369,24 +427,30 @@
         position: absolute;
         left: -9999px;
       }
-      /* ── Footer: the menu again, who and where ── */
+      /* ── Footer bar: the menu again, who and where ── */
       footer {
-        border-top: 2px solid var(--ink);
-        padding: 20px var(--gut) 28px;
+        background: var(--ink);
+        color: var(--paper);
+        padding: 20px var(--gut) 24px;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 16px;
+        text-transform: uppercase;
       }
       footer div {
         display: flex;
         flex-direction: column;
-        gap: 2px;
       }
       footer a {
         text-decoration: none;
+        align-self: start;
       }
       footer a:hover {
-        text-decoration: underline;
+        background: var(--paper);
+        color: var(--ink);
+      }
+      footer .muted {
+        color: #aaa;
       }
       @media (max-width: 560px) {
         form {
@@ -395,9 +459,15 @@
         .top {
           gap: 10px;
         }
+        .intro {
+          font-size: 24px;
+        }
         .doors a {
-          grid-template-columns: 32px 1fr 16px;
+          grid-template-columns: 40px 1fr 16px;
           gap: 4px 10px;
+        }
+        .doors .dir {
+          display: none;
         }
         .doors .muted {
           grid-column: 2;
@@ -413,6 +483,19 @@
     </style>
   </head>
   <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="onebit" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0 0 0 1 0" result="grey" />
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" seed="7" result="noise" />
+        <feColorMatrix in="noise" type="matrix" values="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1" result="noise" />
+        <feComposite in="grey" in2="noise" operator="arithmetic" k2="1" k3="0.7" k4="-0.35" />
+        <feComponentTransfer>
+          <feFuncR type="discrete" tableValues="0 1" />
+          <feFuncG type="discrete" tableValues="0 1" />
+          <feFuncB type="discrete" tableValues="0 1" />
+        </feComponentTransfer>
+      </filter>
+    </svg>
     <header class="top">
       <a class="logo" href="/welcome" data-tab=""><img src="/icons/sanktuary-wordmark.svg" alt="Sanktuary" /></a>
       <nav>
@@ -425,7 +508,7 @@
       <a class="join" href="/welcome#join" data-tab="" data-join>Join</a>
     </header>
     <main id="app">Loading...</main>
-    <footer class="cap">
+    <footer>
       <div>
         <a href="/welcome/mrnd" data-tab="mrnd">MRND</a><a href="/welcome/mhotc" data-tab="mhotc">MHOTC</a
         ><a href="/welcome/events" data-tab="events">Events</a><a href="/cities">CITIES</a><a href="/shop">Shop</a>
@@ -434,7 +517,9 @@
         <a href="/welcome#join" data-tab="" data-join>Join Sanktuary</a><a href="/cities/videos">Vlogs</a
         ><a href="/portfolios">Portfolios</a>
       </div>
-      <div class="muted"><span>Sanktuary</span><span>Twin Cities, Minnesota</span><span id="year"></span></div>
+      <div class="muted">
+        <span>Sanktuary</span><span>Twin Cities, Minnesota</span><span id="year"></span><span class="cur">C:\&gt;</span>
+      </div>
     </footer>
 
     <script>
@@ -476,7 +561,7 @@
           .slice(0, 8)
           .map(
             (i) =>
-              `<a class="item" ${href(i.u)}${i.tab ? ` data-tab="${i.tab}"` : ''}><div class="pic">${i.img ? `<img src="${esc(i.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<img class="s" src="/icons/s-mark.svg" alt="">'}</div><span class="cap">${esc(i.k)}</span><span class="muted">${esc(i.w)}</span><b class="t">${esc(i.t)}</b></a>`,
+              `<a class="item" ${href(i.u)}${i.tab ? ` data-tab="${i.tab}"` : ''}><div class="pic">${i.img ? `<img src="${esc(i.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<img class="s" src="/icons/s-mark.svg" alt="">'}</div><span><span class="k">${esc(i.k)}</span> <span class="muted">${esc(i.w)}</span></span><b class="t">${esc(i.t)}</b></a>`,
           )
           .join('')}</div></fieldset>`;
       }
@@ -533,13 +618,14 @@
       const pages = {
         '': () => `
           <section class="hero">
-            ${d.intro ? `<p class="intro">${esc(d.intro)}</p>` : ''}
-            <div class="where cap">Music · art · fashion · film · Twin Cities</div>
+            <p class="prompt">type intro.txt</p>
+            <p class="intro cur">${esc(d.intro || 'Sanktuary.')}</p>
+            <div class="where">MUSIC / ART / FASHION / FILM / TWIN CITIES</div>
           </section>
           <ol class="doors">
-            <li><a href="/welcome/mrnd" data-tab="mrnd"><span class="cap">01</span><b>MRND</b><span class="muted">Music. The talent we host and our releases, and where to listen.</span><span class="arrow">→</span></a></li>
-            <li><a href="/welcome/mhotc" data-tab="mhotc"><span class="cap">02</span><b>MHOTC</b><span class="muted">Community. CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span><span class="arrow">→</span></a></li>
-            <li><a href="/shop"><span class="cap">03</span><b>SHOP</b><span class="muted">Apparel. Merakaiya and the rest of our apparel and releases.</span><span class="arrow">→</span></a></li>
+            <li><a href="/welcome/mrnd" data-tab="mrnd"><span>[01]</span><span class="dir muted">&lt;DIR&gt;</span><b>MRND</b><span class="muted">Music. The talent we host and our releases, and where to listen.</span><span class="arrow">&gt;</span></a></li>
+            <li><a href="/welcome/mhotc" data-tab="mhotc"><span>[02]</span><span class="dir muted">&lt;DIR&gt;</span><b>MHOTC</b><span class="muted">Community. CITIES, our journal of the Twin Cities arts scene, plus events, stories and vlogs.</span><span class="arrow">&gt;</span></a></li>
+            <li><a href="/shop"><span>[03]</span><span class="dir muted">&lt;DIR&gt;</span><b>SHOP</b><span class="muted">Apparel. Merakaiya and the rest of our apparel and releases.</span><span class="arrow">&gt;</span></a></li>
           </ol>
           ${now()}
           ${join()}`,
