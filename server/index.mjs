@@ -1902,6 +1902,28 @@ async function tracksApi(req, res, url) {
     return json(res, { releases, tracks, statuses: TRACK_STATUSES, kinds: RELEASE_KINDS });
   }
 
+  // GET /api/tracks/splits: the Ledger. Every master split you're on (by your account), with your share and whether
+  // you've signed off on the split as it is now. Shown even where the release is private to others: it's your share.
+  if (req.method === 'GET' && what === 'splits') {
+    const rows = Object.values(db.tracks)
+      .filter((t) => !t.deleted && db.releases[t.release] && !db.releases[t.release].deleted)
+      .flatMap((t) =>
+        (t.master?.splits || [])
+          .filter((x) => x.member === me)
+          .map((x) => ({
+            track: t.id,
+            title: t.title,
+            release: db.releases[t.release].title,
+            role: x.role,
+            share: x.share,
+            total: shareSum(t.master.splits),
+            signed: !!signatureOf(t, 'master', x),
+            open: canSeeRelease(user, db.releases[t.release]),
+          })),
+      );
+    return json(res, { splits: rows });
+  }
+
   if (what === 'release') {
     if (req.method === 'POST' && !id) {
       const input = await jsonBody(req);

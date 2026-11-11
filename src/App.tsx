@@ -35,7 +35,7 @@ const Profile = lazy(() => import('./apps/Profile'));
 const Planner = lazy(() => import('./apps/Planner'));
 const Tracks = lazy(() => import('./apps/Tracks'));
 const Timeline = lazy(() => import('./apps/Timeline'));
-const Business = lazy(() => import('./apps/Business'));
+const Ledger = lazy(() => import('./apps/Ledger'));
 const Welcome = lazy(() => import('./apps/Welcome'));
 const NewThing = lazy(() => import('./apps/NewThing'));
 const ShareIn = lazy(() => import('./apps/ShareIn'));
@@ -196,7 +196,7 @@ export const App: React.FC = () => {
         content = <Welcome tour={win.appProps?.tour} />;
         break;
       case 'business':
-        content = <Business />;
+        content = <Ledger />;
         break;
       case 'timeline':
         content = <Timeline />;
