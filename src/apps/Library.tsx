@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
 import { useLiveEvent } from '../utils/live';
@@ -6,6 +6,7 @@ import { dialog } from '../utils/dialog';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 import { IconLabel } from '../components/RetroIcon';
 import Archive from './Archive';
+import MediaControls from '../components/MediaControls';
 
 /**
  * Library: the team's shared culture. Books we read and recommend, Renaissance Radio (our own tracks, uploaded and
@@ -231,13 +232,10 @@ const LibraryApp: React.FC = () => {
               </div>
               {i.blurb && <div style={{ marginTop: 3, whiteSpace: 'pre-wrap', color: '#222' }}>{i.blurb}</div>}
               {i.audio && (
-                <audio
-                  id={`lib-audio-${i.id}`}
+                <Player
+                  id={i.id}
                   src={`/api/library/${i.id}/audio?v=${encodeURIComponent(i.updated || '')}`}
-                  controls
-                  preload="none"
                   onEnded={() => playNext(i.id)}
-                  style={{ display: 'block', width: '100%', maxWidth: 420, marginTop: 4 }}
                 />
               )}
             </div>
@@ -251,6 +249,17 @@ const LibraryApp: React.FC = () => {
         )}
       </div>
       <div style={statusBar}>{msg || `${items.length} entr${items.length === 1 ? 'y' : 'ies'} in the Library`}</div>
+    </div>
+  );
+};
+
+/** One track with the OS's own player controls (the same ones Music uses), not the browser's. */
+const Player: React.FC<{ id: string; src: string; onEnded: () => void }> = ({ id, src, onEnded }) => {
+  const media = useRef<HTMLAudioElement | null>(null);
+  return (
+    <div style={{ maxWidth: 420, marginTop: 4 }}>
+      <audio id={`lib-audio-${id}`} ref={media} src={src} preload="metadata" onEnded={onEnded} />
+      <MediaControls media={media} src={src} />
     </div>
   );
 };
