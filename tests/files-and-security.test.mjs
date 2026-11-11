@@ -643,6 +643,24 @@ try {
   await call(null, new URL((await signLinks('bmi'))[0].url).pathname, 'POST', 'name=Ada', true);
   await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bmi: bmi('USXYZ2699999') });
   check('split sheet signatures survive saving other fields', !!(await signLinks('bmi'))[0].signed);
+  // The Ledger: your own master splits, by account
+  await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', {
+    master: [
+      { name: 'Bob', role: 'Artist', share: 40, member: 'bob' },
+      { name: 'Sanktuary', role: 'Label', share: 60 },
+    ],
+  });
+  const bobSplits = JSON.parse((await call('bob', '/api/tracks/splits')).text).splits;
+  check(
+    'the Ledger lists the master splits you are on, with your share',
+    bobSplits.length === 1 &&
+      bobSplits[0].track === song.id &&
+      bobSplits[0].share === 40 &&
+      bobSplits[0].total === 100 &&
+      !bobSplits[0].signed,
+    bobSplits,
+  );
+  check('…and nobody else’s', JSON.parse((await call('carol', '/api/tracks/splits')).text).splits.length === 0);
 
   // Release folders: files fill Tracks in
   const albumDir = join(drive, 'team', 'Albums', 'Folder Album');

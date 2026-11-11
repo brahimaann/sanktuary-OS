@@ -136,8 +136,7 @@ const app = {
     width: 640,
     height: 480,
   },
-  // Ledger (the Business window): admins only for now; the server additionally requires two-step verification.
-  // A member Ledger (your own splits and invoices) comes later.
+  // Ledger: every member's own master splits; admins also get the Business tab (two-step verification on the server).
   admin: { id: 'admin-panel', title: 'Admin Panel', icon: I('settings'), appType: 'admin', width: 760, height: 540 },
   business: { id: 'business', title: 'Ledger', icon: I('my-documents-folder'), appType: 'business', width: 860, height: 600 },
 } satisfies Record<string, DesktopIconDef>;
@@ -161,7 +160,7 @@ const memberIcons = (admin: boolean): DesktopIconDef[] => [
   app.darkroom,
   app.filesWorkspace,
   app.studio,
-  ...(admin ? [app.business] : []),
+  app.business,
   app.teams,
   folder('folder-cities', 'CITIES', 'internet-folder', [app.blog, app.magazine, app.write]),
   // The public front door, as visitors see it
