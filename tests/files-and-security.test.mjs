@@ -868,6 +868,73 @@ try {
     'admins still see private entries',
     JSON.parse((await call('alice', '/api/timeline')).text).items.some((i) => i.id === shoot.id),
   );
+
+  // Locations: a scouting photo's GPS pins it; photos taken nearby join the same spot
+  {
+    const { createRequire } = await import('node:module');
+    const sh = createRequire(new URL('../server/package.json', import.meta.url))('sharp');
+    const plain = await sh({ create: { width: 32, height: 24, channels: 3, background: '#4b9560' } })
+      .jpeg()
+      .toBuffer();
+    // EXIF (big-endian TIFF): IFD0 -> GPS IFD with 44°58'40.08" N, 93°15'54" W (Minneapolis)
+    const t = Buffer.alloc(128);
+    t.write('MM', 0, 'latin1');
+    t.writeUInt16BE(42, 2);
+    t.writeUInt32BE(8, 4);
+    t.writeUInt16BE(1, 8);
+    (t.writeUInt16BE(0x8825, 10), t.writeUInt16BE(4, 12), t.writeUInt32BE(1, 14), t.writeUInt32BE(26, 18));
+    t.writeUInt16BE(4, 26);
+    const entry = (n, tag, type, count, value) => {
+      const o = 28 + n * 12;
+      (t.writeUInt16BE(tag, o), t.writeUInt16BE(type, o + 2), t.writeUInt32BE(count, o + 4));
+      typeof value === 'string' ? t.write(value, o + 8, 'latin1') : t.writeUInt32BE(value, o + 8);
+    };
+    entry(0, 1, 2, 2, 'N\0');
+    entry(1, 2, 5, 3, 80);
+    entry(2, 3, 2, 2, 'W\0');
+    entry(3, 4, 5, 3, 104);
+    [44, 1, 58, 1, 4008, 100, 93, 1, 15, 1, 5400, 100].forEach((v, i) => t.writeUInt32BE(v, 80 + i * 4));
+    const app1 = Buffer.concat([Buffer.from([0xff, 0xe1, 0, 0]), Buffer.from('Exif\0\0', 'latin1'), t]);
+    app1.writeUInt16BE(app1.length - 2, 2);
+    const gpsJpeg = Buffer.concat([plain.subarray(0, 2), app1, plain.subarray(2)]);
+    const put = async (u, name, data, to = '') =>
+      JSON.parse((await call(u, `/api/locations/photos?name=${name}${to ? `&to=${to}` : ''}`, 'PUT', data, true)).text);
+    const first = await put('bob', 'mural.jpg', gpsJpeg);
+    const list = async (u) => JSON.parse((await call(u, '/api/locations')).text).items;
+    const spot = (await list('bob')).find((s) => s.id === first.location);
+    check(
+      'a photo with GPS pins a new spot',
+      first.made && first.gps && Math.abs(spot.lat - 44.9778) < 1e-4 && Math.abs(spot.lng + 93.265) < 1e-4,
+      JSON.stringify(spot && [spot.lat, spot.lng]),
+    );
+    const second = await put('carol', 'mural-2.jpg', gpsJpeg);
+    check('a photo taken at the same place joins that spot', !second.made && second.location === first.location);
+    const blind = await put('bob', 'no-gps.jpg', plain);
+    check(
+      'a photo without GPS starts an unpinned spot',
+      blind.made && !blind.gps && (await list('bob')).find((s) => s.id === blind.location).lat === null,
+    );
+    const photo = `/api/locations/photos/${first.photo.file}`;
+    check('team can see spot photos', (await call('carol', photo)).status === 200);
+    const plan = JSON.parse(
+      (await call('bob', '/api/timeline', 'POST', { title: 'Mural shoot', kind: 'Shoot', start: day(3), place: first.location })).text,
+    );
+    check(
+      'shoots booked at a spot show on it',
+      (await list('carol')).find((s) => s.id === first.location).shoots.some((x) => x.id === plan.id),
+    );
+    check('only the owner or an admin deletes a spot', (await call('carol', `/api/locations/${first.location}`, 'DELETE')).status === 403);
+    check('a pin needs both coordinates', (await call('bob', `/api/locations/${blind.location}`, 'PATCH', { lat: 45 })).status === 400);
+    await call('bob', `/api/locations/${first.location}`, 'PATCH', { members: [] });
+    check('a private spot is hidden from others', !(await list('carol')).some((s) => s.id === first.location));
+    check('and so are its photos', (await call('carol', photo)).status === 404);
+    check(
+      'admins still see private spots',
+      (await list('alice')).some((s) => s.id === first.location),
+    );
+    await call('bob', `/api/locations/${first.location}`, 'DELETE');
+    check('deleting a spot removes its photos', (await call('bob', photo)).status === 404);
+  }
   check('only https links', (await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { link: 'ftp://x' })).status === 400);
   check('carol cannot delete it', [403, 404].includes((await call('carol', `/api/timeline/${shoot.id}`, 'DELETE')).status)); // 404 once it's private
   check('owner deletes it', (await call('bob', `/api/timeline/${shoot.id}`, 'DELETE')).status === 200);

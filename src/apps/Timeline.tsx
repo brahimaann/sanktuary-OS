@@ -27,6 +27,7 @@ interface Entry {
   link?: string;
   folder?: FileRef | null;
   release?: string | null;
+  place?: string | null; // a spot in Studio > Locations
   members?: string[] | null;
   owner?: string;
   following?: boolean;
@@ -240,10 +241,16 @@ const EntryPanel: React.FC<{
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState<null | 'people' | 'members'>(null);
   const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
+  const [spots, setSpots] = useState<{ id: string; name: string; address: string }[]>([]);
+  const { openWindow } = useWindowManager();
   useEffect(() => setDraft(e), [e]);
   useEffect(() => {
     api('/api/tracks').then(
       (d) => setReleases(d.releases),
+      () => {},
+    );
+    api('/api/locations').then(
+      (d) => setSpots(d.items),
       () => {},
     );
   }, [api]);
@@ -336,6 +343,30 @@ const EntryPanel: React.FC<{
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ minWidth: 60 }}>Location</span>
           <input style={{ ...input, flex: 1 }} placeholder="Studio, venue, address..." {...text('location')} />
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ minWidth: 60 }}>Spot</span>
+          <select
+            value={e.place || ''}
+            onChange={(ev) => {
+              const p = spots.find((x) => x.id === ev.target.value);
+              save({ place: p?.id || null, ...(p && !e.location ? { location: p.address || p.name } : {}) });
+            }}
+            style={input}
+            title="A spot from the location library (Studio > Locations)"
+          >
+            <option value="">(not from the location library)</option>
+            {spots.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+          {e.place && (
+            <button style={button} onClick={() => openStudio(openWindow, 'locations')}>
+              <IconLabel icon="pin">See on map</IconLabel>
+            </button>
+          )}
         </div>
       </fieldset>
       <fieldset style={fieldset}>

@@ -2852,6 +2852,7 @@ async function timelineApi(req, res, url) {
     if (input.people !== undefined) i.people = usernameList(input.people);
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
+    if (input.place !== undefined) i.place = input.place ? String(input.place).slice(0, 20) : null; // a spot in the location library
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
     if (input.link !== undefined) {
       const v = String(input.link || '').trim();
@@ -2876,6 +2877,7 @@ async function timelineApi(req, res, url) {
       link: '',
       folder: null,
       release: null,
+      place: null,
       members: null,
       owner: me,
       followers: [me],
@@ -2944,6 +2946,214 @@ async function timelineAlerts() {
   }
 }
 setInterval(() => timelineAlerts().catch(console.error), 3.6e6).unref();
+
+// ── /api/locations: the shoot location library — data/locations.json + data/locations/photos/ ──
+// Spots worth shooting at: a pin on the map, why it's interesting, scouting photos (their GPS places the pin),
+// and links to the moodboards/plans for it and the calendar shoots booked there (timeline entries with `place`).
+// A dropped photo with GPS joins the spot it was taken at (within 150 m) or starts a new one.
+// Open to every member unless `members` lists who may see it (owner + admins always can), like boards and entries.
+const LOCATION_TEXT = { name: 80, why: 2000, address: 200 };
+const NEAR_M = 150;
+let locationsDb = null;
+let locationsSaved = Promise.resolve();
+const loadLocations = async () => (locationsDb ??= await readJson('locations.json', { items: {} }));
+const saveLocations = () => (locationsSaved = locationsSaved.then(() => saveJson('locations.json', locationsDb)).catch(console.error));
+const LOCATION_PHOTOS = () => join(DATA, 'locations', 'photos');
+const metres = (a, b) => {
+  const r = Math.PI / 180;
+  const x = (b.lng - a.lng) * r * Math.cos(((a.lat + b.lat) / 2) * r);
+  return Math.hypot(x, (b.lat - a.lat) * r) * 6371e3;
+};
+const coord = (v, max) => (v === null || v === '' ? null : Number.isFinite(+v) && Math.abs(+v) <= max ? +v : fail(400, 'Bad coordinates'));
+
+/** GPS position and capture time from a photo's EXIF (a TIFF block, with or without its "Exif\0\0" prefix), or null. */
+function exifInfo(buf) {
+  if (!buf?.length) return null;
+  const t = buf.indexOf('Exif\0\0') === 0 ? 6 : 0;
+  try {
+    const le = buf.toString('latin1', t, t + 2) === 'II';
+    if (!le && buf.toString('latin1', t, t + 2) !== 'MM') return null;
+    const u16 = (o) => (le ? buf.readUInt16LE(t + o) : buf.readUInt16BE(t + o));
+    const u32 = (o) => (le ? buf.readUInt32LE(t + o) : buf.readUInt32BE(t + o));
+    const tags = (ifd) => Object.fromEntries(Array.from({ length: u16(ifd) }, (_, i) => [u16(ifd + 2 + i * 12), ifd + 2 + i * 12]));
+    const ifd0 = tags(u32(4));
+    const ascii = (e, n) =>
+      buf.toString('latin1', t + (n > 4 ? u32(e + 8) : e + 8), t + (n > 4 ? u32(e + 8) : e + 8) + n).replace(/\0.*$/s, '');
+    const exif = ifd0[0x8769] && tags(u32(ifd0[0x8769] + 8));
+    const when = exif?.[0x9003] && ascii(exif[0x9003], 20).match(/^(\d{4}):(\d\d):(\d\d) (\d\d:\d\d)/);
+    const out = { taken: when ? `${when[1]}-${when[2]}-${when[3]}T${when[4]}` : null };
+    const gps = ifd0[0x8825] && tags(u32(ifd0[0x8825] + 8));
+    if (gps?.[2] && gps[4]) {
+      const dms = (e) => [0, 1, 2].reduce((v, k) => v + u32(u32(e + 8) + k * 8) / u32(u32(e + 8) + k * 8 + 4) / 60 ** k, 0);
+      const lat = dms(gps[2]) * (gps[1] && ascii(gps[1], 2) === 'S' ? -1 : 1);
+      const lng = dms(gps[4]) * (gps[3] && ascii(gps[3], 2) === 'W' ? -1 : 1);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng))
+        Object.assign(out, { lat: +lat.toFixed(6), lng: +lng.toFixed(6) });
+    }
+    return out;
+  } catch {
+    return null; // a truncated or odd EXIF block: treat the photo as having none
+  }
+}
+
+async function locationsApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const db = await loadLocations();
+  const me = user.username;
+  const [, , , id, sub, file] = url.pathname.split('/'); // /api/locations/<id>[/photos/<photo>] or /api/locations/photos/<file>
+  const see = (u) => (l) => canSeeRelease(u, l);
+  const changed = (l) => {
+    l.updated = new Date().toISOString();
+    l.updatedBy = me;
+    saveLocations();
+    emit('locations', { id: l.id }, (u) => see({ username: u.username, admin: cfg.admins.includes(u.username) })(l));
+  };
+  const blank = (input = {}) => {
+    const l = {
+      id: randomUUID().slice(0, 10),
+      name: '',
+      lat: null,
+      lng: null,
+      why: '',
+      address: '',
+      photos: [],
+      boards: [],
+      owner: me,
+      members: null,
+      created: new Date().toISOString(),
+    };
+    apply(l, input);
+    l.name = l.name.trim() || `Spot ${Object.keys(db.items).length + 1}`;
+    db.items[l.id] = l;
+    return l;
+  };
+  const apply = (l, input) => {
+    for (const [k, max] of Object.entries(LOCATION_TEXT)) if (input[k] !== undefined) l[k] = String(input[k] ?? '').slice(0, max);
+    if (input.lat !== undefined || input.lng !== undefined) {
+      l.lat = coord(input.lat ?? l.lat, 90);
+      l.lng = coord(input.lng ?? l.lng, 180);
+      if ((l.lat === null) !== (l.lng === null)) fail(400, 'A pin needs both latitude and longitude');
+    }
+    if (input.boards !== undefined)
+      l.boards = [...new Set((Array.isArray(input.boards) ? input.boards : []).map(String).filter((b) => /^[\w-]{1,60}$/.test(b)))].slice(
+        0,
+        30,
+      );
+  };
+
+  // Photos: anyone who can see a spot can see its photos
+  if (id === 'photos' && req.method === 'GET') {
+    const name = safeName(sub);
+    const l = Object.values(db.items).find((l) => l.photos.some((p) => p.file === name || p.original === name));
+    if (!l || !canSeeRelease(user, l)) fail(404, 'No such photo');
+    return stream(req, res, url.searchParams, join(LOCATION_PHOTOS(), name));
+  }
+  // Upload a photo (raw body). ?to=<spot> adds it there; otherwise its GPS finds or starts the spot.
+  if (id === 'photos' && req.method === 'PUT') {
+    const name = safeName(url.searchParams.get('name'));
+    const ext = extname(name).toLowerCase();
+    const pid = randomUUID().slice(0, 12);
+    await mkdir(LOCATION_PHOTOS(), { recursive: true });
+    const original = join(LOCATION_PHOTOS(), `${pid}-original${ext}`);
+    await pipeline(req, createWriteStream(original, BIG_BUFFER));
+    let info = null;
+    let view = null;
+    try {
+      const img = sharp(original, { animated: false });
+      info = exifInfo((await img.metadata()).exif);
+      await img
+        .rotate()
+        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toFile(join(LOCATION_PHOTOS(), `${pid}.webp`));
+      view = `${pid}.webp`;
+    } catch {
+      // sharp can't read it (HEIC, RAW...): look for the EXIF block in the file itself and keep the original as the view
+      const raw = await readFile(original);
+      const at = raw.indexOf('Exif\0\0');
+      info = at >= 0 ? exifInfo(raw.subarray(at)) : null;
+    }
+    const to = url.searchParams.get('to');
+    let l = to ? own(db.items, to) : null;
+    if (to && (!l || !canSeeRelease(user, l))) fail(404, 'No such spot');
+    const gps = info?.lat !== undefined ? { lat: info.lat, lng: info.lng } : null;
+    if (!l && gps) l = Object.values(db.items).find((x) => x.lat !== null && canSeeRelease(user, x) && metres(x, gps) <= NEAR_M);
+    const made = !l;
+    if (!l) l = blank(gps || {});
+    else if (gps && l.lat === null) Object.assign(l, gps);
+    const photo = {
+      id: pid,
+      file: view || basename(original),
+      original: basename(original),
+      name,
+      by: me,
+      at: new Date().toISOString(),
+      taken: info?.taken || null,
+      ...gps,
+    };
+    l.photos.push(photo);
+    changed(l);
+    if (made) logActivity(user, 'scouted a new spot', { location: l.id, title: l.name });
+    return json(res, { location: l.id, made, gps: !!gps, photo });
+  }
+
+  if (req.method === 'GET' && !id) {
+    const tl = Object.values((await loadTimeline()).items).filter((i) => i.place && canSeeRelease(user, i));
+    const boardName = async (b) => {
+      const meta = (openBoards.get(b) || (await readJson(`boards/${b}/board.json`, null).catch(() => null)))?.meta;
+      return meta && canSeeBoard(user, meta) ? { id: b, name: meta.name, kind: meta.kind || 'canvas' } : null;
+    };
+    const items = [];
+    for (const l of Object.values(db.items).filter(see(user)))
+      items.push({
+        ...l,
+        boards: (await Promise.all(l.boards.map(boardName))).filter(Boolean),
+        shoots: tl
+          .filter((i) => i.place === l.id)
+          .map((i) => ({ id: i.id, title: i.title, kind: i.kind, start: i.start, status: i.status }))
+          .sort((a, b) => a.start.localeCompare(b.start)),
+      });
+    return json(res, { items: items.sort((a, b) => b.updated.localeCompare(a.updated)) });
+  }
+  if (req.method === 'POST' && !id) {
+    const l = blank(await jsonBody(req));
+    changed(l);
+    logActivity(user, 'scouted a new spot', { location: l.id, title: l.name });
+    return json(res, l);
+  }
+
+  const l = (own(db.items, id) && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such spot');
+  const canManage = l.owner === me || user.admin;
+  if (sub === 'photos' && req.method === 'DELETE') {
+    const p = l.photos.find((p) => p.id === file) || fail(404, 'No such photo');
+    if (p.by !== me && !canManage) fail(403, 'Only whoever added it, the spot’s owner or an admin can remove it');
+    l.photos = l.photos.filter((x) => x !== p);
+    for (const f of new Set([p.file, p.original])) await rm(join(LOCATION_PHOTOS(), safeName(f)), { force: true });
+    changed(l);
+    return json(res, { ok: true });
+  }
+  if (req.method === 'PATCH' && !sub) {
+    const input = await jsonBody(req);
+    if (input.members !== undefined) {
+      if (!canManage) fail(403, 'Only whoever added it or an admin can change who sees it');
+      l.members = Array.isArray(input.members) ? usernameList(input.members).filter((u) => u !== l.owner) : null;
+    }
+    apply(l, input);
+    if (input.name !== undefined && !l.name.trim()) fail(400, 'Give the spot a name');
+    changed(l);
+    return json(res, l);
+  }
+  if (req.method === 'DELETE' && !sub) {
+    if (!canManage) fail(403, 'Only whoever added it or an admin can delete it');
+    for (const p of l.photos)
+      for (const f of new Set([p.file, p.original])) await rm(join(LOCATION_PHOTOS(), safeName(f)), { force: true });
+    delete db.items[id];
+    changed(l);
+    return json(res, { ok: true });
+  }
+  fail(405, 'Not allowed');
+}
 
 // ── /api/business: the private business portal — data/business/ ──
 // Clients, jobs, invoices and documents, for admins only, and only with:
@@ -9565,6 +9775,7 @@ const routes = [
   ['/api/push', pushApi],
   ['/api/tracks', tracksApi],
   ['/api/timeline', timelineApi],
+  ['/api/locations', locationsApi],
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
   ['/api/youtube', youtubeApi],
