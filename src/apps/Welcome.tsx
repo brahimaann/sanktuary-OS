@@ -72,23 +72,23 @@ const MEMBER_TOUR: Step[] = [
     open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png?v=2', 560, 420),
   },
   {
-    title: 'Studio > Music: tracks fill themselves in',
+    title: 'Operations > Music: tracks fill themselves in',
     text: 'Drop bounces into a release\'s folder (or onto Tracks): "03 Song v4.wav" becomes track 3 with v4 as its bounce. Projects, stems, BPM and the cover are linked by name.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'music' }),
+    open: win('studio', 'Operations', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'music' }),
   },
   {
-    title: 'Studio > Calendar: shoots, shows, drops',
+    title: 'Operations > Calendar: shoots, shows, drops',
     text: 'One calendar for everything with a date, release days included. People on an entry get reminded the day before.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'calendar' }),
+    open: win('studio', 'Operations', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'calendar' }),
   },
   {
-    title: 'Studio > Opportunities: grants, calls, gigs',
+    title: 'Operations > Opportunities: grants, calls, gigs',
     text: 'Post a grant, residency, open call or gig with its link and deadline and the whole team hears about it. Mark Interested or Applying to get reminded a week and a day before it closes; Copy portfolio link fills the "work samples" box.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'opportunities' }),
+    open: win('studio', 'Operations', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'opportunities' }),
   },
   {
     title: 'Moodboards',
-    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Planner.',
+    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Operations > Planner.',
     open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png?v=2', 560, 420),
   },
   {

@@ -25,10 +25,10 @@ interface DesktopIconDef {
 const I = (name: string) => `/images/icons/${name}-32x32.png?v=2`;
 const app = {
   new: { id: 'new', title: 'New...', icon: I('file'), appType: 'new', width: 460, height: 420 },
-  // Studio: Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
+  // Operations (Studio window): Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
   studio: {
     id: 'studio',
-    title: 'Studio',
+    title: 'Operations',
     icon: I('media-player'),
     appType: 'studio',
     appProps: { tab: 'music' },

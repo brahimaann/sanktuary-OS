@@ -34,7 +34,7 @@ const STUDIO_MENU: MenuItem[] = [
   {
     id: 'studio',
     label: 'Studio (music, calendar, boards, opportunities)',
-    title: 'Studio',
+    title: 'Operations',
     appType: 'studio',
     icon: icon('media-player-32x32.png?v=2'),
     width: 960,
