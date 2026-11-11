@@ -411,10 +411,9 @@ interface Session {
   genre: string;
   checks: Record<string, boolean>;
   lyrics: string;
-  look: string;
 }
 const loadSession = (): Session => {
-  const blank = { song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '', look: '1-bit' };
+  const blank = { song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '' };
   try {
     return { ...blank, ...JSON.parse(localStorage.getItem(SESSION_KEY) || '{}') };
   } catch {
@@ -460,12 +459,11 @@ const SessionTab: React.FC<{
   const genre = GENRES.find((g) => g.name === s.genre) || GENRES[0];
   const bars = s.lyrics.split('\n').filter((l) => l.trim()).length;
   const done = CHECKS.filter((c) => s.checks[c]).length;
-  const look = LOOKS[s.look] || LOOKS['1-bit'];
   return (
     <div
       className="fk-cockpit"
       style={{
-        ...look,
+        ...TOKENS,
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -527,7 +525,7 @@ const SessionTab: React.FC<{
             ))}
           </select>
         </div>
-        <div style={cell}>
+        <div style={{ ...cell, borderRight: 0 }}>
           <span style={label}>Genre</span>
           <select style={sfield} value={genre.name} onChange={(e) => set({ genre: e.target.value })}>
             {GENRES.map((g) => (
@@ -537,19 +535,6 @@ const SessionTab: React.FC<{
           <span style={{ ...mono, color: bpm < genre.bpm[0] || bpm > genre.bpm[1] ? 'var(--fk-warn)' : 'var(--fk-dim)' }}>
             {genre.bpm[0]}-{genre.bpm[1]} BPM{bpm < genre.bpm[0] || bpm > genre.bpm[1] ? ' (outside)' : ''}
           </span>
-        </div>
-        <div style={{ ...cell, borderRight: 0, marginLeft: 'auto' }}>
-          <span style={label}>Look</span>
-          {Object.keys(LOOKS).map((l) => (
-            <button
-              key={l}
-              style={{ ...button, ...(s.look === l ? { background: 'var(--sk-signal, #4b9560)', color: '#000', fontWeight: 700 } : {}) }}
-              aria-pressed={s.look === l}
-              onClick={() => set({ look: l })}
-            >
-              {l}
-            </button>
-          ))}
         </div>
       </div>
       <div className="fk-grid">
@@ -874,31 +859,17 @@ const field: React.CSSProperties = {
   background: '#fff',
   border: '2px inset #808080',
 };
-// Session cockpit: 1px rules between every cell, monospace numbers, no padding to spare. Two looks on trial:
-// 1-bit (the S machine: black on white) and Mixed (1-bit window and controls around a dark panel with
-// phosphor-green readouts and amber warnings).
-const LOOKS: Record<string, React.CSSProperties> = {
-  '1-bit': {
-    '--fk-bg': '#fff',
-    '--fk-ink': '#000',
-    '--fk-dim': '#555',
-    '--fk-rule': '#000',
-    '--fk-head-bg': '#000',
-    '--fk-head-ink': '#fff',
-    '--fk-read': '#000',
-    '--fk-warn': '#000',
-  } as React.CSSProperties,
-  Mixed: {
-    '--fk-bg': '#0a0a0c',
-    '--fk-ink': '#d8d8d8',
-    '--fk-dim': '#8a8a8a',
-    '--fk-rule': '#3a3a3a',
-    '--fk-head-bg': '#fff',
-    '--fk-head-ink': '#000',
-    '--fk-read': '#00ff66',
-    '--fk-warn': '#ffb000',
-  } as React.CSSProperties,
-};
+// Session cockpit: 1px rules between every cell, monospace numbers, no padding to spare (S machine, 1-bit)
+const TOKENS = {
+  '--fk-bg': '#fff',
+  '--fk-ink': '#000',
+  '--fk-dim': '#555',
+  '--fk-rule': '#000',
+  '--fk-head-bg': '#000',
+  '--fk-head-ink': '#fff',
+  '--fk-read': '#000',
+  '--fk-warn': '#000',
+} as React.CSSProperties;
 // Fixed layout: the ribbon and three panes always fill the window and each pane scrolls on its own (like a DAW).
 // On a narrow window (phone, tablet in portrait) the panes stack and the cockpit scrolls instead.
 const COCKPIT_CSS = `
