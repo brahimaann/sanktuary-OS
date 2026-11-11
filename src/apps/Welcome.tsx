@@ -41,9 +41,9 @@ const VISITOR_TOUR: Step[] = [
     open: win('my-computer', 'My Computer', 'directory', 'my-computer-16x16.png?v=2', 680, 500),
   },
   {
-    title: 'Producer: tools for making music',
-    text: 'Drop in a song to get its tempo, key and loudness, compare your mix with a reference, get delay and reverb times for your tempo, and read chains, tips and free tools. Your file stays on your device.',
-    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png?v=2', 720, 560),
+    title: 'Foundry: tools for making music',
+    text: 'A recording cockpit for your tempo and key. Drop in a song to get its tempo, key and loudness, compare your mix with a reference, get delay and reverb times for your tempo, and read chains, tips and free tools. Your file stays on your device.',
+    open: win('producer', 'Foundry', 'producer', 'convert-audio-16x16.png?v=2', 960, 620),
   },
   {
     title: 'Read CITIES',
@@ -72,23 +72,23 @@ const MEMBER_TOUR: Step[] = [
     open: win('sanktuary-network', 'Team Files', 'network', 'network-16x16.png?v=2', 560, 420),
   },
   {
-    title: 'Studio > Music: tracks fill themselves in',
+    title: 'Operations > Music: tracks fill themselves in',
     text: 'Drop bounces into a release\'s folder (or onto Tracks): "03 Song v4.wav" becomes track 3 with v4 as its bounce. Projects, stems, BPM and the cover are linked by name.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'music' }),
+    open: win('studio', 'Operations', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'music' }),
   },
   {
-    title: 'Studio > Calendar: shoots, shows, drops',
+    title: 'Operations > Calendar: shoots, shows, drops',
     text: 'One calendar for everything with a date, release days included. People on an entry get reminded the day before.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'calendar' }),
+    open: win('studio', 'Operations', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'calendar' }),
   },
   {
-    title: 'Studio > Opportunities: grants, calls, gigs',
+    title: 'Operations > Opportunities: grants, calls, gigs',
     text: 'Post a grant, residency, open call or gig with its link and deadline and the whole team hears about it. Mark Interested or Applying to get reminded a week and a day before it closes; Copy portfolio link fills the "work samples" box.',
-    open: win('studio', 'Studio', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'opportunities' }),
+    open: win('studio', 'Operations', 'studio', 'media-player-16x16.png?v=2', 960, 620, { tab: 'opportunities' }),
   },
   {
     title: 'Moodboards',
-    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Studio > Planner.',
+    text: 'Drag images, audio and files onto a shared canvas; it updates live for everyone. To-do boards (the old Planner) are in Operations > Planner.',
     open: win('moodboards', 'Moodboards', 'boards', 'paint-16x16.png?v=2', 560, 420),
   },
   {
@@ -97,9 +97,9 @@ const MEMBER_TOUR: Step[] = [
     open: win('teams', 'Messages', 'teams', 'outlook-express-16x16.png?v=2', 300, 520),
   },
   {
-    title: 'Producer',
-    text: 'Tempo, key and loudness of any bounce (from your device or Team Files), a reference comparison, delay and reverb times, and a guide. Save the tempo and key straight onto a track.',
-    open: win('producer', 'Producer', 'producer', 'convert-audio-16x16.png?v=2', 720, 560),
+    title: 'Foundry',
+    text: 'A recording cockpit (delay, reverb and compressor times, 808 notes, vocal checklist, genre chains), tempo, key and loudness of any bounce (from your device or Team Files), a reference comparison and a guide. Save the tempo and key straight onto a track.',
+    open: win('producer', 'Foundry', 'producer', 'convert-audio-16x16.png?v=2', 960, 620),
   },
   {
     title: 'Edit photos',

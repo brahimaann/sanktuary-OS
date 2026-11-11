@@ -2,18 +2,18 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner)
-// and opportunities (grants, calls, gigs) in one window.
+// Operations (the Studio window): Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner),
+// opportunities (grants, calls, gigs), outreach and the Library (books, Renaissance Radio, our archive) in one window.
 // Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
 const Tracks = lazy(() => import('./Tracks'));
 const Timeline = lazy(() => import('./Timeline'));
 const Boards = lazy(() => import('./Boards'));
 const Opportunities = lazy(() => import('./Opportunities'));
-const Archive = lazy(() => import('./Archive'));
+const Library = lazy(() => import('./Library'));
 const Outreach = lazy(() => import('./Outreach'));
 const Locations = lazy(() => import('./Locations'));
 
-export type StudioTab = 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'archive';
+export type StudioTab = 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'library';
 const TABS: [StudioTab, string][] = [
   ['music', 'Music'],
   ['calendar', 'Calendar'],
@@ -21,7 +21,7 @@ const TABS: [StudioTab, string][] = [
   ['boards', 'Planner'],
   ['opportunities', 'Opportunities'],
   ['outreach', 'Outreach'],
-  ['archive', 'Archive'],
+  ['library', 'Library'],
 ];
 
 /** Opens Studio on a tab (switching the tab if Studio is already open). */
@@ -29,7 +29,7 @@ export function openStudio(openWindow: ReturnType<typeof useWindowManager.getSta
   window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: tab }));
   openWindow({
     id: 'studio',
-    title: 'Studio',
+    title: 'Operations',
     icon: '/images/icons/media-player-16x16.png?v=2',
     appType: 'studio',
     appProps: { tab },
@@ -85,7 +85,7 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
                   ) : id === 'outreach' ? (
                     <Outreach />
                   ) : (
-                    <Archive />
+                    <Library />
                   )}
                 </div>
               ),

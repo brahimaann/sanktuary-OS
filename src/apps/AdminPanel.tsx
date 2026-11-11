@@ -1027,7 +1027,7 @@ const UsageTab: React.FC = () => {
       .filter(([k]) => k.startsWith(prefix))
       .reduce((n, [, v]) => n + v, 0);
   const gaps = [
-    !c.withBounce && 'no song has a bounce yet (Studio > Songs)',
+    !c.withBounce && 'no song has a bounce yet (Operations > Music)',
     !c.timeline && 'the calendar is empty',
     !c.stories && 'no story is published (Stories tab)',
     !c.products && 'the shop has nothing in it',

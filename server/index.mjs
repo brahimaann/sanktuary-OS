@@ -2809,6 +2809,90 @@ async function releaseMoved(r, was, me) {
       );
 }
 
+// ── /api/library: books we recommend, music classics, and our own archive (old and scrapped projects) — data/library.json ──
+// Anyone on the team adds an entry with a blurb on why it matters; others co-sign it. Whoever added it or an admin edits or
+// removes it. Radio and archive entries can carry one of our own tracks (data/library/<id>.<ext>), played in place.
+const LIB_KINDS = ['Book', 'Classic', 'Archive'];
+const LIB_AUDIO = new Set(['.mp3', '.m4a', '.wav', '.ogg']); // what browsers play
+const LIB_DIR = () => join(DATA, 'library');
+const libAudio = (o) => join(LIB_DIR(), o.id + o.audio);
+const LIB_TEXT = { title: 120, by: 120, year: 20, blurb: 2000, station: 40 }; // station: the radio's vibe, e.g. Late night
+let libDb = null;
+let libSaved = Promise.resolve();
+const loadLibrary = async () => (libDb ??= await readJson('library.json', { items: {} }));
+const saveLibrary = () => (libSaved = libSaved.then(() => saveJson('library.json', libDb)).catch(console.error));
+
+async function libraryApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const me = user.username;
+  const db = await loadLibrary();
+  const id = url.pathname.split('/')[3];
+  const changed = () => {
+    saveLibrary();
+    emit('library', {}, () => true);
+  };
+  const apply = (o, input) => {
+    for (const [k, max] of Object.entries(LIB_TEXT))
+      if (input[k] !== undefined)
+        o[k] = String(input[k] ?? '')
+          .trim()
+          .slice(0, max);
+    if (input.link !== undefined) {
+      const v = String(input.link || '').trim();
+      o.link = !v ? '' : /^https:\/\/\S+$/i.test(v) && v.length <= 500 ? v : fail(400, 'The link must start with https://');
+    }
+    if (input.kind !== undefined) o.kind = LIB_KINDS.includes(input.kind) ? input.kind : fail(400, 'Bad kind');
+    if (!o.title) fail(400, 'Give it a title');
+  };
+
+  if (req.method === 'GET' && !id) return json(res, { items: Object.values(db.items).filter((o) => !o.deleted), kinds: LIB_KINDS });
+  if (req.method === 'POST' && !id) {
+    const o = { id: randomUUID().slice(0, 10), kind: 'Book', title: '', by: '', year: '', blurb: '', link: '', cosigns: [] };
+    apply(o, await jsonBody(req));
+    Object.assign(o, { addedBy: me, created: new Date().toISOString() });
+    db.items[o.id] = o;
+    changed();
+    return json(res, o);
+  }
+  const o = (own(db.items, id) && !db.items[id].deleted && db.items[id]) || fail(404, 'No such entry');
+  const sub = url.pathname.split('/')[4];
+  if (sub === 'audio' && req.method === 'GET') return o.audio ? stream(req, res, url.searchParams, libAudio(o)) : fail(404, 'No track');
+  if (sub === 'audio' && req.method === 'PUT') {
+    if (o.addedBy !== me && !user.admin) fail(403, 'Only whoever added it or an admin can change its track');
+    if (o.kind === 'Book') fail(400, 'Books take a link, not a track');
+    const ext = extname(String(url.searchParams.get('name') || '')).toLowerCase();
+    if (!LIB_AUDIO.has(ext)) fail(400, 'Upload an MP3, M4A, WAV or OGG');
+    await mkdir(LIB_DIR(), { recursive: true });
+    const part = join(LIB_DIR(), `${o.id}.part`);
+    await pipeline(req, createWriteStream(part, BIG_BUFFER));
+    await rename(part, join(LIB_DIR(), o.id + ext)); // a failed upload leaves the old track playing
+    Object.assign(o, { audio: ext, audioName: safeName(url.searchParams.get('name')), updated: new Date().toISOString() });
+    changed();
+    return json(res, o);
+  }
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    if (input.cosign !== undefined) o.cosigns = o.cosigns.filter((u) => u !== me).concat(input.cosign && o.addedBy !== me ? [me] : []);
+    const { cosign, ...edit } = input;
+    if (Object.keys(edit).length) {
+      if (o.addedBy !== me && !user.admin) fail(403, 'Only whoever added it or an admin can edit it');
+      const next = { ...o }; // a refused change leaves the entry as it was
+      apply(next, edit);
+      Object.assign(o, next, { updated: new Date().toISOString() });
+    }
+    changed();
+    return json(res, o);
+  }
+  if (req.method === 'DELETE') {
+    if (o.addedBy !== me && !user.admin) fail(403, 'Only whoever added it or an admin can remove it');
+    o.deleted = new Date().toISOString(); // kept in the file, just hidden
+    changed();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown library action');
+}
+
 // ── /api/timeline: visual projects and events on one calendar — data/timeline.json ──
 // Shoots, artwork, videos, shows, drops... with dates, people, status and a linked folder. Release dates and
 // track deadlines from Tracks are merged in (read-only) so there is one timeline for everything.
@@ -4864,6 +4948,31 @@ async function publicApi(req, res, url) {
   if (req.method === 'GET' && what === 'release') return releasePublic(req, res, url);
   if (req.method === 'GET' && what === 'portfolio') return portfolioPublic(req, res);
   if (req.method === 'GET' && what === 'portfolios') return portfoliosPublic(req, res, who, ...url.pathname.split('/').slice(5));
+  if (req.method === 'GET' && what === 'library' && !who) {
+    // CITIES' Library page: the books and classics the team recommends. The team's own archive stays inside.
+    res.setHeader('cache-control', 'public, max-age=60');
+    return json(res, {
+      items: Object.values((await loadLibrary()).items)
+        .filter((i) => !i.deleted && i.kind !== 'Archive')
+        .sort((a, b) => b.cosigns.length - a.cosigns.length || b.created.localeCompare(a.created))
+        .map(({ id, kind, title, by, year, blurb, link, addedBy, cosigns, audio, station }) => ({
+          kind,
+          station: kind === 'Classic' ? station || 'Renaissance' : undefined,
+          title,
+          by,
+          year,
+          blurb,
+          link,
+          addedBy,
+          cosigns,
+          audio: audio ? `/api/public/library/${id}` : null,
+        })),
+    });
+  }
+  if (req.method === 'GET' && what === 'library' && who) {
+    const i = Object.values((await loadLibrary()).items).find((i) => i.id === who && !i.deleted && i.kind !== 'Archive' && i.audio);
+    return i ? stream(req, res, url.searchParams, libAudio(i)) : fail(404, 'Not found');
+  }
   if (req.method === 'GET' && what === 'directory') {
     const today = localDate();
     const tdb = await publicTracks();
@@ -6051,6 +6160,7 @@ const BLOG_SECTIONS = {
   'field-notes': ['Field Notes', 'Straight from the field: shoots, sessions and shows around the Twin Cities.'],
   videos: ['Videos', 'New videos from Twin Cities creators.'],
   moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
+  library: ['Library', 'Books we read and recommend, and Renaissance Radio: our tracks, with the story behind them.'],
 };
 const metaTags = ({ title, text, image, link }) =>
   [
@@ -9885,6 +9995,7 @@ const routes = [
   ['/api/locations', locationsApi],
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
+  ['/api/library', libraryApi],
   ['/api/youtube', youtubeApi],
   ['/api/mail', mailApi],
   ['/api/video', videoApi],
