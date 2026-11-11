@@ -8,15 +8,39 @@
     <link rel="icon" href="/favicon.ico" />
     <style>
       /* Members start drafts for CITIES here; admins read them in Admin Panel > CITIES and publish them */
+      /* The S machine, as on the desktop: 1-bit paper and ink, plus one signal colour for the selection and the main action */
+      @font-face {
+        font-family: 'Pixelify Sans';
+        src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
+        font-weight: 400 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Silkscreen';
+        src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+        font-display: swap;
+      }
+      :root {
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --pixel: 'Pixelify Sans', Arial, sans-serif;
+        --label: 'Silkscreen', 'Pixelify Sans', monospace;
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
+      }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important; /* Pixelify's fi ligature reads as an A; font shorthands would turn it back on */
       }
       body {
         margin: 0;
         min-height: 100vh;
-        background: #008080;
-        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
-        font-size: 13px;
+        background: var(--dots), var(--paper);
+        font-family: var(--pixel);
+        font-size: 14px;
+        color: var(--ink);
         display: flex;
         justify-content: center;
         padding: 24px 12px;
@@ -25,19 +49,39 @@
         width: min(820px, 100%);
       }
       .win {
-        background: #c0c0c0;
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 1px 1px 0 #000;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
       }
       .title {
-        background: linear-gradient(90deg, #000080, #1084d0);
-        color: #fff;
-        font-weight: 700;
-        padding: 4px 6px;
+        height: 28px;
+        padding: 5px 4px;
+        border-bottom: 2px solid var(--ink);
+        background: repeating-linear-gradient(var(--ink) 0 1px, var(--paper) 1px 3px) content-box var(--paper);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+      }
+      .title > * {
+        background: var(--paper);
+        line-height: 16px;
+        padding: 0 8px;
+      }
+      .title > img + * {
+        padding-left: 2px;
+      }
+      .title > img {
+        padding: 0 2px 0 8px;
+        box-sizing: content-box;
+        image-rendering: pixelated;
       }
       .title a {
-        color: #fff;
+        color: var(--ink);
+      }
+      a {
+        color: var(--ink);
       }
       .body {
         padding: 10px;
@@ -47,20 +91,36 @@
       }
       .btn {
         font: inherit;
-        padding: 4px 12px;
+        padding: 3px 12px;
         min-height: 28px;
-        background: #c0c0c0;
-        color: #000;
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
-        cursor: pointer;
+        background: var(--paper);
+        color: var(--ink);
         text-decoration: none;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        box-shadow: none;
+        cursor: pointer;
         display: inline-flex;
         align-items: center;
       }
+      .btn:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .btn.on,
+      .btn:active {
+        background: var(--signal);
+        color: var(--ink);
+      }
       .btn:disabled {
+        background: var(--paper);
         color: #808080;
+        border-color: #808080;
+        cursor: default;
+      }
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 1px;
       }
       .row {
         display: flex;
@@ -73,9 +133,9 @@
       textarea {
         font: inherit;
         padding: 4px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        background: #fff;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        background: var(--paper);
       }
       textarea {
         width: 100%;
@@ -92,34 +152,40 @@
         align-items: center;
       }
       .list div {
-        background: #fff;
+        background: var(--paper);
         padding: 4px 6px;
         border-bottom: 1px solid #ddd;
         cursor: pointer;
       }
+      .list div:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
       .list div.on {
-        background: #000080;
-        color: #fff;
+        background: var(--signal);
+        color: var(--ink);
       }
       .hint {
-        color: #444;
+        color: var(--dim);
       }
       .msg {
         color: #a00000;
       }
       fieldset {
-        border: 2px groove #fff;
+        border: 2px solid var(--ink);
       }
       img.cover {
         height: 56px;
-        border: 1px solid #808080;
+        border: 2px solid var(--ink);
       }
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="win">
-        <div class="title">Write for <a href="/cities">CITIES</a></div>
+        <div class="title">
+          <span>Write for <a href="/cities">CITIES</a></span>
+        </div>
         <div class="body" id="app">Loading...</div>
       </div>
     </div>

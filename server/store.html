@@ -6,20 +6,39 @@
     <title>Sanktuary</title>
     <link rel="icon" href="/favicon.ico" />
     <style>
+      /* The S machine, as on the desktop: 1-bit paper and ink, plus one signal colour for the selection and the main action */
+      @font-face {
+        font-family: 'Pixelify Sans';
+        src: url('/font/pixelify-sans/pixelify-sans-latin.woff2') format('woff2');
+        font-weight: 400 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Silkscreen';
+        src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
+        font-display: swap;
+      }
       :root {
-        --face: #c0c0c0;
-        --navy: #000080;
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --pixel: 'Pixelify Sans', Arial, sans-serif;
+        --label: 'Silkscreen', 'Pixelify Sans', monospace;
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
       }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important; /* Pixelify's fi ligature reads as an A; font shorthands would turn it back on */
       }
       body {
         margin: 0;
         min-height: 100vh;
-        background: #008080;
-        font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
-        font-size: 13px;
-        color: #000;
+        background: var(--dots), var(--paper);
+        font-family: var(--pixel);
+        font-size: 14px;
+        color: var(--ink);
         display: flex;
         justify-content: center;
         padding: 24px 12px;
@@ -28,22 +47,36 @@
         width: min(820px, 100%);
       }
       .win {
-        background: var(--face);
-        border: 2px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: 1px 1px 0 #000;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
       }
       .title {
-        background: linear-gradient(90deg, var(--navy), #1084d0);
-        color: #fff;
-        font-weight: 700;
-        padding: 4px 6px;
+        height: 28px;
+        padding: 5px 4px;
+        border-bottom: 2px solid var(--ink);
+        background: repeating-linear-gradient(var(--ink) 0 1px, var(--paper) 1px 3px) content-box var(--paper);
         display: flex;
         align-items: center;
-        gap: 6px;
+        justify-content: center;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+      }
+      .title > * {
+        background: var(--paper);
+        line-height: 16px;
+        padding: 0 8px;
+      }
+      .title > img + * {
+        padding-left: 2px;
+      }
+      .title > img {
+        padding: 0 2px 0 8px;
+        box-sizing: content-box;
+        image-rendering: pixelated;
       }
       .title a {
-        color: #fff;
+        color: var(--ink);
         text-decoration: none;
       }
       .body {
@@ -53,78 +86,91 @@
         gap: 10px;
       }
       .inset {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         padding: 12px;
       }
       .btn {
         font: inherit;
         padding: 4px 12px;
         min-height: 30px;
-        background: var(--face);
-        color: #000;
+        background: var(--paper);
+        color: var(--ink);
         text-decoration: none;
-        border: 1px solid;
-        border-color: #fff #000 #000 #fff;
-        box-shadow: inset -1px -1px #808080;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        box-shadow: none;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
         gap: 6px;
       }
+      .btn:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
       .btn.on,
       .btn:active {
-        border-color: #000 #fff #fff #000;
-        box-shadow: inset 1px 1px #808080;
-        background: #d4d4d4;
-      }
-      .btn.big {
-        font-weight: 700;
-        min-height: 36px;
-        padding: 6px 18px;
+        background: var(--signal);
+        color: var(--ink);
       }
       .btn:disabled {
+        background: var(--paper);
         color: #808080;
-        text-shadow: 1px 1px #fff;
+        border-color: #808080;
         cursor: default;
+      }
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 1px;
+      }
+      /* The main action (Buy, Continue to payment) wears the signal colour */
+      .btn.big {
+        font-weight: 700;
+        min-height: 38px;
+        padding: 6px 18px;
+        background: var(--signal);
+        box-shadow: 3px 3px 0 var(--ink);
+      }
+      .btn.big:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .btn.big:disabled {
+        background: var(--paper);
+        box-shadow: none;
       }
       input,
       textarea {
         font: inherit;
         padding: 5px;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
-        background: #fff;
+        border: 2px solid var(--ink);
+        border-radius: 0;
+        background: var(--paper);
         min-width: 0;
       }
       h1 {
-        font:
-          700 22px Georgia,
-          serif;
+        font: 700 26px/1.15 var(--pixel);
         margin: 0;
       }
       .muted {
-        color: #555;
+        color: var(--dim);
       }
-      /* Win98 progress bar: navy blocks in a sunken track */
+      /* Progress bar: signal-green blocks in a black frame */
       .bar {
         height: 22px;
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         padding: 2px;
       }
       .bar div {
         height: 100%;
-        background: repeating-linear-gradient(90deg, var(--navy) 0 10px, transparent 10px 12px);
+        background: repeating-linear-gradient(90deg, var(--signal) 0 10px, transparent 10px 12px);
         transition: width 0.6s;
       }
       .big-number {
-        font:
-          700 26px Arial,
-          sans-serif;
-        color: var(--navy);
+        font: 700 28px var(--pixel);
+        color: var(--ink);
       }
       .row {
         display: flex;
@@ -138,28 +184,37 @@
         gap: 10px;
       }
       .card {
-        background: #fff;
-        border: 2px solid;
-        border-color: #808080 #fff #fff #808080;
+        background: var(--paper);
+        border: 2px solid var(--ink);
         color: inherit;
         text-decoration: none;
         display: flex;
         flex-direction: column;
+      }
+      .card:hover {
+        transform: translate(-2px, -2px);
+        box-shadow: 4px 4px 0 var(--ink);
       }
       .card img,
       .product img {
         width: 100%;
         aspect-ratio: 1;
         object-fit: cover;
-        background: #eee;
+        background: var(--dots), #eee;
         display: block;
+      }
+      .card img {
+        border-bottom: 2px solid var(--ink);
+      }
+      .product img {
+        border: 2px solid var(--ink);
       }
       .card .t {
         padding: 8px;
       }
       .note {
-        background: #ffffe1;
-        border: 1px solid #808080;
+        background: var(--paper);
+        border: 2px dashed var(--ink);
         padding: 8px;
       }
       .err {
@@ -176,14 +231,16 @@
         }
       }
       .foot {
-        color: #fff;
         text-align: center;
-        margin-top: 10px;
-        font-size: 11px;
-        opacity: 0.85;
+        margin: 12px auto 0;
+        font: 12px var(--label);
+        -webkit-font-smoothing: none;
+        background: var(--paper);
+        width: fit-content;
+        padding: 2px 8px;
       }
       .foot a {
-        color: #fff;
+        color: var(--ink);
       }
     </style>
   </head>
@@ -346,7 +403,7 @@
       ) => `<a class="card" href="/shop/${esc(p.slug)}">${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : ''}
         <div class="t">${p.capsule ? `<div class="muted" style="font-size:11px">${esc(p.capsule)}</div>` : ''}<b>${esc(p.title)}</b>
         <div class="muted">${usd(p.price)} · ${p.kind === 'digital' ? esc(CATS[p.category] || 'Digital') + ' · download' : 'shipped'}</div>
-        ${upcoming(p) ? `<div style="color:var(--navy);font-weight:700" data-drop="${esc(p.dropAt)}"></div>` : p.left !== null && p.left <= 10 ? `<div class="err">${p.left ? `Only ${p.left} left` : 'All in checkouts right now'}</div>` : ''}</div></a>`;
+        ${upcoming(p) ? `<div style="font-weight:700" data-drop="${esc(p.dropAt)}"></div>` : p.left !== null && p.left <= 10 ? `<div class="err">${p.left ? `Only ${p.left} left` : 'All in checkouts right now'}</div>` : ''}</div></a>`;
       // The Vault: everything sold out or retired, as a gallery (not for sale)
       function showVault(vault) {
         title('The Vault');
