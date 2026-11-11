@@ -7,6 +7,23 @@ import FilePicker from '../components/FilePicker';
 import { fileKind } from './fileTypes';
 import { IconLabel } from '../components/RetroIcon';
 import { GUIDE, GENRES, TRACKING } from './producerGuide';
+import {
+  TOKENS,
+  COCKPIT_CSS,
+  rule,
+  mono,
+  cell,
+  label,
+  pane,
+  paneHead,
+  grid,
+  gth,
+  gtd,
+  num,
+  caption,
+  sfield,
+  FoundryRoles,
+} from './foundryModes';
 import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 
 // Foundry (the Producer window): a companion for making music. Session is the recording cockpit: tempo, key,
@@ -59,7 +76,7 @@ const Producer: React.FC = () => {
       <div style={{ flex: 1, overflow: 'auto', background: '#fff', borderTop: '1px solid #fff', padding: tab === 'session' ? 0 : 8 }}>
         {tab === 'analyze' && <AnalyzeTab current={mine} onDone={adopt} />}
         {tab === 'compare' && <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />}
-        {tab === 'session' && <SessionTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />}
+        {tab === 'session' && <FoundryRoles recording={<SessionTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />} />}
         {tab === 'convert' && <ConvertTab />}
         {tab === 'guide' && <GuideTab />}
       </div>
@@ -859,48 +876,4 @@ const field: React.CSSProperties = {
   background: '#fff',
   border: '2px inset #808080',
 };
-// Session cockpit: 1px rules between every cell, monospace numbers, no padding to spare (S machine, 1-bit)
-const TOKENS = {
-  '--fk-bg': '#fff',
-  '--fk-ink': '#000',
-  '--fk-dim': '#555',
-  '--fk-rule': '#000',
-  '--fk-head-bg': '#000',
-  '--fk-head-ink': '#fff',
-  '--fk-read': '#000',
-  '--fk-warn': '#000',
-} as React.CSSProperties;
-// Fixed layout: the ribbon and three panes always fill the window and each pane scrolls on its own (like a DAW).
-// On a narrow window (phone, tablet in portrait) the panes stack and the cockpit scrolls instead.
-const COCKPIT_CSS = `
-.fk-cockpit { container-type: inline-size; }
-.fk-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 1fr) minmax(240px, 1.1fr) minmax(250px, 1fr); overflow: hidden; }
-.fk-grid > section { overflow: auto; }
-.fk-cockpit input[type='checkbox'] { accent-color: var(--sk-signal, #4b9560); }
-@container (max-width: 760px) {
-  .fk-grid { grid-template-columns: 1fr; overflow: auto; }
-  .fk-grid > section { overflow: visible; border-right: 0 !important; border-bottom: 1px solid var(--fk-rule); }
-}
-`;
-const rule = '1px solid var(--fk-rule)';
-const mono: React.CSSProperties = { fontFamily: 'ui-monospace, Consolas, monospace', fontVariantNumeric: 'tabular-nums' };
-const cell: React.CSSProperties = { display: 'flex', gap: 4, alignItems: 'center', padding: '4px 6px', borderRight: rule };
-const label: React.CSSProperties = { fontWeight: 700, textTransform: 'uppercase', fontSize: 10 };
-const pane: React.CSSProperties = { display: 'flex', flexDirection: 'column', borderRight: rule, minHeight: 0, overflow: 'auto' };
-const paneHead: React.CSSProperties = {
-  margin: 0,
-  padding: '2px 6px',
-  background: 'var(--fk-head-bg)',
-  color: 'var(--fk-head-ink)',
-  fontSize: 11,
-  position: 'sticky',
-  top: 0,
-};
-const grid: React.CSSProperties = { borderCollapse: 'collapse', width: '100%' };
-const gth: React.CSSProperties = { ...label, textAlign: 'left', padding: '2px 6px', borderBottom: rule };
-const gtd: React.CSSProperties = { padding: '1px 6px', borderBottom: '1px dotted var(--fk-rule)', whiteSpace: 'nowrap' };
-const num: React.CSSProperties = { ...gtd, ...mono, textAlign: 'right', color: 'var(--fk-read)' };
-const caption: React.CSSProperties = { padding: '2px 6px 4px', color: 'var(--fk-dim)', fontSize: 10, borderBottom: rule };
-const sfield: React.CSSProperties = { ...field, background: 'var(--fk-bg)', color: 'var(--fk-ink)', border: rule };
-
 export default Producer;
