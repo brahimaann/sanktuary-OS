@@ -117,9 +117,10 @@ const app = {
     width: 640,
     height: 480,
   },
-  // Admins only; the server additionally requires two-step verification for Business
+  // Ledger (the Business window): admins only for now; the server additionally requires two-step verification.
+  // A member Ledger (your own splits and invoices) comes later.
   admin: { id: 'admin-panel', title: 'Admin Panel', icon: I('settings'), appType: 'admin', width: 760, height: 540 },
-  business: { id: 'business', title: 'Business', icon: I('my-documents-folder'), appType: 'business', width: 860, height: 600 },
+  business: { id: 'business', title: 'Ledger', icon: I('my-documents-folder'), appType: 'business', width: 860, height: 600 },
 } satisfies Record<string, DesktopIconDef>;
 
 // A desktop folder: a small window of icons, so a phone screen holds the whole desktop
@@ -133,21 +134,26 @@ const folder = (id: string, title: string, icon: string, items: DesktopIconDef[]
   height: 300,
 });
 
-// Logged on: everyday studio apps first, then the front door, then folders. Visitors get the front door and extras.
+// Logged on: the four workspaces first, then Messages, CITIES, the front door and folders. Visitors get the front door and extras.
 const memberIcons = (admin: boolean): DesktopIconDef[] => [
   app.new,
-  app.studio,
-  app.moodboards,
-  app.teams,
-  app.files,
+  // The four workspaces: Foundry (making), Darkroom (assets and review), Operations (projects and logistics), Ledger
   app.producer,
-  folder('folder-create', 'Create', 'programs-folder', [app.rapidraw, app.darkroom, app.videoEditor, app.notepad]),
+  folder('folder-darkroom', 'Darkroom', 'kodak-imaging', [
+    app.darkroom,
+    app.rapidraw,
+    app.videoEditor,
+    app.files,
+    app.moodboards,
+    app.notepad,
+  ]),
+  app.studio,
+  ...(admin ? [app.business] : []),
+  app.teams,
   folder('folder-cities', 'CITIES', 'internet-folder', [app.blog, app.magazine, app.write]),
-  app.welcome,
-  app.computer,
-  app.nodes,
-  app.shop,
-  ...(admin ? [folder('folder-admin', 'Admin', 'tools-folder', [app.admin, app.business])] : []),
+  // The public front door, as visitors see it
+  folder('folder-front', 'Front door', 'programs-folder', [app.welcome, app.computer, app.nodes, app.shop]),
+  ...(admin ? [folder('folder-admin', 'Admin', 'tools-folder', [app.admin])] : []),
   folder('folder-extras', 'Extras', 'folder', [app.ie, app.africaonly, app.pong]),
   app.recycle,
 ];
