@@ -16,7 +16,7 @@ export interface GuideSection {
 export const GUIDE: GuideSection[] = [
   {
     title: 'Chains',
-    intro: 'In order, top to bottom. Use the Tempo & key tab for delay and reverb times at your tempo.',
+    intro: 'In order, top to bottom. Use the Session tab for delay and reverb times at your tempo.',
     items: [
       {
         name: 'Lead vocal',
@@ -200,4 +200,84 @@ export const GUIDE: GuideSection[] = [
       },
     ],
   },
+];
+
+// Session tab: a short brief per genre (tempo range, what matters, a vocal chain in order). Ableton stock devices
+// first, a common third-party alternative in brackets. Starting points, not rules.
+export interface Genre {
+  name: string;
+  bpm: [number, number];
+  note: string;
+  chain: string[];
+}
+export const GENRES: Genre[] = [
+  {
+    name: 'Detroit rap',
+    bpm: [90, 105],
+    note: 'Fast, bouncy flows over sparse beats: the vocal sits loud and dry on top, the 808 and bass carry the low end.',
+    chain: [
+      'EQ Eight: high-pass 90 Hz, cut boxiness at 250-400 Hz (Pro-Q).',
+      'Compressor: 4:1, attack 3-5 ms, release at the 1/16 time, 5-8 dB on peaks (RCompressor, 1176).',
+      'De-esser on 5-8 kHz.',
+      'Saturator, light drive for edge (Saturn 2, warm tape).',
+      'Glue Compressor catching 1-2 dB to keep it upfront (or Vocal Rider before it).',
+      'Short 1/8 slap delay on a send, almost no reverb.',
+    ],
+  },
+  {
+    name: 'Afrobeats / Afro-fusion',
+    bpm: [95, 115],
+    note: 'Groove and melody first: the voice floats on the percussion, with a little space and call and response in the ad-libs.',
+    chain: [
+      'EQ Eight: high-pass 80-100 Hz, gentle lift at 10-12 kHz for air.',
+      'Compressor: 3:1, attack 10 ms, release at the 1/8 time, 3-5 dB.',
+      'De-esser on 6-9 kHz.',
+      'Saturator, soft sine, low drive.',
+      'Plate reverb send (pre-delay and decay from Signal math) and a 1/4 dotted delay send.',
+    ],
+  },
+  {
+    name: 'Amapiano',
+    bpm: [110, 115],
+    note: 'Log drum and space: keep vocals clear of 100-250 Hz so the log drum owns it, and leave room for long reverbs.',
+    chain: [
+      'EQ Eight: high-pass 120-150 Hz.',
+      'Compressor: 3:1, attack 10-15 ms, release at the 1/8 time.',
+      'De-esser on 6-9 kHz.',
+      'Hall or long plate send, high-passed at 300 Hz.',
+      '1/8 dotted delay send, filtered.',
+    ],
+  },
+  {
+    name: 'Drill',
+    bpm: [138, 145],
+    note: 'Sliding 808s and half-time feel: vocals tight and aggressive, with ad-libs panned and dark.',
+    chain: [
+      'EQ Eight: high-pass 100 Hz, presence lift at 3-4 kHz.',
+      'Compressor: 4:1 to 6:1, attack 2-5 ms, release at the 1/16 time.',
+      'Saturator or Roar for grit (Saturn 2).',
+      'Limiter catching 1-2 dB (L2) to pin it in place.',
+      'Short room reverb, 1/16 delay throws on line ends.',
+    ],
+  },
+  {
+    name: 'R&B',
+    bpm: [60, 90],
+    note: 'Smooth and close: control the dynamics gently, stack harmonies wide, and give the lead a lush plate.',
+    chain: [
+      'EQ Eight: high-pass 80 Hz, cut 300 Hz if muddy, soft air shelf.',
+      'Compressor: 2:1 to 3:1, attack 15-20 ms, release at the 1/8 time.',
+      'Second compressor or Vocal Rider for 1-3 dB more.',
+      'De-esser on 5-8 kHz.',
+      'Plate send and a 1/4 note delay send, both filtered.',
+    ],
+  },
+];
+
+// Session tab: how to track a vocal
+export const TRACKING = [
+  'Cardioid pattern, 15-20 cm from the mic with a pop filter; closer for intimate takes, back off for shouts.',
+  'Gain: about -18 dBFS average with peaks no higher than -6 dBFS. Set it on the loudest line.',
+  'Same mic, distance and gain for doubles and stacks so they blend.',
+  'Headphone mix: a little reverb helps pitch; keep the click or hats audible.',
 ];

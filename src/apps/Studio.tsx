@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Studio: Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner)
+// Operations (the Studio window): Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner)
 // and opportunities (grants, calls, gigs) in one window.
 // Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
 const Tracks = lazy(() => import('./Tracks'));
@@ -29,7 +29,7 @@ export function openStudio(openWindow: ReturnType<typeof useWindowManager.getSta
   window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: tab }));
   openWindow({
     id: 'studio',
-    title: 'Studio',
+    title: 'Operations',
     icon: '/images/icons/media-player-16x16.png?v=2',
     appType: 'studio',
     appProps: { tab },

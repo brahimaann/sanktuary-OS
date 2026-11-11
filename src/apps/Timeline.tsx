@@ -369,7 +369,7 @@ const EntryPanel: React.FC<{
               save({ place: p?.id || null, ...(p && !e.location ? { location: p.address || p.name } : {}) });
             }}
             style={input}
-            title="A spot from the location library (Studio > Locations)"
+            title="A spot from the location library (Operations > Locations)"
           >
             <option value="">(not from the location library)</option>
             {spots.map((x) => (

@@ -25,10 +25,10 @@ interface DesktopIconDef {
 const I = (name: string) => `/images/icons/${name}-32x32.png?v=2`;
 const app = {
   new: { id: 'new', title: 'New...', icon: I('file'), appType: 'new', width: 460, height: 420 },
-  // Studio: Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
+  // Operations (Studio window): Music (projects, songs, bounces, like Untitled), calendar, to-do boards, opportunities and outreach in one window
   studio: {
     id: 'studio',
-    title: 'Studio',
+    title: 'Operations',
     icon: I('media-player'),
     appType: 'studio',
     appProps: { tab: 'music' },
@@ -47,7 +47,8 @@ const app = {
   moodboards: { id: 'moodboards', title: 'Moodboards', icon: I('paint'), appType: 'boards', width: 560, height: 420 },
   teams: { id: 'teams', title: 'Messages', icon: I('outlook-express'), appType: 'teams', width: 300, height: 520 },
   files: { id: 'sanktuary-network', title: 'Team Files', icon: I('network'), appType: 'network', width: 560, height: 420 },
-  producer: { id: 'producer', title: 'Producer', icon: I('convert-audio'), appType: 'producer', width: 720, height: 560 },
+  // Foundry: the making workspace (Producer window): Session cockpit, Analyze, Compare, To WAV, Guide
+  producer: { id: 'producer', title: 'Foundry', icon: I('convert-audio'), appType: 'producer', width: 960, height: 620 },
   rapidraw: {
     id: 'rapidraw',
     title: 'SANKTUARY RAW',
