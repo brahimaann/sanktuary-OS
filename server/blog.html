@@ -43,6 +43,9 @@
         justify-content: center;
         padding: 24px 12px;
       }
+      a {
+        color: var(--ink);
+      }
       .wrap {
         width: min(820px, 100%);
       }
@@ -477,6 +480,9 @@
         color: #000;
         max-width: 640px;
       }
+      .shuffle .mp {
+        width: min(420px, 90vw);
+      }
       .shuffle .song {
         color: #fff;
         font-size: 18px;
@@ -497,6 +503,106 @@
         position: absolute;
         top: 12px;
         right: 12px;
+      }
+      /* The 1-bit player, as in Music and on share links: the browser's <audio> plays, hidden behind these controls */
+      .mp {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+        padding: 6px;
+        background: var(--paper);
+        color: var(--ink);
+        font: 14px var(--pixel);
+      }
+      .mp audio {
+        display: none;
+      }
+      .mp-lcd {
+        background: var(--ink);
+        color: var(--signal);
+        font: 11px var(--label);
+        -webkit-font-smoothing: none;
+        padding: 6px 8px;
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .mp-lcd .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mp-lcd [data-time] {
+        color: var(--paper);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .mp-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .mp-btn {
+        width: 34px;
+        flex: none;
+        padding: 0;
+        justify-content: center;
+      }
+      .mp-btn svg {
+        width: 14px;
+        height: 14px;
+      }
+      .mp-sep {
+        width: 2px;
+        align-self: stretch;
+        margin: 2px 4px;
+        background: var(--ink);
+      }
+      .mp img {
+        width: 16px;
+        height: 16px;
+        flex: none;
+      }
+      .mp input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+        height: 22px;
+        margin: 0;
+        cursor: pointer;
+      }
+      .mp input[type='range']::-webkit-slider-runnable-track {
+        height: 2px;
+        background: var(--ink);
+      }
+      .mp input[type='range']::-moz-range-track {
+        height: 2px;
+        background: var(--ink);
+      }
+      .mp input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 18px;
+        margin-top: -8px;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        border-radius: 0;
+      }
+      .mp input[type='range']::-moz-range-thumb {
+        width: 8px;
+        height: 14px;
+        border-radius: 0;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+      }
+      .mp .seek {
+        width: 100%;
+      }
+      .mp .vol {
+        flex: 1;
+        min-width: 50px;
+        max-width: 90px;
       }
       .videos {
         display: grid;
@@ -800,12 +906,71 @@
           return localStorage.getItem(`sk_mood_${id}_${k}`);
         } catch {}
       };
+      // The 1-bit player (Music's look): player() draws it, wirePlayers() hooks it to its hidden <audio>.
+      // With chain, the players in a list play one after another, like a radio.
+      const svg = (d) =>
+        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+      const glyph = {
+        play: svg('<path d="M7 4.5v15L19.5 12 7 4.5Z" fill="currentColor"/>'),
+        pause: svg('<path d="M8.5 5v14M15.5 5v14" stroke-width="3.2"/>'),
+        stop: svg('<rect x="5.5" y="5.5" width="13" height="13" rx="1.5" fill="currentColor"/>'),
+      };
+      const clock = (s) =>
+        isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--';
+      const player = (src, name, autoplay = false) => `<div class="mp" data-player>
+          <audio preload="none" src="${esc(src)}" ${autoplay ? 'autoplay' : ''}></audio>
+          <div class="mp-lcd"><span class="name">${esc(name)}</span><span data-time>00:00 / --:--</span></div>
+          <input class="seek" type="range" min="0" max="1000" value="0" aria-label="Position" data-seek>
+          <div class="mp-row">
+            <button class="btn mp-btn" title="Play" data-play>${glyph.play}</button>
+            <button class="btn mp-btn" title="Pause" data-pause>${glyph.pause}</button>
+            <button class="btn mp-btn" title="Stop" data-stop>${glyph.stop}</button>
+            <span class="mp-sep"></span>
+            <img src="/images/icons/speaker-16x16.png?v=2" alt="Volume" width="16" height="16">
+            <input class="vol" type="range" min="0" max="100" value="100" aria-label="Volume" data-vol>
+          </div>
+        </div>`;
+      function wirePlayers(root, chain = false) {
+        const all = [...root.querySelectorAll('[data-player]')];
+        all.forEach((el, i) => {
+          const m = el.querySelector('audio');
+          const $ = (s) => el.querySelector(s);
+          const seek = $('[data-seek]');
+          let dragging = false;
+          const show = () => {
+            $('[data-time]').textContent = `${clock(m.currentTime)} / ${clock(m.duration)}`;
+            $('[data-play]').classList.toggle('on', !m.paused);
+            $('[data-pause]').classList.toggle('on', m.paused && m.currentTime > 0 && !m.ended);
+            if (!dragging && m.duration) seek.value = String((m.currentTime / m.duration) * 1000);
+          };
+          ['timeupdate', 'play', 'pause', 'ended', 'loadedmetadata'].forEach((ev) => m.addEventListener(ev, show));
+          // One track at a time: starting one stops the others
+          m.addEventListener('play', () => all.forEach((o) => o !== el && o.querySelector('audio').pause()));
+          if (chain) m.addEventListener('ended', () => all[i + 1]?.querySelector('audio').play());
+          $('[data-play]').onclick = () => m.play();
+          $('[data-pause]').onclick = () => m.pause();
+          $('[data-stop]').onclick = () => {
+            m.pause();
+            m.currentTime = 0;
+            show();
+          };
+          seek.oninput = () => {
+            dragging = true;
+            if (m.duration) $('[data-time]').textContent = `${clock((seek.value / 1000) * m.duration)} / ${clock(m.duration)}`;
+          };
+          seek.onchange = () => {
+            dragging = false;
+            if (m.duration) m.currentTime = (seek.value / 1000) * m.duration;
+          };
+          $('[data-vol]').oninput = (e) => (m.volume = e.target.value / 100);
+        });
+      }
+
       function dropBody(d, big) {
         if (d.kind === 'image') return `<img src="${esc(d.src)}" alt="${esc(d.name || '')}" loading="lazy">`;
         if (d.kind === 'video')
           return `<video src="${esc(d.src)}" controls playsinline preload="metadata" ${big ? 'autoplay' : ''}></video>`;
-        if (d.kind === 'audio')
-          return `<div class="song"><b>♪ ${esc(d.name || 'Track')}</b><audio src="${esc(d.src)}" controls preload="none" ${big ? 'autoplay' : ''}></audio></div>`;
+        if (d.kind === 'audio') return player(d.src, d.name || 'Track', big);
         if (d.kind === 'link')
           return `<a class="song" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(d.name || d.text || new URL(d.url).hostname)}</b><span>${esc(new URL(d.url).hostname)} &nearr;</span></a>`;
         return `<div class="words" style="background:${esc(d.color || '#fff')}">${esc(d.text)}</div>`;
@@ -873,6 +1038,7 @@
           <p style="font-size:11px;margin:8px 0 0">Tap a mood to react. <a href="${esc(mood.board)}" target="_blank" rel="noopener">See the whole board</a>, laid out the way the team made it.</p>`;
         app.querySelectorAll('[data-m]').forEach((b) => (b.onclick = () => ((moodFilter = b.dataset.m), moodboard(month))));
         app.querySelectorAll('[data-r]').forEach((b) => (b.onclick = () => react(b)));
+        wirePlayers(app);
       }
       // Shuffle: the month's drops full screen in random order. Pictures and words stay 6 seconds, clips and songs
       // play to the end. Tap the right side (or →) for next, the left (or ←) for back, Esc to leave.
@@ -891,6 +1057,7 @@
           box.innerHTML = `<div class="stage">${dropBody(d, true)}</div><div class="cap">${tag ? `${tag[1]} ${tag[2]} · ` : ''}${n + 1} / ${list.length}</div>${reactBar(d)}<button class="btn x" aria-label="Close">&times;</button>`;
           box.querySelectorAll('[data-r]').forEach((b) => (b.onclick = (e) => (e.stopPropagation(), react(b))));
           box.querySelector('.x').onclick = (e) => (e.stopPropagation(), close());
+          wirePlayers(box);
           const media = box.querySelector('video,audio');
           if (media) media.onended = () => (n++, show());
           else timer = setTimeout(() => (n++, show()), 6000);
@@ -898,7 +1065,7 @@
         const key = (e) => (e.key === 'Escape' ? close() : e.key === 'ArrowRight' ? (n++, show()) : e.key === 'ArrowLeft' && (n--, show()));
         const close = () => (clearTimeout(timer), box.remove(), removeEventListener('keydown', key), moodboard(mood.month)); // fresh counts
         box.onclick = (e) => {
-          if (e.target.closest('a,video,audio')) return;
+          if (e.target.closest('a,video,.mp')) return;
           e.clientX > innerWidth / 2 ? n++ : n--;
           show();
         };
