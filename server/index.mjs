@@ -7750,6 +7750,35 @@ async function me(req, res, url) {
   return json(res, { username: user.username, admin: user.admin, spaces, favorites });
 }
 
+// ── /api/notes: each person's Notepad files, kept on the server so they follow them to every device ──
+// data/notes/<username>.json is { "<path>": { content, updatedAt } }; nobody else can read it, admins included.
+const NOTE_MAX = 200e3;
+const notesSaved = new Map(); // username -> the last save, so two quick saves never write over each other
+async function notesApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const file = `notes/${user.username}.json`;
+  if (req.method === 'GET') return json(res, { notes: await readJson(file, {}) });
+  const input = req.method === 'PUT' ? await jsonBody(req) : {};
+  const path = String(input.path ?? url.searchParams.get('path') ?? '');
+  if (!/^C:\/[^\x00-\x1f]{1,300}$/i.test(path) || path.split('/').includes('..')) fail(400, 'Bad note path');
+  const change = async () => {
+    const notes = await readJson(file, {});
+    if (req.method === 'DELETE') delete notes[path];
+    else if (req.method === 'PUT') {
+      const content = String(input.content ?? '');
+      if (content.length > NOTE_MAX) fail(413, 'That note is too long');
+      if (!own(notes, path) && Object.keys(notes).length >= 500) fail(400, 'You have 500 notes already; delete some first');
+      notes[path] = { content, updatedAt: Date.now() };
+    } else fail(405, 'Unknown notes action');
+    await mkdir(join(DATA, 'notes'), { recursive: true });
+    await saveJson(file, notes);
+  };
+  const done = (notesSaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
+  notesSaved.set(user.username, done);
+  await done;
+  return json(res, { ok: true });
+}
+
 // ── /api/boards: infinite canvas boards, edited live by the whole team ──
 // Each board lives in data/boards/<id>/ (board.json + assets/) on the PC's SSD, so boards work even with
 // every USB drive unplugged. Edits are per-item last-writer-wins: a client sends the whole item it changed,
@@ -9552,6 +9581,7 @@ const routes = [
   ['/healthz', healthz],
   ['/api/files/', files],
   ['/api/me', me],
+  ['/api/notes', notesApi],
   ['/api/admin/', admin],
   ['/api/boards', boardsApi],
   ['/api/logout', logout],
