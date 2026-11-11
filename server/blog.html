@@ -243,15 +243,15 @@
       .radio {
         max-width: 560px;
         margin: 0 auto;
-        background: #fff;
-        border: 2px solid #000;
-        box-shadow: 4px 4px 0 #000;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
         padding: 12px;
         font-family: var(--pixel);
       }
       .radio .lcd {
-        background: #000;
-        color: #fff;
+        background: var(--ink);
+        color: var(--paper);
         padding: 12px 14px;
       }
       .radio .st {
@@ -271,8 +271,8 @@
         color: #ccc;
       }
       .radio .seek {
-        height: 6px;
-        border: 1px solid #fff;
+        height: 8px;
+        border: 2px solid var(--paper);
         margin-top: 12px;
         cursor: pointer;
       }
@@ -283,8 +283,10 @@
         background: var(--signal);
       }
       .radio .t {
-        font-size: 11px;
-        margin-top: 4px;
+        font: 11px var(--label);
+        -webkit-font-smoothing: none;
+        font-variant-numeric: tabular-nums;
+        margin-top: 6px;
         text-align: right;
       }
       .radio .ctl,
@@ -298,22 +300,39 @@
       .radio .rb {
         font-family: var(--label);
         font-size: 14px;
-        background: #fff;
-        color: #000;
-        border: 2px solid #000;
+        -webkit-font-smoothing: none;
+        background: var(--paper);
+        color: var(--ink);
+        border: 2px solid var(--ink);
+        border-radius: 0;
         padding: 6px 12px;
         cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+      }
+      .radio .rb svg {
+        width: 16px;
+        height: 16px;
       }
       .radio .rb.big {
-        min-width: 64px;
+        min-width: 72px;
+        box-shadow: 3px 3px 0 var(--ink);
+      }
+      .radio .rb:hover {
+        background: var(--ink);
+        color: var(--paper);
       }
       .radio .rb.st {
-        font-size: 12px;
+        font-size: 11px;
         padding: 4px 10px;
+        min-height: 28px;
       }
       .radio .rb.on,
       .radio .rb.big {
         background: var(--signal);
+        color: var(--ink);
       }
       .radio .story {
         margin-top: 10px;
@@ -326,17 +345,21 @@
         margin: 10px 0 0;
         padding: 0;
         list-style: none;
-        border-top: 1px solid #000;
+        border-top: 2px solid var(--ink);
       }
       .radio .q li {
         padding: 6px 4px;
-        border-bottom: 1px dotted #000;
+        border-bottom: 1px dotted var(--ink);
         cursor: pointer;
-        font-size: 13px;
+        font-size: 14px;
+      }
+      .radio .q li:hover {
+        background: var(--ink);
+        color: var(--paper);
       }
       .radio .q li.on {
-        background: #000;
-        color: #fff;
+        background: var(--signal);
+        color: var(--ink);
       }
       .empty {
         background: var(--paper);
@@ -1014,6 +1037,8 @@
         play: svg('<path d="M7 4.5v15L19.5 12 7 4.5Z" fill="currentColor"/>'),
         pause: svg('<path d="M8.5 5v14M15.5 5v14" stroke-width="3.2"/>'),
         stop: svg('<rect x="5.5" y="5.5" width="13" height="13" rx="1.5" fill="currentColor"/>'),
+        prev: svg('<path d="M17 5v14L7 12l10-7Z" fill="currentColor"/><path d="M6 5v14" stroke-width="2.6"/>'),
+        next: svg('<path d="M7 5v14l10-7L7 5Z" fill="currentColor"/><path d="M18 5v14" stroke-width="2.6"/>'),
       };
       const clock = (s) =>
         isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--';
@@ -1244,8 +1269,6 @@
       const air = new Audio();
       let tuned = null; // station name
       let onAir = null; // the track playing
-      const clock = (t) =>
-        isFinite(t) ? `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '--:--';
       const tracksOn = (st) => allLibrary.filter((i) => i.kind === 'Classic' && i.audio && i.station === st);
       function tune(track) {
         onAir = track;
@@ -1266,7 +1289,7 @@
       };
       air.onplay = air.onpause = () => {
         const b = document.getElementById('air-play');
-        if (b) b.innerHTML = air.paused ? '&#9654;' : '&#10074;&#10074;';
+        if (b) b.innerHTML = air.paused ? glyph.play : glyph.pause;
       };
       function radio() {
         const stations = [...new Set(allLibrary.filter((i) => i.kind === 'Classic' && i.audio).map((i) => i.station))].sort();
@@ -1283,9 +1306,9 @@
             <div class="t" id="air-time">${np ? `${clock(air.currentTime)} / ${clock(air.duration)}` : '--:-- / --:--'}</div>
           </div>
           <div class="ctl">
-            <button class="rb" data-k="-1" aria-label="Previous">&#9198;</button>
-            <button class="rb big" id="air-play" aria-label="Play or pause">${np && !air.paused ? '&#10074;&#10074;' : '&#9654;'}</button>
-            <button class="rb" data-k="1" aria-label="Next">&#9197;</button>
+            <button class="rb" data-k="-1" aria-label="Previous">${glyph.prev}</button>
+            <button class="rb big" id="air-play" aria-label="Play or pause">${np && !air.paused ? glyph.pause : glyph.play}</button>
+            <button class="rb" data-k="1" aria-label="Next">${glyph.next}</button>
           </div>
           <div class="tuner">${stations.map((st) => `<button class="rb st ${st === tuned ? 'on' : ''}" data-st="${esc(st)}">${esc(st)}</button>`).join('')}</div>
           ${np && np.blurb ? `<div class="story">${esc(np.blurb)}</div>` : ''}
