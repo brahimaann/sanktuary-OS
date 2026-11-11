@@ -34,6 +34,8 @@ interface Spot {
   shoots: { id: string; title: string; kind: string; start: string; status: string }[];
   owner: string;
   members: string[] | null;
+  release?: string | null; // the release (campaign) this spot is for
+  draft?: boolean; // only its owner sees it, admins included
 }
 type LatLng = { lat: number; lng: number };
 
@@ -234,6 +236,7 @@ const LocationsApp: React.FC = () => {
                     {s.shoots.length ? ` · ${s.shoots.length} shoot${s.shoots.length === 1 ? '' : 's'}` : ''}
                   </span>
                 </span>
+                {s.draft && <i>draft</i>}
                 {s.members && <RetroIcon name="lock" size={12} />}
               </div>
             ))}
@@ -517,9 +520,14 @@ const SpotPanel: React.FC<{
   const [shootDay, setShootDay] = useState('');
   const [choosing, setChoosing] = useState(false);
   const [big, setBig] = useState<Photo | null>(null);
+  const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
   const addPhotos = useRef<HTMLInputElement>(null);
   useEffect(() => setDraft(s), [s]);
   useEffect(() => {
+    api('/api/tracks').then(
+      (d) => setReleases(d.releases),
+      () => {},
+    );
     Promise.all(['canvas', 'kanban'].map((k) => api(`/api/boards?kind=${k}`))).then(
       ([a, b]) => setBoards([...a, ...b].map((x) => ({ id: x.id, name: x.name, kind: x.kind || 'canvas' }))),
       () => {},
@@ -590,7 +598,14 @@ const SpotPanel: React.FC<{
     try {
       const e = await api('/api/timeline', {
         method: 'POST',
-        body: JSON.stringify({ title: `Shoot at ${s.name}`, kind: 'Shoot', start: shootDay, location: s.address || s.name, place: s.id }),
+        body: JSON.stringify({
+          title: `Shoot at ${s.name}`,
+          kind: 'Shoot',
+          start: shootDay,
+          location: s.address || s.name,
+          place: s.id,
+          release: s.release || null,
+        }),
       });
       setShootDay('');
       onChange();
@@ -719,6 +734,31 @@ const SpotPanel: React.FC<{
           </button>
         </div>
       </fieldset>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        For
+        <select
+          value={s.release || ''}
+          onChange={(e) => save({ release: e.target.value || null })}
+          style={field}
+          title="The release this spot is for: it shows in that release's Campaign in Music"
+        >
+          <option value="">(no release)</option>
+          {releases.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.title}
+            </option>
+          ))}
+        </select>
+        {me?.username === s.owner && (
+          <label
+            style={{ display: 'flex', gap: 3, alignItems: 'center' }}
+            title="Only you see a draft spot (admins too) until you untick this"
+          >
+            <input type="checkbox" checked={!!s.draft} onChange={(e) => save({ draft: e.target.checked })} />
+            Draft
+          </label>
+        )}
+      </div>
       {canManage && (
         <div style={{ display: 'flex', gap: 6 }}>
           <button style={button} onClick={() => setChoosing(true)}>

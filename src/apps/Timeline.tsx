@@ -33,6 +33,7 @@ interface Entry {
   following?: boolean;
   done?: boolean;
   public?: boolean;
+  draft?: boolean; // only its owner sees it and nobody is told, until it goes live
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -160,6 +161,7 @@ const TimelineApp: React.FC = () => {
           {i.location ? ` · ${i.location}` : ''}
           {i.people?.length ? ` · ${i.people.join(', ')}` : ''}
         </span>
+        {i.draft && <i style={{ whiteSpace: 'nowrap' }}>Draft</i>}
         {i.status && i.status !== 'Planned' && <span style={{ whiteSpace: 'nowrap' }}>{i.status}</span>}
         {i.members && '🔒'}
       </div>,
@@ -327,9 +329,23 @@ const EntryPanel: React.FC<{
           style={{ display: 'flex', gap: 3, alignItems: 'center' }}
           title="Show it on the public calendar visitors see (title, kind, date, place, link, and the recap once it's over)"
         >
-          <input type="checkbox" checked={!!e.public} disabled={!!e.members} onChange={(ev) => save({ public: ev.target.checked })} />
+          <input
+            type="checkbox"
+            checked={!!e.public}
+            disabled={!!e.members || !!e.draft}
+            onChange={(ev) => save({ public: ev.target.checked })}
+          />
           Show publicly
         </label>
+        {me?.username === e.owner && (
+          <label
+            style={{ display: 'flex', gap: 3, alignItems: 'center' }}
+            title="Only you see a draft (admins too) and nobody gets told about it. Untick to make it live and tell the people on it."
+          >
+            <input type="checkbox" checked={!!e.draft} onChange={(ev) => save({ draft: ev.target.checked })} />
+            Draft
+          </label>
+        )}
       </div>
       <fieldset style={fieldset}>
         <legend>Who and where</legend>

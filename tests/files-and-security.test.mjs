@@ -935,6 +935,70 @@ try {
     await call('bob', `/api/locations/${first.location}`, 'DELETE');
     check('deleting a spot removes its photos', (await call('bob', photo)).status === 404);
   }
+  // Creative graph: drafts are their owner's alone, a release gathers its shoots, spots and boards, and a moved date is told
+  {
+    const j = async (...a) => JSON.parse((await call(...a)).text);
+    const notes = async (u) => j(u, '/api/projects?notifications');
+    const draft = await j('bob', '/api/timeline', 'POST', {
+      title: 'Secret video',
+      kind: 'Video',
+      start: day(4),
+      people: ['bob', 'carol'],
+      draft: true,
+    });
+    check('a draft entry tells nobody', !(await notes('carol')).some((n) => /Secret video/.test(n.text)));
+    check(
+      'a draft entry is hidden from others, admins too',
+      !(await j('carol', '/api/timeline')).items.some((i) => i.id === draft.id) &&
+        !(await j('alice', '/api/timeline')).items.some((i) => i.id === draft.id),
+    );
+    check('a draft cannot go public', (await j('bob', `/api/timeline/${draft.id}`, 'PATCH', { public: true })).public === false);
+    await call('bob', `/api/timeline/${draft.id}`, 'PATCH', { draft: false });
+    check(
+      'going live tells the people on it',
+      (await notes('carol')).some((n) => /put you on "Secret video"/.test(n.text)),
+    );
+    const spot = await j('bob', '/api/locations', 'POST', { name: 'Hidden roof', draft: true });
+    check('a draft spot is hidden from admins', !(await j('alice', '/api/locations')).items.some((s) => s.id === spot.id));
+    check(
+      'only its owner can make a spot live',
+      (await call('alice', `/api/locations/${spot.id}`, 'PATCH', { draft: false })).status === 404,
+    );
+    const board = await j('bob', '/api/boards', 'POST', { name: 'Draft board', kind: 'canvas' });
+    await call('bob', `/api/boards/${board.id}`, 'PATCH', { draft: true });
+    check('a draft board is hidden from admins', !(await j('alice', '/api/boards?kind=canvas')).some((b) => b.id === board.id));
+    await call('bob', `/api/boards/${board.id}`, 'PATCH', { draft: false });
+
+    const rel = await j('bob', '/api/tracks/release', 'POST', { title: 'Graph EP', kind: 'EP', date: day(30) });
+    await call('bob', `/api/locations/${spot.id}`, 'PATCH', { draft: false, release: rel.id });
+    await call('bob', `/api/boards/${board.id}`, 'PATCH', { release: rel.id });
+    const ep = await j('bob', '/api/timeline', 'POST', {
+      title: 'EP cover shoot',
+      kind: 'Shoot',
+      start: day(6),
+      people: ['bob', 'carol'],
+      release: rel.id,
+      place: spot.id,
+    });
+    const camp = await j('carol', `/api/tracks/release/${rel.id}?campaign`);
+    check(
+      'a release gathers its shoots, spots and boards',
+      camp.entries.some((e) => e.id === ep.id && e.place === spot.id) &&
+        camp.spots.some((s) => s.id === spot.id) &&
+        camp.boards.some((b) => b.id === board.id),
+    );
+    check(
+      'a spot only ties to a release you can see',
+      (await call('bob', `/api/locations/${spot.id}`, 'PATCH', { release: 'nope' })).status === 404,
+    );
+    await call('bob', `/api/tracks/release/${rel.id}`, 'PATCH', { date: day(45) });
+    check(
+      'moving a release date tells the people on its shoots',
+      (await notes('carol')).some((n) => /"Graph EP" moved to/.test(n.text) && n.release === rel.id),
+    );
+    check('but not whoever moved it', !(await notes('bob')).some((n) => /"Graph EP" moved to/.test(n.text)));
+  }
+
   check('only https links', (await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { link: 'ftp://x' })).status === 400);
   check('carol cannot delete it', [403, 404].includes((await call('carol', `/api/timeline/${shoot.id}`, 'DELETE')).status)); // 404 once it's private
   check('owner deletes it', (await call('bob', `/api/timeline/${shoot.id}`, 'DELETE')).status === 200);

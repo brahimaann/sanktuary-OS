@@ -1860,8 +1860,11 @@ let tracksDb = null;
 let tracksSaved = Promise.resolve();
 const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { releases: {}, tracks: {} }));
 const saveTracks = () => (tracksSaved = tracksSaved.then(() => saveJson('tracks.json', tracksDb)).catch(console.error));
+// A draft (calendar entry, spot, board) is its owner's sandbox: nobody else sees it, admins included, until it goes live
 const canSeeRelease = (user, r) =>
-  !r.deleted && (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
+  !r.deleted &&
+  !(r.draft && r.owner !== user.username) &&
+  (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
 const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
@@ -1930,6 +1933,7 @@ async function tracksApi(req, res, url) {
     }
     const r = (own(db.releases, id) && canSeeRelease(user, db.releases[id]) && db.releases[id]) || fail(404, 'No such release');
     if (req.method === 'GET' && url.searchParams.has('ready')) return json(res, await releaseReadiness(db, r));
+    if (req.method === 'GET' && url.searchParams.has('campaign')) return json(res, await releaseCampaign(r, user));
     if (req.method !== 'GET') editRelease(user, r);
     if (req.method === 'POST' && url.searchParams.has('scan')) {
       if (!r.folder) fail(400, 'Link the release to a folder first');
@@ -1966,7 +1970,9 @@ async function tracksApi(req, res, url) {
         r.items = [
           ...new Set((Array.isArray(input.items) ? input.items : []).filter((i) => own(db.tracks, i) && !db.tracks[i].deleted)),
         ].slice(0, 500);
+      const wasDate = r.date;
       if (input.date !== undefined) r.date = dateOrNull(input.date);
+      if (r.date !== wasDate) await releaseMoved(r, wasDate, me);
       if (input.cover !== undefined) r.cover = fileRef(input.cover);
       if (input.public !== undefined) r.public = !!input.public; // announced on the public Welcome window (title, kind, date)
       if (r.public) giveSlug(db, r);
@@ -2760,6 +2766,49 @@ async function trackDeadlines() {
 }
 setInterval(() => trackDeadlines().catch(console.error), 3.6e6).unref();
 
+/** Everything tied to a release (the campaign): its calendar entries, spots and boards, as this member may see them. */
+async function releaseCampaign(r, user) {
+  const entries = Object.values((await loadTimeline()).items).filter((i) => i.release === r.id && canSeeRelease(user, i));
+  const places = new Set(entries.map((i) => i.place).filter(Boolean));
+  const spots = Object.values((await loadLocations()).items).filter(
+    (l) => (l.release === r.id || places.has(l.id)) && canSeeRelease(user, l),
+  );
+  const boardIds = new Set(spots.flatMap((l) => l.boards));
+  await mkdir(join(DATA, 'boards'), { recursive: true });
+  const boards = [];
+  for (const e of await readdir(join(DATA, 'boards'), { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const meta = (openBoards.get(e.name) || (await readJson(`boards/${e.name}/board.json`, null)))?.meta;
+    if (meta && (meta.release === r.id || boardIds.has(meta.id)) && canSeeBoard(user, meta))
+      boards.push({ id: meta.id, name: meta.name, kind: meta.kind || 'canvas', draft: !!meta.draft });
+  }
+  return {
+    entries: entries
+      .map((i) => ({ id: i.id, title: i.title, kind: i.kind, start: i.start, status: i.status, place: i.place || null, draft: !!i.draft }))
+      .sort((a, b) => a.start.localeCompare(b.start)),
+    spots: spots.map((l) => ({ id: l.id, name: l.name, photo: l.photos[0]?.file || null, draft: !!l.draft })),
+    boards,
+  };
+}
+
+/** A release date moved: one notice to everyone on its live calendar entries and following them (not the mover). */
+async function releaseMoved(r, was, me) {
+  const entries = Object.values((await loadTimeline()).items).filter((i) => i.release === r.id && !i.draft);
+  const told = new Set(entries.flatMap((i) => [...i.people, ...i.followers]));
+  told.delete(me);
+  const { admins } = await loadConfig();
+  const when = r.date ? `moved to ${r.date}` : 'has no date now';
+  for (const u of told)
+    if (canSeeRelease({ username: u, admin: admins.includes(u) }, r))
+      await notify(
+        u,
+        `"${r.title}" ${when}${was ? ` (was ${was})` : ''}, ${me}. Check its shoots and events: ${entries.length} on the calendar.`,
+        {
+          release: r.id,
+        },
+      );
+}
+
 // ── /api/timeline: visual projects and events on one calendar — data/timeline.json ──
 // Shoots, artwork, videos, shows, drops... with dates, people, status and a linked folder. Release dates and
 // track deadlines from Tracks are merged in (read-only) so there is one timeline for everything.
@@ -2854,6 +2903,8 @@ async function timelineApi(req, res, url) {
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
     if (input.place !== undefined) i.place = input.place ? String(input.place).slice(0, 20) : null; // a spot in the location library
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
+    if (input.draft !== undefined) i.draft = !!input.draft; // only its owner sees it, nobody is told, until it goes live
+    if (i.draft) i.public = false;
     if (input.link !== undefined) {
       const v = String(input.link || '').trim();
       if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
@@ -2890,7 +2941,8 @@ async function timelineApi(req, res, url) {
     if (m) i.members = m.filter((u) => u !== me);
     db.items[i.id] = i;
     changed(i);
-    for (const u of i.people) if (u !== me) await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
+    if (!i.draft)
+      for (const u of i.people) if (u !== me) await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
     await timelineAlerts();
     return json(res, view(i));
   }
@@ -2898,7 +2950,8 @@ async function timelineApi(req, res, url) {
   const i = (own(db.items, id) && canSeeRelease(user, db.items[id]) && db.items[id]) || fail(404, 'No such entry');
   if (req.method === 'PATCH') {
     const input = await jsonBody(req);
-    const before = { status: i.status, start: i.start, people: [...i.people] };
+    const before = { status: i.status, start: i.start, people: [...i.people], draft: !!i.draft };
+    if (input.draft !== undefined && i.owner !== me) fail(403, 'Only whoever made it can keep it as a draft');
     if (input.members !== undefined) {
       if (i.owner !== me && !user.admin) fail(403, 'Only whoever made it or an admin can change who sees it');
       i.members = Array.isArray(input.members) ? usernameList(input.members) : null;
@@ -2908,13 +2961,14 @@ async function timelineApi(req, res, url) {
     apply(i, input);
     if (m) Object.assign(i, { members: m.filter((u) => u !== i.owner), public: false }); // moved onto a private release
     changed(i);
-    const told = new Set([...i.people, ...i.followers].filter((u) => u !== me));
+    if (before.draft) before.people = i.draft ? i.people : []; // a draft told nobody: going live tells everyone on it
+    const told = new Set(i.draft || before.draft ? [] : [...i.people, ...i.followers].filter((u) => u !== me));
     const news = [];
     if (i.status !== before.status) news.push(`"${i.title}" is now ${i.status} (${me}).`);
     if (i.start !== before.start) news.push(`"${i.title}" moved to ${i.start}${i.end ? ` – ${i.end}` : ''} (${me}).`);
     for (const text of news) for (const u of told) await notify(u, text, { timeline: i.id });
     for (const u of i.people)
-      if (!before.people.includes(u) && u !== me)
+      if (!before.people.includes(u) && u !== me && !i.draft)
         await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
     await timelineAlerts();
     return json(res, view(i));
@@ -2933,7 +2987,7 @@ async function timelineAlerts() {
   const db = await loadTimeline();
   const today = localDate();
   for (const i of Object.values(db.items)) {
-    if (!i.start || ['Done', 'Cancelled'].includes(i.status)) continue;
+    if (!i.start || i.draft || ['Done', 'Cancelled'].includes(i.status)) continue;
     const days = Math.round((Date.parse(i.start) - Date.parse(today)) / 864e5);
     const stage = days === 0 ? 'd0' : days === 1 ? 'd1' : days <= 3 && days > 0 ? 'd3' : null;
     if (!stage || i.alerted === `${stage}:${i.start}`) continue;
@@ -3035,6 +3089,7 @@ async function locationsApi(req, res, url) {
       l.lng = coord(input.lng ?? l.lng, 180);
       if ((l.lat === null) !== (l.lng === null)) fail(400, 'A pin needs both latitude and longitude');
     }
+    if (input.draft !== undefined) l.draft = !!input.draft;
     if (input.boards !== undefined)
       l.boards = [...new Set((Array.isArray(input.boards) ? input.boards : []).map(String).filter((b) => /^[\w-]{1,60}$/.test(b)))].slice(
         0,
@@ -3138,6 +3193,12 @@ async function locationsApi(req, res, url) {
     if (input.members !== undefined) {
       if (!canManage) fail(403, 'Only whoever added it or an admin can change who sees it');
       l.members = Array.isArray(input.members) ? usernameList(input.members).filter((u) => u !== l.owner) : null;
+    }
+    if (input.draft !== undefined && l.owner !== me) fail(403, 'Only whoever added it can keep it as a draft');
+    if (input.release !== undefined) {
+      const r = input.release && own((await loadTracks()).releases, String(input.release));
+      if (input.release && (!r || !canSeeRelease(user, r))) fail(404, 'No such release');
+      l.release = r ? r.id : null;
     }
     apply(l, input);
     if (input.name !== undefined && !l.name.trim()) fail(400, 'Give the spot a name');
@@ -7970,7 +8031,9 @@ const CURSOR_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#
 const openBoards = new Map(); // id -> { meta, items: Map, clients: Map<conn, { res, user, color }>, timer }
 
 /** Boards are open to every member unless meta.members lists who may see them (owner + admins always can). */
-const canSeeBoard = (user, meta) => !meta.members || user.admin || meta.owner === user.username || meta.members.includes(user.username);
+const canSeeBoard = (user, meta) =>
+  !(meta.draft && meta.owner !== user.username) &&
+  (!meta.members || user.admin || meta.owner === user.username || meta.members.includes(user.username));
 
 async function loadBoard(id) {
   if (!/^[\w-]{1,60}$/.test(id)) fail(400, 'Bad board id');
@@ -8066,11 +8129,21 @@ async function boardsApi(req, res, url) {
   if (!sub && req.method === 'PATCH') {
     const input = await jsonBody(req);
     if (input.name !== undefined) b.meta.name = String(input.name).trim().slice(0, 80) || b.meta.name;
-    if (input.members !== undefined) {
+    if (input.draft !== undefined) {
+      if (b.meta.owner !== user.username) fail(403, 'Only whoever made the board can keep it as a draft');
+      b.meta.draft = !!input.draft;
+    }
+    if (input.release !== undefined) {
+      const r = input.release && own((await loadTracks()).releases, String(input.release));
+      if (input.release && (!r || !canSeeRelease(user, r))) fail(404, 'No such release');
+      b.meta.release = r ? r.id : null;
+    }
+    if (input.members !== undefined || input.draft) {
       if (b.meta.owner !== user.username && !user.admin) fail(403, 'Only the creator or an admin can change who sees a board');
-      b.meta.members = Array.isArray(input.members)
-        ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))]
-        : null;
+      if (input.members !== undefined)
+        b.meta.members = Array.isArray(input.members)
+          ? [...new Set(input.members.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))]
+          : null;
       // Anyone who just lost access is disconnected from the board
       const cfg = await loadConfig();
       for (const [conn, c] of b.clients) {
@@ -8093,7 +8166,11 @@ async function boardsApi(req, res, url) {
     openBoards.delete(id);
     await mkdir(join(DATA, 'boards-trash'), { recursive: true });
     await rename(join(DATA, 'boards', id), join(DATA, 'boards-trash', `${id}-${stamp()}`)); // recoverable
-    logActivity(user, 'deleted the board', { title: b.meta.name, boardMembers: b.meta.members ? [b.meta.owner, ...b.meta.members] : null });
+    if (!b.meta.draft)
+      logActivity(user, 'deleted the board', {
+        title: b.meta.name,
+        boardMembers: b.meta.members ? [b.meta.owner, ...b.meta.members] : null,
+      });
     return json(res, { ok: true });
   }
 
@@ -8130,7 +8207,7 @@ async function boardsApi(req, res, url) {
     for (const op of ops) {
       if (op.put && validItem(b.meta.kind || 'canvas', op.put)) {
         const before = b.items.get(op.put.id);
-        if (op.put.type === 'card' && before?.col !== op.put.col && /done/i.test(b.items.get(op.put.col)?.title || '')) {
+        if (!b.meta.draft && op.put.type === 'card' && before?.col !== op.put.col && /done/i.test(b.items.get(op.put.col)?.title || '')) {
           logActivity(user, 'finished', {
             board: id,
             boardKind: 'kanban',
