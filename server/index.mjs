@@ -2632,6 +2632,122 @@ async function opportunitiesApi(req, res, url) {
   fail(404, 'Unknown opportunities action');
 }
 
+// ── /api/verses: Open verses — songs posted with an open slot for another artist to hop on — data/verses.json ──
+// Moves the artists' group chat in: a member posts a song (the beat, BPM/key, how long the verse is, a deadline) with
+// one or more open slots, and everyone is told. "Hop on" claims a slot so two people don't record the same verse;
+// whoever claimed it uploads their take, and the poster picks one, which becomes a song in the Music tracker.
+// Nothing here writes splits or the Ledger: that happens later, when the song is published.
+const VERSE_TEXT = { title: 80, bpm: 10, key: 20, length: 40, notes: 2000 };
+let versesDb = null;
+let versesSaved = Promise.resolve();
+const loadVerses = async () => (versesDb ??= await readJson('verses.json', { items: {} }));
+const saveVerses = () => (versesSaved = versesSaved.then(() => saveJson('verses.json', versesDb)).catch(console.error));
+
+async function versesApi(req, res, url) {
+  const cfg = await loadConfig();
+  const user = await currentUser(req, url, cfg);
+  const me = user.username;
+  const db = await loadVerses();
+  const id = url.pathname.split('/')[3];
+  const changed = () => {
+    saveVerses();
+    emit('verses', {}, () => true);
+  };
+  const apply = (v, input) => {
+    for (const [k, max] of Object.entries(VERSE_TEXT))
+      if (input[k] !== undefined)
+        v[k] = String(input[k] ?? '')
+          .trim()
+          .slice(0, max);
+    if (input.deadline !== undefined) v.deadline = dateOrNull(input.deadline);
+    if (!v.title) fail(400, 'Give the song a name');
+  };
+
+  if (req.method === 'GET' && !id)
+    return json(res, {
+      items: Object.values(db.items)
+        .filter((v) => !v.archived)
+        .sort((a, b) => b.created.localeCompare(a.created)),
+    });
+
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const labels = (Array.isArray(input.slots) && input.slots.length ? input.slots : ['Verse'])
+      .map((s) => String(s).trim().slice(0, 40))
+      .filter(Boolean)
+      .slice(0, 8);
+    const v = {
+      id: randomUUID().slice(0, 10),
+      title: '',
+      bpm: '',
+      key: '',
+      length: '',
+      notes: '',
+      deadline: null,
+      beat: fileRef(input.beat) || fail(400, 'Add the song (the beat or the rough) first'),
+      slots: labels.map((label, i) => ({ id: String(i + 1), label, by: null, at: null, take: null })),
+      picked: null,
+      track: null,
+      by: me,
+      created: new Date().toISOString(),
+    };
+    apply(v, input);
+    db.items[v.id] = v;
+    changed();
+    const open = v.slots.map((s) => s.label).join(', ');
+    const text = `${me} posted "${v.title}" with an open ${open.toLowerCase()}${v.deadline ? `, due ${v.deadline}` : ''}. Hop on in Music > Open verses.`;
+    for (const u of await currentMembers()) if (u !== me) await notify(u, text, { verse: v.id });
+    return json(res, v);
+  }
+
+  const v = (own(db.items, id) && !db.items[id].archived && db.items[id]) || fail(404, 'No such open verse');
+  const mine = v.by === me || user.admin;
+  if (req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    const slotOf = (sid) => v.slots.find((s) => s.id === String(sid)) || fail(404, 'No such slot');
+    if (input.hop !== undefined) {
+      // Claiming is first come, first served: a slot someone already has stays theirs
+      const s = slotOf(input.hop);
+      if (v.picked) fail(409, 'A take was already picked for this song');
+      if (s.by && s.by !== me) fail(409, `${s.by} already hopped on the ${s.label.toLowerCase()}`);
+      if (!s.by) {
+        Object.assign(s, { by: me, at: new Date().toISOString() });
+        if (v.by !== me) await notify(v.by, `${me} hopped on the ${s.label.toLowerCase()} of "${v.title}".`, { verse: v.id });
+      }
+    } else if (input.drop !== undefined) {
+      const s = slotOf(input.drop);
+      if (s.by !== me && !mine) fail(403, 'Only whoever hopped on (or the poster) can open the slot again');
+      if (v.picked === s.id) fail(409, 'That take was picked');
+      Object.assign(s, { by: null, at: null, take: null });
+    } else if (input.take !== undefined) {
+      const s = slotOf(input.slot);
+      if (s.by !== me) fail(403, 'Hop on the slot first, then upload your take');
+      s.take = fileRef(input.take);
+      if (s.take && v.by !== me) await notify(v.by, `${me} sent a take for the ${s.label.toLowerCase()} of "${v.title}".`, { verse: v.id });
+    } else if (input.pick !== undefined) {
+      // The poster picks the take that makes the song; the song tracker gets it (the client makes the song first)
+      if (!mine) fail(403, 'Only whoever posted it can pick a take');
+      const s = slotOf(input.pick);
+      if (!s.take) fail(400, 'That slot has no take yet');
+      v.picked = s.id;
+      v.track = typeof input.track === 'string' ? input.track.slice(0, 40) : null;
+      if (s.by !== me) await notify(s.by, `${me} picked your ${s.label.toLowerCase()} for "${v.title}".`, { verse: v.id });
+    } else {
+      if (!mine) fail(403, 'Only whoever posted it or an admin can change the details');
+      apply(v, input);
+    }
+    changed();
+    return json(res, v);
+  }
+  if (req.method === 'DELETE') {
+    if (!mine) fail(403, 'Only whoever posted it or an admin can take it down');
+    v.archived = new Date().toISOString(); // kept in the file, just hidden
+    changed();
+    return json(res, { ok: true });
+  }
+  fail(404, 'Unknown open verses action');
+}
+
 // ── /api/outreach: who we pitch (radio, playlists, press, distribution, pressing, sync, venues, brands) — data/outreach.json ──
 // Shared by the team so two people never pitch the same curator twice. Marking one "Pitched" starts a clock: after
 // 7 days with no reply, whoever pitched is reminded to follow up.
@@ -10063,6 +10179,7 @@ const routes = [
   ['/api/tiles/', tilesApi],
   ['/api/opportunities', opportunitiesApi],
   ['/api/outreach', outreachApi],
+  ['/api/verses', versesApi],
   ['/api/library', libraryApi],
   ['/api/youtube', youtubeApi],
   ['/api/mail', mailApi],

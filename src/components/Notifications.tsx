@@ -4,6 +4,7 @@ import { liveUser, useLiveEvent } from '../utils/live';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from '../apps/Studio';
+import { showVerses } from '../apps/OpenVerses';
 import RetroIcon from './RetroIcon';
 
 /**
@@ -23,6 +24,7 @@ interface Note {
   track?: string;
   timeline?: string;
   opportunity?: string;
+  verse?: string; // open verses: open Music on the board
 }
 
 const SEEN = 'sk_notif_seen';
@@ -58,7 +60,17 @@ export const NotificationTray: React.FC = () => {
           setServer(
             list.map((n) => ({
               ...n,
-              title: n.turn ? "It's your turn" : n.track ? 'Tracks' : n.timeline ? 'Timeline' : n.opportunity ? 'Opportunity' : 'Update',
+              title: n.turn
+                ? "It's your turn"
+                : n.track
+                  ? 'Tracks'
+                  : n.verse
+                    ? 'Open verses'
+                    : n.timeline
+                      ? 'Timeline'
+                      : n.opportunity
+                        ? 'Opportunity'
+                        : 'Update',
             })),
           ),
         () => {},
@@ -78,7 +90,17 @@ export const NotificationTray: React.FC = () => {
   useLiveEvent('notify', (n: any) => {
     const note = {
       ...n,
-      title: n.turn ? "It's your turn" : n.track ? 'Tracks' : n.timeline ? 'Timeline' : n.opportunity ? 'Opportunity' : 'Update',
+      title: n.turn
+        ? "It's your turn"
+        : n.track
+          ? 'Tracks'
+          : n.verse
+            ? 'Open verses'
+            : n.timeline
+              ? 'Timeline'
+              : n.opportunity
+                ? 'Opportunity'
+                : 'Update',
     };
     setServer((s) => [note, ...s].slice(0, 50));
     toast(note);
@@ -134,6 +156,9 @@ export const NotificationTray: React.FC = () => {
         dir: /\.(psd|psb|ai)$/i.test(w.name) ? w.dir.slice(0, -1) : w.dir,
         name: /\.(psd|psb|ai)$/i.test(w.name) ? w.dir[w.dir.length - 1] : w.name,
       });
+    } else if (n.verse) {
+      showVerses();
+      openMusic(openWindow);
     } else if (n.track) {
       openMusic(openWindow);
     } else if (n.timeline) {
