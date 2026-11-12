@@ -81,17 +81,10 @@ const PortfolioEditor: React.FC<{ who: string; value: Portfolio; onChange: (patc
         Look
         <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <select value={pf.theme} onChange={(e) => onChange({ theme: e.target.value as Portfolio['theme'] })} style={input}>
-            <option value="paper">Paper (light, serif)</option>
-            <option value="night">Night (dark gallery)</option>
-            <option value="bold">Bold (white, heavy type)</option>
+            <option value="paper">Paper (black on white)</option>
+            <option value="night">Night (white on black)</option>
+            <option value="bold">Bold (paper, big name)</option>
           </select>
-          Accent
-          <input type="color" value={pf.accent || '#8a5a12'} onChange={(e) => onChange({ accent: e.target.value })} />
-          {pf.accent && (
-            <button style={button} onClick={() => onChange({ accent: '' })}>
-              Theme colour
-            </button>
-          )}
         </span>
       </label>
 
