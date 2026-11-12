@@ -32,7 +32,8 @@ initializeCanvas(
 );
 
 const PORT = Number(process.env.PORT || 3080);
-const DIST = resolve(new URL('../dist/', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
+// DIST_DIR: auto-deploy tests the fresh build (dist-next) before it goes live
+const DIST = resolve(process.env.DIST_DIR || new URL('../dist/', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
 const HOST = process.env.HOST || '127.0.0.1';
 const DATA = process.env.DATA_DIR || resolve(DIST, '../data');
 const LOCAL_CACHE = process.env.THUMB_CACHE || resolve(DIST, '../cache/thumbs'); // on the SSD; used when the cache drive is unplugged

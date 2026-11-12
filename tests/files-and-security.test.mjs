@@ -264,6 +264,11 @@ try {
     'intro video answers byte ranges (Safari plays nothing without them)',
     intro.status === 206 && (await intro.arrayBuffer()).byteLength === 2,
   );
+  const deploy = readFileSync(new URL('../ops/deploy.ps1', import.meta.url), 'utf8');
+  check(
+    'auto-deploy tests the new build, not the live one (else a commit adding a file can never deploy)',
+    deploy.indexOf("Run 'build'") < deploy.indexOf("Run 'tests'") && /DIST_DIR = .*dist-next/.test(deploy),
+  );
   check('no login -> 401', (await call(null, '/api/files/view/?list')).status === 401);
   check(
     'forged cookie -> 401',
