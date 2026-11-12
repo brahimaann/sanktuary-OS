@@ -4,171 +4,209 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Portfolios · Sanktuary</title>
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" href="/favicon.ico" />
     <style>
       /* Member portfolios: the index of every live one, or one member's blocks in the order and sizes they set in
-         Profile, as a masonry wall inside a Sanktuary (Win98) window. The frame is retro; the work inside is not. */
-      :root,
-      [data-theme='paper'] {
-        --bg: #f7f4ee;
-        --ink: #1b1a17;
-        --dim: #6b655b;
-        --accent: #8a5a12;
-        --line: #e4ddd0;
-        --card: #ffffff;
-        --head: 400 clamp(36px, 6vw, 58px) / 1.02 Georgia, 'Times New Roman', serif;
-        --title: 400 19px/1.25 Georgia, 'Times New Roman', serif;
-        --body: 16px/1.6 Georgia, 'Times New Roman', serif;
+         Profile, as a masonry wall. The S machine as a terminal (as on /welcome): 1-bit paper and ink, the Fixedsys
+         bitmap font, ink header and footer bars, prompts, pictures dithered to black and white, one green signal.
+         A member's Look picks paper, night (the same page inverted) or bold (a bigger name). */
+      @font-face {
+        font-family: 'Fixedsys Excelsior';
+        src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
+        font-display: swap;
+      }
+      :root {
+        --paper: #fff;
+        --ink: #000;
+        --signal: #4b9560; /* text on it stays black: white on this green fails contrast */
+        --dim: #555;
+        --mono: 'Fixedsys Excelsior', 'Courier New', monospace; /* a 16px bitmap font: keep sizes at 16 or 32 */
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
+        --gut: clamp(16px, 4vw, 40px);
+        --name: 32px;
       }
       [data-theme='night'] {
-        --bg: #0b0b0f;
-        --ink: #f3efe8;
-        --dim: #b9b2a6;
-        --accent: #d9a441;
-        --line: #24242b;
-        --card: #15151b;
+        --paper: #000;
+        --ink: #fff;
+        --dim: #aaa;
+        --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6' shape-rendering='crispEdges'%3E%3Crect width='1' height='1' fill='%23fff'/%3E%3C/svg%3E")
+          0 0 / 6px 6px;
       }
       [data-theme='bold'] {
-        --bg: #ffffff;
-        --ink: #0a0a0a;
-        --dim: #5a5a5a;
-        --accent: #e5484d;
-        --line: #e6e6e6;
-        --card: #f4f4f4;
-        --head: 800 clamp(40px, 8vw, 78px) / 0.95 system-ui, sans-serif;
-        --title: 700 17px/1.25 system-ui, sans-serif;
-        --body: 15px/1.55 system-ui, sans-serif;
+        --name: clamp(32px, 8vw, 64px);
       }
       * {
         box-sizing: border-box;
+        font-variant-ligatures: none !important;
       }
       body {
         margin: 0;
-        background: #008080; /* the Sanktuary desktop */
-        padding: 18px;
-        font:
-          12px Tahoma,
-          'MS Sans Serif',
-          sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.5 var(--mono);
+        -webkit-font-smoothing: none;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
       a {
-        color: var(--accent);
+        color: inherit;
       }
-      /* the window */
-      .win {
-        max-width: 1180px;
-        margin: 0 auto;
-        background: #c0c0c0;
-        padding: 3px;
-        box-shadow:
-          inset -1px -1px #0a0a0a,
-          inset 1px 1px #dfdfdf,
-          inset -2px -2px #808080,
-          inset 2px 2px #fff;
+      :focus-visible {
+        outline: 2px solid var(--signal);
+        outline-offset: 2px;
       }
-      .titlebar {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 3px 4px 3px 6px;
-        color: #fff;
-        font-weight: 700;
-        background: linear-gradient(90deg, #000080, #1084d0);
-      }
-      .titlebar span {
-        flex: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .titlebar i,
-      .titlebar a {
-        width: 16px;
-        height: 14px;
-        background: #c0c0c0;
-        color: #000;
-        font:
-          700 10px/14px Tahoma,
-          sans-serif;
-        font-style: normal;
-        text-align: center;
-        text-decoration: none;
-        box-shadow:
-          inset -1px -1px #0a0a0a,
-          inset 1px 1px #fff,
-          inset -2px -2px #808080;
-      }
-      .menu {
-        display: flex;
-        gap: 14px;
-        padding: 3px 6px;
+      ::selection {
+        background: var(--signal);
         color: #000;
       }
-      .menu a {
-        color: #000;
-        text-decoration: none;
-      }
-      .menu a:hover {
-        background: #000080;
-        color: #fff;
-      }
-      .screen {
-        background: var(--bg);
-        color: var(--ink);
-        font: var(--body);
-        padding: clamp(18px, 4vw, 44px);
-        box-shadow:
-          inset 1px 1px #808080,
-          inset -1px -1px #fff;
-        min-height: 60vh;
-      }
-      .status {
-        display: flex;
-        gap: 3px;
-        margin-top: 3px;
-        color: #000;
-      }
-      .status span {
-        padding: 2px 6px;
-        box-shadow:
-          inset 1px 1px #808080,
-          inset -1px -1px #fff;
-      }
-      .status span:first-child {
-        flex: 1;
-      }
-      /* the header */
-      header {
-        display: flex;
-        gap: 22px;
-        align-items: flex-end;
-        padding-bottom: 22px;
-        margin-bottom: 26px;
-        border-bottom: 1px solid var(--line);
-      }
-      header img {
-        width: 108px;
-        height: 108px;
-        object-fit: cover;
-        flex-shrink: 0;
-      }
-      h1 {
-        font: var(--head);
+      h1,
+      h3 {
+        font: inherit;
         margin: 0;
+        text-transform: uppercase;
       }
+      .small,
       .headline {
         color: var(--dim);
-        font-size: 19px;
+      }
+      /* The block cursor */
+      .cur::after {
+        content: '';
+        display: inline-block;
+        width: 0.55em;
+        height: 1em;
+        margin-left: 4px;
+        vertical-align: -0.12em;
+        background: currentColor;
+        animation: blink 1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          visibility: hidden;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cur::after {
+          animation: none;
+        }
+      }
+      /* ── Header and footer bars: always black ink, whatever the Look ── */
+      .top,
+      footer {
+        display: flex;
+        align-items: center;
+        gap: 4px 20px;
+        flex-wrap: wrap;
+        padding: 12px var(--gut);
+        background: #000;
+        color: #fff;
+        text-transform: uppercase;
+      }
+      .logo img {
+        display: block;
+        width: 120px;
+        image-rendering: pixelated;
+        filter: invert(1);
+      }
+      .top nav {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .top nav a {
+        text-decoration: none;
+        padding: 2px 6px;
+      }
+      .top nav a::before {
+        content: '[';
+      }
+      .top nav a::after {
+        content: ']';
+      }
+      .top nav a:hover {
+        background: #fff;
+        color: #000;
+      }
+      .top nav a.on {
+        background: var(--signal);
+        color: #000;
+      }
+      footer {
+        justify-content: space-between;
+        color: #aaa;
+      }
+      /* ── Page ── */
+      main {
+        flex: 1;
+        width: 100%;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px var(--gut) 48px;
+      }
+      .prompt {
+        color: var(--dim);
+        margin: 0 0 16px;
+        overflow-wrap: anywhere;
+      }
+      .prompt::before {
+        content: 'C:\\SANKTUARY\\PORTFOLIOS> ';
+        color: var(--ink);
+      }
+      /* the member's header: photo, name, headline, contact; closes on an ink rule */
+      .who {
+        display: flex;
+        gap: 24px;
+        align-items: flex-end;
+        padding-bottom: 24px;
+        margin-bottom: 24px;
+        border-bottom: 2px solid var(--ink);
+      }
+      .who img {
+        width: 112px;
+        height: 112px;
+        object-fit: cover;
+        flex-shrink: 0;
+        border: 2px solid var(--ink);
+      }
+      h1 {
+        font-size: var(--name);
+        line-height: 1.05;
+        overflow-wrap: anywhere;
+      }
+      .headline {
         margin: 8px 0 0;
+        max-width: 60ch;
       }
       .contact {
-        font:
-          13px system-ui,
-          sans-serif;
-        color: var(--dim);
         margin-top: 12px;
         display: flex;
-        gap: 14px;
+        gap: 4px 16px;
         flex-wrap: wrap;
+        text-transform: uppercase;
+      }
+      .contact a {
+        text-decoration: none;
+      }
+      .contact a::before {
+        content: '[';
+      }
+      .contact a::after {
+        content: ']';
+      }
+      .contact a:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      /* Pictures go 1-bit: grey, a little noise, then a hard threshold (the filter is in the page body); videos go grey */
+      img {
+        filter: url(#onebit);
+        image-rendering: pixelated;
+      }
+      iframe {
+        filter: grayscale(1);
       }
       /* the wall: equal columns, each block as tall as its content (spans set in script), wide ones span two */
       .wall {
@@ -180,9 +218,10 @@
       .block {
         align-self: start;
         margin-bottom: 16px;
-        background: var(--card);
-        border: 1px solid var(--line);
+        background: var(--paper);
+        border: 2px solid var(--ink);
         overflow: hidden;
+        text-decoration: none;
       }
       .block.wide {
         grid-column: span 2;
@@ -191,9 +230,12 @@
         .block.wide {
           grid-column: auto;
         }
-        header {
+        .who {
           flex-direction: column;
           align-items: flex-start;
+        }
+        .logo img {
+          width: 80px;
         }
       }
       .block img {
@@ -215,107 +257,139 @@
       .block.tall iframe {
         aspect-ratio: 9 / 16;
       }
-      .cap {
-        padding: 12px 14px 14px;
+      .block > img,
+      .block > iframe {
+        border-bottom: 2px solid var(--ink);
       }
-      .cap h3 {
-        font: var(--title);
-        margin: 0;
+      .block > img:last-child,
+      .block > iframe:last-child {
+        border-bottom: 0;
+      }
+      .cap {
+        padding: 10px 12px 12px;
       }
       .cap p {
         margin: 6px 0 0;
         white-space: pre-wrap;
       }
       .kind {
-        font:
-          600 10px/1 system-ui,
-          sans-serif;
-        letter-spacing: 0.2em;
         text-transform: uppercase;
-        color: var(--accent);
-        margin-bottom: 8px;
+        margin-bottom: 6px;
       }
-      .small {
-        font:
-          12px system-ui,
-          sans-serif;
-        color: var(--dim);
-      }
-      .block.text .cap {
-        padding: 18px 18px 20px;
+      .kind::before {
+        content: '> ';
       }
       .block.link a.cap {
         display: block;
         color: inherit;
         text-decoration: none;
       }
-      .block.link:hover {
-        border-color: var(--accent);
+      .block.link:hover,
+      a.block:hover {
+        transform: translate(-2px, -2px);
+        box-shadow: 4px 4px 0 var(--ink);
       }
+      .block.link:hover h3,
+      a.block:hover h3 {
+        background: var(--ink);
+        color: var(--paper);
+        display: inline;
+      }
+      /* music: a dir listing of releases */
       .rel {
         display: flex;
         gap: 12px;
         align-items: center;
-        padding: 8px 14px;
-        border-top: 1px solid var(--line);
+        padding: 8px 12px;
+        border-top: 1px dashed var(--ink);
         color: inherit;
         text-decoration: none;
       }
-      .rel h3 {
-        font: var(--title);
-        margin: 0;
+      .rel:hover {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .rel:hover .small {
+        color: var(--paper);
+      }
+      .rel span {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
       }
       .rel img {
         width: 56px;
         height: 56px;
         object-fit: cover;
         flex-shrink: 0;
+        border: 2px solid var(--ink);
       }
-      /* the index */
-      .card {
-        display: block;
-        color: var(--ink);
-        text-decoration: none;
-        border-top: 4px solid var(--c, var(--accent));
-      }
-      .card img,
+      /* the index: one card each, a dithered picture or the pixel S over the dots */
       .card .ph {
-        width: 100%;
+        aspect-ratio: 1;
+        background: var(--dots), var(--paper);
+        display: grid;
+        place-items: center;
+        border-bottom: 2px solid var(--ink);
+      }
+      .card .ph img {
+        width: 56px;
+        padding: 8px;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        filter: none;
+      }
+      .card > img {
         aspect-ratio: 1;
         object-fit: cover;
-        background: var(--line);
       }
+      .card .dir::before {
+        content: '<DIR> ';
+        color: var(--dim);
+      }
+      /* the owner's note: a signal bar */
       .bar {
-        font:
-          13px system-ui,
-          sans-serif;
-        background: #ffffe1;
+        background: var(--signal);
         color: #000;
-        border: 1px solid #808080;
+        border: 2px solid #000;
         padding: 8px 12px;
-        margin-bottom: 22px;
-        display: flex;
-        gap: 14px;
-        flex-wrap: wrap;
-        justify-content: space-between;
-      }
-      .bar a {
-        color: #000080;
+        margin-bottom: 24px;
       }
       .notice {
         color: var(--dim);
         text-align: center;
-        padding: 60px 0;
+        padding: 64px 0;
       }
     </style>
   </head>
   <body>
-    <div class="win">
-      <div class="titlebar"><span id="title">Portfolios</span><i>_</i><i>□</i><a href="/" title="Sanktuary">×</a></div>
-      <div class="menu"><a href="/portfolios?all">All portfolios</a><a href="/portfolio">Sanktuary studio</a><a href="/">Sanktuary</a></div>
-      <div class="screen" id="page"><p class="notice">Loading...</p></div>
-      <div class="status"><span id="status">Ready</span><span>sanktuary.studio</span></div>
-    </div>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="onebit" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0.3 0.59 0.11 0 0 0 0 0 1 0" result="grey" />
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" seed="7" result="noise" />
+        <feColorMatrix in="noise" type="matrix" values="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1" result="noise" />
+        <feComposite in="grey" in2="noise" operator="arithmetic" k2="1" k3="0.7" k4="-0.35" />
+        <feComponentTransfer>
+          <feFuncR type="discrete" tableValues="0 1" />
+          <feFuncG type="discrete" tableValues="0 1" />
+          <feFuncB type="discrete" tableValues="0 1" />
+        </feComponentTransfer>
+      </filter>
+    </svg>
+    <header class="top">
+      <a class="logo" href="/welcome"><img src="/icons/sanktuary-wordmark.svg" alt="Sanktuary" /></a>
+      <nav>
+        <a href="/portfolios?all" id="all">Portfolios</a>
+        <a href="/portfolio">Studio</a>
+        <a href="/cities">CITIES</a>
+        <a href="/welcome">Sanktuary</a>
+      </nav>
+    </header>
+    <main>
+      <p class="prompt" id="title">dir</p>
+      <div id="page"><p class="notice">Loading...</p></div>
+    </main>
+    <footer><span id="status">Ready</span><span class="cur">sanktuary.studio</span></footer>
     <script>
       (() => {
         const page = document.getElementById('page');
@@ -380,9 +454,10 @@
             .then(member, offline);
 
         function index({ people }) {
-          set('Portfolios - Sanktuary', `${people.length} portfolio(s)`);
+          set('dir', `${people.length} portfolio(s)`);
+          document.getElementById('all').className = 'on';
           page.replaceChildren();
-          const head = el('header');
+          const head = el('header', 'who');
           const t = el('div');
           t.append(el('h1', '', 'Portfolios'), el('p', 'headline', 'The artists, producers and makers of Sanktuary.'));
           head.append(t);
@@ -392,13 +467,20 @@
           page.append(w);
           people.forEach((p) => {
             const a = link(`/portfolios/${encodeURIComponent(p.username)}`, '', 'block card');
-            if (p.accent) a.style.setProperty('--c', p.accent);
             const u = encodeURIComponent(p.username);
             a.append(
-              p.photo ? img(`/api/public/avatar/${u}`) : p.cover ? img(`/api/public/portfolios/${u}/img/${p.cover}`) : el('div', 'ph'),
+              p.photo
+                ? img(`/api/public/avatar/${u}`)
+                : p.cover
+                  ? img(`/api/public/portfolios/${u}/img/${p.cover}`)
+                  : (() => {
+                      const ph = el('div', 'ph');
+                      ph.append(img('/icons/s-mark.svg'));
+                      return ph;
+                    })(),
             );
             const cap = el('div', 'cap');
-            cap.append(el('h3', '', p.displayName));
+            cap.append(el('h3', 'dir', p.displayName));
             if (p.headline || p.role) cap.append(el('p', 'small', p.headline || p.role));
             a.append(cap);
             w.add(a);
@@ -408,13 +490,12 @@
         function member(p) {
           page.replaceChildren();
           if (!p) {
-            set('Not found', 'This portfolio isn’t live');
+            set(`cd ${who}`, 'File not found');
             return page.append(el('p', 'notice', 'This portfolio isn’t live.'));
           }
           document.title = `${p.displayName} · Portfolio`;
-          set(`${p.displayName} - Portfolio`, p.mine && !p.live ? 'Preview: only you can see this' : `@${p.username}`);
+          set(`cd ${p.username}`, p.mine && !p.live ? 'Preview: only you can see this' : `@${p.username}`);
           document.documentElement.dataset.theme = p.theme;
-          if (p.accent) document.documentElement.style.setProperty('--accent', p.accent);
 
           if (p.mine) {
             const bar = el('div', 'bar');
@@ -430,7 +511,7 @@
             page.append(bar);
           }
 
-          const head = el('header');
+          const head = el('header', 'who');
           if (p.photo)
             head.append(
               img(
