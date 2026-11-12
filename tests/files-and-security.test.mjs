@@ -1972,6 +1972,49 @@ try {
     (await (await pub('/api/public/directory')).json()).stories.some((x) => x.slug === 'heart-of-the-cities'),
   );
 
+  // Open verses: a song with an open slot, hopped on, a take sent, one picked; no splits made
+  check('an open verse needs its song', (await call('bob', '/api/verses', 'POST', { title: 'No beat' })).status === 400);
+  const ov = JSON.parse(
+    (
+      await call('bob', '/api/verses', 'POST', {
+        title: 'Lake Street',
+        bpm: '140',
+        key: 'F# minor',
+        length: '16 bars',
+        slots: ['Verse 2', 'Bridge'],
+        beat: { space: 'team', path: 'Open verses/Lake Street/lake.wav' },
+      })
+    ).text,
+  );
+  check('a member posts a song with open slots', ov.slots.length === 2 && ov.slots.every((x) => !x.by));
+  check(
+    'the team hears about the open verse',
+    JSON.parse((await call('carol', '/api/projects?notifications')).text).some((n) => n.verse === ov.id && /Lake Street/.test(n.text)),
+  );
+  check(
+    'hopping on claims the slot',
+    JSON.parse((await call('carol', `/api/verses/${ov.id}`, 'PATCH', { hop: '1' })).text).slots[0].by === 'carol',
+  );
+  check('a claimed slot cannot be taken twice', (await call('alice', `/api/verses/${ov.id}`, 'PATCH', { hop: '1' })).status === 409);
+  check(
+    'only whoever hopped on sends a take',
+    (await call('alice', `/api/verses/${ov.id}`, 'PATCH', { slot: '1', take: { space: 'team', path: 'x.wav' } })).status === 403,
+  );
+  await call('carol', `/api/verses/${ov.id}`, 'PATCH', {
+    slot: '1',
+    take: { space: 'team', path: 'Open verses/Lake Street/Takes/carol/v2.wav' },
+  });
+  check('only the poster picks a take', (await call('carol', `/api/verses/${ov.id}`, 'PATCH', { pick: '1' })).status === 403);
+  check('a slot with no take cannot be picked', (await call('bob', `/api/verses/${ov.id}`, 'PATCH', { pick: '2' })).status === 400);
+  const picked = JSON.parse((await call('bob', `/api/verses/${ov.id}`, 'PATCH', { pick: '1', track: 'abc' })).text);
+  check('the poster picks a take', picked.picked === '1' && picked.track === 'abc');
+  check(
+    'whoever was picked is told',
+    JSON.parse((await call('carol', '/api/projects?notifications')).text).some((n) => /bob picked your verse 2/.test(n.text)),
+  );
+  check('a picked song is closed to new claims', (await call('alice', `/api/verses/${ov.id}`, 'PATCH', { hop: '2' })).status === 409);
+  check('open verses are for members only', (await fetch(B + '/api/verses')).status === 401);
+
   // Opportunities: grants and calls posted for the team
   const oppDue = new Date(Date.now() + 5 * 864e5).toLocaleDateString('en-CA');
   check(

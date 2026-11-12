@@ -18,6 +18,7 @@ import { ProjectInfo } from './ProjectPanel';
 import { useProfiles } from '../utils/profiles';
 import { Term } from '../utils/glossary';
 import Campaign from './Campaign';
+import OpenVerses, { takeVersesWish, Verse, VerseSlot } from './OpenVerses';
 
 interface Release {
   id: string;
@@ -154,7 +155,13 @@ const TracksApp: React.FC = () => {
   const { me } = useMe();
   const [data, setData] = useState<{ releases: Release[]; tracks: Track[]; statuses: string[]; kinds: string[] } | null>(null);
   const [releaseId, setReleaseId] = useState(''); // '' = the library
-  const [songsView, setSongsView] = useState(false); // the library as one list of every song, by where it's at
+  // the library as covers, one list of every song by where it's at, or the open verses board
+  const [view, setView] = useState<'' | 'songs' | 'verses'>(() => (takeVersesWish() ? 'verses' : ''));
+  useEffect(() => {
+    const on = () => takeVersesWish() && (setView('verses'), setReleaseId(''));
+    window.addEventListener('sk:open-verses', on);
+    return () => window.removeEventListener('sk:open-verses', on);
+  }, []);
   const [adding, setAdding] = useState<UploadItem[] | null>(null); // songs dropped or picked: new, or new versions?
   const songPicker = useRef<HTMLInputElement>(null);
   const [trackId, setTrackId] = useState<string | null>(null);
@@ -436,6 +443,30 @@ const TracksApp: React.FC = () => {
       load();
     }
   };
+  /** A picked open-verse take becomes a song in New songs: the take as its bounce, who's on it in the credits.
+   * No splits or Ledger rows: those are set when the song is published. */
+  const pickVerse = async (v: Verse, s: VerseSlot) => {
+    const target =
+      releases.find(isInbox) ||
+      (await api('/api/tracks/release', {
+        method: 'POST',
+        body: JSON.stringify({ title: INBOX, kind: 'Folder' }),
+      }));
+    const t = await api('/api/tracks/track', { method: 'POST', body: JSON.stringify({ release: target.id, title: v.title }) });
+    await api(`/api/tracks/track/${t.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        bounce: s.take,
+        bpm: v.bpm,
+        key: v.key,
+        status: 'Recording',
+        credits: `Artists: ${[v.by, s.by].filter((x, i, a) => x && a.indexOf(x) === i).join(', ')}\n${s.label}: ${s.by}`,
+        notes: `From Open verses. Beat: ${v.beat.path}`,
+      }),
+    });
+    await load();
+    return t.id as string;
+  };
   const addTrack = async () => {
     if (!release) return;
     const title = (await dialog.prompt('Track title:', '', { title: `Add a track to ${release.title}` }))?.trim();
@@ -475,11 +506,18 @@ const TracksApp: React.FC = () => {
               New playlist...
             </button>
             <button
-              style={{ ...button, ...(songsView ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setSongsView((v) => !v)}
+              style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+              onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
               title="Every song in one list: mixed, mastered, out, and what each needs next"
             >
-              {songsView ? 'Covers' : 'All songs'}
+              {view === 'songs' ? 'Covers' : 'All songs'}
+            </button>
+            <button
+              style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+              onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
+              title="Songs with an open verse: hop on, send a take, the poster picks one"
+            >
+              {view === 'verses' ? 'Covers' : 'Open verses'}
             </button>
           </>
         )}
@@ -664,7 +702,22 @@ const TracksApp: React.FC = () => {
         onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setDragging(false)}
         onDrop={drop}
       >
-        {!release && songsView ? (
+        {!release && view === 'verses' ? (
+          <OpenVerses
+            me={me?.username}
+            admin={me?.admin}
+            space={uploadSpace}
+            setMsg={setMsg}
+            onPick={pickVerse}
+            onOpenTrack={(id) => {
+              const t = byId.get(id);
+              if (!t) return setMsg('That song is gone from the tracker.');
+              setView('');
+              setReleaseId(t.release);
+              setTrackId(t.id);
+            }}
+          />
+        ) : !release && view === 'songs' ? (
           <AllSongs
             tracks={data.tracks}
             releases={releases}
