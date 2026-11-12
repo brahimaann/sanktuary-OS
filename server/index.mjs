@@ -4605,6 +4605,7 @@ async function readChannel(ch) {
         channel: plainText(tag(e, 'name')) || ch.name,
         excerpt: plainText(tag(e, 'media:description')).slice(0, 300),
         date: new Date(plainText(tag(e, 'published')) || Date.now()).toISOString(),
+        short: /youtube\.com\/shorts\//i.test(e), // the feed links a Short to /shorts/<id>, a long video to /watch?v=<id>
       }))
       .filter((v) => /^[\w-]{11}$/.test(v.id) && v.title); // the id goes into youtube-nocookie.com embed links
     const fresh = { at: Date.now(), items, error: null };
@@ -4729,7 +4730,8 @@ async function blogApi(req, res, url) {
   if (req.method === 'GET' && what === 'videos') {
     const videos = (await Promise.all((db.channels || []).map(readChannel))).flatMap((c) => c.items);
     res.setHeader('cache-control', 'public, max-age=60');
-    return json(res, { videos: videos.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) });
+    // Long videos first, newest first; Shorts after them
+    return json(res, { videos: videos.sort((a, b) => a.short - b.short || b.date.localeCompare(a.date)).slice(0, 60) });
   }
   if (what === 'moodboards') {
     // The moodboard of the month: the team fills a board through the month (Moodboards > New month... starts one
