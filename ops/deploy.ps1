@@ -85,9 +85,12 @@ try {
   Run 'git pull' { git pull --ff-only --quiet origin main }
   Run 'npm install' { npm install --no-audit --no-fund }
   Run 'npm install (server)' { npm install --prefix server --no-audit --no-fund }
-  Run 'tests' { npm test }
+  # Build first, then test against that build (as CI does): tests that fetch built files, like the intro video,
+  # fail against the live dist when the change adds those files
   if (Test-Path dist-next) { Remove-Item dist-next -Recurse -Force }
   Run 'build' { npm run build -- --outDir dist-next --emptyOutDir }
+  $env:DIST_DIR = Join-Path $proj 'dist-next'
+  try { Run 'tests' { npm test } } finally { Remove-Item Env:DIST_DIR }
   # Tabs opened before this deploy still load the last build's code files when someone opens an app: keep those
   # (up to two weeks old; their names are content hashes, so they never clash) next to the new ones
   if (Test-Path dist\assets) {

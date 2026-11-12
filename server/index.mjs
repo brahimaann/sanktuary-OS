@@ -32,10 +32,12 @@ initializeCanvas(
 );
 
 const PORT = Number(process.env.PORT || 3080);
-const DIST = resolve(new URL('../dist/', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
+// DIST_DIR lets auto-deploy test a fresh build (dist-next) before it goes live; data and cache paths stay put
+const DEFAULT_DIST = resolve(new URL('../dist/', import.meta.url).pathname.replace(/^\/(\w:)/, '$1'));
+const DIST = process.env.DIST_DIR ? resolve(process.env.DIST_DIR) : DEFAULT_DIST;
 const HOST = process.env.HOST || '127.0.0.1';
-const DATA = process.env.DATA_DIR || resolve(DIST, '../data');
-const LOCAL_CACHE = process.env.THUMB_CACHE || resolve(DIST, '../cache/thumbs'); // on the SSD; used when the cache drive is unplugged
+const DATA = process.env.DATA_DIR || resolve(DEFAULT_DIST, '../data');
+const LOCAL_CACHE = process.env.THUMB_CACHE || resolve(DEFAULT_DIST, '../cache/thumbs'); // on the SSD; used when the cache drive is unplugged
 const TUNNEL_READY = process.env.TUNNEL_READY || 'http://127.0.0.1:2000/ready';
 const SITE_ORIGINS = (process.env.SITE_ORIGINS || '').split(',').filter(Boolean);
 const CLERK = process.env.CLERK_API_URL || 'https://api.clerk.com/v1'; // overridable so tests can use a fake Clerk
