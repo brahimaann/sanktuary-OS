@@ -136,7 +136,7 @@ const app = {
     width: 640,
     height: 480,
   },
-  // Ledger: every member's own master splits; admins also get the Business tab (two-step verification on the server).
+  // Ledger: the songs each member claims space on and their own invoices; admins also get Business (two-step on the server).
   admin: { id: 'admin-panel', title: 'Admin Panel', icon: I('settings'), appType: 'admin', width: 760, height: 540 },
   business: { id: 'business', title: 'Ledger', icon: I('my-documents-folder'), appType: 'business', width: 860, height: 600 },
 } satisfies Record<string, DesktopIconDef>;

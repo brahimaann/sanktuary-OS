@@ -673,6 +673,44 @@ try {
     bobSplits,
   );
   check('…and nobody else’s', JSON.parse((await call('carol', '/api/tracks/splits')).text).splits.length === 0);
+  check(
+    'a song that has earned nothing is a placeholder: no money, nothing to recoup',
+    bobSplits[0].made === 0 && bobSplits[0].releaseMade === 0 && bobSplits[0].yours === 0,
+  );
+
+  // Ledger > My invoices: any member bills an artist for their own work, with a deposit, from their own name
+  const lj = async (u, path, method = 'GET', body) => {
+    const r = await call(u, '/api/ledger' + path, method, body);
+    return { status: r.status, body: r.status === 200 ? JSON.parse(r.text) : r.text };
+  };
+  await lj('carol', '/details', 'PATCH', { name: 'Carol Lens', payment: 'Cash App $carollens' });
+  const mInv = (
+    await lj('carol', '/invoices', 'POST', { billTo: 'Ada Okoro', title: 'Cover shoot', items: [{ desc: 'Shoot', qty: 2, rate: 150 }] })
+  ).body;
+  check(
+    'member invoice: numbered from the username, starts as a draft with a 50% deposit',
+    /^CAROL-\d{4}-001$/.test(mInv.number) && mInv.status === 'Draft' && mInv.deposit === 50,
+    mInv,
+  );
+  check('…and nobody else can see or change it', (await lj('bob', `/invoices/${mInv.id}`, 'PATCH', { title: 'x' })).status === 404);
+  check('…or list it', (await lj('bob', '')).body.invoices.length === 0);
+  check('bad deposit amounts refused', (await lj('carol', `/invoices/${mInv.id}`, 'PATCH', { deposit: 'half' })).status === 400);
+  const mPage = (await lj('carol', `/invoices/${mInv.id}/page`)).body;
+  const mPath = new URL(mPage.link).pathname;
+  check('a draft member invoice link does not open yet', (await call(null, mPath)).status === 410);
+  await lj('carol', `/invoices/${mInv.id}`, 'PATCH', { status: 'Sent' });
+  const mHtml = (await call(null, mPath)).text;
+  check(
+    'the artist’s copy: from the member, deposit due now, how to pay them, no card button',
+    mHtml.includes('Carol Lens') &&
+      mHtml.includes('Deposit due now (50%)') &&
+      mHtml.includes('$150.00') &&
+      mHtml.includes('Cash App $carollens') &&
+      !mHtml.includes('by card'),
+  );
+  const mDep = (await lj('carol', `/invoices/${mInv.id}`, 'PATCH', { status: 'Deposit paid' })).body;
+  check('marking the deposit stamps the date', mDep.depositOn === new Date().toLocaleDateString('en-CA'));
+  check('…and the copy shows the balance due', (await call(null, mPath)).text.includes('Balance due'));
 
   // Release folders: files fill Tracks in
   const albumDir = join(drive, 'team', 'Albums', 'Folder Album');
@@ -2877,6 +2915,19 @@ try {
   );
   const imp2 = await importCsv(rowsV1);
   check('importing the same file again adds nothing', imp2.added === 0 && imp2.skipped === 3);
+  // The Ledger shows a member what their song has made and their part of it, once the song is earning
+  await call('alice', `/api/tracks/track/${revSong.id}`, 'PATCH', {
+    master: [
+      { name: 'HIMA', role: 'Artist', share: 50, member: 'bob' },
+      { name: 'Sanktuary', role: 'Label', share: 50, member: '' },
+    ],
+  });
+  const bobMoney = JSON.parse((await call('bob', '/api/tracks/splits')).text).splits.find((x) => x.track === revSong.id);
+  check(
+    'Ledger: what the song made and your part of it',
+    bobMoney?.made === 5 && bobMoney.releaseMade === 5 && bobMoney.toRecoup === 0 && bobMoney.yours === 2.5,
+    JSON.stringify(bobMoney),
+  );
   // The next download has the whole history plus late earnings for January: only the new row is added
   const imp3 = await importCsv([
     ...rowsV1,
