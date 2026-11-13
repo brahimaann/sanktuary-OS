@@ -450,7 +450,7 @@
           <div class="muted">${p.kind === 'digital' ? 'Digital: you get a private download link right after paying.' : 'Shipped to the US and Canada. Stripe asks for your address.'}</div>
           ${!p.vault && p.left ? `<div class="err">Only ${p.left} left</div>` : ''}
           ${p.description ? `<p>${para(p.description)}</p>` : ''}
-          ${!p.vault && p.sizes.length ? `<div class="row sizes" style="margin-top:12px">Size ${p.sizes.map((z) => `<button class="btn" data-size="${esc(z)}">${esc(z)}</button>`).join('')}</div>` : ''}
+          ${!p.vault && p.sizes.length ? `<div class="row sizes" style="margin:12px 0">Size ${p.sizes.map((z) => `<button class="btn" data-size="${esc(z)}">${esc(z)}</button>`).join('')}</div>` : ''}
           ${
             p.vault
               ? `<div class="note">In <a href="/shop?c=vault">The Vault</a>: ${p.soldOut ? 'sold out' : 'retired'}, no longer for sale.</div>`
