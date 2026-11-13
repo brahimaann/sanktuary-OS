@@ -230,6 +230,9 @@
           grid-template-columns: 1fr;
         }
       }
+      .product.solo {
+        grid-template-columns: 1fr;
+      }
       .foot {
         text-align: center;
         margin: 12px auto 0;
@@ -419,11 +422,16 @@
           return fail(e);
         }
         const p = s.products.find((x) => x.slug === slug);
-        if (!p) return fail(new Error('This item is not available.'));
+        if (!p)
+          return (
+            fail(new Error('This item is not available.')),
+            app.insertAdjacentHTML('beforeend', '<div><a class="btn" href="/shop">&larr; All items</a></div>')
+          );
         title(p.title);
-        app.innerHTML = `<div class="inset product">${p.image ? `<img src="${esc(p.image)}" alt="">` : '<div></div>'}
+        app.innerHTML = `<div class="inset product${p.image ? '' : ' solo'}">${p.image ? `<img src="${esc(p.image)}" alt="">` : ''}
           <div>${p.capsule ? `<div class="muted">${esc(p.capsule)}</div>` : ''}<h1>${esc(p.title)}</h1><div class="big-number" style="margin:8px 0">${usd(p.price)}</div>
           <div class="muted">${p.kind === 'digital' ? 'Digital: you get a private download link right after paying.' : 'Shipped to the US and Canada. Stripe asks for your address.'}</div>
+          ${!p.vault && p.left ? `<div class="err">Only ${p.left} left</div>` : ''}
           ${p.description ? `<p>${para(p.description)}</p>` : ''}
           ${
             p.vault
@@ -434,8 +442,8 @@
                   ? '<div class="note">All that are left are in other people\'s checkouts. Try again in half an hour.</div>'
                   : !s.payments
                     ? '<div class="note">The shop opens for orders soon.</div>'
-                    : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? 'Qty <input id="qty" type="number" min="1" max="10" value="1" style="width:60px">' : ''}
-                  <button class="btn big" id="buy">Buy</button></div>${p.left !== null && p.left <= 10 ? `<div class="err" style="margin-top:6px">Only ${p.left} left</div>` : ''}<div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
+                    : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? `Qty <input id="qty" type="number" min="1" max="${Math.min(10, p.left ?? 10)}" value="1" style="width:60px">` : ''}
+                  <button class="btn big" id="buy">Buy</button></div><div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
           }</div></div><div><a class="btn" href="/shop">&larr; All items</a></div>`;
         tick();
         const buy = document.getElementById('buy');

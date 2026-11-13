@@ -55,7 +55,7 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
   }, []);
   return (
     <div style={shell}>
-      <div style={{ display: 'flex', gap: 2, padding: '4px 4px 0' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, padding: '4px 4px 0' }}>
         {TABS.map(([id, label]) => (
           <button
             key={id}

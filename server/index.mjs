@@ -4978,7 +4978,8 @@ async function blogApi(req, res, url) {
         id: randomUUID().slice(0, 10),
         title: 'Untitled',
         body: '',
-        author: user.username,
+        // The byline starts as the writer's display name ("Nia Wells"), not their sign-in name
+        author: (await readJson(`profiles/${user.username}.json`, {})).displayName || user.username,
         owner: user.username,
         line: 'heart',
         image: null,

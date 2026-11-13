@@ -508,16 +508,20 @@ const TracksApp: React.FC = () => {
             <button
               style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
               onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
-              title="Every song in one list: mixed, mastered, out, and what each needs next"
+              title={
+                view === 'songs' ? 'Back to the project covers' : 'Every song in one list: mixed, mastered, out, and what each needs next'
+              }
             >
-              {view === 'songs' ? 'Covers' : 'All songs'}
+              All songs
             </button>
             <button
               style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
               onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
-              title="Songs with an open verse: hop on, send a take, the poster picks one"
+              title={
+                view === 'verses' ? 'Back to the project covers' : 'Songs with an open verse: hop on, send a take, the poster picks one'
+              }
             >
-              {view === 'verses' ? 'Covers' : 'Open verses'}
+              Open verses
             </button>
           </>
         )}
@@ -681,6 +685,11 @@ const TracksApp: React.FC = () => {
           </>
         )}
       </div>
+      {me && !uploadSpace() && (
+        <div style={{ padding: '3px 6px', background: '#000', color: '#fff' }}>
+          You can't add songs yet: you have no team space to upload to. Ask an admin for upload rights.
+        </div>
+      )}
       {release && guided && ready && <GuidedStrip ready={ready} onGo={goTo} onHide={() => guide(false)} />}
       <div
         ref={box}

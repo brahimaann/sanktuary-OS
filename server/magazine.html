@@ -149,12 +149,30 @@
         min-width: 13ch;
         text-align: center;
       }
+      nav > * {
+        white-space: nowrap;
+      }
+      header a,
+      nav a {
+        color: inherit;
+        text-decoration: none;
+      }
+      /* The way back to CITIES, for a reader who landed here from a link (the desktop window has its own) */
+      .embedded #home {
+        display: none;
+      }
       /* Small screens, fullscreen and the desktop window (its title bar names the issue): just the magazine and a slim control bar */
       .embedded header {
         display: none;
       }
       @media (max-width: 600px), (max-height: 600px) {
         header {
+          display: none;
+        }
+        #count {
+          min-width: 0;
+        }
+        .pg {
           display: none;
         }
       }
@@ -165,11 +183,12 @@
   </head>
   <body>
     <header>
-      <h1>CITIES Vol. 1</h1>
+      <h1><a href="/cities">CITIES</a> Vol. 1</h1>
       <span>C:\SANKTUARY\CITIES&gt; open vol1</span>
     </header>
     <div id="stage"><div id="book"></div></div>
     <nav>
+      <a id="home" href="/cities" aria-label="Back to CITIES">[CITIES]</a>
       <button id="prev" aria-label="Previous page">[&lt; Prev]</button>
       <span id="count"></span>
       <button id="next" aria-label="Next page">[Next &gt;]</button>
@@ -237,7 +256,7 @@
         imgs.forEach((img) => (img.onload = () => trim(img)));
         const show = () => {
           const i = book.getCurrentPageIndex();
-          count.textContent = `PAGE ${String(i + 1).padStart(2, '0')}/${book.getPageCount()}`;
+          count.innerHTML = `<span class="pg">PAGE </span>${String(i + 1).padStart(2, '0')}/${book.getPageCount()}`;
           el.classList.toggle('open', i > 0 && i < book.getPageCount() - 1);
           // The open pages first; neighbours wait their turn so they don't slow the pages on screen
           for (let n = Math.max(0, i - 2); n < Math.min(imgs.length, i + 4); n++) {

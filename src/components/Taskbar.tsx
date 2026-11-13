@@ -7,6 +7,7 @@ import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
 import { openStudio } from '../apps/Studio';
 import { button } from '../apps/fileTypes';
+import { useMe } from '../utils/api';
 
 interface MenuItem {
   id: string;
@@ -33,7 +34,7 @@ const STUDIO_MENU: MenuItem[] = [
   },
   {
     id: 'studio',
-    label: 'Studio (music, calendar, boards, opportunities)',
+    label: 'Operations (music, calendar, boards, opportunities)',
     title: 'Operations',
     appType: 'studio',
     icon: icon('media-player-32x32.png?v=2'),
@@ -103,6 +104,7 @@ const VISITOR_MENU: MenuItem[] = [
 
 export const Taskbar: React.FC = () => {
   const { isSignedIn } = useAuth();
+  const { me } = useMe();
   const { windows, startMenuOpen, setStartMenuOpen, openWindow, focusWindow, minimizeWindow } = useWindowManager();
 
   const [timeStr, setTimeStr] = useState('');
@@ -304,6 +306,17 @@ export const Taskbar: React.FC = () => {
                 </button>
               </li>
             ))}
+            {me?.admin && (
+              <li className="hover:bg-black hover:text-white group">
+                <button
+                  onClick={() => launchApp('admin-panel', 'Admin Panel', 'admin', icon('settings-32x32.png?v=2'), 760, 540)}
+                  className="w-full text-left py-1 px-2 flex items-center"
+                >
+                  <img src={icon('settings-32x32.png?v=2')} alt="" className="w-6 h-6 mr-3 image-render-pixelated" />
+                  <span>Admin Panel</span>
+                </button>
+              </li>
+            )}
             <hr className="my-1 border-t border-gray-400 border-b border-white" />
             <li className="hover:bg-black hover:text-white group">
               <button

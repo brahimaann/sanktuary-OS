@@ -1675,6 +1675,12 @@ try {
   check('but drafts need a sign-in', (await call(null, '/api/blog/mine')).status === 401);
   const bobDraft = JSON.parse((await call('bob', '/api/blog/posts', 'POST', { title: 'Lyric', line: 'heart', kind: 'profile' })).text);
   check('members can start a draft', bobDraft.owner === 'bob' && bobDraft.kind === 'profile' && !bobDraft.published);
+  check('a draft is bylined by sign-in name when there is no display name', bobDraft.author === 'bob');
+  mkdirSync(join(dir, 'data', 'profiles'), { recursive: true });
+  writeFileSync(join(dir, 'data', 'profiles', 'dave.json'), JSON.stringify({ displayName: 'Dave D' }));
+  const daveDraft = JSON.parse((await call('dave', '/api/blog/posts', 'POST', { title: 'Byline' })).text);
+  check('a draft is bylined by display name, not sign-in name', daveDraft.author === 'Dave D');
+  await call('dave', `/api/blog/posts/${daveDraft.id}`, 'DELETE');
   await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', {
     published: true,
     preface: 'Singing since she was two.',

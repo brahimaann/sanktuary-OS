@@ -1230,7 +1230,11 @@ const ShopTab: React.FC = () => {
               const title = (await dialog.prompt('Product name:', '', { title: 'New product' }))?.trim();
               if (title)
                 api('/api/shop/products', { method: 'POST', body: JSON.stringify({ title }) }).then(
-                  (p: Product) => (setOpenProduct(p.id), load()),
+                  (p: Product) => (
+                    setOpenProduct(p.id),
+                    load(),
+                    setMsg('Created hidden. Fill it in, then tick On sale at the bottom to put it in the shop.')
+                  ),
                   (e) => setMsg(e.message),
                 );
             }}
@@ -1248,7 +1252,7 @@ const ShopTab: React.FC = () => {
             style={{ ...pickRow, background: p.id === openProduct ? '#000' : '#fff', color: p.id === openProduct ? '#fff' : '#000' }}
           >
             <b>{p.title}</b> · {usd(p.price)} · {p.kind} · {p.stock === null ? 'unlimited' : `${p.stock} left`} ·{' '}
-            {p.active ? 'on sale' : 'hidden'}
+            {p.active ? 'on sale' : <b>hidden, not in the shop</b>}
           </div>
         ))}
         {product && (

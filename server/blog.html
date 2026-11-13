@@ -893,27 +893,20 @@
         const shown = inSection.filter((p) => section !== 'essays' || !filter || p.publication === filter);
         const faces = section === 'heart' && people.length ? `<div class="people">${people.map(face).join('')}</div>` : '';
         // Heart of the Cities opens with the magazine
-        const magazine =
-          section === 'heart'
-            ? `<a class="post" href="/magazine"><img src="/magazine/pages/cover.webp" alt="" loading="lazy">
-                <div style="min-width:0"><div class="meta"><span class="chip">Magazine</span>CITIES</div>
-                <h2>CITIES Vol. 1</h2><div class="excerpt">The magazine: Twin Cities artists in their own words. Flip through the issue.</div></div></a>`
-            : '';
         app.innerHTML =
-          magazine +
-            faces +
-            shown
-              .map(
-                (p) => `<a class="post" href="${esc(p.url)}" data-nav>
+          (section === 'heart' ? MAGAZINE : '') + faces + shown.map(card).join('') ||
+          '<div class="empty">Nothing here yet. Check back soon.</div>';
+      }
+      const MAGAZINE = `<a class="post" href="/magazine"><img src="/magazine/pages/cover.webp" alt="" loading="lazy">
+                <div style="min-width:0"><div class="meta"><span class="chip">Magazine</span>CITIES</div>
+                <h2>CITIES Vol. 1</h2><div class="excerpt">The magazine: Twin Cities artists in their own words. Flip through the issue.</div></div></a>`;
+      const card = (p) => `<a class="post" href="${esc(p.url)}" data-nav>
                     ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
                     <div style="min-width:0">
                       <div class="meta">${chip(p)}${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
                       <h2>${esc(p.title)}</h2>
                       <div class="excerpt">${esc(p.excerpt)}</div>
-                    </div></a>`,
-              )
-              .join('') || '<div class="empty">Nothing here yet. Check back soon.</div>';
-      }
+                    </div></a>`;
 
       // Our own posts are plain text: paragraphs, https links made clickable, and a line that is just one of our
       // uploaded pictures (/api/blog/images/...) shown as a photo. Nothing else is interpreted.
@@ -1006,10 +999,20 @@
           ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
           : '';
         app.innerHTML = `<article class="reader"><div class="meta">${chip(p)}</div><h1>${esc(p.title)}</h1>${p.preface ? `<p class="preface">${esc(p.preface)}</p>` : ''}<div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}${p.people?.length ? `<h3>People in this story</h3><div class="people">${p.people.map(face).join('')}</div>` : ''}<div id="listen"></div><div id="shop"></div>${credit}</article>`;
+                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}${p.people?.length ? `<h3>People in this story</h3><div class="people">${p.people.map(face).join('')}</div>` : ''}<div id="listen"></div><div id="shop"></div>${credit}<div id="more"></div></article>`;
         scrollTo(0, 0);
         if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
         if (p.product) document.getElementById('shop').outerHTML = await shopCard(p.product);
+        // A story never ends in a dead end: a few more to read, and the magazine
+        if (!all.length)
+          all = await fetch('/api/blog')
+            .then((r) => r.json())
+            .then(
+              (d) => d.posts,
+              () => [],
+            );
+        const more = all.filter((x) => x.url !== p.url).slice(0, 3);
+        document.getElementById('more').innerHTML = `<h3>More from CITIES</h3>${more.map(card).join('')}${MAGAZINE}`;
       }
 
       // The moodboard of the month: whatever the team dropped on its board this month, as a wall sorted into four

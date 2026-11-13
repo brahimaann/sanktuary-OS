@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
+import { displayName, useProfiles } from '../utils/profiles';
 import { useApi } from '../utils/api';
 import { useLiveEvent } from '../utils/live';
 import { uploadFiles } from '../utils/upload';
@@ -83,6 +84,8 @@ const OpenVerses: React.FC<{
   const [sel, setSel] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { byName } = useProfiles();
+  const who = (u: string) => displayName(byName[u], u);
   const [show, setShow] = useState<'open' | 'all'>('open');
   const load = useCallback(
     () =>
@@ -162,7 +165,7 @@ const OpenVerses: React.FC<{
                   style={{ cursor: 'pointer' }}
                 >
                   <td style={{ ...td, fontWeight: 700 }}>{x.title}</td>
-                  <td style={td}>{x.by}</td>
+                  <td style={td}>{who(x.by)}</td>
                   <td style={td}>{[x.bpm && `${x.bpm} BPM`, x.key].filter(Boolean).join(' · ')}</td>
                   <td style={td}>
                     {x.picked
@@ -191,7 +194,7 @@ const OpenVerses: React.FC<{
           <div style={{ ...box, flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, whiteSpace: 'normal' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
               <b style={{ fontSize: 14 }}>{v.title}</b>
-              <span style={{ opacity: 0.7 }}>posted by {v.by}</span>
+              <span style={{ opacity: 0.7 }}>posted by {who(v.by)}</span>
               {(v.by === me || admin) && (
                 <button
                   style={{ ...button, marginLeft: 'auto' }}
@@ -213,7 +216,7 @@ const OpenVerses: React.FC<{
             {v.slots.map((s) => (
               <fieldset key={s.id} style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px' }}>
                 <legend>
-                  {s.label}: {v.picked === s.id ? `${s.by}'s take, picked ✓` : s.by ? `${s.by} hopped on` : 'open'}
+                  {s.label}: {v.picked === s.id ? `${who(s.by!)}'s take, picked ✓` : s.by ? `${who(s.by)} hopped on` : 'open'}
                 </legend>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {!s.by && !v.picked && (
@@ -239,10 +242,13 @@ const OpenVerses: React.FC<{
                           const f = e.target.files?.[0];
                           e.target.value = '';
                           if (f)
-                            act(async () => {
-                              const take = await upload(f, ['Open verses', folderSafe(v.title) || v.id, 'Takes', me]);
-                              await patch(v, { slot: s.id, take });
-                            }, `Take sent to ${v.by}.`);
+                            act(
+                              async () => {
+                                const take = await upload(f, ['Open verses', folderSafe(v.title) || v.id, 'Takes', me]);
+                                await patch(v, { slot: s.id, take });
+                              },
+                              `Take sent to ${who(v.by)}.`,
+                            );
                         }}
                       />
                     </label>
@@ -259,10 +265,13 @@ const OpenVerses: React.FC<{
                       disabled={busy}
                       title="Makes the song in the tracker (New songs) with this take. Splits come later, when it's published."
                       onClick={() =>
-                        act(async () => {
-                          const track = await onPick(v, s);
-                          await patch(v, { pick: s.id, track });
-                        }, `Picked ${s.by}'s take. "${v.title}" is in your songs now.`)
+                        act(
+                          async () => {
+                            const track = await onPick(v, s);
+                            await patch(v, { pick: s.id, track });
+                          },
+                          `Picked ${who(s.by!)}'s take. "${v.title}" is in your songs now.`,
+                        )
                       }
                     >
                       Pick this take
@@ -287,6 +296,7 @@ const OpenVerses: React.FC<{
       </div>
       {posting && (
         <PostForm
+          blocked={!space()}
           busy={busy}
           onClose={() => setPosting(false)}
           onPost={(f, body) =>
@@ -304,13 +314,14 @@ const OpenVerses: React.FC<{
 };
 
 const PostForm: React.FC<{
+  blocked: boolean;
   busy: boolean;
   onClose: () => void;
   onPost: (
     f: File,
     body: { title: string; bpm: string; key: string; length: string; deadline: string | null; notes: string; slots: string[] },
   ) => void;
-}> = ({ busy, onClose, onPost }) => {
+}> = ({ blocked, busy, onClose, onPost }) => {
   const [file, setFile] = useState<File | null>(null);
   const [f, setF] = useState({ title: '', bpm: '', key: '', length: '16 bars', deadline: '', notes: '', slots: 'Verse' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
@@ -340,8 +351,13 @@ const PostForm: React.FC<{
         }}
       >
         <b>Post a song with an open verse</b>
+        {blocked && (
+          <div style={{ padding: '3px 6px', background: '#000', color: '#fff' }}>
+            You can't post yet: you have no team space to upload to. Ask an admin for upload rights.
+          </div>
+        )}
         {row(
-          'Song',
+          'Song or beat',
           <input
             type="file"
             accept={AUDIO}
@@ -372,7 +388,7 @@ const PostForm: React.FC<{
           <button type="button" style={button} onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="sk-signal" style={{ ...button, fontWeight: 700 }} disabled={busy || !file}>
+          <button type="submit" className="sk-signal" style={{ ...button, fontWeight: 700 }} disabled={busy || blocked || !file}>
             Post
           </button>
         </div>
