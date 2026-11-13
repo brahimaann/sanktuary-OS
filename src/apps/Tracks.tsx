@@ -930,7 +930,7 @@ const TracksApp: React.FC = () => {
             members={release.members}
             always={release.owner}
             listeners={release.listeners || []}
-            note="Everyone = every member. Pick people to keep it private (you and admins always see it). Can listen = play, comment and follow, but not change anything."
+            note="Everyone = every member. Pick people to keep it private: its songs and its folder in Team Files are hidden from everyone else (you and admins always see it). Can listen = play, comment and follow, but not change anything."
             onSave={(m, listeners) => patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners })}
             onClose={() => setSharing(false)}
           />
@@ -1392,6 +1392,25 @@ const TrackPage: React.FC<{
   const { me } = useMe();
   const syncKit = async () => {
     try {
+      // Stems wait for the split: no link goes out until everyone on it has signed (or you say so)
+      const m = t.master;
+      const waiting = (m?.splits || []).filter(
+        (r) => !m!.signoffs.some((x) => x.hash === m!.hash && (x.user === r.member || x.party === r.name)),
+      );
+      const why = !m?.splits.length
+        ? 'This song has no master split yet.'
+        : waiting.length
+          ? `Still to sign the split: ${waiting.map((r) => r.name).join(', ')}.`
+          : '';
+      if (
+        why &&
+        !(await dialog.confirm(`${why} The stems link is held until the split is signed.`, {
+          icon: 'warning',
+          ok: 'I know, send anyway',
+          cancel: 'Hold it',
+        }))
+      )
+        return setMsg('Stems link held until the split is signed.');
       const l = await api('/api/links', {
         method: 'POST',
         body: JSON.stringify({ space: t.stems!.space, path: t.stems!.path, days: 30, download: true }),

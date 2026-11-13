@@ -189,7 +189,8 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
             <div style={{ color: '#444' }}>Twin Cities · music · art · fashion · film</div>
           </div>
         </div>
-        <div style={{ ...panel, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{f ? f.intro : 'Loading...'}</div>
+        {/* The front-door pitch is for visitors; a member's first-time tour goes straight to how the studio works */}
+        {!(tour && isSignedIn) && <div style={{ ...panel, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{f ? f.intro : 'Loading...'}</div>}
 
         <Section title={isSignedIn ? 'How the studio works' : 'Take the tour'} refEl={tourBox}>
           <Tour member={!!isSignedIn} />

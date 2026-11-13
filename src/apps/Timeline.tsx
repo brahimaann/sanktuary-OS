@@ -23,6 +23,7 @@ interface Entry {
   people?: string[];
   location?: string;
   notes?: string;
+  plan?: Record<string, Record<string, { text: string; done?: boolean }[] | unknown>>; // from Foundry > Director / Stylist
   recap?: string;
   link?: string;
   folder?: FileRef | null;
@@ -443,6 +444,27 @@ const EntryPanel: React.FC<{
           {...text('notes')}
         />
       </fieldset>
+      {/* The shoot plan the director and stylist keep in Foundry (Session > Director / Stylist > Shoot), for the whole crew */}
+      {(
+        [
+          ['Shot list', e.plan?.director?.shots],
+          ['Looks', e.plan?.stylist?.looks],
+          ['Pulls', e.plan?.stylist?.pulls],
+        ] as [string, { text: string; done?: boolean }[] | undefined][]
+      )
+        .filter(([, list]) => list?.length)
+        .map(([name, list]) => (
+          <fieldset key={name} style={fieldset}>
+            <legend>
+              {name} ({list!.filter((x) => x.done).length}/{list!.length} done) · from Foundry
+            </legend>
+            {list!.map((x, n) => (
+              <div key={n} style={{ textDecoration: x.done ? 'line-through' : 'none' }}>
+                {x.done ? '☑' : '☐'} {x.text}
+              </div>
+            ))}
+          </fieldset>
+        ))}
       {e.public && (
         <fieldset style={fieldset}>
           <legend>Recap for visitors</legend>

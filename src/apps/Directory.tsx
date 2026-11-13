@@ -10,6 +10,7 @@ interface Person {
   username: string;
   displayName: string;
   role: string;
+  city: string;
   bio: string;
   links: Partial<Record<LinkKey, string>>;
   avatar: boolean;
@@ -237,7 +238,7 @@ const Details: React.FC<{ d: Dir; section: Section; i: number }> = ({ d, section
           <b>
             {p.displayName} <span style={{ fontWeight: 400, color: '#555' }}>@{p.username}</span>
           </b>
-          {p.role && <div>{p.role}</div>}
+          {(p.role || p.city) && <div>{[p.role, p.city].filter(Boolean).join(' · ')}</div>}
           {p.bio && <div style={{ whiteSpace: 'pre-wrap' }}>{p.bio}</div>}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {PROFILE_LINKS.map(

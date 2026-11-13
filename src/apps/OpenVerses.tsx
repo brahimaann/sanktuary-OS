@@ -212,6 +212,13 @@ const OpenVerses: React.FC<{
               {[v.bpm && `${v.bpm} BPM`, v.key, v.length, v.deadline && `${dueIn(v.deadline)} (${v.deadline})`].filter(Boolean).join(' · ')}
             </div>
             {v.notes && <div style={{ whiteSpace: 'pre-wrap' }}>{v.notes}</div>}
+            <div style={{ border: '1px dashed #000', padding: '3px 6px' }}>
+              <b>On this song:</b> {[...new Set([v.by, ...v.slots.flatMap((x) => (x.by ? [x.by] : []))])].map(who).join(', ')}
+              <div style={{ opacity: 0.7 }}>
+                Hopping on holds your place on the song. No percentages yet: the split is set once it's published and earning enough to
+                share.
+              </div>
+            </div>
             <Player file={v.beat} />
             {v.slots.map((s) => (
               <fieldset key={s.id} style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px' }}>

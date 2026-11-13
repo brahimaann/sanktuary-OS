@@ -130,6 +130,9 @@
         outline-offset: 1px;
       }
       /* The main action (Buy, Continue to payment) wears the signal colour */
+      .btn.on {
+        background: var(--signal);
+      }
       .btn.big {
         font-weight: 700;
         min-height: 38px;
@@ -265,7 +268,9 @@
         <div class="title"><span id="t">Sanktuary</span></div>
         <div class="body" id="app">Loading...</div>
       </div>
-      <div class="foot"><a href="/">Enter Sanktuary</a> · <a href="/shop">Shop</a> · <a href="/cities">CITIES</a> · payments by Stripe</div>
+      <div class="foot">
+        <a href="/welcome">Enter Sanktuary</a> · <a href="/shop">Shop</a> · <a href="/cities">CITIES</a> · payments by Stripe
+      </div>
     </div>
     <script>
       const app = document.getElementById('app');
@@ -445,6 +450,7 @@
           <div class="muted">${p.kind === 'digital' ? 'Digital: you get a private download link right after paying.' : 'Shipped to the US and Canada. Stripe asks for your address.'}</div>
           ${!p.vault && p.left ? `<div class="err">Only ${p.left} left</div>` : ''}
           ${p.description ? `<p>${para(p.description)}</p>` : ''}
+          ${!p.vault && p.sizes.length ? `<div class="row sizes" style="margin-top:12px">Size ${p.sizes.map((z) => `<button class="btn" data-size="${esc(z)}">${esc(z)}</button>`).join('')}</div>` : ''}
           ${
             p.vault
               ? `<div class="note">In <a href="/shop?c=vault">The Vault</a>: ${p.soldOut ? 'sold out' : 'retired'}, no longer for sale.</div>`
@@ -458,14 +464,22 @@
                   <button class="btn big" id="buy">Buy</button></div><div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
           }</div></div><div><a class="btn" href="/shop">&larr; All items</a></div>`;
         tick();
+        let size = '';
+        for (const b of app.querySelectorAll('[data-size]'))
+          b.onclick = () => {
+            size = b.dataset.size;
+            for (const x of app.querySelectorAll('[data-size]')) x.classList.toggle('on', x === b);
+            document.getElementById('e')?.replaceChildren();
+          };
         const buy = document.getElementById('buy');
         if (buy)
           buy.onclick = async () => {
+            if (p.sizes.length && !size) return (document.getElementById('e').textContent = 'Pick a size first.');
             buy.disabled = true;
             try {
               const r = await get(`/api/shop/${encodeURIComponent(p.slug)}/buy`, {
                 method: 'POST',
-                body: JSON.stringify({ qty: document.getElementById('qty')?.value || 1 }),
+                body: JSON.stringify({ qty: document.getElementById('qty')?.value || 1, size }),
               });
               location.href = r.url;
             } catch (e) {

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { button } from './TeamFiles';
+import { useApi } from '../utils/api';
 
 // Foundry's Session tab has three roles on the same cockpit: Recording (in Producer.tsx), Director and Stylist.
 // Each one is a ribbon of settings that drives three panes: math on the left, the working list in the centre,
-// a brief on the right. Lists are kept on this device. Numbers are starting points, not rules.
+// a brief on the right. Numbers are starting points, not rules. A Director or Stylist plan is kept on the shoot picked
+// in the role bar (so the whole crew sees it, in Foundry and on the shoot in Calendar); with no shoot, on this device.
 // Session cockpit: 1px rules between every cell, monospace numbers, no padding to spare (S machine, 1-bit)
 export const TOKENS = {
   '--fk-bg': '#fff',
@@ -55,25 +57,33 @@ export const sfield: React.CSSProperties = {
   border: rule,
 };
 
-/** A value kept in this browser (private window: just not kept). */
-function useKept<T>(key: string, blank: T): [T, (patch: Partial<T>) => void] {
+/** The shoot the plan is being kept on: its saved halves, and how to save one. null = kept on this device. */
+type Half = 'director' | 'stylist';
+const ShootPlan = createContext<{ plan: Partial<Record<Half, object>>; save: (half: Half, value: object) => void } | null>(null);
+
+/** A value kept on the picked shoot (when `half` is given and a shoot is picked), else in this browser
+ * (private window: just not kept). */
+function useKept<T>(key: string, blank: T, half?: Half): [T, (patch: Partial<T>) => void] {
+  const shoot = useContext(ShootPlan);
+  const on = half && shoot ? shoot : null;
   const [v, setV] = useState<T>(() => {
+    if (on) return { ...blank, ...on.plan[half!] };
     try {
       return { ...blank, ...JSON.parse(localStorage.getItem(key) || '{}') };
     } catch {
       return blank;
     }
   });
-  const set = (patch: Partial<T>) =>
-    setV((o) => {
-      const n = { ...o, ...patch };
-      try {
-        localStorage.setItem(key, JSON.stringify(n));
-      } catch {
-        /* not kept */
-      }
-      return n;
-    });
+  const set = (patch: Partial<T>) => {
+    const n = { ...v, ...patch };
+    setV(n);
+    if (on) return on.save(half!, n as object);
+    try {
+      localStorage.setItem(key, JSON.stringify(n));
+    } catch {
+      /* not kept */
+    }
+  };
   return [v, set];
 }
 
@@ -239,17 +249,21 @@ const RIG = [
 const ft = (m: number) => (m * 3.281).toFixed(1);
 
 const DirectorCockpit: React.FC = () => {
-  const [d, set] = useKept('sk:foundry-director', {
-    fps: '23.976',
-    angle: '180',
-    aspect: '2.39',
-    sensor: 'Full frame',
-    stop: '2.8',
-    iso: '800',
-    subject: '3',
-    shots: [] as Item[],
-    rig: {} as Record<string, boolean>,
-  });
+  const [d, set] = useKept(
+    'sk:foundry-director',
+    {
+      fps: '23.976',
+      angle: '180',
+      aspect: '2.39',
+      sensor: 'Full frame',
+      stop: '2.8',
+      iso: '800',
+      subject: '3',
+      shots: [] as Item[],
+      rig: {} as Record<string, boolean>,
+    },
+    'director',
+  );
   const fps = Number(d.fps);
   const t = Number(d.angle) / 360 / fps; // exposure time in seconds
   const [w, h] = SENSORS[d.sensor] || SENSORS['Full frame'];
@@ -382,16 +396,20 @@ const ALTERATIONS = [
 ];
 
 const StylistCockpit: React.FC = () => {
-  const [st, set] = useKept('sk:foundry-stylist', {
-    block: 'Boxy tee',
-    gsm: '280',
-    width: '60',
-    shrink: '5',
-    run: { S: 10, M: 20, L: 20, XL: 10 } as Record<string, number>,
-    looks: [] as Item[],
-    pulls: [] as Item[],
-    alt: {} as Record<string, boolean>,
-  });
+  const [st, set] = useKept(
+    'sk:foundry-stylist',
+    {
+      block: 'Boxy tee',
+      gsm: '280',
+      width: '60',
+      shrink: '5',
+      run: { S: 10, M: 20, L: 20, XL: 10 } as Record<string, number>,
+      looks: [] as Item[],
+      pulls: [] as Item[],
+      alt: {} as Record<string, boolean>,
+    },
+    'stylist',
+  );
   const b = BLOCKS[st.block] || BLOCKS['Boxy tee'];
   const shrink = Number(st.shrink) / 100;
   const width = Number(st.width);
@@ -476,12 +494,46 @@ const StylistCockpit: React.FC = () => {
 
 // ---- Role switch ----
 
+interface Shoot {
+  id: string;
+  source?: string;
+  title: string;
+  kind: string;
+  start: string;
+  plan?: Partial<Record<Half, object>>;
+}
 const ROLES = ['Recording', 'Director', 'Stylist'] as const;
 type Role = (typeof ROLES)[number];
 
 /** The Session tab: a role bar, then that role's cockpit. Recording is passed in from Producer. */
 export const FoundryRoles: React.FC<{ recording: React.ReactNode }> = ({ recording }) => {
-  const [r, set] = useKept<{ role: Role }>('sk:foundry-role', { role: 'Recording' });
+  const [r, set] = useKept<{ role: Role; shoot: string }>('sk:foundry-role', { role: 'Recording', shoot: '' });
+  // Shoots and videos on the Calendar: pick one and the Director / Stylist plan lives on it, for everyone on the shoot
+  const api = useApi();
+  const [shoots, setShoots] = useState<Shoot[]>([]);
+  const [saved, setSaved] = useState('');
+  useEffect(() => {
+    api('/api/timeline').then(
+      (d: { items: Shoot[] }) =>
+        setShoots(d.items.filter((i) => !i.source && ['Shoot', 'Video'].includes(i.kind)).sort((a, b) => b.start.localeCompare(a.start))),
+      () => {},
+    );
+  }, [api]);
+  const shoot = shoots.find((s) => s.id === r.shoot);
+  const timer = useRef<number | undefined>(undefined);
+  const save = (half: Half, value: object) => {
+    shoot!.plan = { ...shoot!.plan, [half]: value };
+    setSaved('Saving...');
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(
+      () =>
+        api(`/api/timeline/${shoot!.id}`, { method: 'PATCH', body: JSON.stringify({ plan: { [half]: value } }) }).then(
+          () => setSaved('Saved on the shoot'),
+          (e: Error) => setSaved(e.message),
+        ),
+      700,
+    );
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '3px 6px', borderBottom: '1px solid #000' }}>
@@ -496,9 +548,38 @@ export const FoundryRoles: React.FC<{ recording: React.ReactNode }> = ({ recordi
             {x}
           </button>
         ))}
+        {r.role !== 'Recording' && (
+          <>
+            <span style={{ ...label, marginLeft: 8 }}>Shoot</span>
+            <select
+              style={{ ...sfield, maxWidth: 220 }}
+              value={shoot ? shoot.id : ''}
+              onChange={(e) => (setSaved(''), set({ shoot: e.target.value }))}
+              title="Keep this plan on a shoot from the Calendar, so the whole crew sees it"
+            >
+              <option value="">(only on this device)</option>
+              {shoots.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.start} {s.title}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: 'var(--fk-dim, #555)' }}>
+              {shoot ? saved || 'Kept on the shoot: the crew sees it' : shoots.length ? '' : 'Add a shoot in Calendar to share this plan'}
+            </span>
+          </>
+        )}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {r.role === 'Director' ? <DirectorCockpit /> : r.role === 'Stylist' ? <StylistCockpit /> : recording}
+        <ShootPlan.Provider value={shoot ? { plan: shoot.plan || {}, save } : null}>
+          {r.role === 'Director' ? (
+            <DirectorCockpit key={shoot?.id} />
+          ) : r.role === 'Stylist' ? (
+            <StylistCockpit key={shoot?.id} />
+          ) : (
+            recording
+          )}
+        </ShootPlan.Provider>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { formatSize } from './fileTypes';
 import { dialog } from '../utils/dialog';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 import FilePicker from '../components/FilePicker';
+import { useProfiles } from '../utils/profiles';
 
 interface Space {
   id: string;
@@ -69,7 +70,7 @@ interface Health {
 }
 
 const GROUPS = {
-  Server: ['Health', 'Usage', 'Log'],
+  Server: ['Waiting', 'Health', 'Usage', 'Log'],
   People: ['Members'],
   Storage: ['Drives', 'Spaces', 'Backups'],
   Website: ['Front page', 'CITIES', 'Stories', 'Mailing list', 'Shop & pool'],
@@ -82,7 +83,7 @@ const CONFIG_TABS: Tab[] = ['Drives', 'Spaces', 'Members', 'Backups'];
 const AdminPanel: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   const api = useApi();
-  const [tab, setTab] = useState<Tab>('Health');
+  const [tab, setTab] = useState<Tab>('Waiting');
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -168,6 +169,7 @@ const AdminPanel: React.FC = () => {
           ))}
         </nav>
         <div style={page}>
+          {tab === 'Waiting' && <WaitingTab go={setTab} />}
           {tab === 'Health' && <HealthTab state={state} health={health} refresh={loadHealth} />}
 
           {tab === 'Drives' && (
@@ -365,6 +367,74 @@ const AdminPanel: React.FC = () => {
   );
 };
 
+/** What needs an admin right now, with counts: each line opens the tab where it's handled. */
+const WaitingTab: React.FC<{ go: (t: Tab) => void }> = ({ go }) => {
+  const api = useApi();
+  const [rows, setRows] = useState<{ n: number; what: string; names: string; tab: Tab | null }[] | null>(null);
+  useEffect(() => {
+    const names = (list: string[]) => list.slice(0, 4).join(', ') + (list.length > 4 ? '...' : '');
+    const none = () => null;
+    Promise.all([
+      api('/api/blog/admin').catch(none),
+      api('/api/public/admin').catch(none),
+      api('/api/shop/admin').catch(none),
+      api('/api/business/orders').catch(none),
+    ]).then(([blog, front, products, orders]) => {
+      const drafts = (blog?.posts || []).filter((p: BlogPost) => p.submitted && !p.published);
+      const joins = (front?.joins || []).filter((j: Join) => j.status === 'New');
+      const bookings = (front?.bookings || []).filter((b: Booking) => b.status === 'New');
+      const hidden = (products || []).filter((p: Product) => !p.active && !p.retired);
+      const toShip = (orders || []).filter((o: { status: string }) => o.status === 'Paid' || o.status === 'Oversold');
+      setRows([
+        {
+          n: drafts.length,
+          what: 'CITIES drafts sent in, waiting to publish',
+          names: names(drafts.map((p: BlogPost) => p.title)),
+          tab: 'CITIES',
+        },
+        { n: joins.length, what: 'new join requests', names: names(joins.map((j: Join) => j.name)), tab: 'Front page' },
+        { n: bookings.length, what: 'new booking requests', names: names(bookings.map((b: Booking) => b.name)), tab: 'Front page' },
+        {
+          n: hidden.length,
+          what: 'products hidden, not in the shop yet',
+          names: names(hidden.map((p: Product) => p.title)),
+          tab: 'Shop & pool',
+        },
+        {
+          n: toShip.length,
+          what: 'shop orders to ship or refund (Ledger > Business > Orders)',
+          names: names(toShip.map((o: { title: string }) => o.title)),
+          tab: null,
+        },
+      ]);
+    });
+  }, [api]);
+  if (!rows) return <div>Loading...</div>;
+  const open = rows.filter((r) => r.n);
+  return (
+    <fieldset style={fieldset}>
+      <legend>Waiting for you ({open.reduce((n, r) => n + r.n, 0)})</legend>
+      {!open.length && (
+        <div style={{ color: '#555' }}>Nothing is waiting. Drafts, join and booking requests, hidden products and orders show up here.</div>
+      )}
+      {open.map((r) => (
+        <div key={r.what} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid #eee' }}>
+          <b style={{ minWidth: 22, textAlign: 'right' }}>{r.n}</b>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            {r.what}
+            <span style={{ display: 'block', color: '#555' }}>{r.names}</span>
+          </span>
+          {r.tab && (
+            <button style={button} onClick={() => go(r.tab!)}>
+              Open
+            </button>
+          )}
+        </div>
+      ))}
+    </fieldset>
+  );
+};
+
 const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => void }> = ({ state, health, refresh }) => {
   const st = state.status;
   const rows: [string, boolean | null, string][] = [
@@ -485,6 +555,7 @@ const MembersTab: React.FC<{
   setMsg: (m: string) => void;
 }> = ({ state, draft, edit, driveIds, driveName, reload, setMsg }) => {
   const api = useApi();
+  const { byName } = useProfiles();
   const add = async () => {
     const username = (await dialog.prompt('New member nickname (their operator ID):', '', { title: 'Add member' }))?.trim();
     if (!username) return;
@@ -565,6 +636,8 @@ const MembersTab: React.FC<{
               <tr key={u.id}>
                 <td style={td}>
                   <b>{name}</b>
+                  {/* Their node city, from their own profile */}
+                  {byName[name]?.city && <div style={{ color: '#555' }}>{byName[name].city}</div>}
                 </td>
                 <td style={td}>
                   <input
@@ -761,6 +834,7 @@ type Product = {
   left: number | null;
   dropAt: string | null;
   capsule: string;
+  sizes: string[];
   retired: boolean;
   file: { space: string; path: string } | null;
 };
@@ -1337,6 +1411,14 @@ const ShopTab: React.FC = () => {
               maxLength={60}
               defaultValue={product.capsule}
               onBlur={(e) => e.target.value !== product.capsule && patchProduct(product.id, { capsule: e.target.value })}
+            />
+            Sizes
+            <input
+              style={input}
+              key={`z-${product.sizes.join()}`}
+              placeholder="e.g. S, M, L, XL (empty = one size; the buyer picks one)"
+              defaultValue={product.sizes.join(', ')}
+              onBlur={(e) => e.target.value !== product.sizes.join(', ') && patchProduct(product.id, { sizes: e.target.value })}
             />
             Picture
             <span style={row}>

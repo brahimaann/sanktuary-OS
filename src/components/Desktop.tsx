@@ -241,10 +241,12 @@ export const Desktop: React.FC = () => {
     });
   }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    // Members: the studio tour opens once, the first time they're logged on in this browser
-    if (!isSignedIn) return;
+    // Members: the studio tour opens once per member, the first time they're logged on anywhere (the server
+    // remembers, so a new phone or a cleared browser doesn't bring it back)
+    if (!isSignedIn || !me || me.toured) return;
+    api('/api/me', { method: 'PUT', body: JSON.stringify({ toured: true }) }).catch(() => {});
     try {
-      if (localStorage.getItem('sk_member_tour')) return;
+      if (localStorage.getItem('sk_member_tour')) return; // saw it here before the server kept track
       localStorage.setItem('sk_member_tour', '1');
     } catch {
       return;
@@ -258,7 +260,7 @@ export const Desktop: React.FC = () => {
       width: 520,
       height: 560,
     });
-  }, [isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isSignedIn, me?.username]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // The service worker makes Sanktuary installable with a place in the phone's share menu (and does push)
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

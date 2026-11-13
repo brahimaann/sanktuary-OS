@@ -396,6 +396,30 @@
         margin: 0 auto 14px;
         max-width: 620px;
       }
+      .follow {
+        margin: 18px 0 0;
+        max-width: none;
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+      }
+      .follow .row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .follow input[type='email'] {
+        flex: 1 1 180px;
+        min-width: 0;
+        font: inherit;
+        padding: 6px 8px;
+        border: 2px solid var(--ink);
+        background: var(--paper);
+        color: var(--ink);
+      }
+      .follow .muted {
+        opacity: 0.7;
+      }
       .note .hd {
         background: var(--ink);
         color: var(--paper);
@@ -849,7 +873,7 @@
         <div class="bar" id="bar"></div>
         <div class="body" id="app">Loading...</div>
       </div>
-      <div class="foot"><a href="/">Enter Sanktuary</a> · <a href="/write">Write for CITIES</a> (members) · sanktuary.studio</div>
+      <div class="foot"><a href="/welcome">Enter Sanktuary</a> · <a href="/write">Write for CITIES</a> (members) · sanktuary.studio</div>
     </div>
     <script>
       const app = document.getElementById('app');
@@ -1018,6 +1042,40 @@
             );
         const more = all.filter((x) => x.url !== p.url).slice(0, 3);
         document.getElementById('more').innerHTML = `<h3>More from CITIES</h3>${more.map(card).join('')}${MAGAZINE}`;
+        follow(document.getElementById('more'));
+      }
+
+      // "Get CITIES by email" under every story: the mailing list the team already has (double opt-in, unsubscribe in
+      // every email). Not shown until the list is open.
+      let mailOpen;
+      async function follow(at) {
+        mailOpen ??= await fetch('/api/mail')
+          .then((r) => r.json())
+          .then(
+            (d) => d.open,
+            () => false,
+          );
+        if (!mailOpen) return;
+        at.insertAdjacentHTML(
+          'beforeend',
+          `<form class="note follow"><b>Get CITIES by email</b><div class="muted">New stories when they're out. No spam, leave any time.</div>
+            <div class="row"><input type="email" name="email" required placeholder="you@example.com" autocomplete="email" aria-label="Your email"><button class="btn">Sign up</button></div>
+            <label><input type="checkbox" name="consent" required> Yes, email me CITIES stories</label>
+            <input name="website" tabindex="-1" autocomplete="off" hidden><div class="muted" role="status"></div></form>`,
+        );
+        const form = at.querySelector('.follow');
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          const say = form.querySelector('[role=status]');
+          say.textContent = 'Sending...';
+          const r = await fetch('/api/mail/subscribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: form.email.value, consent: form.consent.checked, website: form.website.value, source: 'cities' }),
+          }).catch(() => null);
+          if (r?.ok) form.innerHTML = '<b>Check your email</b><div class="muted">Tap the link we just sent to confirm.</div>';
+          else say.textContent = r ? await r.text() : "Couldn't send. Check your connection.";
+        };
       }
 
       // The moodboard of the month: whatever the team dropped on its board this month, as a wall sorted into four

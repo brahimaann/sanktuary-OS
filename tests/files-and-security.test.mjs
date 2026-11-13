@@ -615,6 +615,40 @@ try {
   check('listen only: but can follow', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { follow: true })).status === 200);
   check('the owner is never listen only', (await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '100' })).status === 200);
   await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] });
+  // A private project's folder is private in Team Files too, through every space that shows it
+  const pack = JSON.parse(
+    (
+      await call('bob', '/api/tracks/release', 'POST', {
+        title: 'Pack',
+        kind: 'Folder',
+        folder: { space: 'up', path: 'Packs/Pack' },
+        setup: true,
+      })
+    ).text,
+  );
+  await up('bob', 'up', 'Packs/Pack/Bounces/beat.txt', 'beat');
+  check('open pack: carol reads its files', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  await call('bob', `/api/tracks/release/${pack.id}`, 'PATCH', { members: [] });
+  check('private pack: carol cannot read its files', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).status === 404);
+  check('private pack: or list its folder', (await call('carol', '/api/files/view/Packs/Pack?list')).status === 404);
+  check(
+    'private pack: it is left out of the folder above',
+    !JSON.parse((await call('carol', '/api/files/view/Packs?list')).text).entries.some((e) => e.name === 'Pack'),
+  );
+  check(
+    'private pack: and out of search',
+    !JSON.parse((await call('carol', '/api/files/view/?find=beat')).text).entries.some((e) => e.name === 'beat.txt'),
+  );
+  check('private pack: the folder above cannot be zipped around it', (await call('carol', '/api/files/view/Packs?zip')).status === 403);
+  check(
+    'private pack: or shared by link',
+    (await call('carol', '/api/links', 'POST', { space: 'grp', path: 'Packs/Pack', days: 7 })).status === 404,
+  );
+  check('private pack: its owner still reads it', (await call('bob', '/api/files/up/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  check('private pack: admins too', (await call('alice', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  await call('bob', `/api/tracks/release/${pack.id}`, 'PATCH', { members: ['carol'] });
+  check('private pack: a listed member reads it', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  await call('bob', `/api/tracks/release/${pack.id}`, 'DELETE');
   const pl = JSON.parse((await call('bob', '/api/tracks/release', 'POST', { title: 'march mixes', kind: 'Playlist' })).text);
   const plItems = JSON.parse(
     (await call('bob', `/api/tracks/release/${pl.id}`, 'PATCH', { items: [song.id, song.id, 'nope'] })).text,
@@ -877,6 +911,19 @@ try {
   check(
     'day-before reminder goes out',
     carolNotes.some((n) => /"Cover shoot" is tomorrow/.test(n.text) && /Studio A/.test(n.text)),
+  );
+  // The Foundry plan is kept on the shoot: the director and the stylist each save their own half, the crew reads both
+  await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { director: { shots: [{ text: 'Wide on the roof' }] } } });
+  await call('carol', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { stylist: { looks: [{ text: 'Look 1', done: true }] } } });
+  const planned = JSON.parse((await call('carol', '/api/timeline')).text).items.find((i) => i.id === shoot.id).plan;
+  check(
+    'a shoot keeps the director and stylist plans side by side',
+    planned.director.shots[0].text === 'Wide on the roof' && planned.stylist.looks[0].done === true,
+  );
+  check(
+    'an oversized plan is refused',
+    (await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { director: { shots: [{ text: 'x'.repeat(50_000) }] } } })).status ===
+      400,
   );
   const aliceView = JSON.parse((await call('alice', '/api/timeline')).text);
   check(
@@ -2691,6 +2738,23 @@ try {
   await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2}' });
   const teeCall = stripeCalls[stripeCalls.length - 1];
   check('merch asks Stripe for a shipping address', teeCall.form.get('shipping_address_collection[allowed_countries][0]') === 'US');
+  // Sizes: the buyer has to pick one, and it rides on the order's name
+  await call('alice', `/api/shop/products/${tee.id}`, 'PATCH', { sizes: 'S, M , L, M' });
+  check(
+    'a sized product lists its sizes',
+    (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === tee.id).sizes.join() === 'S,M,L',
+  );
+  check(
+    'a sized product needs a size',
+    (await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2}' })).status === 400,
+  );
+  check(
+    'and only one of its sizes',
+    (await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2,"size":"XXL"}' })).status === 400,
+  );
+  const sizedBefore = stripeCalls.length;
+  await call('alice', `/api/shop/products/${tee.id}`, 'PATCH', { sizes: '' });
+  check('no checkout was started without a size', stripeCalls.length === sizedBefore);
   check(
     'shop categories must be known ones',
     (await call('alice', `/api/shop/products/${beat.id}`, 'PATCH', { category: '<script>' })).status === 400,

@@ -248,7 +248,7 @@ function folderLabels(folders, cfg) {
 /** Every space this user can see, including their personal space ("me"). A space with several folders
  * ("combined") shows each folder as a top-level folder inside it; see partOf(). */
 function spacesFor(user, cfg, status) {
-  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s) })).filter((s) => RANK[s.rights] > 0);
+  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s), viewer: user })).filter((s) => RANK[s.rights] > 0);
   const mine = cfg.members[user.username];
   if (mine?.drive) {
     list.unshift({
@@ -364,7 +364,16 @@ async function files(req, res, url) {
       }
       if (req.method === 'GET' && q.has('find')) {
         // Search every connected folder of the space, as one newest-first list
-        const found = await Promise.all(whole.sources.filter((f) => f.online).map((f) => findIn(f.root, ...findArgs(q), [f.label])));
+        await loadTracks();
+        const found = await Promise.all(
+          whole.sources
+            .filter((f) => f.online)
+            .map(async (f) => {
+              const got = await findIn(f.root, ...findArgs(q), [f.label]);
+              const part = partOf(whole, f.label);
+              return { ...got, entries: got.entries.filter((e) => !sealedFor(user, part, join(f.root, ...e.dir.slice(1), e.name))) };
+            }),
+        );
         const entries = found.flatMap((f) => f.entries).sort((a, b) => b.modified.localeCompare(a.modified));
         return json(res, { entries: entries.slice(0, 300), more: entries.length > 300 || found.some((f) => f.more) });
       }
@@ -379,6 +388,10 @@ async function files(req, res, url) {
   const root = resolve(space.root);
   const target = resolve(root, ...parts);
   if (!inside(root, target)) fail(400, 'Bad path');
+  await loadTracks();
+  // Zipping, moving, renaming or deleting a folder takes everything in it along; listing and searching just leave private folders out
+  assertUnsealed(user, space, target, !(req.method === 'GET' && (q.has('list') || q.has('find'))) && req.method !== 'PUT');
+  const open = (list, at = (e) => join(target, ...(e.dir || []), e.name)) => list.filter((e) => !sealedFor(user, space, at(e)));
   const rel = relative(root, target);
   const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
   /** A path as the member sees it in the space (with the folder's name first in a combined space). */
@@ -392,7 +405,7 @@ async function files(req, res, url) {
     need('view');
     if (q.has('list')) {
       const all = await loadProjects();
-      const entries = await listDir(target);
+      const entries = open(await listDir(target));
       // Subfolders are checked for a project file 12 at a time (was one after another; all at once would queue
       // thousands of disk reads ahead of everyone else's downloads on a huge folder)
       let next = 0;
@@ -414,7 +427,10 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     }
-    if (q.has('find')) return json(res, await findIn(target, ...findArgs(q)));
+    if (q.has('find')) {
+      const found = await findIn(target, ...findArgs(q));
+      return json(res, { ...found, entries: open(found.entries) });
+    }
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
@@ -1121,6 +1137,7 @@ function locateIn(space, relPath) {
   const root = resolve(space.root);
   const abs = resolve(root, ...parts);
   if (!inside(root, abs)) fail(400, 'Bad path');
+  assertUnsealed(space.viewer, space, abs);
   return { root, abs };
 }
 
@@ -1344,6 +1361,7 @@ async function linksApi(req, res, url) {
   if (!space.online) fail(503, 'Drive offline');
   const { root, abs } = locateIn(space, q.path);
   if (abs === root) fail(400, 'Share a folder or file inside the space');
+  if (req.method === 'POST') assertUnsealed(user, space, abs, true);
   const key = ownerKey(space, abs);
 
   if (req.method === 'GET') {
@@ -1868,6 +1886,28 @@ const canSeeRelease = (user, r) =>
   !r.deleted &&
   !(r.draft && r.owner !== user.username) &&
   (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
+/** A private project's folder is as private as the project: the project (if any) this member can't see whose folder
+ * holds `abs`. With around, also one inside `abs`, since zipping, moving or sharing that folder would take it along. */
+function sealedFor(user, space, abs, around = false) {
+  if (!user || user.admin || !tracksDb) return null;
+  const k = ownerKey(space, abs);
+  const below = k.endsWith('|') ? k : k + '/';
+  return (
+    Object.values(tracksDb.releases).find(
+      (r) =>
+        r.members &&
+        !r.deleted &&
+        r.folderKey &&
+        !canSeeRelease(user, r) &&
+        (k === r.folderKey || k.startsWith(r.folderKey + '/') || (around && r.folderKey.startsWith(below))),
+    ) || null
+  );
+}
+const assertUnsealed = (user, space, abs, around = false) => {
+  const r = sealedFor(user, space, abs, around);
+  if (r && !sealedFor(user, space, abs)) fail(403, 'A folder in here is private to other people. Open the folders inside it instead.');
+  if (r) fail(404, 'Not found');
+};
 const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
@@ -3130,6 +3170,14 @@ async function timelineApi(req, res, url) {
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
     if (input.draft !== undefined) i.draft = !!input.draft; // only its owner sees it, nobody is told, until it goes live
     if (i.draft) i.public = false;
+    if (input.plan !== undefined) {
+      // The shoot plan from Foundry (Director: shot list, rig; Stylist: looks, pulls): each role saves its own half
+      const plan = { ...i.plan };
+      for (const k of ['director', 'stylist'])
+        if (input.plan?.[k] !== undefined) plan[k] = input.plan[k] && typeof input.plan[k] === 'object' ? input.plan[k] : undefined;
+      if (JSON.stringify(plan).length > 40_000) fail(400, 'That plan is too long to keep on the shoot');
+      i.plan = JSON.parse(JSON.stringify(plan));
+    }
     if (input.link !== undefined) {
       const v = String(input.link || '').trim();
       if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
@@ -5112,6 +5160,7 @@ async function listedPeople() {
       username,
       displayName: p.displayName || username,
       role: p.role || '',
+      city: p.city || '',
       bio: p.bio || '',
       links: Object.fromEntries(
         Object.keys(PROFILE_LINKS)
@@ -5657,6 +5706,7 @@ const productView = (p, admin, db = shopDb) => {
     left: admin || (left !== null && left <= 10) ? left : null, // "Only 3 left" (the public only sees it when it's low)
     dropAt: p.dropAt || null, // on sale from this moment (ISO); a countdown until then
     capsule: p.capsule || '',
+    sizes: p.sizes || [], // the buyer picks one (stock is one number for the item, not per size)
     vault: !!p.vault || (p.stock !== null && p.stock <= 0), // in The Vault: shown, never sold
     ...(admin
       ? { stock: p.stock, active: p.active, retired: !!p.vault, file: p.file ? { space: p.file.space, path: p.file.path } : null }
@@ -5697,7 +5747,10 @@ async function shopApi(req, res, url) {
     const p =
       Object.values(db.products).find((x) => (x.id === a || x.slug === a) && x.active && !x.deleted) || fail(404, 'No such product');
     if (!stripeReady()) fail(503, "The shop isn't taking payments yet");
-    const asked = Math.max(1, Math.min(10, Math.floor(Number((await jsonBody(req)).qty) || 1)));
+    const want = await jsonBody(req);
+    const asked = Math.max(1, Math.min(10, Math.floor(Number(want.qty) || 1)));
+    const size = p.sizes?.length ? (p.sizes.includes(want.size) ? want.size : fail(400, 'Pick a size')) : '';
+    const title = size ? `${p.title} (${size})` : p.title; // the size rides on the order's name, to Stripe and Business > Orders
     const qty = p.kind === 'digital' ? 1 : asked; // one download link per order
     if (p.vault) fail(409, 'This piece is in The Vault: no longer for sale');
     if (p.dropAt && Date.parse(p.dropAt) > Date.now()) fail(409, `This drops ${new Date(p.dropAt).toUTCString()}`);
@@ -5723,7 +5776,7 @@ async function shopApi(req, res, url) {
     const order = {
       id: randomUUID().slice(0, 10),
       product: p.id,
-      title: p.title,
+      title,
       kind: p.kind,
       qty,
       amount: p.price * qty,
@@ -5735,7 +5788,7 @@ async function shopApi(req, res, url) {
     const session = await stripe('/checkout/sessions', {
       mode: 'payment',
       line_items: {
-        0: { quantity: qty, price_data: { currency: 'usd', unit_amount: Math.round(p.price * 100), product_data: { name: p.title } } },
+        0: { quantity: qty, price_data: { currency: 'usd', unit_amount: Math.round(p.price * 100), product_data: { name: title } } },
       },
       ...(p.kind === 'physical' ? { shipping_address_collection: { allowed_countries: { 0: 'US', 1: 'CA' } } } : {}),
       success_url: `${siteOrigin(req)}/shop/thanks?session={CHECKOUT_SESSION_ID}`,
@@ -5804,6 +5857,15 @@ async function shopApi(req, res, url) {
         p.capsule = String(input.capsule ?? '')
           .trim()
           .slice(0, 60);
+      if (input.sizes !== undefined)
+        p.sizes = [
+          ...new Set(
+            String(input.sizes ?? '')
+              .split(',')
+              .map((x) => x.trim().slice(0, 12))
+              .filter(Boolean),
+          ),
+        ].slice(0, 12);
       if (input.vault !== undefined) p.vault = !!input.vault;
       if (input.image !== undefined) p.image = input.image && /^\/api\/shop\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
       if (input.file !== undefined) {
@@ -8312,6 +8374,12 @@ async function me(req, res, url) {
   const prefsFile = `prefs/${user.username}.json`;
   if (req.method === 'PUT') {
     const input = await jsonBody(req);
+    if (input.toured) {
+      // The member tour has opened for them once, on some device: it doesn't open by itself again anywhere
+      await mkdir(join(DATA, 'prefs'), { recursive: true });
+      await saveJson(prefsFile, { ...(await readJson(prefsFile, {})), toured: true });
+      return json(res, { toured: true });
+    }
     const favorites = (Array.isArray(input.favorites) ? input.favorites : []).slice(0, 40).map((f) => {
       const space = String(f?.space || '');
       const path = String(f?.path ?? '');
@@ -8326,9 +8394,10 @@ async function me(req, res, url) {
   const spaces = await Promise.all(visible.map(spaceInfo));
   for (const s of spaces)
     s.driveName = cfg.drives[(cfg.spaces.find((x) => x.id === s.id) || cfg.members[user.username])?.drive]?.name || null;
-  const favorites = ((await readJson(prefsFile, {})).favorites || []).filter((f) => visible.some((s) => s.id === f.space));
+  const prefs = await readJson(prefsFile, {});
+  const favorites = (prefs.favorites || []).filter((f) => visible.some((s) => s.id === f.space));
   res.setHeader('set-cookie', sessionCookie(req, user));
-  return json(res, { username: user.username, admin: user.admin, spaces, favorites });
+  return json(res, { username: user.username, admin: user.admin, spaces, favorites, toured: !!prefs.toured });
 }
 
 // ── /api/notes: each person's Notepad files, kept on the server so they follow them to every device ──
@@ -9387,6 +9456,7 @@ const PROFILE_FIELDS = {
   displayName: 60,
   status: 140,
   role: 60,
+  city: 40, // which node city they're in (the app offers the Nodes list)
   bio: 1000,
   pro: 80, // roster: "BMI · IPI 123456789" (members only, never public)
   rates: 1000, // roster: rate card / availability (members only, never public)

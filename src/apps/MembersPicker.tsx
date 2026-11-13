@@ -28,12 +28,15 @@ const MembersPicker: React.FC<{
       onlyListen ? n.add(u) : n.delete(u);
       return n;
     });
-  const toggle = (u: string) =>
+  const toggle = (u: string) => {
+    // Someone newly let in starts at "Can listen"; the creator raises them to "Can edit"
+    if (listeners && !picked.has(u)) setRole(u, true);
     setPicked((p) => {
       const n = new Set(p);
       n.has(u) ? n.delete(u) : n.add(u);
       return n;
     });
+  };
 
   return (
     <div

@@ -4,7 +4,7 @@ import AccountButton from '../components/AccountButton';
 import { useWindowManager } from '../wm/manager';
 import { useApi, useMe } from '../utils/api';
 import { liveUser } from '../utils/live';
-import { displayName, EMPTY_PORTFOLIO, linkFor, Portfolio, Profile as P, PROFILE_LINKS, useProfiles } from '../utils/profiles';
+import { displayName, EMPTY_PORTFOLIO, linkFor, NODE_CITIES, Portfolio, Profile as P, PROFILE_LINKS, useProfiles } from '../utils/profiles';
 import { dmId } from './Chat';
 import Avatar from './Avatar';
 import PortfolioEditor from './PortfolioEditor';
@@ -19,6 +19,7 @@ const BASE_FIELDS: [keyof P, string, string][] = [
   ['displayName', 'Display name', 'How your name shows to the team'],
   ['status', 'Status / away message', 'e.g. in the studio till 9'],
   ['role', 'Role', 'e.g. producer, designer, photographer'],
+  ['city', 'City', 'Your node city: you show under it in Nodes'],
 ];
 
 /** Your profile (editable) or another member's info card. */
@@ -97,6 +98,7 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
                 @{who}
                 {p?.admin ? ' · admin' : ''}
                 {p?.role ? ` · ${p.role}` : ''}
+                {p?.city ? ` · ${p.city}` : ''}
               </div>
               <div style={{ color: '#444' }}>
                 {p?.online ? 'Online now' : p?.lastSignIn ? `Last seen ${new Date(p.lastSignIn).toLocaleDateString()}` : 'Offline'}
@@ -202,11 +204,17 @@ const ProfileCard: React.FC<{ username?: string }> = ({ username }) => {
             <input
               value={(draft[k] as string) ?? ''}
               placeholder={hint}
+              list={k === 'city' ? 'node-cities' : undefined}
               onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
               style={input}
             />
           </label>
         ))}
+        <datalist id="node-cities">
+          {NODE_CITIES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
 
         <div style={{ border: '2px groove #fff', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
