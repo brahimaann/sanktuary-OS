@@ -1903,24 +1903,40 @@ async function tracksApi(req, res, url) {
     return json(res, { releases, tracks, statuses: TRACK_STATUSES, kinds: RELEASE_KINDS });
   }
 
-  // GET /api/tracks/splits: the Ledger. Every master split you're on (by your account), with your share and whether
-  // you've signed off on the split as it is now. Shown even where the release is private to others: it's your share.
+  // GET /api/tracks/splits: the Ledger. Every song you claim space on (a master split row with your account), your
+  // share, whether you've signed it as it is now, and the money so far from the business revenue lines: what the
+  // song made, what's still to recoup on its release, and your part of the net. Shown even where the release is
+  // private to others: it's your share.
   if (req.method === 'GET' && what === 'splits') {
+    const lines = Object.values((await loadBiz()).revenue || {});
+    const statements = new Map();
+    const statementOf = (r) => statements.get(r.id) || statements.set(r.id, releaseStatement(db, lines, r)).get(r.id);
     const rows = Object.values(db.tracks)
       .filter((t) => !t.deleted && db.releases[t.release] && !db.releases[t.release].deleted)
       .flatMap((t) =>
         (t.master?.splits || [])
           .filter((x) => x.member === me)
-          .map((x) => ({
-            track: t.id,
-            title: t.title,
-            release: db.releases[t.release].title,
-            role: x.role,
-            share: x.share,
-            total: shareSum(t.master.splits),
-            signed: !!signatureOf(t, 'master', x),
-            open: canSeeRelease(user, db.releases[t.release]),
-          })),
+          .map((x) => {
+            const st = statementOf(db.releases[t.release]);
+            const name = String(x.name || '')
+              .trim()
+              .toLowerCase();
+            return {
+              track: t.id,
+              title: t.title,
+              releaseId: t.release,
+              release: db.releases[t.release].title,
+              role: x.role,
+              share: x.share,
+              total: shareSum(t.master.splits),
+              signed: !!signatureOf(t, 'master', x),
+              open: canSeeRelease(user, db.releases[t.release]),
+              made: centsOf(lines.filter((l) => l.type === 'income' && l.track === t.id)) / 100, // this song
+              releaseMade: st.income,
+              toRecoup: st.toRecoup,
+              yours: st.income > 0 ? st.parties.find((p) => p.name.toLowerCase() === name)?.amount || 0 : 0,
+            };
+          }),
       );
     return json(res, { splits: rows });
   }
@@ -3558,6 +3574,7 @@ const invoiceTotal = (i) => {
   return Math.round(net * (1 + (i.tax || 0) / 100) * 100) / 100;
 };
 const usd = (n) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const depositOf = (i) => Math.round(invoiceTotal(i) * (i.deposit || 0)) / 100; // a percentage of the total
 const twoStep = new Map(); // clerk user id -> { on, at }
 let bizDb = null;
 let bizSaved = Promise.resolve();
@@ -3599,7 +3616,8 @@ function invoiceHtml(i, brand, c, { admin = false, pay = false, thanks = false }
   <table><tr><th>Description</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>
   ${i.items.map((it) => `<tr><td>${e(it.desc)}</td><td class="n">${it.qty}</td><td class="n">${usd(it.rate)}</td><td class="n">${usd(it.qty * it.rate)}</td></tr>`).join('')}
   </table><div class="sums">${i.discount || i.tax ? line('Subtotal', usd(sub)) : ''}${i.discount ? line('Discount', `−${usd(i.discount)}`) : ''}${i.tax ? line(`Tax ${i.tax}%`, usd(net * (i.tax / 100))) : ''}
-  <div class="tot">Total <span>${usd(invoiceTotal(i))}</span></div>${i.status === 'Paid' ? `<div class="tot" style="color:#006000">PAID ${e(i.paidOn || '')}</div>` : ''}</div>
+  <div class="tot">Total <span>${usd(invoiceTotal(i))}</span></div>${i.status === 'Paid' ? `<div class="tot" style="color:#006000">PAID ${e(i.paidOn || '')}</div>` : ''}
+  ${i.deposit && i.status !== 'Paid' ? (i.status === 'Deposit paid' ? `${line('Deposit received', usd(depositOf(i)))}<div class="tot">Balance due <span>${usd(invoiceTotal(i) - depositOf(i))}</span></div>` : `<div class="tot">Deposit due now (${i.deposit}%) <span>${usd(depositOf(i))}</span></div>${line('Balance after the deposit', usd(invoiceTotal(i) - depositOf(i)))}`) : ''}</div>
   ${thanks && i.status !== 'Paid' ? '<p class="pay">Thank you. Your payment is going through; this page shows PAID once it lands.</p>' : ''}
   ${pay ? `<div class="pay"><form method="post" action="/invoice/${e(i.id)}/${e(i.link)}/pay"><button>Pay ${usd(invoiceTotal(i))} by card</button></form></div>` : ''}
   ${i.status !== 'Paid' && brand.payment ? `<p><b>How to pay</b><br>${br(brand.payment)}</p>` : ''}
@@ -3614,10 +3632,10 @@ async function invoicePage(req, res, url) {
   res.setHeader('referrer-policy', 'no-referrer'); // the link is the key
   const [, , id, link, action] = url.pathname.split('/');
   const db = await loadBiz();
-  const i = own(db.invoices, id) && db.invoices[id];
+  const i = (own(db.invoices, id) && db.invoices[id]) || (own(db.memberInvoices || {}, id) && db.memberInvoices[id]);
   if (!i || i.deleted || !i.link || i.link !== link || i.status === 'Void' || i.status === 'Draft')
     fail(410, 'This invoice link no longer works. Ask the sender for a new one.');
-  const brand = brandOf(db, i.brand);
+  const brand = i.member ? memberBrand(db, i.member) : brandOf(db, i.brand);
   if (req.method === 'POST' && action === 'pay') {
     if (!canPayByCard(i, brand))
       fail(409, i.status === 'Paid' ? 'This invoice is already paid' : 'Card payment is not open for this invoice');
@@ -3652,6 +3670,118 @@ async function invoicePage(req, res, url) {
       thanks: url.searchParams.has('paid'),
     }),
   );
+}
+
+// ── /api/ledger: a member's own invoices (Ledger > My invoices) ──
+// Any member can bill an artist or client for their own work (a shoot, a beat, a mix) and ask for a deposit first.
+// They're from the member, not a Sanktuary brand: the member's own name, contact and how-to-pay text. No card
+// button: Sanktuary never holds anyone's money; the member marks the deposit and the rest as paid themselves.
+// Kept next to the business invoices (business.json, memberInvoices) and opened by the same /invoice/<id>/<link>.
+const MEMBER_INVOICE = { text: { billTo: 500, title: 150, notes: 2000 }, status: ['Draft', 'Sent', 'Deposit paid', 'Paid', 'Void'] };
+const MEMBER_DETAILS = { name: 100, email: 200, payment: 1000, terms: 1000 };
+const memberBrand = (db, username) => ({
+  ...blankBrand('member', username),
+  ...(db.memberDetails?.[username] || {}),
+  name: db.memberDetails?.[username]?.name || username,
+  color: '#000000',
+  cards: false,
+});
+
+async function ledgerApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const me = user.username;
+  const db = await loadBiz();
+  db.memberInvoices ??= {};
+  db.memberDetails ??= {};
+  db.memberNext ??= {};
+  const [, , , kind, id, sub] = url.pathname.split('/'); // /api/ledger/<invoices|details>/<id>/<page>
+  const mine = () => Object.values(db.memberInvoices).filter((i) => i.member === me && !i.deleted);
+  if (req.method === 'GET' && !kind)
+    return json(res, {
+      invoices: mine().sort((a, b) => b.number.localeCompare(a.number)),
+      details: { name: '', email: '', payment: '', terms: '', ...db.memberDetails[me] },
+      statuses: MEMBER_INVOICE.status,
+    });
+  if (kind === 'details' && req.method === 'PATCH') {
+    const input = await jsonBody(req);
+    const d = (db.memberDetails[me] ??= {});
+    for (const [k, max] of Object.entries(MEMBER_DETAILS))
+      if (input[k] !== undefined)
+        d[k] = String(input[k] ?? '')
+          .trim()
+          .slice(0, max);
+    saveBiz();
+    return json(res, d);
+  }
+  if (kind !== 'invoices') fail(404, 'Unknown section');
+  const apply = (x, input) => {
+    for (const [k, max] of Object.entries(MEMBER_INVOICE.text)) if (input[k] !== undefined) x[k] = String(input[k] ?? '').slice(0, max);
+    if (input.status !== undefined) x.status = MEMBER_INVOICE.status.includes(input.status) ? input.status : fail(400, 'Bad status');
+    if (input.deposit !== undefined) x.deposit = Math.min(100, Math.max(0, Math.round(money(input.deposit || 0))));
+    if (input.items !== undefined)
+      x.items = (Array.isArray(input.items) ? input.items : []).slice(0, 50).map((it) => ({
+        desc: String(it?.desc || '').slice(0, 300),
+        qty: money(it?.qty ?? 1),
+        rate: money(it?.rate ?? 0),
+      }));
+    for (const k of ['issued', 'due']) if (input[k] !== undefined) x[k] = dateOrNull(input[k]);
+    if (x.status === 'Deposit paid' && !x.depositOn) x.depositOn = localDate();
+    if (x.status === 'Paid' && !x.paidOn) x.paidOn = localDate();
+  };
+  if (req.method === 'POST' && !id) {
+    const input = await jsonBody(req);
+    const from = input.copy && own(db.memberInvoices, input.copy) && db.memberInvoices[input.copy];
+    if (input.copy && (!from || from.member !== me)) fail(404, 'No such invoice');
+    // Numbered per member and year from the username: MARA-2026-001
+    const year = localDate().slice(0, 4);
+    const tag =
+      me
+        .replace(/[^a-z0-9]/gi, '')
+        .slice(0, 6)
+        .toUpperCase() || 'INV';
+    const n = (db.memberNext[`${me}:${year}`] = (db.memberNext[`${me}:${year}`] || 0) + 1);
+    const x = {
+      id: randomUUID().slice(0, 10),
+      member: me,
+      number: `${tag}-${year}-${String(n).padStart(3, '0')}`,
+      status: 'Draft',
+      billTo: from?.billTo || '',
+      title: from?.title || '',
+      notes: from?.notes || '',
+      items: from ? from.items.map((it) => ({ ...it })) : [{ desc: '', qty: 1, rate: 0 }],
+      deposit: from?.deposit ?? 50,
+      issued: localDate(),
+      due: null,
+      depositOn: null,
+      paidOn: null,
+      created: new Date().toISOString(),
+    };
+    apply(x, input);
+    db.memberInvoices[x.id] = x;
+    saveBiz();
+    return json(res, x);
+  }
+  const x =
+    (own(db.memberInvoices, id) && !db.memberInvoices[id].deleted && db.memberInvoices[id].member === me && db.memberInvoices[id]) ||
+    fail(404, 'No such invoice');
+  if (req.method === 'GET' && sub === 'page') {
+    // The member's own copy and the link to send the artist (made the first time it's asked for)
+    const link = invoiceLink(req, x);
+    saveBiz();
+    return json(res, { link, html: invoiceHtml(x, memberBrand(db, me), null, { admin: true }) });
+  }
+  if (req.method === 'PATCH') {
+    apply(x, await jsonBody(req));
+    x.updated = new Date().toISOString();
+    saveBiz();
+    return json(res, x);
+  }
+  if (req.method === 'DELETE') {
+    x.deleted = new Date().toISOString(); // hidden, kept in the file
+    saveBiz();
+    return json(res, { ok: true });
+  }
+  fail(405, 'Not allowed');
 }
 
 /** Called from the Stripe webhook when an invoice is paid by card. */
@@ -3945,6 +4075,7 @@ const REV_SOURCES = {
   cost: ['Recording', 'Mixing & mastering', 'Artwork & video', 'Marketing', 'Distribution', 'Travel', 'Equipment', 'Other'],
 };
 const round2 = (n) => Math.round(n * 100) / 100;
+const centsOf = (xs) => Math.round(xs.reduce((n, l) => n + Math.round(l.amount * 1e6), 0) / 1e4); // summed exactly, rounded once
 
 /**
  * A CSV, semicolon or tab-separated file as rows of cells (quotes, "" escapes, newlines inside quotes, CRLF).
@@ -4069,6 +4200,46 @@ function allocate(cents, weights) {
     left--;
   }
   return out;
+}
+
+/**
+ * A release's statement from its revenue lines: income, costs, net, what's still to recoup, and everyone's part of
+ * the net profit (song lines by the song's splits, the rest by the release's).
+ */
+function releaseStatement(tdb, lines, r) {
+  const mine = lines.filter((l) => l.release === r.id);
+  const inc = mine.filter((l) => l.type === 'income');
+  const income = centsOf(inc);
+  const net = income - centsOf(mine.filter((l) => l.type === 'cost'));
+  const whole = releaseSplits(tdb, r.id);
+  // Each person's part of the income (song lines by the song's splits, the rest by the release's), names
+  // matched without case ("Hima" and "HIMA" are one person)
+  const weight = new Map();
+  const add = (name, w) => {
+    const k = name.toLowerCase();
+    const x = weight.get(k) || { name, w: 0 };
+    x.w += w;
+    weight.set(k, x);
+  };
+  for (const l of inc) for (const s of songSplits(own(tdb.tracks, l.track)) || whole) add(s.name, (l.amount * s.share) / 100);
+  let parts = [...weight.values()].filter((p) => p.w > 0);
+  const total = parts.reduce((n, p) => n + p.w, 0);
+  if (!(total > 0)) parts = whole.map((s) => ({ name: s.name, w: s.share })); // no income yet: the plain splits
+  const sumW = parts.reduce((n, p) => n + p.w, 0);
+  const amounts = allocate(
+    Math.max(0, net),
+    parts.map((p) => p.w / sumW),
+  );
+  return {
+    id: r.id,
+    title: r.title,
+    artist: r.artist || '',
+    income: income / 100,
+    costs: (income - net) / 100,
+    net: net / 100,
+    toRecoup: net < 0 ? -net / 100 : 0,
+    parties: parts.map((p, i) => ({ name: p.name, share: round2((p.w / sumW) * 100), amount: amounts[i] / 100 })),
+  };
 }
 
 async function businessRevenue(req, res, url, user, db, id) {
@@ -4210,50 +4381,15 @@ async function businessRevenue(req, res, url, user, db, id) {
     (o) => ['Paid', 'Shipped', 'Delivered'].includes(o.status) && o.paid && inRange(localDate(new Date(o.paid))), // paid is UTC; the period is in local days
   );
   const all = [...lines, ...shop.map((o) => ({ type: 'income', source: 'Shop', amount: o.amount, release: null }))];
-  const cents = (xs) => Math.round(xs.reduce((n, l) => n + Math.round(l.amount * 1e6), 0) / 1e4); // summed exactly, rounded once
   const bySource = {};
   for (const l of all) bySource[`${l.type}:${l.source}`] = (bySource[`${l.type}:${l.source}`] || 0) + Math.round(l.amount * 1e6);
   for (const k in bySource) bySource[k] = Math.round(bySource[k] / 1e4) / 100; // summed exactly like the totals
   const releases = Object.values(tdb.releases)
     .filter((r) => !r.deleted && lines.some((l) => l.release === r.id))
-    .map((r) => {
-      const mine = lines.filter((l) => l.release === r.id);
-      const inc = mine.filter((l) => l.type === 'income');
-      const income = cents(inc);
-      const net = income - cents(mine.filter((l) => l.type === 'cost'));
-      const whole = releaseSplits(tdb, r.id);
-      // Each person's part of the income (song lines by the song's splits, the rest by the release's), names
-      // matched without case ("Hima" and "HIMA" are one person)
-      const weight = new Map();
-      const add = (name, w) => {
-        const k = name.toLowerCase();
-        const x = weight.get(k) || { name, w: 0 };
-        x.w += w;
-        weight.set(k, x);
-      };
-      for (const l of inc) for (const s of songSplits(own(tdb.tracks, l.track)) || whole) add(s.name, (l.amount * s.share) / 100);
-      let parts = [...weight.values()].filter((p) => p.w > 0);
-      const total = parts.reduce((n, p) => n + p.w, 0);
-      if (!(total > 0)) parts = whole.map((s) => ({ name: s.name, w: s.share })); // no income yet: the plain splits
-      const sumW = parts.reduce((n, p) => n + p.w, 0);
-      const amounts = allocate(
-        Math.max(0, net),
-        parts.map((p) => p.w / sumW),
-      );
-      return {
-        id: r.id,
-        title: r.title,
-        artist: r.artist || '',
-        income: income / 100,
-        costs: (income - net) / 100,
-        net: net / 100,
-        toRecoup: net < 0 ? -net / 100 : 0,
-        parties: parts.map((p, i) => ({ name: p.name, share: round2((p.w / sumW) * 100), amount: amounts[i] / 100 })),
-      };
-    });
+    .map((r) => releaseStatement(tdb, lines, r));
   await audit(req, user, 'opened revenue', `${from} to ${to}`);
-  const tin = cents(all.filter((l) => l.type === 'income'));
-  const tout = cents(all.filter((l) => l.type === 'cost'));
+  const tin = centsOf(all.filter((l) => l.type === 'income'));
+  const tout = centsOf(all.filter((l) => l.type === 'cost'));
   return json(res, {
     from,
     to,
@@ -10187,6 +10323,7 @@ const routes = [
   ['/api/mail', mailApi],
   ['/api/video', videoApi],
   ['/api/business', businessApi],
+  ['/api/ledger', ledgerApi],
   ['/api/blog', blogApi],
   ['/api/public', publicApi],
   ['/api/raw/', rawApi],
