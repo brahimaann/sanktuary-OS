@@ -1723,6 +1723,10 @@ try {
       postPage.includes('<meta property="og:description" content="Singing since she was two." />'),
   );
   check(
+    'a shared post with no picture still gets one in its link card',
+    /og:image" content="[^"]+\/magazine\/pages\/cover\.webp"/.test(postPage),
+  );
+  check(
     'section pages have their own title',
     (await (await fetch(B + '/cities/heart')).text()).includes('<title>Heart of the Cities · CITIES</title>'),
   );
@@ -2730,6 +2734,10 @@ try {
   );
   check('orders are not in the open admin API', (await call('bob', '/api/business/orders')).status === 401);
   check('shop pages load', (await fetch(B + '/shop')).status === 200 && (await fetch(B + `/shop/${tee.slug}`)).status === 200);
+  check(
+    'a shared item link shows the item in its link card',
+    (await (await fetch(B + `/shop/${tee.slug}`)).text()).includes('<meta property="og:title" content="Village tee · Sanktuary Shop" />'),
+  );
   check('checkouts expire before their hold ends', Number(teeCall.form.get('expires_at')) > Date.now() / 1000 + 29 * 60);
 
   // Capsule drops: on sale from a set time, checkout holds so a limited drop can't oversell, The Vault

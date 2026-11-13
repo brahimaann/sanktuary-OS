@@ -407,7 +407,11 @@ const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => 
           : 'Docker Desktop is not running'
         : '',
     ],
-    ['Tailscale', st ? st.tailscale.online : null, st ? `${st.tailscale.state || 'unknown'}${st.tailscale.online ? ' · online' : ''}` : ''],
+    [
+      'Tailscale',
+      st?.tailscale ? st.tailscale.online : null,
+      st?.tailscale ? `${st.tailscale.state || 'unknown'}${st.tailscale.online ? ' · online' : ''}` : '',
+    ],
     [
       'PC',
       st ? st.pc.cFreeGB > 10 : null,

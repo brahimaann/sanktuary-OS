@@ -144,8 +144,8 @@ const OpenVerses: React.FC<{
         ))}
         <span style={{ marginLeft: 'auto', opacity: 0.7 }}>Hop on to claim a slot. Everyone hears about new posts.</span>
       </div>
-      <div style={{ flex: 1, display: 'flex', gap: 4, minHeight: 0 }}>
-        <div style={{ ...box, flex: v ? '0 0 46%' : 1 }}>
+      <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 0, overflow: 'auto' }}>
+        <div style={{ ...box, flex: v ? '1 1 300px' : 1, maxHeight: '100%' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -191,7 +191,7 @@ const OpenVerses: React.FC<{
           </table>
         </div>
         {v && (
-          <div style={{ ...box, flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, whiteSpace: 'normal' }}>
+          <div style={{ ...box, flex: '1 1 300px', padding: 8, display: 'flex', flexDirection: 'column', gap: 6, whiteSpace: 'normal' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
               <b style={{ fontSize: 14 }}>{v.title}</b>
               <span style={{ opacity: 0.7 }}>posted by {who(v.by)}</span>
@@ -326,7 +326,7 @@ const PostForm: React.FC<{
   const [f, setF] = useState({ title: '', bpm: '', key: '', length: '16 bars', deadline: '', notes: '', slots: 'Verse' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const row = (label: string, el: React.ReactNode) => (
-    <label style={{ display: 'grid', gridTemplateColumns: '90px 1fr', alignItems: 'center', gap: 6 }}>
+    <label style={{ display: 'grid', gridTemplateColumns: '90px minmax(0, 1fr)', alignItems: 'center', gap: 6 }}>
       {label}
       {el}
     </label>
@@ -335,7 +335,17 @@ const PostForm: React.FC<{
     <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.25)', display: 'grid', placeItems: 'center', zIndex: 5 }}>
       <form
         className="window"
-        style={{ width: 340, padding: 10, display: 'flex', flexDirection: 'column', gap: 6, background: '#fff', border: '2px solid #000' }}
+        style={{
+          width: 340,
+          maxWidth: 'calc(100% - 16px)',
+          boxSizing: 'border-box',
+          padding: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          background: '#fff',
+          border: '2px solid #000',
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           if (file && f.title.trim())
@@ -360,6 +370,7 @@ const PostForm: React.FC<{
           'Song or beat',
           <input
             type="file"
+            style={{ maxWidth: '100%' }}
             accept={AUDIO}
             required
             onChange={(e) => {
@@ -410,6 +421,8 @@ const th: React.CSSProperties = {
 };
 const td: React.CSSProperties = { padding: '3px 6px', whiteSpace: 'nowrap', borderBottom: '1px solid #eee' };
 const input: React.CSSProperties = {
+  maxWidth: '100%',
+  boxSizing: 'border-box',
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '1px 3px',

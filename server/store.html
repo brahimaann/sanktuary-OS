@@ -14,6 +14,11 @@
         font-display: swap;
       }
       @font-face {
+        font-family: 'Fixedsys Excelsior';
+        src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
+        font-display: swap;
+      }
+      @font-face {
         font-family: 'Silkscreen';
         src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
         font-display: swap;
@@ -168,8 +173,15 @@
         background: repeating-linear-gradient(90deg, var(--signal) 0 10px, transparent 10px 12px);
         transition: width 0.6s;
       }
+      /* Prices in the bitmap font: in Pixelify a 5 reads as an S ("$6S.00") */
+      .num {
+        font-family: 'Fixedsys Excelsior', 'Courier New', monospace;
+      }
       .big-number {
-        font: 700 28px var(--pixel);
+        font:
+          32px 'Fixedsys Excelsior',
+          'Courier New',
+          monospace;
         color: var(--ink);
       }
       .row {
@@ -258,7 +270,7 @@
     <script>
       const app = document.getElementById('app');
       const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-      const usd = (n) => Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+      const usd = (n) => `<span class="num">${Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</span>`;
       const para = (t) => esc(t).replace(/\n/g, '<br>');
       const [, section, slug] = location.pathname.split('/');
       const q = new URLSearchParams(location.search);

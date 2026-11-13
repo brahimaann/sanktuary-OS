@@ -1412,7 +1412,9 @@ async function publicShare(req, res, url) {
     // A password-protected link shows nothing about what it holds until it's unlocked
     if (!unlocked)
       return json(res, { name: 'Protected link', locked: true, sharedBy: l.createdBy, expires: l.expires, download: l.download });
-    return json(res, { name: l.name, isDir: l.isDir, download: l.download, locked: false, sharedBy: l.createdBy, expires: l.expires });
+    // The person who shared it, as they call themselves ("Mara Quinn"), not their sign-in name
+    const sharedBy = (await readJson(`profiles/${l.createdBy}.json`, {})).displayName || l.createdBy;
+    return json(res, { name: l.name, isDir: l.isDir, download: l.download, locked: false, sharedBy, expires: l.expires });
   }
   if (action === 'unlock' && req.method === 'POST') {
     const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
@@ -5917,15 +5919,27 @@ async function shopPaid(s) {
 
 // The public pool and shop pages (no account): /pool/<slug>, /shop, /shop/<product>, /shop/thanks
 const STORE_PAGE = new URL('./store.html', import.meta.url);
-function storePage(req, res, url) {
+async function storePage(req, res, url) {
   if (!/^\/(pool|shop)(\/[\w-]+)?\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  // A shared item link shows the item in its link card (previews don't run the page's script)
+  const [, kind, slug] = url.pathname.split('/');
+  const p = kind === 'shop' && slug && Object.values((await loadShop()).products).find((x) => x.slug === slug && x.active && !x.deleted);
+  const origin = siteOrigin(req);
+  const meta = p
+    ? { title: `${p.title} · Sanktuary Shop`, text: `$${p.price}. ${p.description || ''}`.slice(0, 200), image: p.image }
+    : { title: 'Sanktuary Shop', text: 'Apparel and digital releases from Sanktuary, out of the Twin Cities.', image: null };
+  if (meta.image?.startsWith('/')) meta.image = origin + meta.image;
+  const html = (await readFile(STORE_PAGE, 'utf8')).replace(
+    '<title>Sanktuary</title>',
+    metaTags({ ...meta, link: origin + url.pathname, site: 'Sanktuary', type: p ? 'product' : 'website' }),
+  );
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
     'content-security-policy':
       "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'none'",
   });
-  return pipeline(createReadStream(STORE_PAGE), res);
+  res.end(html);
 }
 
 // ── /api/raw: the RapidRAW photo editor, running on this PC (github.com/brahimaann/rapidraw-sanktuary) ──
@@ -6347,12 +6361,12 @@ const BLOG_SECTIONS = {
   moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
   library: ['Library', 'Books we read and recommend, and Renaissance Radio: our tracks, with the story behind them.'],
 };
-const metaTags = ({ title, text, image, link }) =>
+const metaTags = ({ title, text, image, link, site = 'CITIES · Sanktuary', type = 'article' }) =>
   [
     `<title>${escAttr(title)}</title>`,
     `<meta name="description" content="${escAttr(text)}" />`,
-    `<meta property="og:site_name" content="CITIES · Sanktuary" />`,
-    `<meta property="og:type" content="article" />`,
+    `<meta property="og:site_name" content="${escAttr(site)}" />`,
+    `<meta property="og:type" content="${type}" />`,
     `<meta property="og:title" content="${escAttr(title)}" />`,
     `<meta property="og:description" content="${escAttr(text)}" />`,
     `<meta property="og:url" content="${escAttr(link)}" />`,
@@ -6393,7 +6407,8 @@ async function blogPage(req, res, url) {
       : b && (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === `/cities/${a}/${b}`);
     if (post) meta = { title: `${post.title} · CITIES`, text: post.excerpt.slice(0, 200), image: post.image };
   }
-  if (meta.image?.startsWith('/')) meta.image = origin + meta.image;
+  meta.image ||= '/magazine/pages/cover.webp'; // a link card always has a picture: the magazine cover when the post has none
+  if (meta.image.startsWith('/')) meta.image = origin + meta.image;
   const html = (await readFile(BLOG_PAGE, 'utf8')).replace('<!--meta-->', metaTags({ ...meta, link: origin + url.pathname }));
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',

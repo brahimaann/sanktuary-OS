@@ -354,6 +354,10 @@
         flex: 1;
         text-align: center;
       }
+      .ip-note {
+        padding: 4px 6px;
+        font-size: 12px;
+      }
       .row img.thumb {
         width: 24px;
         height: 24px;
@@ -530,6 +534,11 @@
               <span class="mp-sep"></span>
               <button data-fit>${fit ? 'Actual size' : 'Fit to window'}</button>
             </div>
+            ${
+              src.includes('/preview?') // so nobody judges the work by the lighter copy
+                ? `<div class="ip-note">Preview: a lighter copy for viewing.${info.download ? ' Download for the full-quality original.' : ''}</div>`
+                : ''
+            }
           </div>
         </div>`;
       }

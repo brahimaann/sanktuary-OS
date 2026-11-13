@@ -47,7 +47,7 @@ body {
 }
 .taskbar {
   position: absolute;
-  z-index: 2;
+  z-index: 99999; /* above every window, so the Start menu and notifications it holds never open behind one */
   bottom: 0;
   left: 0;
   right: 0;
