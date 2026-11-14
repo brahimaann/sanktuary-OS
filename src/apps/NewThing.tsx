@@ -561,7 +561,9 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
             placeholder={
               kind === 'article'
                 ? 'Write your post here (blank line = new paragraph)...'
-                : 'Session scratch ideas, gear used, tempo, scratch lyric tags...'
+                : kind === 'Shoot' || kind === 'Video'
+                  ? 'Call time, shot list, looks, who brings what...'
+                  : 'Session scratch ideas, gear used, tempo, scratch lyric tags...'
             }
           />
         </div>
@@ -649,6 +651,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           Make a folder for its files
           {makeFolder && !release?.folder && spaces.length > 0 && (
             <>
+              {' '}
               in <SpaceSelect spaces={spaces} value={spaceId} onChange={setSpace} /> › Timeline
             </>
           )}

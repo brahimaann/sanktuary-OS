@@ -189,7 +189,8 @@ const Welcome: React.FC<{ tour?: boolean }> = ({ tour }) => {
             <div style={{ color: '#444' }}>Twin Cities · music · art · fashion · film</div>
           </div>
         </div>
-        <div style={{ ...panel, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{f ? f.intro : 'Loading...'}</div>
+        {/* The front-door pitch is for visitors; a member's first-time tour goes straight to how the studio works */}
+        {!(tour && isSignedIn) && <div style={{ ...panel, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{f ? f.intro : 'Loading...'}</div>}
 
         <Section title={isSignedIn ? 'How the studio works' : 'Take the tour'} refEl={tourBox}>
           <Tour member={!!isSignedIn} />
@@ -423,7 +424,15 @@ const Section: React.FC<{ title: string; children: React.ReactNode; refEl?: Reac
 }) => (
   <fieldset
     ref={refEl}
-    style={{ border: '2px groove #fff', margin: 0, padding: '4px 10px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
+    style={{
+      border: '2px groove #fff',
+      margin: 0,
+      minWidth: 0,
+      padding: '4px 10px 10px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+    }}
   >
     <legend style={{ fontWeight: 700 }}>{title}</legend>
     {children}

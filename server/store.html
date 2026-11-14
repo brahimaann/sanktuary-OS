@@ -14,6 +14,11 @@
         font-display: swap;
       }
       @font-face {
+        font-family: 'Fixedsys Excelsior';
+        src: url('/font/fixedsys-excelsior/fsex300-webfont.woff') format('woff');
+        font-display: swap;
+      }
+      @font-face {
         font-family: 'Silkscreen';
         src: url('/font/silkscreen/silkscreen-latin.woff2') format('woff2');
         font-display: swap;
@@ -125,6 +130,9 @@
         outline-offset: 1px;
       }
       /* The main action (Buy, Continue to payment) wears the signal colour */
+      .btn.on {
+        background: var(--signal);
+      }
       .btn.big {
         font-weight: 700;
         min-height: 38px;
@@ -168,8 +176,15 @@
         background: repeating-linear-gradient(90deg, var(--signal) 0 10px, transparent 10px 12px);
         transition: width 0.6s;
       }
+      /* Prices in the bitmap font: in Pixelify a 5 reads as an S ("$6S.00") */
+      .num {
+        font-family: 'Fixedsys Excelsior', 'Courier New', monospace;
+      }
       .big-number {
-        font: 700 28px var(--pixel);
+        font:
+          32px 'Fixedsys Excelsior',
+          'Courier New',
+          monospace;
         color: var(--ink);
       }
       .row {
@@ -230,6 +245,9 @@
           grid-template-columns: 1fr;
         }
       }
+      .product.solo {
+        grid-template-columns: 1fr;
+      }
       .foot {
         text-align: center;
         margin: 12px auto 0;
@@ -250,12 +268,14 @@
         <div class="title"><span id="t">Sanktuary</span></div>
         <div class="body" id="app">Loading...</div>
       </div>
-      <div class="foot"><a href="/">Enter Sanktuary</a> · <a href="/shop">Shop</a> · <a href="/cities">CITIES</a> · payments by Stripe</div>
+      <div class="foot">
+        <a href="/welcome">Enter Sanktuary</a> · <a href="/shop">Shop</a> · <a href="/cities">CITIES</a> · payments by Stripe
+      </div>
     </div>
     <script>
       const app = document.getElementById('app');
       const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-      const usd = (n) => Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+      const usd = (n) => `<span class="num">${Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</span>`;
       const para = (t) => esc(t).replace(/\n/g, '<br>');
       const [, section, slug] = location.pathname.split('/');
       const q = new URLSearchParams(location.search);
@@ -419,12 +439,18 @@
           return fail(e);
         }
         const p = s.products.find((x) => x.slug === slug);
-        if (!p) return fail(new Error('This item is not available.'));
+        if (!p)
+          return (
+            fail(new Error('This item is not available.')),
+            app.insertAdjacentHTML('beforeend', '<div><a class="btn" href="/shop">&larr; All items</a></div>')
+          );
         title(p.title);
-        app.innerHTML = `<div class="inset product">${p.image ? `<img src="${esc(p.image)}" alt="">` : '<div></div>'}
+        app.innerHTML = `<div class="inset product${p.image ? '' : ' solo'}">${p.image ? `<img src="${esc(p.image)}" alt="">` : ''}
           <div>${p.capsule ? `<div class="muted">${esc(p.capsule)}</div>` : ''}<h1>${esc(p.title)}</h1><div class="big-number" style="margin:8px 0">${usd(p.price)}</div>
           <div class="muted">${p.kind === 'digital' ? 'Digital: you get a private download link right after paying.' : 'Shipped to the US and Canada. Stripe asks for your address.'}</div>
+          ${!p.vault && p.left ? `<div class="err">Only ${p.left} left</div>` : ''}
           ${p.description ? `<p>${para(p.description)}</p>` : ''}
+          ${!p.vault && p.sizes.length ? `<div class="row sizes" style="margin:12px 0">Size ${p.sizes.map((z) => `<button class="btn" data-size="${esc(z)}">${esc(z)}</button>`).join('')}</div>` : ''}
           ${
             p.vault
               ? `<div class="note">In <a href="/shop?c=vault">The Vault</a>: ${p.soldOut ? 'sold out' : 'retired'}, no longer for sale.</div>`
@@ -434,18 +460,26 @@
                   ? '<div class="note">All that are left are in other people\'s checkouts. Try again in half an hour.</div>'
                   : !s.payments
                     ? '<div class="note">The shop opens for orders soon.</div>'
-                    : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? 'Qty <input id="qty" type="number" min="1" max="10" value="1" style="width:60px">' : ''}
-                  <button class="btn big" id="buy">Buy</button></div>${p.left !== null && p.left <= 10 ? `<div class="err" style="margin-top:6px">Only ${p.left} left</div>` : ''}<div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
+                    : `<div class="row" style="margin-top:12px">${p.kind === 'physical' ? `Qty <input id="qty" type="number" min="1" max="${Math.min(10, p.left ?? 10)}" value="1" style="width:60px">` : ''}
+                  <button class="btn big" id="buy">Buy</button></div><div class="muted" style="margin-top:6px">Card details go to Stripe, never to us.</div><div class="err" id="e"></div>`
           }</div></div><div><a class="btn" href="/shop">&larr; All items</a></div>`;
         tick();
+        let size = '';
+        for (const b of app.querySelectorAll('[data-size]'))
+          b.onclick = () => {
+            size = b.dataset.size;
+            for (const x of app.querySelectorAll('[data-size]')) x.classList.toggle('on', x === b);
+            document.getElementById('e')?.replaceChildren();
+          };
         const buy = document.getElementById('buy');
         if (buy)
           buy.onclick = async () => {
+            if (p.sizes.length && !size) return (document.getElementById('e').textContent = 'Pick a size first.');
             buy.disabled = true;
             try {
               const r = await get(`/api/shop/${encodeURIComponent(p.slug)}/buy`, {
                 method: 'POST',
-                body: JSON.stringify({ qty: document.getElementById('qty')?.value || 1 }),
+                body: JSON.stringify({ qty: document.getElementById('qty')?.value || 1, size }),
               });
               location.href = r.url;
             } catch (e) {

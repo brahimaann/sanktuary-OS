@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { button } from './TeamFiles';
+import { useApi } from '../utils/api';
 
 // Foundry's Session tab has three roles on the same cockpit: Recording (in Producer.tsx), Director and Stylist.
 // Each one is a ribbon of settings that drives three panes: math on the left, the working list in the centre,
-// a brief on the right. Lists are kept on this device. Numbers are starting points, not rules.
+// a brief on the right. Numbers are starting points, not rules. A Director or Stylist plan is kept on the shoot picked
+// in the role bar (so the whole crew sees it, in Foundry and on the shoot in Calendar); with no shoot, on this device.
 // Session cockpit: 1px rules between every cell, monospace numbers, no padding to spare (S machine, 1-bit)
 export const TOKENS = {
   '--fk-bg': '#fff',
@@ -55,25 +57,33 @@ export const sfield: React.CSSProperties = {
   border: rule,
 };
 
-/** A value kept in this browser (private window: just not kept). */
-function useKept<T>(key: string, blank: T): [T, (patch: Partial<T>) => void] {
+/** The shoot the plan is being kept on: its saved halves, and how to save one. null = kept on this device. */
+type Half = 'director' | 'stylist';
+const ShootPlan = createContext<{ plan: Partial<Record<Half, object>>; save: (half: Half, value: object) => void } | null>(null);
+
+/** A value kept on the picked shoot (when `half` is given and a shoot is picked), else in this browser
+ * (private window: just not kept). */
+function useKept<T>(key: string, blank: T, half?: Half): [T, (patch: Partial<T>) => void] {
+  const shoot = useContext(ShootPlan);
+  const on = half && shoot ? shoot : null;
   const [v, setV] = useState<T>(() => {
+    if (on) return { ...blank, ...on.plan[half!] };
     try {
       return { ...blank, ...JSON.parse(localStorage.getItem(key) || '{}') };
     } catch {
       return blank;
     }
   });
-  const set = (patch: Partial<T>) =>
-    setV((o) => {
-      const n = { ...o, ...patch };
-      try {
-        localStorage.setItem(key, JSON.stringify(n));
-      } catch {
-        /* not kept */
-      }
-      return n;
-    });
+  const set = (patch: Partial<T>) => {
+    const n = { ...v, ...patch };
+    setV(n);
+    if (on) return on.save(half!, n as object);
+    try {
+      localStorage.setItem(key, JSON.stringify(n));
+    } catch {
+      /* not kept */
+    }
+  };
   return [v, set];
 }
 
@@ -138,12 +148,12 @@ const Table: React.FC<{ head: string[]; rows: (string | number)[][]; wrap?: bool
   </table>
 );
 
-/** A checklist kept on this device: add a line, tick it off, remove it. */
-interface Item {
+/** A checklist you can edit: add a line, tick it off, remove it. */
+export interface Item {
   text: string;
   done?: boolean;
 }
-const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder: string }> = ({ items, set, placeholder }) => {
+export const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder: string }> = ({ items, set, placeholder }) => {
   const [draft, setDraft] = useState('');
   const add = () => {
     if (!draft.trim()) return;
@@ -186,27 +196,27 @@ const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder:
   );
 };
 
-const Checks: React.FC<{ title: string; items: string[]; done: Record<string, boolean>; set: (d: Record<string, boolean>) => void }> = ({
-  title,
-  items,
-  done,
-  set,
-}) => (
-  <div style={{ padding: '4px 6px', borderBottom: rule }}>
-    <div style={label}>
-      {title}{' '}
-      <span style={mono}>
-        {items.filter((c) => done[c]).length}/{items.length}
-      </span>
+/** An editable checklist under a title with its count. `start` is the list it begins as until it's first changed. */
+export const EditList: React.FC<{
+  title: string;
+  items: Item[] | undefined;
+  start: Item[];
+  set: (items: Item[]) => void;
+  placeholder: string;
+}> = ({ title, items, start, set, placeholder }) => {
+  const list = items || start;
+  return (
+    <div>
+      <div style={{ ...label, padding: '4px 6px 0' }}>
+        {title}{' '}
+        <span style={mono}>
+          {list.filter((c) => c.done).length}/{list.length}
+        </span>
+      </div>
+      <List items={list} set={set} placeholder={placeholder} />
     </div>
-    {items.map((c) => (
-      <label key={c} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '1px 0' }}>
-        <input type="checkbox" checked={!!done[c]} onChange={(e) => set({ ...done, [c]: e.target.checked })} />
-        <span style={done[c] ? { textDecoration: 'line-through', color: 'var(--fk-dim)' } : undefined}>{c}</span>
-      </label>
-    ))}
-  </div>
-);
+  );
+};
 
 // ---- Director / cinematographer ----
 
@@ -218,13 +228,14 @@ const SENSORS: Record<string, [number, number]> = {
   'Phone (1/1.3")': [9.8, 7.4],
 };
 const FOCALS = [14, 18, 24, 35, 50, 85, 135];
+// The lens inventory starts as these; the director swaps in what's actually in the bag and ticks what's packed
 const LENS_NOTES: [string, string][] = [
-  ['14-18mm', 'Wide establishing, rooms, cars; distorts faces up close.'],
-  ['24mm', 'Wide but natural: walk-and-talks, dance, group shots.'],
-  ['35mm', 'Closest to the eye: the everyday storytelling lens.'],
-  ['50mm', 'Standard: mid shots and clean product.'],
-  ['85mm', 'Portraits and close-ups; soft background.'],
-  ['135mm', 'Compression and isolation from far away; needs support.'],
+  ['14-18mm', 'wide establishing, rooms, cars'],
+  ['24mm', 'walk-and-talks, dance, groups'],
+  ['35mm', 'the everyday storytelling lens'],
+  ['50mm', 'mid shots and clean product'],
+  ['85mm', 'portraits and close-ups'],
+  ['135mm', 'far away; needs support'],
 ];
 const RIG = [
   'Batteries charged (camera, monitor, lights, mics)',
@@ -239,17 +250,23 @@ const RIG = [
 const ft = (m: number) => (m * 3.281).toFixed(1);
 
 const DirectorCockpit: React.FC = () => {
-  const [d, set] = useKept('sk:foundry-director', {
-    fps: '23.976',
-    angle: '180',
-    aspect: '2.39',
-    sensor: 'Full frame',
-    stop: '2.8',
-    iso: '800',
-    subject: '3',
-    shots: [] as Item[],
-    rig: {} as Record<string, boolean>,
-  });
+  const [d, set] = useKept(
+    'sk:foundry-director',
+    {
+      fps: '23.976',
+      angle: '180',
+      aspect: '2.39',
+      sensor: 'Full frame',
+      stop: '2.8',
+      iso: '800',
+      subject: '3',
+      shots: [] as Item[],
+      rig: {} as Record<string, boolean>, // ticks from before the rig list could be edited
+      rigList: undefined as Item[] | undefined,
+      lenses: undefined as Item[] | undefined,
+    },
+    'director',
+  );
   const fps = Number(d.fps);
   const t = Number(d.angle) / 360 / fps; // exposure time in seconds
   const [w, h] = SENSORS[d.sensor] || SENSORS['Full frame'];
@@ -339,16 +356,21 @@ const DirectorCockpit: React.FC = () => {
         <List items={d.shots} set={(shots) => set({ shots })} placeholder="e.g. Wide, artist walks in, 24mm, dolly" />
       </section>
       <section style={{ ...pane, borderRight: 0 }}>
-        <h3 style={paneHead}>Brief: camera and lenses</h3>
-        <Checks title="Rig checklist" items={RIG} done={d.rig} set={(rig) => set({ rig })} />
-        <div style={{ padding: '4px 6px' }}>
-          <div style={label}>Lenses</div>
-          {LENS_NOTES.map(([l, n]) => (
-            <div key={l} style={{ padding: '1px 0' }}>
-              <b style={mono}>{l}</b> {n}
-            </div>
-          ))}
-        </div>
+        <h3 style={paneHead}>Rig and lenses</h3>
+        <EditList
+          title="Rig checklist"
+          items={d.rigList}
+          start={RIG.map((text) => ({ text, done: !!d.rig[text] }))}
+          set={(rigList) => set({ rigList })}
+          placeholder="e.g. Second body, spare plate"
+        />
+        <EditList
+          title="Lens inventory"
+          items={d.lenses}
+          start={LENS_NOTES.map(([l, n]) => ({ text: `${l}: ${n}` }))}
+          set={(lenses) => set({ lenses })}
+          placeholder="e.g. 24-70mm f/2.8 (rented, back Mon)"
+        />
       </section>
     </Cockpit>
   );
@@ -382,16 +404,21 @@ const ALTERATIONS = [
 ];
 
 const StylistCockpit: React.FC = () => {
-  const [st, set] = useKept('sk:foundry-stylist', {
-    block: 'Boxy tee',
-    gsm: '280',
-    width: '60',
-    shrink: '5',
-    run: { S: 10, M: 20, L: 20, XL: 10 } as Record<string, number>,
-    looks: [] as Item[],
-    pulls: [] as Item[],
-    alt: {} as Record<string, boolean>,
-  });
+  const [st, set] = useKept(
+    'sk:foundry-stylist',
+    {
+      block: 'Boxy tee',
+      gsm: '280',
+      width: '60',
+      shrink: '5',
+      run: { S: 10, M: 20, L: 20, XL: 10 } as Record<string, number>,
+      looks: [] as Item[],
+      pulls: [] as Item[],
+      alt: {} as Record<string, boolean>, // ticks from before the list could be edited
+      altList: undefined as Item[] | undefined,
+    },
+    'stylist',
+  );
   const b = BLOCKS[st.block] || BLOCKS['Boxy tee'];
   const shrink = Number(st.shrink) / 100;
   const width = Number(st.width);
@@ -468,7 +495,13 @@ const StylistCockpit: React.FC = () => {
         <h3 style={paneHead}>Brief: pulls and alterations</h3>
         <div style={{ ...label, padding: '4px 6px 0' }}>Pulls (tick when returned)</div>
         <List items={st.pulls} set={(pulls) => set({ pulls })} placeholder="e.g. Jacket from showroom X, back Fri" />
-        <Checks title="Alterations" items={ALTERATIONS} done={st.alt} set={(alt) => set({ alt })} />
+        <EditList
+          title="Alterations"
+          items={st.altList}
+          start={ALTERATIONS.map((text) => ({ text, done: !!st.alt[text] }))}
+          set={(altList) => set({ altList })}
+          placeholder="e.g. Hem the trousers 2 cm"
+        />
       </section>
     </Cockpit>
   );
@@ -476,12 +509,46 @@ const StylistCockpit: React.FC = () => {
 
 // ---- Role switch ----
 
+interface Shoot {
+  id: string;
+  source?: string;
+  title: string;
+  kind: string;
+  start: string;
+  plan?: Partial<Record<Half, object>>;
+}
 const ROLES = ['Recording', 'Director', 'Stylist'] as const;
 type Role = (typeof ROLES)[number];
 
 /** The Session tab: a role bar, then that role's cockpit. Recording is passed in from Producer. */
 export const FoundryRoles: React.FC<{ recording: React.ReactNode }> = ({ recording }) => {
-  const [r, set] = useKept<{ role: Role }>('sk:foundry-role', { role: 'Recording' });
+  const [r, set] = useKept<{ role: Role; shoot: string }>('sk:foundry-role', { role: 'Recording', shoot: '' });
+  // Shoots and videos on the Calendar: pick one and the Director / Stylist plan lives on it, for everyone on the shoot
+  const api = useApi();
+  const [shoots, setShoots] = useState<Shoot[]>([]);
+  const [saved, setSaved] = useState('');
+  useEffect(() => {
+    api('/api/timeline').then(
+      (d: { items: Shoot[] }) =>
+        setShoots(d.items.filter((i) => !i.source && ['Shoot', 'Video'].includes(i.kind)).sort((a, b) => b.start.localeCompare(a.start))),
+      () => {},
+    );
+  }, [api]);
+  const shoot = shoots.find((s) => s.id === r.shoot);
+  const timer = useRef<number | undefined>(undefined);
+  const save = (half: Half, value: object) => {
+    shoot!.plan = { ...shoot!.plan, [half]: value };
+    setSaved('Saving...');
+    clearTimeout(timer.current);
+    timer.current = window.setTimeout(
+      () =>
+        api(`/api/timeline/${shoot!.id}`, { method: 'PATCH', body: JSON.stringify({ plan: { [half]: value } }) }).then(
+          () => setSaved('Saved on the shoot'),
+          (e: Error) => setSaved(e.message),
+        ),
+      700,
+    );
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '3px 6px', borderBottom: '1px solid #000' }}>
@@ -496,9 +563,38 @@ export const FoundryRoles: React.FC<{ recording: React.ReactNode }> = ({ recordi
             {x}
           </button>
         ))}
+        {r.role !== 'Recording' && (
+          <>
+            <span style={{ ...label, marginLeft: 8 }}>Shoot</span>
+            <select
+              style={{ ...sfield, maxWidth: 220 }}
+              value={shoot ? shoot.id : ''}
+              onChange={(e) => (setSaved(''), set({ shoot: e.target.value }))}
+              title="Keep this plan on a shoot from the Calendar, so the whole crew sees it"
+            >
+              <option value="">(only on this device)</option>
+              {shoots.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.start} {s.title}
+                </option>
+              ))}
+            </select>
+            <span style={{ color: 'var(--fk-dim, #555)' }}>
+              {shoot ? saved || 'Kept on the shoot: the crew sees it' : shoots.length ? '' : 'Add a shoot in Calendar to share this plan'}
+            </span>
+          </>
+        )}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {r.role === 'Director' ? <DirectorCockpit /> : r.role === 'Stylist' ? <StylistCockpit /> : recording}
+        <ShootPlan.Provider value={shoot ? { plan: shoot.plan || {}, save } : null}>
+          {r.role === 'Director' ? (
+            <DirectorCockpit key={shoot?.id} />
+          ) : r.role === 'Stylist' ? (
+            <StylistCockpit key={shoot?.id} />
+          ) : (
+            recording
+          )}
+        </ShootPlan.Provider>
       </div>
     </div>
   );

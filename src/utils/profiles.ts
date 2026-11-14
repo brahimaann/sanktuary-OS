@@ -25,6 +25,9 @@ export const linkFor = (k: LinkKey, v: string) => {
   return /^https?:\/\//i.test(v) ? v : prefix ? prefix + v.replace(/^@/, '') : `https://${v}`;
 };
 
+/** The node cities a member can be in: the same names as CITIES in apps/Nodes.tsx (kept here so Profile doesn't load the globe). */
+export const NODE_CITIES = ['Twin Cities', 'Seattle', 'Philadelphia', 'London', 'Riyadh', 'Houston', 'Atlanta'];
+
 export interface Profile extends Partial<Record<LinkKey, string>> {
   username: string;
   admin?: boolean;
@@ -33,6 +36,7 @@ export interface Profile extends Partial<Record<LinkKey, string>> {
   displayName?: string;
   status?: string;
   role?: string;
+  city?: string; // one of NODE_CITIES
   bio?: string;
   avatar?: number; // the picture inside Sanktuary
   photo?: number; // the picture on the public profile and portfolio, kept separate from avatar

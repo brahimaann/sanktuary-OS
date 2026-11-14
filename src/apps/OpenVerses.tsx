@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
+import { displayName, useProfiles } from '../utils/profiles';
 import { useApi } from '../utils/api';
+import { useWindowManager } from '../wm/manager';
 import { useLiveEvent } from '../utils/live';
 import { uploadFiles } from '../utils/upload';
 import { dialog } from '../utils/dialog';
@@ -83,6 +85,31 @@ const OpenVerses: React.FC<{
   const [sel, setSel] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { byName } = useProfiles();
+  const who = (u: string) => displayName(byName[u], u);
+  const { openWindow } = useWindowManager();
+  // A name opens that person's profile (same window as Teams opens)
+  const link = (u: string) => (
+    <a
+      href="#"
+      style={{ color: 'inherit' }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openWindow({
+          id: `profile-${u}`,
+          title: u === me ? 'My Profile' : `${who(u)} — Info`,
+          icon: '/images/icons/my-documents-16x16.png?v=2',
+          appType: 'profile',
+          appProps: { username: u },
+          width: 420,
+          height: 520,
+        });
+      }}
+    >
+      {who(u)}
+    </a>
+  );
   const [show, setShow] = useState<'open' | 'all'>('open');
   const load = useCallback(
     () =>
@@ -97,12 +124,18 @@ const OpenVerses: React.FC<{
   }, [load]);
   useLiveEvent('verses', load);
 
-  const upload = async (file: File, dir: string[]) => {
+  /** `over`: a file this replaces. Same type goes in at the same path, so links already sent play the new one. */
+  const upload = async (file: File, dir: string[], over?: FileRef | null) => {
     const s = space();
     if (!s) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
-    const [saved] = await uploadFiles(getToken, s.id, dir, [{ file, name: file.name }], (n, of) =>
-      setMsg(`Uploading ${file.name}... ${Math.round((n / of) * 100)}%`),
-    );
+    const ext = (n: string) => n.slice(n.lastIndexOf('.')).toLowerCase();
+    const old = over?.space === s.id && over.path.startsWith(dir.join('/') + '/') ? over.path.split('/').pop()! : '';
+    const send = (name: string, replace: boolean) =>
+      uploadFiles(getToken, s.id, dir, [{ file, name, replace }], (n, of) =>
+        setMsg(`Uploading ${file.name}... ${Math.round((n / of) * 100)}%`),
+      );
+    const [saved] =
+      old && ext(old) === ext(file.name) ? await send(old, true).catch(() => send(file.name, false)) : await send(file.name, false);
     return { space: s.id, path: [...dir, saved].join('/') };
   };
   const act = async (fn: () => Promise<unknown>, done = '') => {
@@ -141,8 +174,8 @@ const OpenVerses: React.FC<{
         ))}
         <span style={{ marginLeft: 'auto', opacity: 0.7 }}>Hop on to claim a slot. Everyone hears about new posts.</span>
       </div>
-      <div style={{ flex: 1, display: 'flex', gap: 4, minHeight: 0 }}>
-        <div style={{ ...box, flex: v ? '0 0 46%' : 1 }}>
+      <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 0, overflow: 'auto' }}>
+        <div style={{ ...box, flex: v ? '1 1 300px' : 1, maxHeight: '100%' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -162,7 +195,7 @@ const OpenVerses: React.FC<{
                   style={{ cursor: 'pointer' }}
                 >
                   <td style={{ ...td, fontWeight: 700 }}>{x.title}</td>
-                  <td style={td}>{x.by}</td>
+                  <td style={td}>{link(x.by)}</td>
                   <td style={td}>{[x.bpm && `${x.bpm} BPM`, x.key].filter(Boolean).join(' · ')}</td>
                   <td style={td}>
                     {x.picked
@@ -188,10 +221,10 @@ const OpenVerses: React.FC<{
           </table>
         </div>
         {v && (
-          <div style={{ ...box, flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 6, whiteSpace: 'normal' }}>
+          <div style={{ ...box, flex: '1 1 300px', padding: 8, display: 'flex', flexDirection: 'column', gap: 6, whiteSpace: 'normal' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
               <b style={{ fontSize: 14 }}>{v.title}</b>
-              <span style={{ opacity: 0.7 }}>posted by {v.by}</span>
+              <span style={{ opacity: 0.7 }}>posted by {link(v.by)}</span>
               {(v.by === me || admin) && (
                 <button
                   style={{ ...button, marginLeft: 'auto' }}
@@ -209,11 +242,19 @@ const OpenVerses: React.FC<{
               {[v.bpm && `${v.bpm} BPM`, v.key, v.length, v.deadline && `${dueIn(v.deadline)} (${v.deadline})`].filter(Boolean).join(' · ')}
             </div>
             {v.notes && <div style={{ whiteSpace: 'pre-wrap' }}>{v.notes}</div>}
+            <div style={{ border: '1px dashed #000', padding: '3px 6px' }}>
+              <b>On this song:</b> {[...new Set([v.by, ...v.slots.flatMap((x) => (x.by ? [x.by] : []))])].map(who).join(', ')}
+              <div style={{ opacity: 0.7 }}>
+                Hopping on holds your place on the song. No percentages yet: the split is set once it's published and earning enough to
+                share.
+              </div>
+            </div>
             <Player file={v.beat} />
             {v.slots.map((s) => (
               <fieldset key={s.id} style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px' }}>
                 <legend>
-                  {s.label}: {v.picked === s.id ? `${s.by}'s take, picked ✓` : s.by ? `${s.by} hopped on` : 'open'}
+                  {s.label}: {s.by ? link(s.by) : 'open'}
+                  {v.picked === s.id ? "'s take, picked ✓" : s.by ? ' hopped on' : ''}
                 </legend>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {!s.by && !v.picked && (
@@ -239,10 +280,13 @@ const OpenVerses: React.FC<{
                           const f = e.target.files?.[0];
                           e.target.value = '';
                           if (f)
-                            act(async () => {
-                              const take = await upload(f, ['Open verses', folderSafe(v.title) || v.id, 'Takes', me]);
-                              await patch(v, { slot: s.id, take });
-                            }, `Take sent to ${v.by}.`);
+                            act(
+                              async () => {
+                                const take = await upload(f, ['Open verses', folderSafe(v.title) || v.id, 'Takes', me], s.take);
+                                await patch(v, { slot: s.id, take });
+                              },
+                              `Take sent to ${who(v.by)}.`,
+                            );
                         }}
                       />
                     </label>
@@ -259,10 +303,13 @@ const OpenVerses: React.FC<{
                       disabled={busy}
                       title="Makes the song in the tracker (New songs) with this take. Splits come later, when it's published."
                       onClick={() =>
-                        act(async () => {
-                          const track = await onPick(v, s);
-                          await patch(v, { pick: s.id, track });
-                        }, `Picked ${s.by}'s take. "${v.title}" is in your songs now.`)
+                        act(
+                          async () => {
+                            const track = await onPick(v, s);
+                            await patch(v, { pick: s.id, track });
+                          },
+                          `Picked ${who(s.by!)}'s take. "${v.title}" is in your songs now.`,
+                        )
                       }
                     >
                       Pick this take
@@ -287,6 +334,7 @@ const OpenVerses: React.FC<{
       </div>
       {posting && (
         <PostForm
+          blocked={!space()}
           busy={busy}
           onClose={() => setPosting(false)}
           onPost={(f, body) =>
@@ -304,18 +352,19 @@ const OpenVerses: React.FC<{
 };
 
 const PostForm: React.FC<{
+  blocked: boolean;
   busy: boolean;
   onClose: () => void;
   onPost: (
     f: File,
     body: { title: string; bpm: string; key: string; length: string; deadline: string | null; notes: string; slots: string[] },
   ) => void;
-}> = ({ busy, onClose, onPost }) => {
+}> = ({ blocked, busy, onClose, onPost }) => {
   const [file, setFile] = useState<File | null>(null);
   const [f, setF] = useState({ title: '', bpm: '', key: '', length: '16 bars', deadline: '', notes: '', slots: 'Verse' });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const row = (label: string, el: React.ReactNode) => (
-    <label style={{ display: 'grid', gridTemplateColumns: '90px 1fr', alignItems: 'center', gap: 6 }}>
+    <label style={{ display: 'grid', gridTemplateColumns: '90px minmax(0, 1fr)', alignItems: 'center', gap: 6 }}>
       {label}
       {el}
     </label>
@@ -324,7 +373,17 @@ const PostForm: React.FC<{
     <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.25)', display: 'grid', placeItems: 'center', zIndex: 5 }}>
       <form
         className="window"
-        style={{ width: 340, padding: 10, display: 'flex', flexDirection: 'column', gap: 6, background: '#fff', border: '2px solid #000' }}
+        style={{
+          width: 340,
+          maxWidth: 'calc(100% - 16px)',
+          boxSizing: 'border-box',
+          padding: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          background: '#fff',
+          border: '2px solid #000',
+        }}
         onSubmit={(e) => {
           e.preventDefault();
           if (file && f.title.trim())
@@ -340,10 +399,16 @@ const PostForm: React.FC<{
         }}
       >
         <b>Post a song with an open verse</b>
+        {blocked && (
+          <div style={{ padding: '3px 6px', background: '#000', color: '#fff' }}>
+            You can't post yet: you have no team space to upload to. Ask an admin for upload rights.
+          </div>
+        )}
         {row(
-          'Song',
+          'Song or beat',
           <input
             type="file"
+            style={{ maxWidth: '100%' }}
             accept={AUDIO}
             required
             onChange={(e) => {
@@ -372,7 +437,7 @@ const PostForm: React.FC<{
           <button type="button" style={button} onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="sk-signal" style={{ ...button, fontWeight: 700 }} disabled={busy || !file}>
+          <button type="submit" className="sk-signal" style={{ ...button, fontWeight: 700 }} disabled={busy || blocked || !file}>
             Post
           </button>
         </div>
@@ -394,6 +459,8 @@ const th: React.CSSProperties = {
 };
 const td: React.CSSProperties = { padding: '3px 6px', whiteSpace: 'nowrap', borderBottom: '1px solid #eee' };
 const input: React.CSSProperties = {
+  maxWidth: '100%',
+  boxSizing: 'border-box',
   fontFamily: 'inherit',
   fontSize: 11,
   padding: '1px 3px',

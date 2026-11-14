@@ -88,7 +88,7 @@
 }
 .folder-view[data-view-mode='DESKTOP'] .desktop-icon .title,
 .folder-view[data-view-mode='LARGE_ICONS'] .desktop-icon .title {
-  margin-top: 5px;
+  margin: 5px -6px 0; /* a few px wider than the icon, so "Operations" isn't clipped to "Jperations" */
 }
 .folder-view:not([data-view-mode='DESKTOP']):not([data-view-mode='LARGE_ICONS']) .desktop-icon .title {
   text-align: start;

@@ -396,6 +396,30 @@
         margin: 0 auto 14px;
         max-width: 620px;
       }
+      .follow {
+        margin: 18px 0 0;
+        max-width: none;
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+      }
+      .follow .row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .follow input[type='email'] {
+        flex: 1 1 180px;
+        min-width: 0;
+        font: inherit;
+        padding: 6px 8px;
+        border: 2px solid var(--ink);
+        background: var(--paper);
+        color: var(--ink);
+      }
+      .follow .muted {
+        opacity: 0.7;
+      }
       .note .hd {
         background: var(--ink);
         color: var(--paper);
@@ -849,7 +873,7 @@
         <div class="bar" id="bar"></div>
         <div class="body" id="app">Loading...</div>
       </div>
-      <div class="foot"><a href="/">Enter Sanktuary</a> · <a href="/write">Write for CITIES</a> (members) · sanktuary.studio</div>
+      <div class="foot"><a href="/welcome">Enter Sanktuary</a> · <a href="/write">Write for CITIES</a> (members) · sanktuary.studio</div>
     </div>
     <script>
       const app = document.getElementById('app');
@@ -898,27 +922,20 @@
         const shown = inSection.filter((p) => section !== 'essays' || !filter || p.publication === filter);
         const faces = section === 'heart' && people.length ? `<div class="people">${people.map(face).join('')}</div>` : '';
         // Heart of the Cities opens with the magazine
-        const magazine =
-          section === 'heart'
-            ? `<a class="post" href="/magazine"><img src="/magazine/pages/cover.webp" alt="" loading="lazy">
-                <div style="min-width:0"><div class="meta"><span class="chip">Magazine</span>CITIES</div>
-                <h2>CITIES Vol. 1</h2><div class="excerpt">The magazine: Twin Cities artists in their own words. Flip through the issue.</div></div></a>`
-            : '';
         app.innerHTML =
-          magazine +
-            faces +
-            shown
-              .map(
-                (p) => `<a class="post" href="${esc(p.url)}" data-nav>
+          (section === 'heart' ? MAGAZINE : '') + faces + shown.map(card).join('') ||
+          '<div class="empty">Nothing here yet. Check back soon.</div>';
+      }
+      const MAGAZINE = `<a class="post" href="/magazine"><img src="/magazine/pages/cover.webp" alt="" loading="lazy">
+                <div style="min-width:0"><div class="meta"><span class="chip">Magazine</span>CITIES</div>
+                <h2>CITIES Vol. 1</h2><div class="excerpt">The magazine: Twin Cities artists in their own words. Flip through the issue.</div></div></a>`;
+      const card = (p) => `<a class="post" href="${esc(p.url)}" data-nav>
                     ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
                     <div style="min-width:0">
                       <div class="meta">${chip(p)}${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
                       <h2>${esc(p.title)}</h2>
                       <div class="excerpt">${esc(p.excerpt)}</div>
-                    </div></a>`,
-              )
-              .join('') || '<div class="empty">Nothing here yet. Check back soon.</div>';
-      }
+                    </div></a>`;
 
       // Our own posts are plain text: paragraphs, https links made clickable, and a line that is just one of our
       // uploaded pictures (/api/blog/images/...) shown as a photo. Nothing else is interpreted.
@@ -1011,10 +1028,54 @@
           ? `<div class="credit">Originally published by <b>${esc(p.publication)}</b> on Substack. <a class="btn" href="${esc(p.external)}" target="_blank" rel="noopener noreferrer">Comment or subscribe on Substack</a></div>`
           : '';
         app.innerHTML = `<article class="reader"><div class="meta">${chip(p)}</div><h1>${esc(p.title)}</h1>${p.preface ? `<p class="preface">${esc(p.preface)}</p>` : ''}<div class="meta">${esc(p.publication)}${p.author && p.author !== p.publication ? ' · ' + esc(p.author) : ''} · ${when(p.date)}</div>
-                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}${p.people?.length ? `<h3>People in this story</h3><div class="people">${p.people.map(face).join('')}</div>` : ''}<div id="listen"></div><div id="shop"></div>${credit}</article>`;
+                ${p.image && !(p.html || '').includes(p.image) ? `<img class="cover" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer">` : ''}${p.html != null ? `<div class="content">${p.html}</div>` : body(p.body)}${p.people?.length ? `<h3>People in this story</h3><div class="people">${p.people.map(face).join('')}</div>` : ''}<div id="listen"></div><div id="shop"></div>${credit}<div id="more"></div></article>`;
         scrollTo(0, 0);
         if (p.release) document.getElementById('listen').outerHTML = await listen(p.release);
         if (p.product) document.getElementById('shop').outerHTML = await shopCard(p.product);
+        // A story never ends in a dead end: a few more to read, and the magazine
+        if (!all.length)
+          all = await fetch('/api/blog')
+            .then((r) => r.json())
+            .then(
+              (d) => d.posts,
+              () => [],
+            );
+        const more = all.filter((x) => x.url !== p.url).slice(0, 3);
+        document.getElementById('more').innerHTML = `<h3>More from CITIES</h3>${more.map(card).join('')}${MAGAZINE}`;
+        follow(document.getElementById('more'));
+      }
+
+      // "Get CITIES by email" under every story: the mailing list the team already has (double opt-in, unsubscribe in
+      // every email). Not shown until the list is open.
+      let mailOpen;
+      async function follow(at) {
+        mailOpen ??= await fetch('/api/mail')
+          .then((r) => r.json())
+          .then(
+            (d) => d.open,
+            () => false,
+          );
+        if (!mailOpen) return;
+        at.insertAdjacentHTML(
+          'beforeend',
+          `<form class="note follow"><b>Get CITIES by email</b><div class="muted">New stories when they're out. No spam, leave any time.</div>
+            <div class="row"><input type="email" name="email" required placeholder="you@example.com" autocomplete="email" aria-label="Your email"><button class="btn">Sign up</button></div>
+            <label><input type="checkbox" name="consent" required> Yes, email me CITIES stories</label>
+            <input name="website" tabindex="-1" autocomplete="off" hidden><div class="muted" role="status"></div></form>`,
+        );
+        const form = at.querySelector('.follow');
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          const say = form.querySelector('[role=status]');
+          say.textContent = 'Sending...';
+          const r = await fetch('/api/mail/subscribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: form.email.value, consent: form.consent.checked, website: form.website.value, source: 'cities' }),
+          }).catch(() => null);
+          if (r?.ok) form.innerHTML = '<b>Check your email</b><div class="muted">Tap the link we just sent to confirm.</div>';
+          else say.textContent = r ? await r.text() : "Couldn't send. Check your connection.";
+        };
       }
 
       // The moodboard of the month: whatever the team dropped on its board this month, as a wall sorted into four
@@ -1240,10 +1301,10 @@
 
       // Library: books we recommend and Renaissance Radio (our tracks, played one after another), each with why. Added by the team in Studio.
       let allLibrary = null;
-      let shelf = 'Book';
       async function library() {
+        const shelf = location.pathname === '/cities/radio' ? 'Classic' : 'Book'; // the radio has its own address, so it can be linked
         sectionTabs('library');
-        document.title = 'Library · CITIES';
+        document.title = `${shelf === 'Classic' ? 'Renaissance Radio' : 'Library'} · CITIES`;
         if (!allLibrary) {
           app.textContent = 'Loading...';
           allLibrary = await fetch('/api/public/library')
@@ -1258,7 +1319,9 @@
         ]
           .map(([k, name]) => `<button class="btn ${shelf === k ? 'on' : ''}" data-s="${k}">${name}</button>`)
           .join('');
-        bar.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => ((shelf = b.dataset.s), library())));
+        bar
+          .querySelectorAll('[data-s]')
+          .forEach((b) => (b.onclick = () => go(b.dataset.s === 'Classic' ? '/cities/radio' : '/cities/library')));
         if (shelf === 'Classic') return radio();
         const shown = allLibrary.filter((i) => i.kind === shelf);
         app.innerHTML =
@@ -1280,7 +1343,7 @@
         onAir = track;
         air.src = track.audio;
         air.play().catch(() => {});
-        if (location.pathname === '/cities/library') radio();
+        if (location.pathname === '/cities/radio') radio();
       }
       const skip = (n) => {
         const list = tracksOn(tuned);
@@ -1401,7 +1464,7 @@
         const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
         if (path === 'notes') return notes();
         if (path === 'videos') return videos();
-        if (path === 'library') return library();
+        if (path === 'library' || path === 'radio') return library();
         if (path.split('/')[0] === 'moodboard') return moodboard(path.split('/')[1]);
         if (path.startsWith('heart/')) return person(path.split('/')[1]);
         const section = path === '' ? 'heart' : ['heart', 'essays', 'field-notes'].includes(path) ? path : null;

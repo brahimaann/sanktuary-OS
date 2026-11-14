@@ -7,6 +7,7 @@ import { useLiveEvent } from '../utils/live';
 import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
+import { openSession, takeSongWish } from '../utils/songs';
 import { fileKind, lightAudio } from './fileTypes';
 import ShareDialog from './ShareDialog';
 import { Ref } from '../utils/refs';
@@ -41,6 +42,8 @@ interface Release {
   created?: string;
   cover?: FileRef | null; // found in Artwork by a scan
   listeners?: string[]; // can listen and comment, not change it
+  everyone?: 'listen'; // new projects: the team listens, only `editors` (and the owner) change it
+  editors?: string[];
   items?: string[]; // a Playlist's songs (track ids from other projects)
 }
 const STORES: [string, string][] = [
@@ -162,6 +165,13 @@ const TracksApp: React.FC = () => {
     window.addEventListener('sk:open-verses', on);
     return () => window.removeEventListener('sk:open-verses', on);
   }, []);
+  // Another window (Files, Foundry) asked for a song's page
+  const [wish, setWish] = useState(takeSongWish);
+  useEffect(() => {
+    const on = () => setWish(takeSongWish());
+    window.addEventListener('sk:open-song', on);
+    return () => window.removeEventListener('sk:open-song', on);
+  }, []);
   const [adding, setAdding] = useState<UploadItem[] | null>(null); // songs dropped or picked: new, or new versions?
   const songPicker = useRef<HTMLInputElement>(null);
   const [trackId, setTrackId] = useState<string | null>(null);
@@ -196,6 +206,16 @@ const TracksApp: React.FC = () => {
     return () => window.removeEventListener('sk:tracks-release', show);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!wish || !data) return;
+    const t = data.tracks.find((x) => x.id === wish);
+    if (t) {
+      setView('');
+      setReleaseId(t.release);
+      setTrackId(t.id);
+    }
+    setWish(null);
+  }, [wish, data]);
   const releases = data?.releases || [];
   const release = releases.find((r) => r.id === releaseId);
   const isPlaylist = release?.kind === 'Playlist';
@@ -260,7 +280,8 @@ const TracksApp: React.FC = () => {
       if (!first) pickRelease(pl.id);
     });
   };
-  const listenOnly = !!(release && me && release.owner !== me.username && !me.admin && release.listeners?.includes(me.username));
+  const myInbox = (r: Release) => isInbox(r) && r.owner === me?.username;
+  const listenOnly = !!(release && me && !me.admin && !canEdit(release, me.username));
   const [ready, setReady] = useState<Readiness | null>(null);
   const [readyOpen, setReadyOpen] = useState(false);
   // Guided path on by default; hiding it is remembered in this browser
@@ -402,13 +423,19 @@ const TracksApp: React.FC = () => {
     try {
       const fresh = items.filter((_, i) => !picks[i]);
       if (fresh.length) {
-        let target = release && !isPlaylist ? release : releases.find(isInbox);
+        // Everyone has their own New songs folder, so keeping yours private never hides anyone else's songs
+        let target = release && !isPlaylist ? release : releases.find(myInbox);
         if (!target) {
           const space = uploadSpace();
           if (!space) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
           target = await api('/api/tracks/release', {
             method: 'POST',
-            body: JSON.stringify({ title: INBOX, kind: 'Folder', folder: { space: space.id, path: `Releases/${INBOX}` }, setup: true }),
+            body: JSON.stringify({
+              title: `${INBOX} (${me!.username})`,
+              kind: 'Folder',
+              folder: { space: space.id, path: `Releases/${INBOX} (${me!.username})` },
+              setup: true,
+            }),
           });
         }
         const f = await folderOf(target!);
@@ -447,10 +474,10 @@ const TracksApp: React.FC = () => {
    * No splits or Ledger rows: those are set when the song is published. */
   const pickVerse = async (v: Verse, s: VerseSlot) => {
     const target =
-      releases.find(isInbox) ||
+      releases.find(myInbox) ||
       (await api('/api/tracks/release', {
         method: 'POST',
-        body: JSON.stringify({ title: INBOX, kind: 'Folder' }),
+        body: JSON.stringify({ title: `${INBOX} (${me!.username})`, kind: 'Folder' }),
       }));
     const t = await api('/api/tracks/track', { method: 'POST', body: JSON.stringify({ release: target.id, title: v.title }) });
     await api(`/api/tracks/track/${t.id}`, {
@@ -508,16 +535,20 @@ const TracksApp: React.FC = () => {
             <button
               style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
               onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
-              title="Every song in one list: mixed, mastered, out, and what each needs next"
+              title={
+                view === 'songs' ? 'Back to the project covers' : 'Every song in one list: mixed, mastered, out, and what each needs next'
+              }
             >
-              {view === 'songs' ? 'Covers' : 'All songs'}
+              All songs
             </button>
             <button
               style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
               onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
-              title="Songs with an open verse: hop on, send a take, the poster picks one"
+              title={
+                view === 'verses' ? 'Back to the project covers' : 'Songs with an open verse: hop on, send a take, the poster picks one'
+              }
             >
-              {view === 'verses' ? 'Covers' : 'Open verses'}
+              Open verses
             </button>
           </>
         )}
@@ -681,6 +712,11 @@ const TracksApp: React.FC = () => {
           </>
         )}
       </div>
+      {me && !uploadSpace() && (
+        <div style={{ padding: '3px 6px', background: '#000', color: '#fff' }}>
+          You can't add songs yet: you have no team space to upload to. Ask an admin for upload rights.
+        </div>
+      )}
       {release && guided && ready && <GuidedStrip ready={ready} onGo={goTo} onHide={() => guide(false)} />}
       <div
         ref={box}
@@ -921,8 +957,10 @@ const TracksApp: React.FC = () => {
             members={release.members}
             always={release.owner}
             listeners={release.listeners || []}
-            note="Everyone = every member. Pick people to keep it private (you and admins always see it). Can listen = play, comment and follow, but not change anything."
-            onSave={(m, listeners) => patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners })}
+            listenFirst={release.everyone === 'listen'}
+            editors={release.editors || []}
+            note="Everyone = every member. Pick people to keep it private: its songs and its folder in Team Files are hidden from everyone else (you and admins always see it). Can listen = play, comment and follow, but not change anything."
+            onSave={(m, listeners, editors) => patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners, editors })}
             onClose={() => setSharing(false)}
           />
         )}
@@ -1067,7 +1105,7 @@ const Library: React.FC<{
             </b>
             <span style={{ color: '#555' }}>
               {r.kind} · {n} track(s)
-              {me && r.listeners?.includes(me) ? ' · listen only' : ''}
+              {me && !canEdit(r, me) ? ' · listen only' : ''}
             </span>
           </button>
         );
@@ -1078,7 +1116,10 @@ const Library: React.FC<{
 
 const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
 const INBOX = 'New songs'; // where dropped songs wait until they find their album
-const isInbox = (r: Release) => r.kind === 'Folder' && r.title === INBOX;
+const isInbox = (r: Release) => r.kind === 'Folder' && r.title.startsWith(INBOX);
+/** Same rule as canEditRelease on the server (admins aside). */
+const canEdit = (r: Release, me: string) =>
+  r.owner === me || !!r.editors?.includes(me) || (r.everyone !== 'listen' && !r.listeners?.includes(me));
 const folderSafe = (name: string) =>
   name
     .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
@@ -1383,6 +1424,25 @@ const TrackPage: React.FC<{
   const { me } = useMe();
   const syncKit = async () => {
     try {
+      // Stems wait for the split: no link goes out until everyone on it has signed (or you say so)
+      const m = t.master;
+      const waiting = (m?.splits || []).filter(
+        (r) => !m!.signoffs.some((x) => x.hash === m!.hash && (x.user === r.member || x.party === r.name)),
+      );
+      const why = !m?.splits.length
+        ? 'This song has no master split yet.'
+        : waiting.length
+          ? `Still to sign the split: ${waiting.map((r) => r.name).join(', ')}.`
+          : '';
+      if (
+        why &&
+        !(await dialog.confirm(`${why} The stems link is held until the split is signed.`, {
+          icon: 'warning',
+          ok: 'I know, send anyway',
+          cancel: 'Hold it',
+        }))
+      )
+        return setMsg('Stems link held until the split is signed.');
       const l = await api('/api/links', {
         method: 'POST',
         body: JSON.stringify({ space: t.stems!.space, path: t.stems!.path, days: 30, download: true }),
@@ -1481,6 +1541,13 @@ const TrackPage: React.FC<{
           title="Track number"
         />
         <input style={{ ...input, flex: 1, fontWeight: 700, fontSize: 13 }} {...text('title')} />
+        <button
+          style={button}
+          onClick={() => openSession(openWindow, t.id)}
+          title="This song's recording session in Foundry: tempo, key, vocal checklist, lyrics"
+        >
+          Session
+        </button>
         <button style={button} onClick={onClose} title="Close the track page">
           <RetroIcon name="close" />
         </button>
@@ -1979,16 +2046,20 @@ const BmiSheet: React.FC<{ track: Track; release: Release; onSave: (bmi: Bmi) =>
   onSave,
   onClose,
 }) => {
-  // A new sheet starts with the release's artist and songwriters, shares split evenly
-  const [b, setB] = useState<Bmi>(() =>
-    track.bmi
-      ? { ...emptyBmi(), ...track.bmi }
-      : {
-          ...emptyBmi(),
-          artist: release.artist || '',
-          writers: release.writers?.length ? evenShares(release.writers.map((w) => ({ ...NEW_WRITER, ...w }))) : emptyBmi().writers,
-        },
-  );
+  // A new sheet starts with the release's artist and songwriters, plus the artists and producers on the master split
+  // (names only: writing shares are their own agreement), shares split evenly
+  const [b, setB] = useState<Bmi>(() => {
+    if (track.bmi) return { ...emptyBmi(), ...track.bmi };
+    const start: Partial<BmiWriter>[] = [...(release.writers || [])];
+    for (const r of track.master?.splits || [])
+      if (/artist|producer/i.test(r.role) && r.name && !start.some((w) => w.name?.toLowerCase() === r.name.toLowerCase()))
+        start.push({ name: r.name });
+    return {
+      ...emptyBmi(),
+      artist: release.artist || '',
+      writers: start.length ? evenShares(start.map((w) => ({ ...NEW_WRITER, ...w }))) : emptyBmi().writers,
+    };
+  });
   const [note, setNote] = useState('');
   const api = useApi();
   const set = (k: keyof Bmi, v: string) => setB({ ...b, [k]: v });

@@ -21,6 +21,7 @@ export interface Me {
   username: string;
   admin: boolean;
   spaces: SpaceInfo[];
+  toured?: boolean; // the member tour has already opened for them once (on any device)
 }
 
 /** fetch() with the Clerk session token; throws the server's message on errors. */

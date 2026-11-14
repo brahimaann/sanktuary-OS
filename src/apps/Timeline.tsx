@@ -9,6 +9,7 @@ import { openMusic, openStudio } from './Studio';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
+import { displayName, useProfiles } from '../utils/profiles';
 import RetroIcon, { IconLabel } from '../components/RetroIcon';
 
 interface Entry {
@@ -23,6 +24,7 @@ interface Entry {
   people?: string[];
   location?: string;
   notes?: string;
+  plan?: Record<string, Record<string, { text: string; done?: boolean }[] | unknown>>; // from Foundry > Director / Stylist
   recap?: string;
   link?: string;
   folder?: FileRef | null;
@@ -66,6 +68,7 @@ const TimelineApp: React.FC = () => {
   const [kind, setKind] = useState('');
   const [showClosed, setShowClosed] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const { byName } = useProfiles();
   const [msg, setMsg] = useState('');
   const todayRow = useRef<HTMLDivElement>(null);
 
@@ -159,7 +162,7 @@ const TimelineApp: React.FC = () => {
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <b style={{ textDecoration: i.status === 'Cancelled' ? 'line-through' : undefined }}>{i.title}</b>
           {i.location ? ` · ${i.location}` : ''}
-          {i.people?.length ? ` · ${i.people.join(', ')}` : ''}
+          {i.people?.length ? ` · ${i.people.map((u) => displayName(byName[u], u)).join(', ')}` : ''}
         </span>
         {i.draft && <i style={{ whiteSpace: 'nowrap' }}>Draft</i>}
         {i.status && i.status !== 'Planned' && <span style={{ whiteSpace: 'nowrap' }}>{i.status}</span>}
@@ -240,6 +243,7 @@ const EntryPanel: React.FC<{
   const { me } = useMe();
   const openRef = useOpenRef();
   const [draft, setDraft] = useState(e);
+  const { byName } = useProfiles();
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState<null | 'people' | 'members'>(null);
   const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
@@ -351,7 +355,13 @@ const EntryPanel: React.FC<{
         <legend>Who and where</legend>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ minWidth: 60 }}>People</span>
-          <span style={{ flex: 1 }}>{e.people?.length ? e.people.join(', ') : <span style={{ color: '#666' }}>nobody yet</span>}</span>
+          <span style={{ flex: 1 }}>
+            {e.people?.length ? (
+              e.people.map((u) => displayName(byName[u], u)).join(', ')
+            ) : (
+              <span style={{ color: '#666' }}>nobody yet</span>
+            )}
+          </span>
           <button style={button} onClick={() => setChoosing('people')}>
             <IconLabel icon="plus">Choose...</IconLabel>
           </button>
@@ -443,6 +453,29 @@ const EntryPanel: React.FC<{
           {...text('notes')}
         />
       </fieldset>
+      {/* The shoot plan the director and stylist keep in Foundry (Session > Director / Stylist > Shoot), for the whole crew */}
+      {(
+        [
+          ['Shot list', e.plan?.director?.shots],
+          ['Rig checklist', e.plan?.director?.rigList],
+          ['Lens inventory', e.plan?.director?.lenses],
+          ['Looks', e.plan?.stylist?.looks],
+          ['Pulls', e.plan?.stylist?.pulls],
+        ] as [string, { text: string; done?: boolean }[] | undefined][]
+      )
+        .filter(([, list]) => list?.length)
+        .map(([name, list]) => (
+          <fieldset key={name} style={fieldset}>
+            <legend>
+              {name} ({list!.filter((x) => x.done).length}/{list!.length} done) · from Foundry
+            </legend>
+            {list!.map((x, n) => (
+              <div key={n} style={{ textDecoration: x.done ? 'line-through' : 'none' }}>
+                {x.done ? '☑' : '☐'} {x.text}
+              </div>
+            ))}
+          </fieldset>
+        ))}
       {e.public && (
         <fieldset style={fieldset}>
           <legend>Recap for visitors</legend>

@@ -283,6 +283,11 @@ try {
   check('no access -> space hidden', (await call('carol', '/api/files/up/?list')).status === 404);
   check('upload: can add', (await up('bob', 'up', 'docs/new.txt', 'new')).status === 200);
   check('upload: cannot replace', (await up('bob', 'up', 'docs/song.txt', 'v2', '&replace=1')).status === 403);
+  check(
+    'upload: can replace your own file, and it keeps its name',
+    (await up('bob', 'up', 'docs/new.txt', 'new2', '&replace=1')).status === 200 &&
+      (await call('bob', '/api/files/up/docs/new.txt')).text === 'new2',
+  );
   check("upload: cannot delete others' files", (await call('bob', '/api/files/up/docs/song.txt', 'DELETE')).status === 403);
   check("edit: cannot delete others' files either", (await call('bob', '/api/files/ed/docs/song.txt', 'DELETE')).status === 403);
   check("edit: cannot delete a folder holding others' files", (await call('bob', '/api/files/ed/docs', 'DELETE')).status === 403);
@@ -555,6 +560,16 @@ try {
     'releases are open to members by default',
     seen.releases.some((r) => r.id === album.id) && seen.tracks.some((t) => t.id === song.id),
   );
+  // A new project starts with the team listening: its owner hands out "Can edit"
+  check(
+    'a new project: members can listen but not change it',
+    (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '99' })).status === 403,
+  );
+  check(
+    'bob cannot make himself an editor',
+    (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { editors: ['bob'] })).status === 403,
+  );
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { editors: ['bob'] });
   check('bad date refused', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { deadline: 'next week' })).status === 400);
   check(
     'only https links',
@@ -605,7 +620,7 @@ try {
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
   check('bob cannot set who edits', (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] })).status === 403);
-  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: ['bob', 'alice'] });
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: ['bob', 'alice'], editors: [] });
   check('listen only: bob cannot edit a track', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '1' })).status === 403);
   check('listen only: or add one', (await call('bob', '/api/tracks/track', 'POST', { release: album.id, title: 'x' })).status === 403);
   check(
@@ -614,7 +629,41 @@ try {
   );
   check('listen only: but can follow', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { follow: true })).status === 200);
   check('the owner is never listen only', (await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '100' })).status === 200);
-  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] });
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [], editors: ['bob'] });
+  // A private project's folder is private in Team Files too, through every space that shows it
+  const pack = JSON.parse(
+    (
+      await call('bob', '/api/tracks/release', 'POST', {
+        title: 'Pack',
+        kind: 'Folder',
+        folder: { space: 'up', path: 'Packs/Pack' },
+        setup: true,
+      })
+    ).text,
+  );
+  await up('bob', 'up', 'Packs/Pack/Bounces/beat.txt', 'beat');
+  check('open pack: carol reads its files', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  await call('bob', `/api/tracks/release/${pack.id}`, 'PATCH', { members: [] });
+  check('private pack: carol cannot read its files', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).status === 404);
+  check('private pack: or list its folder', (await call('carol', '/api/files/view/Packs/Pack?list')).status === 404);
+  check(
+    'private pack: it is left out of the folder above',
+    !JSON.parse((await call('carol', '/api/files/view/Packs?list')).text).entries.some((e) => e.name === 'Pack'),
+  );
+  check(
+    'private pack: and out of search',
+    !JSON.parse((await call('carol', '/api/files/view/?find=beat')).text).entries.some((e) => e.name === 'beat.txt'),
+  );
+  check('private pack: the folder above cannot be zipped around it', (await call('carol', '/api/files/view/Packs?zip')).status === 403);
+  check(
+    'private pack: or shared by link',
+    (await call('carol', '/api/links', 'POST', { space: 'grp', path: 'Packs/Pack', days: 7 })).status === 404,
+  );
+  check('private pack: its owner still reads it', (await call('bob', '/api/files/up/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  check('private pack: admins too', (await call('alice', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  await call('bob', `/api/tracks/release/${pack.id}`, 'PATCH', { members: ['carol'] });
+  check('private pack: a listed member reads it', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
+  await call('bob', `/api/tracks/release/${pack.id}`, 'DELETE');
   const pl = JSON.parse((await call('bob', '/api/tracks/release', 'POST', { title: 'march mixes', kind: 'Playlist' })).text);
   const plItems = JSON.parse(
     (await call('bob', `/api/tracks/release/${pl.id}`, 'PATCH', { items: [song.id, song.id, 'nope'] })).text,
@@ -765,7 +814,7 @@ try {
   writeFileSync(join(albumDir, 'Artwork', 'cover final.png'), Buffer.from('89504e47', 'hex'));
   check(
     'carol cannot scan a folder in a space she cannot see',
-    (await call('carol', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).status === 404,
+    [403, 404].includes((await call('carol', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).status), // 403: she only listens
   );
   const scan = JSON.parse((await call('bob', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).text);
   fts = await tracksOf('bob', folderAlbum.id);
@@ -827,7 +876,7 @@ try {
   );
   check(
     'carol cannot move it into a project she cannot see',
-    (await call('carol', `/api/tracks/track/${hand.id}`, 'PATCH', { release: album.id })).status === 404,
+    [403, 404].includes((await call('carol', `/api/tracks/track/${hand.id}`, 'PATCH', { release: album.id })).status), // 403: she only listens
   );
   check(
     'mkdir with parents makes the whole path',
@@ -877,6 +926,40 @@ try {
   check(
     'day-before reminder goes out',
     carolNotes.some((n) => /"Cover shoot" is tomorrow/.test(n.text) && /Studio A/.test(n.text)),
+  );
+  // Foundry sessions are saved per member and opened again later; nobody else reads them
+  await call('bob', '/api/foundry', 'PUT', { id: 'sess-000001', session: { song: 'Golden Hour', lyrics: 'la', bpm: 98 } });
+  const bobSessions = JSON.parse((await call('bob', '/api/foundry')).text).sessions;
+  check(
+    'a Foundry session is saved to the member',
+    bobSessions['sess-000001']?.song === 'Golden Hour' && !!bobSessions['sess-000001'].updated,
+  );
+  check("another member doesn't see it", !JSON.parse((await call('carol', '/api/foundry')).text).sessions['sess-000001']);
+  // Tied to a song, a session is shared with everyone who can see that song (and nobody else)
+  await call('bob', '/api/foundry', 'PUT', { id: 'sess-000002', session: { song: 'Summer I Missed You', track: song.id } });
+  const sharedWith = async (u) => JSON.parse((await call(u, '/api/foundry')).text).shared.filter((x) => x.id === 'sess-000002');
+  check("a song's session is shared with people on the song", (await sharedWith('alice'))[0]?.by === 'bob');
+  check('but not with someone who cannot see the song', (await sharedWith('carol')).length === 0);
+  check(
+    'a session with no song stays private',
+    !JSON.parse((await call('alice', '/api/foundry')).text).shared.some((x) => x.id === 'sess-000001'),
+  );
+  await call('bob', '/api/foundry?id=sess-000002', 'DELETE');
+  check('a bad session id is refused', (await call('bob', '/api/foundry', 'PUT', { id: '../x', session: {} })).status === 400);
+  await call('bob', '/api/foundry?id=sess-000001', 'DELETE');
+  check('a session can be deleted', !JSON.parse((await call('bob', '/api/foundry')).text).sessions['sess-000001']);
+  // The Foundry plan is kept on the shoot: the director and the stylist each save their own half, the crew reads both
+  await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { director: { shots: [{ text: 'Wide on the roof' }] } } });
+  await call('carol', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { stylist: { looks: [{ text: 'Look 1', done: true }] } } });
+  const planned = JSON.parse((await call('carol', '/api/timeline')).text).items.find((i) => i.id === shoot.id).plan;
+  check(
+    'a shoot keeps the director and stylist plans side by side',
+    planned.director.shots[0].text === 'Wide on the roof' && planned.stylist.looks[0].done === true,
+  );
+  check(
+    'an oversized plan is refused',
+    (await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { director: { shots: [{ text: 'x'.repeat(50_000) }] } } })).status ===
+      400,
   );
   const aliceView = JSON.parse((await call('alice', '/api/timeline')).text);
   check(
@@ -1675,6 +1758,12 @@ try {
   check('but drafts need a sign-in', (await call(null, '/api/blog/mine')).status === 401);
   const bobDraft = JSON.parse((await call('bob', '/api/blog/posts', 'POST', { title: 'Lyric', line: 'heart', kind: 'profile' })).text);
   check('members can start a draft', bobDraft.owner === 'bob' && bobDraft.kind === 'profile' && !bobDraft.published);
+  check('a draft is bylined by sign-in name when there is no display name', bobDraft.author === 'bob');
+  mkdirSync(join(dir, 'data', 'profiles'), { recursive: true });
+  writeFileSync(join(dir, 'data', 'profiles', 'dave.json'), JSON.stringify({ displayName: 'Dave D' }));
+  const daveDraft = JSON.parse((await call('dave', '/api/blog/posts', 'POST', { title: 'Byline' })).text);
+  check('a draft is bylined by display name, not sign-in name', daveDraft.author === 'Dave D');
+  await call('dave', `/api/blog/posts/${daveDraft.id}`, 'DELETE');
   await call('bob', `/api/blog/posts/${bobDraft.id}`, 'PATCH', {
     published: true,
     preface: 'Singing since she was two.',
@@ -1717,11 +1806,19 @@ try {
       postPage.includes('<meta property="og:description" content="Singing since she was two." />'),
   );
   check(
+    'a shared post with no picture still gets one in its link card',
+    /og:image" content="[^"]+\/magazine\/pages\/cover\.webp"/.test(postPage),
+  );
+  check(
     'section pages have their own title',
     (await (await fetch(B + '/cities/heart')).text()).includes('<title>Heart of the Cities · CITIES</title>'),
   );
   const heartTitled = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Heart' })).text);
   await call('alice', `/api/blog/posts/${heartTitled.id}`, 'PATCH', { published: true });
+  check(
+    'the radio has its own address and link card',
+    (await (await fetch(B + '/cities/radio')).text()).includes('<title>Renaissance Radio · CITIES</title>'),
+  );
   check(
     'a post called "Heart" does not take over /cities/heart',
     JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === heartTitled.id).slug !== 'heart',
@@ -2681,6 +2778,23 @@ try {
   await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2}' });
   const teeCall = stripeCalls[stripeCalls.length - 1];
   check('merch asks Stripe for a shipping address', teeCall.form.get('shipping_address_collection[allowed_countries][0]') === 'US');
+  // Sizes: the buyer has to pick one, and it rides on the order's name
+  await call('alice', `/api/shop/products/${tee.id}`, 'PATCH', { sizes: 'S, M , L, M' });
+  check(
+    'a sized product lists its sizes',
+    (await (await fetch(B + '/api/shop')).json()).products.find((p) => p.id === tee.id).sizes.join() === 'S,M,L',
+  );
+  check(
+    'a sized product needs a size',
+    (await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2}' })).status === 400,
+  );
+  check(
+    'and only one of its sizes',
+    (await fetch(B + `/api/shop/${tee.slug}/buy`, { method: 'POST', body: '{"qty":2,"size":"XXL"}' })).status === 400,
+  );
+  const sizedBefore = stripeCalls.length;
+  await call('alice', `/api/shop/products/${tee.id}`, 'PATCH', { sizes: '' });
+  check('no checkout was started without a size', stripeCalls.length === sizedBefore);
   check(
     'shop categories must be known ones',
     (await call('alice', `/api/shop/products/${beat.id}`, 'PATCH', { category: '<script>' })).status === 400,
@@ -2724,6 +2838,10 @@ try {
   );
   check('orders are not in the open admin API', (await call('bob', '/api/business/orders')).status === 401);
   check('shop pages load', (await fetch(B + '/shop')).status === 200 && (await fetch(B + `/shop/${tee.slug}`)).status === 200);
+  check(
+    'a shared item link shows the item in its link card',
+    (await (await fetch(B + `/shop/${tee.slug}`)).text()).includes('<meta property="og:title" content="Village tee · Sanktuary Shop" />'),
+  );
   check('checkouts expire before their hold ends', Number(teeCall.form.get('expires_at')) > Date.now() / 1000 + 29 * 60);
 
   // Capsule drops: on sale from a set time, checkout holds so a limited drop can't oversell, The Vault

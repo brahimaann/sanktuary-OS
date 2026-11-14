@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi, useMe } from '../utils/api';
+import { openSession, openSong } from '../utils/songs';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { displayName, useProfiles } from '../utils/profiles';
 import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
@@ -71,6 +72,16 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const [posting, setPosting] = useState(false);
   const index = siblings.indexOf(name);
   const kind = fileKind(name);
+  // The same song list as Music and Foundry: is this audio file a song's current bounce?
+  const [songs, setSongs] = useState<{ id: string; title: string; bounce: { space: string; path: string } | null }[]>([]);
+  useEffect(() => {
+    if (kind === 'audio')
+      api('/api/tracks').then(
+        (d) => setSongs(d.tracks),
+        () => {},
+      );
+  }, [api, kind]);
+  const song = songs.find((t) => t.bounce?.space === app && t.bounce.path === [...dir, name].join('/'));
   const src = token
     ? `${fileUrl(app, [...dir, name])}?t=${token}${ver ? `&version=${encodeURIComponent(ver)}` : ''}${fresh ? `&r=${fresh}` : ''}`
     : '';
@@ -177,6 +188,17 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         <button style={button} disabled={!token} onClick={() => window.open(`${src}&download`, '_blank')}>
           Download
         </button>
+        {/* This file is a song in Music: its page there, and its recording session in Foundry */}
+        {song && (
+          <button style={button} onClick={() => openSong(openWindow, song.id)} title={`"${song.title}" in Operations > Music`}>
+            Song page
+          </button>
+        )}
+        {song && (
+          <button style={button} onClick={() => openSession(openWindow, song.id)} title={`The Foundry session for "${song.title}"`}>
+            Session
+          </button>
+        )}
         {versions.length > 0 && (
           <select
             value={ver}

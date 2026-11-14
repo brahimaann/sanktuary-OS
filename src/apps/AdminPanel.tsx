@@ -5,6 +5,7 @@ import { formatSize } from './fileTypes';
 import { dialog } from '../utils/dialog';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 import FilePicker from '../components/FilePicker';
+import { useProfiles } from '../utils/profiles';
 
 interface Space {
   id: string;
@@ -69,7 +70,7 @@ interface Health {
 }
 
 const GROUPS = {
-  Server: ['Health', 'Usage', 'Log'],
+  Server: ['Waiting', 'Health', 'Usage', 'Log'],
   People: ['Members'],
   Storage: ['Drives', 'Spaces', 'Backups'],
   Website: ['Front page', 'CITIES', 'Stories', 'Mailing list', 'Shop & pool'],
@@ -82,7 +83,7 @@ const CONFIG_TABS: Tab[] = ['Drives', 'Spaces', 'Members', 'Backups'];
 const AdminPanel: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   const api = useApi();
-  const [tab, setTab] = useState<Tab>('Health');
+  const [tab, setTab] = useState<Tab>('Waiting');
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -143,10 +144,22 @@ const AdminPanel: React.FC = () => {
     (id && draft.drives[id]?.name) || attached.find((d) => d.id === id)?.label || id?.slice(0, 8) || '—';
   const usernames = state.users.map((u) => u.username).filter(Boolean) as string[];
 
+  const narrow = window.innerWidth < 560; // a phone: the side menu becomes a picker so the page gets the full width
   return (
     <div style={shell}>
-      <div style={{ flex: 1, display: 'flex', minHeight: 0, padding: '4px 0 0' }}>
-        <nav style={{ width: 112, flexShrink: 0, overflow: 'auto', padding: '0 0 0 4px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: narrow ? 'column' : 'row', minHeight: 0, padding: '4px 0 0' }}>
+        {narrow && (
+          <select value={tab} onChange={(e) => setTab(e.target.value as Tab)} style={{ margin: '0 4px 4px', fontSize: 16 }}>
+            {Object.entries(GROUPS).map(([group, tabs]) => (
+              <optgroup key={group} label={group}>
+                {tabs.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        )}
+        <nav style={{ width: 112, flexShrink: 0, overflow: 'auto', padding: '0 0 0 4px', display: narrow ? 'none' : undefined }}>
           {Object.entries(GROUPS).map(([group, tabs]) => (
             <div key={group} style={{ marginBottom: 8 }}>
               <div style={{ color: '#404040', padding: '0 4px 2px', fontSize: 10, textTransform: 'uppercase' }}>{group}</div>
@@ -168,6 +181,7 @@ const AdminPanel: React.FC = () => {
           ))}
         </nav>
         <div style={page}>
+          {tab === 'Waiting' && <WaitingTab go={setTab} />}
           {tab === 'Health' && <HealthTab state={state} health={health} refresh={loadHealth} />}
 
           {tab === 'Drives' && (
@@ -365,6 +379,74 @@ const AdminPanel: React.FC = () => {
   );
 };
 
+/** What needs an admin right now, with counts: each line opens the tab where it's handled. */
+const WaitingTab: React.FC<{ go: (t: Tab) => void }> = ({ go }) => {
+  const api = useApi();
+  const [rows, setRows] = useState<{ n: number; what: string; names: string; tab: Tab | null }[] | null>(null);
+  useEffect(() => {
+    const names = (list: string[]) => list.slice(0, 4).join(', ') + (list.length > 4 ? '...' : '');
+    const none = () => null;
+    Promise.all([
+      api('/api/blog/admin').catch(none),
+      api('/api/public/admin').catch(none),
+      api('/api/shop/admin').catch(none),
+      api('/api/business/orders').catch(none),
+    ]).then(([blog, front, products, orders]) => {
+      const drafts = (blog?.posts || []).filter((p: BlogPost) => p.submitted && !p.published);
+      const joins = (front?.joins || []).filter((j: Join) => j.status === 'New');
+      const bookings = (front?.bookings || []).filter((b: Booking) => b.status === 'New');
+      const hidden = (products || []).filter((p: Product) => !p.active && !p.retired);
+      const toShip = (orders || []).filter((o: { status: string }) => o.status === 'Paid' || o.status === 'Oversold');
+      setRows([
+        {
+          n: drafts.length,
+          what: 'CITIES drafts sent in, waiting to publish',
+          names: names(drafts.map((p: BlogPost) => p.title)),
+          tab: 'CITIES',
+        },
+        { n: joins.length, what: 'new join requests', names: names(joins.map((j: Join) => j.name)), tab: 'Front page' },
+        { n: bookings.length, what: 'new booking requests', names: names(bookings.map((b: Booking) => b.name)), tab: 'Front page' },
+        {
+          n: hidden.length,
+          what: 'products hidden, not in the shop yet',
+          names: names(hidden.map((p: Product) => p.title)),
+          tab: 'Shop & pool',
+        },
+        {
+          n: toShip.length,
+          what: 'shop orders to ship or refund (Ledger > Business > Orders)',
+          names: names(toShip.map((o: { title: string }) => o.title)),
+          tab: null,
+        },
+      ]);
+    });
+  }, [api]);
+  if (!rows) return <div>Loading...</div>;
+  const open = rows.filter((r) => r.n);
+  return (
+    <fieldset style={fieldset}>
+      <legend>Waiting for you ({open.reduce((n, r) => n + r.n, 0)})</legend>
+      {!open.length && (
+        <div style={{ color: '#555' }}>Nothing is waiting. Drafts, join and booking requests, hidden products and orders show up here.</div>
+      )}
+      {open.map((r) => (
+        <div key={r.what} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '4px 0', borderBottom: '1px solid #eee' }}>
+          <b style={{ minWidth: 22, textAlign: 'right' }}>{r.n}</b>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            {r.what}
+            <span style={{ display: 'block', color: '#555' }}>{r.names}</span>
+          </span>
+          {r.tab && (
+            <button style={button} onClick={() => go(r.tab!)}>
+              Open
+            </button>
+          )}
+        </div>
+      ))}
+    </fieldset>
+  );
+};
+
 const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => void }> = ({ state, health, refresh }) => {
   const st = state.status;
   const rows: [string, boolean | null, string][] = [
@@ -407,7 +489,11 @@ const HealthTab: React.FC<{ state: State; health: Health | null; refresh: () => 
           : 'Docker Desktop is not running'
         : '',
     ],
-    ['Tailscale', st ? st.tailscale.online : null, st ? `${st.tailscale.state || 'unknown'}${st.tailscale.online ? ' · online' : ''}` : ''],
+    [
+      'Tailscale',
+      st?.tailscale ? st.tailscale.online : null,
+      st?.tailscale ? `${st.tailscale.state || 'unknown'}${st.tailscale.online ? ' · online' : ''}` : '',
+    ],
     [
       'PC',
       st ? st.pc.cFreeGB > 10 : null,
@@ -481,6 +567,7 @@ const MembersTab: React.FC<{
   setMsg: (m: string) => void;
 }> = ({ state, draft, edit, driveIds, driveName, reload, setMsg }) => {
   const api = useApi();
+  const { byName } = useProfiles();
   const add = async () => {
     const username = (await dialog.prompt('New member nickname (their operator ID):', '', { title: 'Add member' }))?.trim();
     if (!username) return;
@@ -561,6 +648,8 @@ const MembersTab: React.FC<{
               <tr key={u.id}>
                 <td style={td}>
                   <b>{name}</b>
+                  {/* Their node city, from their own profile */}
+                  {byName[name]?.city && <div style={{ color: '#555' }}>{byName[name].city}</div>}
                 </td>
                 <td style={td}>
                   <input
@@ -757,6 +846,7 @@ type Product = {
   left: number | null;
   dropAt: string | null;
   capsule: string;
+  sizes: string[];
   retired: boolean;
   file: { space: string; path: string } | null;
 };
@@ -1230,7 +1320,11 @@ const ShopTab: React.FC = () => {
               const title = (await dialog.prompt('Product name:', '', { title: 'New product' }))?.trim();
               if (title)
                 api('/api/shop/products', { method: 'POST', body: JSON.stringify({ title }) }).then(
-                  (p: Product) => (setOpenProduct(p.id), load()),
+                  (p: Product) => (
+                    setOpenProduct(p.id),
+                    load(),
+                    setMsg('Created hidden. Fill it in, then tick On sale at the bottom to put it in the shop.')
+                  ),
                   (e) => setMsg(e.message),
                 );
             }}
@@ -1248,7 +1342,7 @@ const ShopTab: React.FC = () => {
             style={{ ...pickRow, background: p.id === openProduct ? '#000' : '#fff', color: p.id === openProduct ? '#fff' : '#000' }}
           >
             <b>{p.title}</b> · {usd(p.price)} · {p.kind} · {p.stock === null ? 'unlimited' : `${p.stock} left`} ·{' '}
-            {p.active ? 'on sale' : 'hidden'}
+            {p.active ? 'on sale' : <b>hidden, not in the shop</b>}
           </div>
         ))}
         {product && (
@@ -1329,6 +1423,14 @@ const ShopTab: React.FC = () => {
               maxLength={60}
               defaultValue={product.capsule}
               onBlur={(e) => e.target.value !== product.capsule && patchProduct(product.id, { capsule: e.target.value })}
+            />
+            Sizes
+            <input
+              style={input}
+              key={`z-${product.sizes.join()}`}
+              placeholder="e.g. S, M, L, XL (empty = one size; the buyer picks one)"
+              defaultValue={product.sizes.join(', ')}
+              onBlur={(e) => e.target.value !== product.sizes.join(', ') && patchProduct(product.id, { sizes: e.target.value })}
             />
             Picture
             <span style={row}>

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 // Coastlines from Natural Earth (public domain), 1° precision, as flat [lng, lat, lng, lat, ...] lines
 import land from './landOutline.json';
+import { displayName, useProfiles } from '../utils/profiles';
 
 /**
  * Sanktuary's nodes: a spinning wireframe globe with every city on it, and a hologram of each city built from
@@ -1280,6 +1281,20 @@ const Nodes: React.FC = () => {
   }, []);
 
   const city = CITIES[view.city];
+  // Who's in this city: every member for the team, people in the public directory for visitors
+  const { profiles } = useProfiles();
+  const [listed, setListed] = useState<{ displayName: string; city: string }[]>([]);
+  useEffect(() => {
+    fetch('/api/public')
+      .then((r) => r.json())
+      .then(
+        (d) => setListed(d.people || []),
+        () => {},
+      );
+  }, []);
+  const here = (profiles.length ? profiles.map((p) => ({ displayName: displayName(p), city: p.city || '' })) : listed)
+    .filter((p) => p.city === city.name)
+    .map((p) => p.displayName);
   const step = (d: number) => go.current({ mode: 'city', city: (view.city + d + CITIES.length) % CITIES.length }, d);
   const btn = 'lightweight w-8 h-8 grid place-items-center';
 
@@ -1326,6 +1341,11 @@ const Nodes: React.FC = () => {
                 {Math.abs(city.lat).toFixed(2)}°{city.lat < 0 ? 'S' : 'N'} {Math.abs(city.lng).toFixed(2)}°{city.lng < 0 ? 'W' : 'E'} ·{' '}
                 {time(city.tz)}
               </div>
+              {here.length > 0 && (
+                <div className="mt-1 max-w-[300px]">
+                  MEMBERS {String(here.length).padStart(2, '0')}: {here.join(' · ')}
+                </div>
+              )}
               {status === 'loading' && <div className="mt-1 animate-pulse">RECEIVING TRANSMISSION...</div>}
               {status === 'lost' && <div className="mt-1">SIGNAL LOST. CHECK YOUR CONNECTION.</div>}
             </div>

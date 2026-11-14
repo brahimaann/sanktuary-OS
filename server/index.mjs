@@ -248,7 +248,7 @@ function folderLabels(folders, cfg) {
 /** Every space this user can see, including their personal space ("me"). A space with several folders
  * ("combined") shows each folder as a top-level folder inside it; see partOf(). */
 function spacesFor(user, cfg, status) {
-  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s) })).filter((s) => RANK[s.rights] > 0);
+  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s), viewer: user })).filter((s) => RANK[s.rights] > 0);
   const mine = cfg.members[user.username];
   if (mine?.drive) {
     list.unshift({
@@ -364,7 +364,16 @@ async function files(req, res, url) {
       }
       if (req.method === 'GET' && q.has('find')) {
         // Search every connected folder of the space, as one newest-first list
-        const found = await Promise.all(whole.sources.filter((f) => f.online).map((f) => findIn(f.root, ...findArgs(q), [f.label])));
+        await loadTracks();
+        const found = await Promise.all(
+          whole.sources
+            .filter((f) => f.online)
+            .map(async (f) => {
+              const got = await findIn(f.root, ...findArgs(q), [f.label]);
+              const part = partOf(whole, f.label);
+              return { ...got, entries: got.entries.filter((e) => !sealedFor(user, part, join(f.root, ...e.dir.slice(1), e.name))) };
+            }),
+        );
         const entries = found.flatMap((f) => f.entries).sort((a, b) => b.modified.localeCompare(a.modified));
         return json(res, { entries: entries.slice(0, 300), more: entries.length > 300 || found.some((f) => f.more) });
       }
@@ -379,6 +388,10 @@ async function files(req, res, url) {
   const root = resolve(space.root);
   const target = resolve(root, ...parts);
   if (!inside(root, target)) fail(400, 'Bad path');
+  await loadTracks();
+  // Zipping, moving, renaming or deleting a folder takes everything in it along; listing and searching just leave private folders out
+  assertUnsealed(user, space, target, !(req.method === 'GET' && (q.has('list') || q.has('find'))) && req.method !== 'PUT');
+  const open = (list, at = (e) => join(target, ...(e.dir || []), e.name)) => list.filter((e) => !sealedFor(user, space, at(e)));
   const rel = relative(root, target);
   const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
   /** A path as the member sees it in the space (with the folder's name first in a combined space). */
@@ -392,7 +405,7 @@ async function files(req, res, url) {
     need('view');
     if (q.has('list')) {
       const all = await loadProjects();
-      const entries = await listDir(target);
+      const entries = open(await listDir(target));
       // Subfolders are checked for a project file 12 at a time (was one after another; all at once would queue
       // thousands of disk reads ahead of everyone else's downloads on a huge folder)
       let next = 0;
@@ -414,7 +427,10 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     }
-    if (q.has('find')) return json(res, await findIn(target, ...findArgs(q)));
+    if (q.has('find')) {
+      const found = await findIn(target, ...findArgs(q));
+      return json(res, { ...found, entries: open(found.entries) });
+    }
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
@@ -1121,6 +1137,7 @@ function locateIn(space, relPath) {
   const root = resolve(space.root);
   const abs = resolve(root, ...parts);
   if (!inside(root, abs)) fail(400, 'Bad path');
+  assertUnsealed(space.viewer, space, abs);
   return { root, abs };
 }
 
@@ -1344,6 +1361,7 @@ async function linksApi(req, res, url) {
   if (!space.online) fail(503, 'Drive offline');
   const { root, abs } = locateIn(space, q.path);
   if (abs === root) fail(400, 'Share a folder or file inside the space');
+  if (req.method === 'POST') assertUnsealed(user, space, abs, true);
   const key = ownerKey(space, abs);
 
   if (req.method === 'GET') {
@@ -1412,7 +1430,9 @@ async function publicShare(req, res, url) {
     // A password-protected link shows nothing about what it holds until it's unlocked
     if (!unlocked)
       return json(res, { name: 'Protected link', locked: true, sharedBy: l.createdBy, expires: l.expires, download: l.download });
-    return json(res, { name: l.name, isDir: l.isDir, download: l.download, locked: false, sharedBy: l.createdBy, expires: l.expires });
+    // The person who shared it, as they call themselves ("Mara Quinn"), not their sign-in name
+    const sharedBy = (await readJson(`profiles/${l.createdBy}.json`, {})).displayName || l.createdBy;
+    return json(res, { name: l.name, isDir: l.isDir, download: l.download, locked: false, sharedBy, expires: l.expires });
   }
   if (action === 'unlock' && req.method === 'POST') {
     const ip = req.headers['cf-connecting-ip'] || req.socket.remoteAddress;
@@ -1866,7 +1886,35 @@ const canSeeRelease = (user, r) =>
   !r.deleted &&
   !(r.draft && r.owner !== user.username) &&
   (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
-const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
+/** A private project's folder is as private as the project: the project (if any) this member can't see whose folder
+ * holds `abs`. With around, also one inside `abs`, since zipping, moving or sharing that folder would take it along. */
+function sealedFor(user, space, abs, around = false) {
+  if (!user || user.admin || !tracksDb) return null;
+  const k = ownerKey(space, abs);
+  const below = k.endsWith('|') ? k : k + '/';
+  return (
+    Object.values(tracksDb.releases).find(
+      (r) =>
+        r.members &&
+        !r.deleted &&
+        r.folderKey &&
+        !canSeeRelease(user, r) &&
+        (k === r.folderKey || k.startsWith(r.folderKey + '/') || (around && r.folderKey.startsWith(below))),
+    ) || null
+  );
+}
+const assertUnsealed = (user, space, abs, around = false) => {
+  const r = sealedFor(user, space, abs, around);
+  if (r && !sealedFor(user, space, abs)) fail(403, 'A folder in here is private to other people. Open the folders inside it instead.');
+  if (r) fail(404, 'Not found');
+};
+// Who may change a release: admins, its owner and its `editors`. Everyone else who sees it can listen, comment and
+// follow. Releases from before 2026-11 have no `everyone: 'listen'`: there, everyone not in `listeners` can edit.
+const canEditRelease = (user, r) =>
+  user.admin ||
+  r.owner === user.username ||
+  !!r.editors?.includes(user.username) ||
+  (r.everyone !== 'listen' && !r.listeners?.includes(user.username));
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
 const fileRef = (v) =>
@@ -1944,6 +1992,8 @@ async function tracksApi(req, res, url) {
         writers: releaseWriters(input.writers),
         cover: null,
         members: null,
+        everyone: 'listen', // the team can listen; the owner hands out "Can edit"
+        editors: [],
         owner: me,
         created: new Date().toISOString(),
       };
@@ -2029,6 +2079,10 @@ async function tracksApi(req, res, url) {
       if (input.listeners !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
         r.listeners = Array.isArray(input.listeners) ? userList(input.listeners).filter((u) => u !== r.owner) : [];
+      }
+      if (input.editors !== undefined) {
+        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
+        r.editors = Array.isArray(input.editors) ? userList(input.editors).filter((u) => u !== r.owner) : [];
       }
       const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
@@ -3128,6 +3182,14 @@ async function timelineApi(req, res, url) {
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
     if (input.draft !== undefined) i.draft = !!input.draft; // only its owner sees it, nobody is told, until it goes live
     if (i.draft) i.public = false;
+    if (input.plan !== undefined) {
+      // The shoot plan from Foundry (Director: shot list, rig; Stylist: looks, pulls): each role saves its own half
+      const plan = { ...i.plan };
+      for (const k of ['director', 'stylist'])
+        if (input.plan?.[k] !== undefined) plan[k] = input.plan[k] && typeof input.plan[k] === 'object' ? input.plan[k] : undefined;
+      if (JSON.stringify(plan).length > 40_000) fail(400, 'That plan is too long to keep on the shoot');
+      i.plan = JSON.parse(JSON.stringify(plan));
+    }
     if (input.link !== undefined) {
       const v = String(input.link || '').trim();
       if (v && !/^https:\/\//i.test(v)) fail(400, 'Links must start with https://');
@@ -4347,7 +4409,7 @@ const feedCache = new Map(); // feed url -> { at, items, error }
 const BLOG_LINES = ['heart', 'essays', 'field-notes'];
 const HEART_KINDS = ['profile', 'case-study', 'spotlight'];
 // Section pages (/cities/heart ...) and the writing page: no post may take these addresses
-const BLOG_RESERVED = ['notes', 'videos', 'moodboard', 'write', ...BLOG_LINES];
+const BLOG_RESERVED = ['notes', 'videos', 'moodboard', 'library', 'radio', 'write', ...BLOG_LINES];
 const FEED_MINUTES = 10;
 
 /** "hima", "hima.substack.com" or any Substack / RSS URL -> the feed URL. */
@@ -4980,7 +5042,8 @@ async function blogApi(req, res, url) {
         id: randomUUID().slice(0, 10),
         title: 'Untitled',
         body: '',
-        author: user.username,
+        // The byline starts as the writer's display name ("Nia Wells"), not their sign-in name
+        author: (await readJson(`profiles/${user.username}.json`, {})).displayName || user.username,
         owner: user.username,
         line: 'heart',
         image: null,
@@ -5109,6 +5172,7 @@ async function listedPeople() {
       username,
       displayName: p.displayName || username,
       role: p.role || '',
+      city: p.city || '',
       bio: p.bio || '',
       links: Object.fromEntries(
         Object.keys(PROFILE_LINKS)
@@ -5654,6 +5718,7 @@ const productView = (p, admin, db = shopDb) => {
     left: admin || (left !== null && left <= 10) ? left : null, // "Only 3 left" (the public only sees it when it's low)
     dropAt: p.dropAt || null, // on sale from this moment (ISO); a countdown until then
     capsule: p.capsule || '',
+    sizes: p.sizes || [], // the buyer picks one (stock is one number for the item, not per size)
     vault: !!p.vault || (p.stock !== null && p.stock <= 0), // in The Vault: shown, never sold
     ...(admin
       ? { stock: p.stock, active: p.active, retired: !!p.vault, file: p.file ? { space: p.file.space, path: p.file.path } : null }
@@ -5694,7 +5759,10 @@ async function shopApi(req, res, url) {
     const p =
       Object.values(db.products).find((x) => (x.id === a || x.slug === a) && x.active && !x.deleted) || fail(404, 'No such product');
     if (!stripeReady()) fail(503, "The shop isn't taking payments yet");
-    const asked = Math.max(1, Math.min(10, Math.floor(Number((await jsonBody(req)).qty) || 1)));
+    const want = await jsonBody(req);
+    const asked = Math.max(1, Math.min(10, Math.floor(Number(want.qty) || 1)));
+    const size = p.sizes?.length ? (p.sizes.includes(want.size) ? want.size : fail(400, 'Pick a size')) : '';
+    const title = size ? `${p.title} (${size})` : p.title; // the size rides on the order's name, to Stripe and Business > Orders
     const qty = p.kind === 'digital' ? 1 : asked; // one download link per order
     if (p.vault) fail(409, 'This piece is in The Vault: no longer for sale');
     if (p.dropAt && Date.parse(p.dropAt) > Date.now()) fail(409, `This drops ${new Date(p.dropAt).toUTCString()}`);
@@ -5720,7 +5788,7 @@ async function shopApi(req, res, url) {
     const order = {
       id: randomUUID().slice(0, 10),
       product: p.id,
-      title: p.title,
+      title,
       kind: p.kind,
       qty,
       amount: p.price * qty,
@@ -5732,7 +5800,7 @@ async function shopApi(req, res, url) {
     const session = await stripe('/checkout/sessions', {
       mode: 'payment',
       line_items: {
-        0: { quantity: qty, price_data: { currency: 'usd', unit_amount: Math.round(p.price * 100), product_data: { name: p.title } } },
+        0: { quantity: qty, price_data: { currency: 'usd', unit_amount: Math.round(p.price * 100), product_data: { name: title } } },
       },
       ...(p.kind === 'physical' ? { shipping_address_collection: { allowed_countries: { 0: 'US', 1: 'CA' } } } : {}),
       success_url: `${siteOrigin(req)}/shop/thanks?session={CHECKOUT_SESSION_ID}`,
@@ -5801,6 +5869,15 @@ async function shopApi(req, res, url) {
         p.capsule = String(input.capsule ?? '')
           .trim()
           .slice(0, 60);
+      if (input.sizes !== undefined)
+        p.sizes = [
+          ...new Set(
+            String(input.sizes ?? '')
+              .split(',')
+              .map((x) => x.trim().slice(0, 12))
+              .filter(Boolean),
+          ),
+        ].slice(0, 12);
       if (input.vault !== undefined) p.vault = !!input.vault;
       if (input.image !== undefined) p.image = input.image && /^\/api\/shop\/images\/[\w-]+\.webp$/.test(input.image) ? input.image : null;
       if (input.file !== undefined) {
@@ -5916,15 +5993,27 @@ async function shopPaid(s) {
 
 // The public pool and shop pages (no account): /pool/<slug>, /shop, /shop/<product>, /shop/thanks
 const STORE_PAGE = new URL('./store.html', import.meta.url);
-function storePage(req, res, url) {
+async function storePage(req, res, url) {
   if (!/^\/(pool|shop)(\/[\w-]+)?\/?$/.test(url.pathname)) return staticFile(req, res, url);
+  // A shared item link shows the item in its link card (previews don't run the page's script)
+  const [, kind, slug] = url.pathname.split('/');
+  const p = kind === 'shop' && slug && Object.values((await loadShop()).products).find((x) => x.slug === slug && x.active && !x.deleted);
+  const origin = siteOrigin(req);
+  const meta = p
+    ? { title: `${p.title} · Sanktuary Shop`, text: `$${p.price}. ${p.description || ''}`.slice(0, 200), image: p.image }
+    : { title: 'Sanktuary Shop', text: 'Apparel and digital releases from Sanktuary, out of the Twin Cities.', image: null };
+  if (meta.image?.startsWith('/')) meta.image = origin + meta.image;
+  const html = (await readFile(STORE_PAGE, 'utf8')).replace(
+    '<title>Sanktuary</title>',
+    metaTags({ ...meta, link: origin + url.pathname, site: 'Sanktuary', type: p ? 'product' : 'website' }),
+  );
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-cache',
     'content-security-policy':
       "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'none'",
   });
-  return pipeline(createReadStream(STORE_PAGE), res);
+  res.end(html);
 }
 
 // ── /api/raw: the RapidRAW photo editor, running on this PC (github.com/brahimaann/rapidraw-sanktuary) ──
@@ -6345,13 +6434,14 @@ const BLOG_SECTIONS = {
   videos: ['Videos', 'New videos from Twin Cities creators.'],
   moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
   library: ['Library', 'Books we read and recommend, and Renaissance Radio: our tracks, with the story behind them.'],
+  radio: ['Renaissance Radio', 'Our tracks, station by station, with the story behind them. Press play.'],
 };
-const metaTags = ({ title, text, image, link }) =>
+const metaTags = ({ title, text, image, link, site = 'CITIES · Sanktuary', type = 'article' }) =>
   [
     `<title>${escAttr(title)}</title>`,
     `<meta name="description" content="${escAttr(text)}" />`,
-    `<meta property="og:site_name" content="CITIES · Sanktuary" />`,
-    `<meta property="og:type" content="article" />`,
+    `<meta property="og:site_name" content="${escAttr(site)}" />`,
+    `<meta property="og:type" content="${type}" />`,
     `<meta property="og:title" content="${escAttr(title)}" />`,
     `<meta property="og:description" content="${escAttr(text)}" />`,
     `<meta property="og:url" content="${escAttr(link)}" />`,
@@ -6392,7 +6482,8 @@ async function blogPage(req, res, url) {
       : b && (await Promise.all(db.feeds.map(readFeed))).flatMap((f) => f.items).find((i) => i.url === `/cities/${a}/${b}`);
     if (post) meta = { title: `${post.title} · CITIES`, text: post.excerpt.slice(0, 200), image: post.image };
   }
-  if (meta.image?.startsWith('/')) meta.image = origin + meta.image;
+  meta.image ||= '/magazine/pages/cover.webp'; // a link card always has a picture: the magazine cover when the post has none
+  if (meta.image.startsWith('/')) meta.image = origin + meta.image;
   const html = (await readFile(BLOG_PAGE, 'utf8')).replace('<!--meta-->', metaTags({ ...meta, link: origin + url.pathname }));
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
@@ -7798,7 +7889,9 @@ const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
 const BIG_BUFFER = { highWaterMark: 1024 * 1024 }; // 1 MB disk reads/writes instead of 64 KB
 
 async function upload(req, res, q, { status, space, root, target, need, log, user, transfer, staged }) {
-  need(q.get('replace') ? 'edit' : 'upload');
+  // Replacing needs edit rights, except your own upload: a new take keeps its path, so links already sent still work
+  const mine = q.get('replace') && existsSync(target) && (await ownsAll(space, target, user.username));
+  need(q.get('replace') && !mine ? 'edit' : 'upload');
   const id = q.get('upload') || '';
   const chunk = Number(q.get('chunk') || 0);
   const chunks = Number(q.get('chunks') || 1);
@@ -8296,6 +8389,12 @@ async function me(req, res, url) {
   const prefsFile = `prefs/${user.username}.json`;
   if (req.method === 'PUT') {
     const input = await jsonBody(req);
+    if (input.toured) {
+      // The member tour has opened for them once, on some device: it doesn't open by itself again anywhere
+      await mkdir(join(DATA, 'prefs'), { recursive: true });
+      await saveJson(prefsFile, { ...(await readJson(prefsFile, {})), toured: true });
+      return json(res, { toured: true });
+    }
     const favorites = (Array.isArray(input.favorites) ? input.favorites : []).slice(0, 40).map((f) => {
       const space = String(f?.space || '');
       const path = String(f?.path ?? '');
@@ -8310,9 +8409,10 @@ async function me(req, res, url) {
   const spaces = await Promise.all(visible.map(spaceInfo));
   for (const s of spaces)
     s.driveName = cfg.drives[(cfg.spaces.find((x) => x.id === s.id) || cfg.members[user.username])?.drive]?.name || null;
-  const favorites = ((await readJson(prefsFile, {})).favorites || []).filter((f) => visible.some((s) => s.id === f.space));
+  const prefs = await readJson(prefsFile, {});
+  const favorites = (prefs.favorites || []).filter((f) => visible.some((s) => s.id === f.space));
   res.setHeader('set-cookie', sessionCookie(req, user));
-  return json(res, { username: user.username, admin: user.admin, spaces, favorites });
+  return json(res, { username: user.username, admin: user.admin, spaces, favorites, toured: !!prefs.toured });
 }
 
 // ── /api/notes: each person's Notepad files, kept on the server so they follow them to every device ──
@@ -8340,6 +8440,48 @@ async function notesApi(req, res, url) {
   };
   const done = (notesSaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
   notesSaved.set(user.username, done);
+  await done;
+  return json(res, { ok: true });
+}
+
+// ── /api/foundry: each member's saved Foundry sessions (song, tempo, key, checklist, lyrics), so they follow them
+// to every device and past ones can be opened again — data/foundry/<username>.json is { "<id>": session } ──
+const foundrySaved = new Map(); // username -> the last save, so two quick saves never write over each other
+async function foundryApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const file = `foundry/${user.username}.json`;
+  if (req.method === 'GET') {
+    // Yours, plus everyone else's sessions for songs you can see (a session tied to a song is shared with the song's people)
+    const db = await loadTracks();
+    const shared = [];
+    for (const f of await readdir(join(DATA, 'foundry')).catch(() => [])) {
+      const by = f.slice(0, -5);
+      if (!f.endsWith('.json') || by === user.username) continue;
+      for (const [sid, s] of Object.entries(await readJson(`foundry/${f}`, {}))) {
+        const t = s.track && own(db.tracks, String(s.track));
+        if (t && !t.deleted && own(db.releases, t.release) && canSeeRelease(user, db.releases[t.release]))
+          shared.push({ ...s, id: sid, by });
+      }
+    }
+    return json(res, { sessions: await readJson(file, {}), shared });
+  }
+  const input = req.method === 'PUT' ? await jsonBody(req) : {};
+  const id = String(input.id ?? url.searchParams.get('id') ?? '');
+  if (!/^[\w-]{6,40}$/.test(id)) fail(400, 'Bad session id');
+  const change = async () => {
+    const all = await readJson(file, {});
+    if (req.method === 'DELETE') delete all[id];
+    else if (req.method === 'PUT') {
+      const s = input.session && typeof input.session === 'object' ? input.session : fail(400, 'Nothing to save');
+      if (JSON.stringify(s).length > 60_000) fail(413, 'That session is too long to save');
+      if (!own(all, id) && Object.keys(all).length >= 300) fail(400, 'You have 300 saved sessions already; delete some first');
+      all[id] = { ...s, updated: new Date().toISOString() };
+    } else fail(405, 'Unknown session action');
+    await mkdir(join(DATA, 'foundry'), { recursive: true });
+    await saveJson(file, all);
+  };
+  const done = (foundrySaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
+  foundrySaved.set(user.username, done);
   await done;
   return json(res, { ok: true });
 }
@@ -9371,6 +9513,7 @@ const PROFILE_FIELDS = {
   displayName: 60,
   status: 140,
   role: 60,
+  city: 40, // which node city they're in (the app offers the Nodes list)
   bio: 1000,
   pro: 80, // roster: "BMI · IPI 123456789" (members only, never public)
   rates: 1000, // roster: rate card / availability (members only, never public)
@@ -10164,6 +10307,7 @@ const routes = [
   ['/api/files/', files],
   ['/api/me', me],
   ['/api/notes', notesApi],
+  ['/api/foundry', foundryApi],
   ['/api/admin/', admin],
   ['/api/boards', boardsApi],
   ['/api/logout', logout],
