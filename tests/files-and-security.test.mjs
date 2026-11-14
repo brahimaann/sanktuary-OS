@@ -283,6 +283,11 @@ try {
   check('no access -> space hidden', (await call('carol', '/api/files/up/?list')).status === 404);
   check('upload: can add', (await up('bob', 'up', 'docs/new.txt', 'new')).status === 200);
   check('upload: cannot replace', (await up('bob', 'up', 'docs/song.txt', 'v2', '&replace=1')).status === 403);
+  check(
+    'upload: can replace your own file, and it keeps its name',
+    (await up('bob', 'up', 'docs/new.txt', 'new2', '&replace=1')).status === 200 &&
+      (await call('bob', '/api/files/up/docs/new.txt')).text === 'new2',
+  );
   check("upload: cannot delete others' files", (await call('bob', '/api/files/up/docs/song.txt', 'DELETE')).status === 403);
   check("edit: cannot delete others' files either", (await call('bob', '/api/files/ed/docs/song.txt', 'DELETE')).status === 403);
   check("edit: cannot delete a folder holding others' files", (await call('bob', '/api/files/ed/docs', 'DELETE')).status === 403);
@@ -930,6 +935,16 @@ try {
     bobSessions['sess-000001']?.song === 'Golden Hour' && !!bobSessions['sess-000001'].updated,
   );
   check("another member doesn't see it", !JSON.parse((await call('carol', '/api/foundry')).text).sessions['sess-000001']);
+  // Tied to a song, a session is shared with everyone who can see that song (and nobody else)
+  await call('bob', '/api/foundry', 'PUT', { id: 'sess-000002', session: { song: 'Summer I Missed You', track: song.id } });
+  const sharedWith = async (u) => JSON.parse((await call(u, '/api/foundry')).text).shared.filter((x) => x.id === 'sess-000002');
+  check("a song's session is shared with people on the song", (await sharedWith('alice'))[0]?.by === 'bob');
+  check('but not with someone who cannot see the song', (await sharedWith('carol')).length === 0);
+  check(
+    'a session with no song stays private',
+    !JSON.parse((await call('alice', '/api/foundry')).text).shared.some((x) => x.id === 'sess-000001'),
+  );
+  await call('bob', '/api/foundry?id=sess-000002', 'DELETE');
   check('a bad session id is refused', (await call('bob', '/api/foundry', 'PUT', { id: '../x', session: {} })).status === 400);
   await call('bob', '/api/foundry?id=sess-000001', 'DELETE');
   check('a session can be deleted', !JSON.parse((await call('bob', '/api/foundry')).text).sessions['sess-000001']);
@@ -1800,6 +1815,10 @@ try {
   );
   const heartTitled = JSON.parse((await call('alice', '/api/blog/posts', 'POST', { title: 'Heart' })).text);
   await call('alice', `/api/blog/posts/${heartTitled.id}`, 'PATCH', { published: true });
+  check(
+    'the radio has its own address and link card',
+    (await (await fetch(B + '/cities/radio')).text()).includes('<title>Renaissance Radio · CITIES</title>'),
+  );
   check(
     'a post called "Heart" does not take over /cities/heart',
     JSON.parse((await call('alice', '/api/blog/admin')).text).posts.find((p) => p.id === heartTitled.id).slug !== 'heart',

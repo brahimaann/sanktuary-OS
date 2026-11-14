@@ -144,10 +144,22 @@ const AdminPanel: React.FC = () => {
     (id && draft.drives[id]?.name) || attached.find((d) => d.id === id)?.label || id?.slice(0, 8) || '—';
   const usernames = state.users.map((u) => u.username).filter(Boolean) as string[];
 
+  const narrow = window.innerWidth < 560; // a phone: the side menu becomes a picker so the page gets the full width
   return (
     <div style={shell}>
-      <div style={{ flex: 1, display: 'flex', minHeight: 0, padding: '4px 0 0' }}>
-        <nav style={{ width: 112, flexShrink: 0, overflow: 'auto', padding: '0 0 0 4px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: narrow ? 'column' : 'row', minHeight: 0, padding: '4px 0 0' }}>
+        {narrow && (
+          <select value={tab} onChange={(e) => setTab(e.target.value as Tab)} style={{ margin: '0 4px 4px', fontSize: 16 }}>
+            {Object.entries(GROUPS).map(([group, tabs]) => (
+              <optgroup key={group} label={group}>
+                {tabs.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        )}
+        <nav style={{ width: 112, flexShrink: 0, overflow: 'auto', padding: '0 0 0 4px', display: narrow ? 'none' : undefined }}>
           {Object.entries(GROUPS).map(([group, tabs]) => (
             <div key={group} style={{ marginBottom: 8 }}>
               <div style={{ color: '#404040', padding: '0 4px 2px', fontSize: 10, textTransform: 'uppercase' }}>{group}</div>

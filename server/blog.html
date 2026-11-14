@@ -1301,10 +1301,10 @@
 
       // Library: books we recommend and Renaissance Radio (our tracks, played one after another), each with why. Added by the team in Studio.
       let allLibrary = null;
-      let shelf = 'Book';
       async function library() {
+        const shelf = location.pathname === '/cities/radio' ? 'Classic' : 'Book'; // the radio has its own address, so it can be linked
         sectionTabs('library');
-        document.title = 'Library · CITIES';
+        document.title = `${shelf === 'Classic' ? 'Renaissance Radio' : 'Library'} · CITIES`;
         if (!allLibrary) {
           app.textContent = 'Loading...';
           allLibrary = await fetch('/api/public/library')
@@ -1319,7 +1319,9 @@
         ]
           .map(([k, name]) => `<button class="btn ${shelf === k ? 'on' : ''}" data-s="${k}">${name}</button>`)
           .join('');
-        bar.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => ((shelf = b.dataset.s), library())));
+        bar
+          .querySelectorAll('[data-s]')
+          .forEach((b) => (b.onclick = () => go(b.dataset.s === 'Classic' ? '/cities/radio' : '/cities/library')));
         if (shelf === 'Classic') return radio();
         const shown = allLibrary.filter((i) => i.kind === shelf);
         app.innerHTML =
@@ -1341,7 +1343,7 @@
         onAir = track;
         air.src = track.audio;
         air.play().catch(() => {});
-        if (location.pathname === '/cities/library') radio();
+        if (location.pathname === '/cities/radio') radio();
       }
       const skip = (n) => {
         const list = tracksOn(tuned);
@@ -1462,7 +1464,7 @@
         const path = location.pathname.split('/').slice(2).filter(Boolean).join('/');
         if (path === 'notes') return notes();
         if (path === 'videos') return videos();
-        if (path === 'library') return library();
+        if (path === 'library' || path === 'radio') return library();
         if (path.split('/')[0] === 'moodboard') return moodboard(path.split('/')[1]);
         if (path.startsWith('heart/')) return person(path.split('/')[1]);
         const section = path === '' ? 'heart' : ['heart', 'essays', 'field-notes'].includes(path) ? path : null;

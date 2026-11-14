@@ -4409,7 +4409,7 @@ const feedCache = new Map(); // feed url -> { at, items, error }
 const BLOG_LINES = ['heart', 'essays', 'field-notes'];
 const HEART_KINDS = ['profile', 'case-study', 'spotlight'];
 // Section pages (/cities/heart ...) and the writing page: no post may take these addresses
-const BLOG_RESERVED = ['notes', 'videos', 'moodboard', 'write', ...BLOG_LINES];
+const BLOG_RESERVED = ['notes', 'videos', 'moodboard', 'library', 'radio', 'write', ...BLOG_LINES];
 const FEED_MINUTES = 10;
 
 /** "hima", "hima.substack.com" or any Substack / RSS URL -> the feed URL. */
@@ -6434,6 +6434,7 @@ const BLOG_SECTIONS = {
   videos: ['Videos', 'New videos from Twin Cities creators.'],
   moodboard: ['Moodboard', 'The CITIES moodboard of the month: what the Twin Cities looks, sounds and feels like right now.'],
   library: ['Library', 'Books we read and recommend, and Renaissance Radio: our tracks, with the story behind them.'],
+  radio: ['Renaissance Radio', 'Our tracks, station by station, with the story behind them. Press play.'],
 };
 const metaTags = ({ title, text, image, link, site = 'CITIES · Sanktuary', type = 'article' }) =>
   [
@@ -7888,7 +7889,9 @@ const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
 const BIG_BUFFER = { highWaterMark: 1024 * 1024 }; // 1 MB disk reads/writes instead of 64 KB
 
 async function upload(req, res, q, { status, space, root, target, need, log, user, transfer, staged }) {
-  need(q.get('replace') ? 'edit' : 'upload');
+  // Replacing needs edit rights, except your own upload: a new take keeps its path, so links already sent still work
+  const mine = q.get('replace') && existsSync(target) && (await ownsAll(space, target, user.username));
+  need(q.get('replace') && !mine ? 'edit' : 'upload');
   const id = q.get('upload') || '';
   const chunk = Number(q.get('chunk') || 0);
   const chunks = Number(q.get('chunks') || 1);
@@ -8447,7 +8450,21 @@ const foundrySaved = new Map(); // username -> the last save, so two quick saves
 async function foundryApi(req, res, url) {
   const user = await currentUser(req, url, await loadConfig());
   const file = `foundry/${user.username}.json`;
-  if (req.method === 'GET') return json(res, { sessions: await readJson(file, {}) });
+  if (req.method === 'GET') {
+    // Yours, plus everyone else's sessions for songs you can see (a session tied to a song is shared with the song's people)
+    const db = await loadTracks();
+    const shared = [];
+    for (const f of await readdir(join(DATA, 'foundry')).catch(() => [])) {
+      const by = f.slice(0, -5);
+      if (!f.endsWith('.json') || by === user.username) continue;
+      for (const [sid, s] of Object.entries(await readJson(`foundry/${f}`, {}))) {
+        const t = s.track && own(db.tracks, String(s.track));
+        if (t && !t.deleted && own(db.releases, t.release) && canSeeRelease(user, db.releases[t.release]))
+          shared.push({ ...s, id: sid, by });
+      }
+    }
+    return json(res, { sessions: await readJson(file, {}), shared });
+  }
   const input = req.method === 'PUT' ? await jsonBody(req) : {};
   const id = String(input.id ?? url.searchParams.get('id') ?? '');
   if (!/^[\w-]{6,40}$/.test(id)) fail(400, 'Bad session id');

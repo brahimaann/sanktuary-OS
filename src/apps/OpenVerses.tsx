@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { displayName, useProfiles } from '../utils/profiles';
 import { useApi } from '../utils/api';
+import { useWindowManager } from '../wm/manager';
 import { useLiveEvent } from '../utils/live';
 import { uploadFiles } from '../utils/upload';
 import { dialog } from '../utils/dialog';
@@ -86,6 +87,29 @@ const OpenVerses: React.FC<{
   const [busy, setBusy] = useState(false);
   const { byName } = useProfiles();
   const who = (u: string) => displayName(byName[u], u);
+  const { openWindow } = useWindowManager();
+  // A name opens that person's profile (same window as Teams opens)
+  const link = (u: string) => (
+    <a
+      href="#"
+      style={{ color: 'inherit' }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openWindow({
+          id: `profile-${u}`,
+          title: u === me ? 'My Profile' : `${who(u)} — Info`,
+          icon: '/images/icons/my-documents-16x16.png?v=2',
+          appType: 'profile',
+          appProps: { username: u },
+          width: 420,
+          height: 520,
+        });
+      }}
+    >
+      {who(u)}
+    </a>
+  );
   const [show, setShow] = useState<'open' | 'all'>('open');
   const load = useCallback(
     () =>
@@ -100,12 +124,18 @@ const OpenVerses: React.FC<{
   }, [load]);
   useLiveEvent('verses', load);
 
-  const upload = async (file: File, dir: string[]) => {
+  /** `over`: a file this replaces. Same type goes in at the same path, so links already sent play the new one. */
+  const upload = async (file: File, dir: string[], over?: FileRef | null) => {
     const s = space();
     if (!s) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
-    const [saved] = await uploadFiles(getToken, s.id, dir, [{ file, name: file.name }], (n, of) =>
-      setMsg(`Uploading ${file.name}... ${Math.round((n / of) * 100)}%`),
-    );
+    const ext = (n: string) => n.slice(n.lastIndexOf('.')).toLowerCase();
+    const old = over?.space === s.id && over.path.startsWith(dir.join('/') + '/') ? over.path.split('/').pop()! : '';
+    const send = (name: string, replace: boolean) =>
+      uploadFiles(getToken, s.id, dir, [{ file, name, replace }], (n, of) =>
+        setMsg(`Uploading ${file.name}... ${Math.round((n / of) * 100)}%`),
+      );
+    const [saved] =
+      old && ext(old) === ext(file.name) ? await send(old, true).catch(() => send(file.name, false)) : await send(file.name, false);
     return { space: s.id, path: [...dir, saved].join('/') };
   };
   const act = async (fn: () => Promise<unknown>, done = '') => {
@@ -165,7 +195,7 @@ const OpenVerses: React.FC<{
                   style={{ cursor: 'pointer' }}
                 >
                   <td style={{ ...td, fontWeight: 700 }}>{x.title}</td>
-                  <td style={td}>{who(x.by)}</td>
+                  <td style={td}>{link(x.by)}</td>
                   <td style={td}>{[x.bpm && `${x.bpm} BPM`, x.key].filter(Boolean).join(' · ')}</td>
                   <td style={td}>
                     {x.picked
@@ -194,7 +224,7 @@ const OpenVerses: React.FC<{
           <div style={{ ...box, flex: '1 1 300px', padding: 8, display: 'flex', flexDirection: 'column', gap: 6, whiteSpace: 'normal' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
               <b style={{ fontSize: 14 }}>{v.title}</b>
-              <span style={{ opacity: 0.7 }}>posted by {who(v.by)}</span>
+              <span style={{ opacity: 0.7 }}>posted by {link(v.by)}</span>
               {(v.by === me || admin) && (
                 <button
                   style={{ ...button, marginLeft: 'auto' }}
@@ -223,7 +253,8 @@ const OpenVerses: React.FC<{
             {v.slots.map((s) => (
               <fieldset key={s.id} style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px' }}>
                 <legend>
-                  {s.label}: {v.picked === s.id ? `${who(s.by!)}'s take, picked ✓` : s.by ? `${who(s.by)} hopped on` : 'open'}
+                  {s.label}: {s.by ? link(s.by) : 'open'}
+                  {v.picked === s.id ? "'s take, picked ✓" : s.by ? ' hopped on' : ''}
                 </legend>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                   {!s.by && !v.picked && (
@@ -251,7 +282,7 @@ const OpenVerses: React.FC<{
                           if (f)
                             act(
                               async () => {
-                                const take = await upload(f, ['Open verses', folderSafe(v.title) || v.id, 'Takes', me]);
+                                const take = await upload(f, ['Open verses', folderSafe(v.title) || v.id, 'Takes', me], s.take);
                                 await patch(v, { slot: s.id, take });
                               },
                               `Take sent to ${who(v.by)}.`,

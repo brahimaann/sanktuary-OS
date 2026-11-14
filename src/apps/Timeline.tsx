@@ -9,6 +9,7 @@ import { openMusic, openStudio } from './Studio';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
+import { displayName, useProfiles } from '../utils/profiles';
 import RetroIcon, { IconLabel } from '../components/RetroIcon';
 
 interface Entry {
@@ -67,6 +68,7 @@ const TimelineApp: React.FC = () => {
   const [kind, setKind] = useState('');
   const [showClosed, setShowClosed] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const { byName } = useProfiles();
   const [msg, setMsg] = useState('');
   const todayRow = useRef<HTMLDivElement>(null);
 
@@ -160,7 +162,7 @@ const TimelineApp: React.FC = () => {
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <b style={{ textDecoration: i.status === 'Cancelled' ? 'line-through' : undefined }}>{i.title}</b>
           {i.location ? ` · ${i.location}` : ''}
-          {i.people?.length ? ` · ${i.people.join(', ')}` : ''}
+          {i.people?.length ? ` · ${i.people.map((u) => displayName(byName[u], u)).join(', ')}` : ''}
         </span>
         {i.draft && <i style={{ whiteSpace: 'nowrap' }}>Draft</i>}
         {i.status && i.status !== 'Planned' && <span style={{ whiteSpace: 'nowrap' }}>{i.status}</span>}
@@ -241,6 +243,7 @@ const EntryPanel: React.FC<{
   const { me } = useMe();
   const openRef = useOpenRef();
   const [draft, setDraft] = useState(e);
+  const { byName } = useProfiles();
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState<null | 'people' | 'members'>(null);
   const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
@@ -352,7 +355,13 @@ const EntryPanel: React.FC<{
         <legend>Who and where</legend>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ minWidth: 60 }}>People</span>
-          <span style={{ flex: 1 }}>{e.people?.length ? e.people.join(', ') : <span style={{ color: '#666' }}>nobody yet</span>}</span>
+          <span style={{ flex: 1 }}>
+            {e.people?.length ? (
+              e.people.map((u) => displayName(byName[u], u)).join(', ')
+            ) : (
+              <span style={{ color: '#666' }}>nobody yet</span>
+            )}
+          </span>
           <button style={button} onClick={() => setChoosing('people')}>
             <IconLabel icon="plus">Choose...</IconLabel>
           </button>

@@ -438,6 +438,7 @@ interface Session {
   vocals?: Item[];
   lyrics: string;
   updated?: string;
+  by?: string; // someone else's session for a song you can see
 }
 const newId = () => crypto.randomUUID().slice(0, 12);
 const blankSession = (): Session => ({ id: newId(), song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '' });
@@ -474,6 +475,7 @@ const SessionTab: React.FC<{
   const { openWindow } = useWindowManager();
   const [s, setS] = useState(loadSession);
   const [past, setPast] = useState<Record<string, Session>>({});
+  const [shared, setShared] = useState<Session[]>([]); // other people's sessions for songs you can see
   const [songs, setSongs] = useState<Song[]>([]);
   const [saved, setSaved] = useState('');
   const timer = useRef<number | undefined>(undefined);
@@ -532,8 +534,9 @@ const SessionTab: React.FC<{
   useEffect(() => {
     if (!isSignedIn) return;
     Promise.all([api('/api/foundry'), api('/api/tracks')]).then(
-      ([f, t]: [{ sessions: Record<string, Session> }, { tracks: Song[] }]) => {
+      ([f, t]: [{ sessions: Record<string, Session>; shared: Session[] }, { tracks: Song[] }]) => {
         setPast(f.sessions);
+        setShared(f.shared || []);
         setSongs(t.tracks);
         forSong(takeSessionWish(), f.sessions, t.tracks);
       },
@@ -769,7 +772,14 @@ const SessionTab: React.FC<{
                 style={{ ...sfield, flex: 1, minWidth: 0 }}
                 value={past[s.id] ? s.id : ''}
                 title="Sessions save themselves to your account. Pick a past one to open it."
-                onChange={(e) => (e.target.value === 'new' ? fresh() : past[e.target.value] && open(past[e.target.value]))}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const theirs = shared.find((x) => `by:${x.by}:${x.id}` === v);
+                  // Someone else's session opens as your own copy: theirs stays as they left it
+                  if (theirs) open({ ...blankSession(), ...theirs, id: newId(), by: undefined, updated: undefined });
+                  else if (v === 'new') fresh();
+                  else if (past[v]) open(past[v]);
+                }}
               >
                 {!past[s.id] && <option value="">{s.song || 'Untitled'} (not saved yet)</option>}
                 {latest(past).map((x) => (
@@ -777,6 +787,15 @@ const SessionTab: React.FC<{
                     {x.song || 'Untitled'} · {x.updated ? new Date(x.updated).toLocaleDateString() : ''}
                   </option>
                 ))}
+                {shared.length > 0 && (
+                  <optgroup label="From others on your songs (opens a copy)">
+                    {shared.map((x) => (
+                      <option key={`${x.by}:${x.id}`} value={`by:${x.by}:${x.id}`}>
+                        {x.song || 'Untitled'} · {x.by} · {x.updated ? new Date(x.updated).toLocaleDateString() : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 <option value="new">+ New session</option>
               </select>
               {past[s.id] && (

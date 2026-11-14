@@ -2046,16 +2046,20 @@ const BmiSheet: React.FC<{ track: Track; release: Release; onSave: (bmi: Bmi) =>
   onSave,
   onClose,
 }) => {
-  // A new sheet starts with the release's artist and songwriters, shares split evenly
-  const [b, setB] = useState<Bmi>(() =>
-    track.bmi
-      ? { ...emptyBmi(), ...track.bmi }
-      : {
-          ...emptyBmi(),
-          artist: release.artist || '',
-          writers: release.writers?.length ? evenShares(release.writers.map((w) => ({ ...NEW_WRITER, ...w }))) : emptyBmi().writers,
-        },
-  );
+  // A new sheet starts with the release's artist and songwriters, plus the artists and producers on the master split
+  // (names only: writing shares are their own agreement), shares split evenly
+  const [b, setB] = useState<Bmi>(() => {
+    if (track.bmi) return { ...emptyBmi(), ...track.bmi };
+    const start: Partial<BmiWriter>[] = [...(release.writers || [])];
+    for (const r of track.master?.splits || [])
+      if (/artist|producer/i.test(r.role) && r.name && !start.some((w) => w.name?.toLowerCase() === r.name.toLowerCase()))
+        start.push({ name: r.name });
+    return {
+      ...emptyBmi(),
+      artist: release.artist || '',
+      writers: start.length ? evenShares(start.map((w) => ({ ...NEW_WRITER, ...w }))) : emptyBmi().writers,
+    };
+  });
   const [note, setNote] = useState('');
   const api = useApi();
   const set = (k: keyof Bmi, v: string) => setB({ ...b, [k]: v });
