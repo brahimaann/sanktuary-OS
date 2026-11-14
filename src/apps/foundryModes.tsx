@@ -148,12 +148,12 @@ const Table: React.FC<{ head: string[]; rows: (string | number)[][]; wrap?: bool
   </table>
 );
 
-/** A checklist kept on this device: add a line, tick it off, remove it. */
-interface Item {
+/** A checklist you can edit: add a line, tick it off, remove it. */
+export interface Item {
   text: string;
   done?: boolean;
 }
-const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder: string }> = ({ items, set, placeholder }) => {
+export const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder: string }> = ({ items, set, placeholder }) => {
   const [draft, setDraft] = useState('');
   const add = () => {
     if (!draft.trim()) return;
@@ -196,27 +196,27 @@ const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder:
   );
 };
 
-const Checks: React.FC<{ title: string; items: string[]; done: Record<string, boolean>; set: (d: Record<string, boolean>) => void }> = ({
-  title,
-  items,
-  done,
-  set,
-}) => (
-  <div style={{ padding: '4px 6px', borderBottom: rule }}>
-    <div style={label}>
-      {title}{' '}
-      <span style={mono}>
-        {items.filter((c) => done[c]).length}/{items.length}
-      </span>
+/** An editable checklist under a title with its count. `start` is the list it begins as until it's first changed. */
+export const EditList: React.FC<{
+  title: string;
+  items: Item[] | undefined;
+  start: Item[];
+  set: (items: Item[]) => void;
+  placeholder: string;
+}> = ({ title, items, start, set, placeholder }) => {
+  const list = items || start;
+  return (
+    <div>
+      <div style={{ ...label, padding: '4px 6px 0' }}>
+        {title}{' '}
+        <span style={mono}>
+          {list.filter((c) => c.done).length}/{list.length}
+        </span>
+      </div>
+      <List items={list} set={set} placeholder={placeholder} />
     </div>
-    {items.map((c) => (
-      <label key={c} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '1px 0' }}>
-        <input type="checkbox" checked={!!done[c]} onChange={(e) => set({ ...done, [c]: e.target.checked })} />
-        <span style={done[c] ? { textDecoration: 'line-through', color: 'var(--fk-dim)' } : undefined}>{c}</span>
-      </label>
-    ))}
-  </div>
-);
+  );
+};
 
 // ---- Director / cinematographer ----
 
@@ -228,13 +228,14 @@ const SENSORS: Record<string, [number, number]> = {
   'Phone (1/1.3")': [9.8, 7.4],
 };
 const FOCALS = [14, 18, 24, 35, 50, 85, 135];
+// The lens inventory starts as these; the director swaps in what's actually in the bag and ticks what's packed
 const LENS_NOTES: [string, string][] = [
-  ['14-18mm', 'Wide establishing, rooms, cars; distorts faces up close.'],
-  ['24mm', 'Wide but natural: walk-and-talks, dance, group shots.'],
-  ['35mm', 'Closest to the eye: the everyday storytelling lens.'],
-  ['50mm', 'Standard: mid shots and clean product.'],
-  ['85mm', 'Portraits and close-ups; soft background.'],
-  ['135mm', 'Compression and isolation from far away; needs support.'],
+  ['14-18mm', 'wide establishing, rooms, cars'],
+  ['24mm', 'walk-and-talks, dance, groups'],
+  ['35mm', 'the everyday storytelling lens'],
+  ['50mm', 'mid shots and clean product'],
+  ['85mm', 'portraits and close-ups'],
+  ['135mm', 'far away; needs support'],
 ];
 const RIG = [
   'Batteries charged (camera, monitor, lights, mics)',
@@ -260,7 +261,9 @@ const DirectorCockpit: React.FC = () => {
       iso: '800',
       subject: '3',
       shots: [] as Item[],
-      rig: {} as Record<string, boolean>,
+      rig: {} as Record<string, boolean>, // ticks from before the rig list could be edited
+      rigList: undefined as Item[] | undefined,
+      lenses: undefined as Item[] | undefined,
     },
     'director',
   );
@@ -353,16 +356,21 @@ const DirectorCockpit: React.FC = () => {
         <List items={d.shots} set={(shots) => set({ shots })} placeholder="e.g. Wide, artist walks in, 24mm, dolly" />
       </section>
       <section style={{ ...pane, borderRight: 0 }}>
-        <h3 style={paneHead}>Brief: camera and lenses</h3>
-        <Checks title="Rig checklist" items={RIG} done={d.rig} set={(rig) => set({ rig })} />
-        <div style={{ padding: '4px 6px' }}>
-          <div style={label}>Lenses</div>
-          {LENS_NOTES.map(([l, n]) => (
-            <div key={l} style={{ padding: '1px 0' }}>
-              <b style={mono}>{l}</b> {n}
-            </div>
-          ))}
-        </div>
+        <h3 style={paneHead}>Rig and lenses</h3>
+        <EditList
+          title="Rig checklist"
+          items={d.rigList}
+          start={RIG.map((text) => ({ text, done: !!d.rig[text] }))}
+          set={(rigList) => set({ rigList })}
+          placeholder="e.g. Second body, spare plate"
+        />
+        <EditList
+          title="Lens inventory"
+          items={d.lenses}
+          start={LENS_NOTES.map(([l, n]) => ({ text: `${l}: ${n}` }))}
+          set={(lenses) => set({ lenses })}
+          placeholder="e.g. 24-70mm f/2.8 (rented, back Mon)"
+        />
       </section>
     </Cockpit>
   );
@@ -406,7 +414,8 @@ const StylistCockpit: React.FC = () => {
       run: { S: 10, M: 20, L: 20, XL: 10 } as Record<string, number>,
       looks: [] as Item[],
       pulls: [] as Item[],
-      alt: {} as Record<string, boolean>,
+      alt: {} as Record<string, boolean>, // ticks from before the list could be edited
+      altList: undefined as Item[] | undefined,
     },
     'stylist',
   );
@@ -486,7 +495,13 @@ const StylistCockpit: React.FC = () => {
         <h3 style={paneHead}>Brief: pulls and alterations</h3>
         <div style={{ ...label, padding: '4px 6px 0' }}>Pulls (tick when returned)</div>
         <List items={st.pulls} set={(pulls) => set({ pulls })} placeholder="e.g. Jacket from showroom X, back Fri" />
-        <Checks title="Alterations" items={ALTERATIONS} done={st.alt} set={(alt) => set({ alt })} />
+        <EditList
+          title="Alterations"
+          items={st.altList}
+          start={ALTERATIONS.map((text) => ({ text, done: !!st.alt[text] }))}
+          set={(altList) => set({ altList })}
+          placeholder="e.g. Hem the trousers 2 cm"
+        />
       </section>
     </Cockpit>
   );

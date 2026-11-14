@@ -7,6 +7,7 @@ import { button } from './TeamFiles';
  * Dialog for choosing who can see something. `members === null` means everyone.
  * `always` (the creator) is always included and can't be unticked.
  * With `listeners`, each person in it can also be set to "Can listen" (see and comment, not change) instead of "Can edit".
+ * With `listenFirst`, people are "Can listen" unless they're in `editors` (how new music projects start).
  */
 const MembersPicker: React.FC<{
   title: string;
@@ -15,19 +16,18 @@ const MembersPicker: React.FC<{
   allowEveryone?: boolean;
   note?: string;
   listeners?: string[];
-  onSave: (members: string[] | null, listeners: string[]) => void;
+  listenFirst?: boolean;
+  editors?: string[];
+  onSave: (members: string[] | null, listeners: string[], editors: string[]) => void;
   onClose: () => void;
-}> = ({ title, members, always, allowEveryone = true, note, listeners, onSave, onClose }) => {
+}> = ({ title, members, always, allowEveryone = true, note, listeners, listenFirst, editors, onSave, onClose }) => {
   const { profiles } = useProfiles();
   const [everyone, setEveryone] = useState(allowEveryone && members === null);
   const [picked, setPicked] = useState<Set<string>>(new Set([...(members || []), ...(always ? [always] : [])]));
-  const [listen, setListen] = useState(new Set(listeners));
-  const setRole = (u: string, onlyListen: boolean) =>
-    setListen((l) => {
-      const n = new Set(l);
-      onlyListen ? n.add(u) : n.delete(u);
-      return n;
-    });
+  // Roles changed in this dialog; everyone else keeps what they had (or the project's starting role)
+  const [roles, setRoles] = useState<Record<string, boolean>>({});
+  const listens = (u: string) => roles[u] ?? (editors?.includes(u) ? false : listeners?.includes(u) || !!listenFirst);
+  const setRole = (u: string, onlyListen: boolean) => setRoles((r) => ({ ...r, [u]: onlyListen }));
   const toggle = (u: string) => {
     // Someone newly let in starts at "Can listen"; the creator raises them to "Can edit"
     if (listeners && !picked.has(u)) setRole(u, true);
@@ -100,7 +100,7 @@ const MembersPicker: React.FC<{
                 {listeners && p.username !== always && (everyone || picked.has(p.username)) && (
                   <select
                     style={{ marginLeft: 'auto', fontSize: 11 }}
-                    value={listen.has(p.username) ? 'listen' : 'edit'}
+                    value={listens(p.username) ? 'listen' : 'edit'}
                     onChange={(e) => setRole(p.username, e.target.value === 'listen')}
                   >
                     <option value="edit">Can edit</option>
@@ -120,9 +120,11 @@ const MembersPicker: React.FC<{
             style={{ ...button, fontWeight: 700 }}
             onClick={() => {
               const m = everyone ? null : [...picked];
+              const shown = profiles.map((p) => p.username).filter((u) => u !== always && (!m || m.includes(u)));
               onSave(
                 m,
-                [...listen].filter((u) => u !== always && (!m || m.includes(u))),
+                shown.filter((u) => listens(u)),
+                shown.filter((u) => !listens(u)),
               );
             }}
           >

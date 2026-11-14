@@ -555,6 +555,16 @@ try {
     'releases are open to members by default',
     seen.releases.some((r) => r.id === album.id) && seen.tracks.some((t) => t.id === song.id),
   );
+  // A new project starts with the team listening: its owner hands out "Can edit"
+  check(
+    'a new project: members can listen but not change it',
+    (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '99' })).status === 403,
+  );
+  check(
+    'bob cannot make himself an editor',
+    (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { editors: ['bob'] })).status === 403,
+  );
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { editors: ['bob'] });
   check('bad date refused', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { deadline: 'next week' })).status === 400);
   check(
     'only https links',
@@ -605,7 +615,7 @@ try {
   );
   check('bob cannot delete alice’s release', (await call('bob', `/api/tracks/release/${album.id}`, 'DELETE')).status === 403);
   check('bob cannot set who edits', (await call('bob', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] })).status === 403);
-  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: ['bob', 'alice'] });
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: ['bob', 'alice'], editors: [] });
   check('listen only: bob cannot edit a track', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '1' })).status === 403);
   check('listen only: or add one', (await call('bob', '/api/tracks/track', 'POST', { release: album.id, title: 'x' })).status === 403);
   check(
@@ -614,7 +624,7 @@ try {
   );
   check('listen only: but can follow', (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { follow: true })).status === 200);
   check('the owner is never listen only', (await call('alice', `/api/tracks/track/${song.id}`, 'PATCH', { bpm: '100' })).status === 200);
-  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [] });
+  await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { listeners: [], editors: ['bob'] });
   // A private project's folder is private in Team Files too, through every space that shows it
   const pack = JSON.parse(
     (
@@ -799,7 +809,7 @@ try {
   writeFileSync(join(albumDir, 'Artwork', 'cover final.png'), Buffer.from('89504e47', 'hex'));
   check(
     'carol cannot scan a folder in a space she cannot see',
-    (await call('carol', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).status === 404,
+    [403, 404].includes((await call('carol', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).status), // 403: she only listens
   );
   const scan = JSON.parse((await call('bob', `/api/tracks/release/${folderAlbum.id}?scan`, 'POST')).text);
   fts = await tracksOf('bob', folderAlbum.id);
@@ -861,7 +871,7 @@ try {
   );
   check(
     'carol cannot move it into a project she cannot see',
-    (await call('carol', `/api/tracks/track/${hand.id}`, 'PATCH', { release: album.id })).status === 404,
+    [403, 404].includes((await call('carol', `/api/tracks/track/${hand.id}`, 'PATCH', { release: album.id })).status), // 403: she only listens
   );
   check(
     'mkdir with parents makes the whole path',
@@ -912,6 +922,17 @@ try {
     'day-before reminder goes out',
     carolNotes.some((n) => /"Cover shoot" is tomorrow/.test(n.text) && /Studio A/.test(n.text)),
   );
+  // Foundry sessions are saved per member and opened again later; nobody else reads them
+  await call('bob', '/api/foundry', 'PUT', { id: 'sess-000001', session: { song: 'Golden Hour', lyrics: 'la', bpm: 98 } });
+  const bobSessions = JSON.parse((await call('bob', '/api/foundry')).text).sessions;
+  check(
+    'a Foundry session is saved to the member',
+    bobSessions['sess-000001']?.song === 'Golden Hour' && !!bobSessions['sess-000001'].updated,
+  );
+  check("another member doesn't see it", !JSON.parse((await call('carol', '/api/foundry')).text).sessions['sess-000001']);
+  check('a bad session id is refused', (await call('bob', '/api/foundry', 'PUT', { id: '../x', session: {} })).status === 400);
+  await call('bob', '/api/foundry?id=sess-000001', 'DELETE');
+  check('a session can be deleted', !JSON.parse((await call('bob', '/api/foundry')).text).sessions['sess-000001']);
   // The Foundry plan is kept on the shoot: the director and the stylist each save their own half, the crew reads both
   await call('bob', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { director: { shots: [{ text: 'Wide on the roof' }] } } });
   await call('carol', `/api/timeline/${shoot.id}`, 'PATCH', { plan: { stylist: { looks: [{ text: 'Look 1', done: true }] } } });

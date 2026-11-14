@@ -448,6 +448,8 @@ const EntryPanel: React.FC<{
       {(
         [
           ['Shot list', e.plan?.director?.shots],
+          ['Rig checklist', e.plan?.director?.rigList],
+          ['Lens inventory', e.plan?.director?.lenses],
           ['Looks', e.plan?.stylist?.looks],
           ['Pulls', e.plan?.stylist?.pulls],
         ] as [string, { text: string; done?: boolean }[] | undefined][]

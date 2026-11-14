@@ -23,7 +23,11 @@ import {
   caption,
   sfield,
   FoundryRoles,
+  EditList,
+  Item,
 } from './foundryModes';
+import { useWindowManager } from '../wm/manager';
+import { openSong, takeSessionWish } from '../utils/songs';
 import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 
 // Foundry (the Producer window): a companion for making music. Session is the recording cockpit: tempo, key,
@@ -423,25 +427,41 @@ export const noteHz = (root: number, octave: number) => 440 * 2 ** ((12 * (octav
 const CHECKS = ['Lead takes', 'Lead comp', 'Doubles L/R', 'Ad-lib lanes', 'Stacks and harmonies', 'Tuned', 'Stems bounced'];
 const SESSION_KEY = 'sk:foundry-session';
 interface Session {
+  id: string;
   song: string;
+  track?: string; // the song in Music this session is for
+  bpm?: number;
+  key?: { root: number; minor: boolean };
   rate: number;
   genre: string;
-  checks: Record<string, boolean>;
+  checks: Record<string, boolean>; // ticks from before the vocal checklist could be edited
+  vocals?: Item[];
   lyrics: string;
+  updated?: string;
 }
+const newId = () => crypto.randomUUID().slice(0, 12);
+const blankSession = (): Session => ({ id: newId(), song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '' });
 const loadSession = (): Session => {
-  const blank = { song: '', rate: 48000, genre: GENRES[0].name, checks: {}, lyrics: '' };
   try {
-    return { ...blank, ...JSON.parse(localStorage.getItem(SESSION_KEY) || '{}') };
+    return { ...blankSession(), ...JSON.parse(localStorage.getItem(SESSION_KEY) || '{}') };
   } catch {
-    return blank;
+    return blankSession();
   }
 };
+const keepSession = (s: Session) => {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  } catch {
+    /* private window: the working session just isn't kept on this device */
+  }
+};
+type Song = { id: string; title: string; bpm?: string };
 
 /**
  * Session: Foundry's recording cockpit. The ribbon (tempo, key, sample rate, genre) drives every pane at once:
  * delay, reverb and compressor times, the key's notes in Hz, the vocal checklist and lyric bar count, and the
- * genre's vocal chain. The session is kept on this device.
+ * genre's vocal chain. A session saves itself as you work, to your account: the Sessions list opens past ones on any
+ * device. Its song comes from the same list as Operations > Music, so the song's page and its sessions link both ways.
  */
 const SessionTab: React.FC<{
   bpm: number;
@@ -449,17 +469,83 @@ const SessionTab: React.FC<{
   keySel: { root: number; minor: boolean };
   setKey: (k: { root: number; minor: boolean }) => void;
 }> = ({ bpm, setBpm, keySel, setKey }) => {
+  const { isSignedIn } = useAuth();
+  const api = useApi();
+  const { openWindow } = useWindowManager();
   const [s, setS] = useState(loadSession);
-  const set = (patch: Partial<Session>) =>
-    setS((o) => {
-      const n = { ...o, ...patch };
-      try {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(n));
-      } catch {
-        /* private window: the session just isn't kept */
-      }
-      return n;
-    });
+  const [past, setPast] = useState<Record<string, Session>>({});
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [saved, setSaved] = useState('');
+  const timer = useRef<number | undefined>(undefined);
+  // Saved a moment after the last change, with the ribbon's tempo and key. An empty session isn't worth a row.
+  const save = (n: Session) => {
+    keepSession(n);
+    clearTimeout(timer.current);
+    if (!isSignedIn || !(n.song.trim() || n.lyrics.trim() || n.track)) return;
+    setSaved('Saving...');
+    timer.current = window.setTimeout(
+      () =>
+        api('/api/foundry', { method: 'PUT', body: JSON.stringify({ id: n.id, session: n }) }).then(
+          () => {
+            setPast((p) => ({ ...p, [n.id]: { ...n, updated: new Date().toISOString() } }));
+            setSaved('Saved');
+          },
+          (e: Error) => setSaved(e.message),
+        ),
+      800,
+    );
+  };
+  const set = (patch: Partial<Session>) => {
+    const n = { ...s, bpm, key: keySel, ...patch };
+    setS(n);
+    save(n);
+  };
+  const open = (n: Session) => {
+    clearTimeout(timer.current);
+    setS(n);
+    keepSession(n);
+    if (n.bpm) setBpm(n.bpm);
+    if (n.key) setKey(n.key);
+    setSaved('');
+  };
+  // A new session keeps your checklist (unticked), sample rate and genre
+  const fresh = (song?: Song) => {
+    const n: Session = {
+      ...blankSession(),
+      rate: s.rate,
+      genre: s.genre,
+      vocals: s.vocals?.map((v) => ({ text: v.text })),
+      ...(song ? { song: song.title, track: song.id, bpm: Number(song.bpm) || undefined } : {}),
+    };
+    open(n);
+    if (song) save(n);
+  };
+  const latest = (list: Record<string, Session>) => Object.values(list).sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+  // Asked for from a song's page in Music (or its file): its latest session, or a new one for it
+  const forSong = (id: string | null, list = past, all = songs) => {
+    if (!id) return;
+    const had = latest(list).find((x) => x.track === id);
+    const song = all.find((x) => x.id === id);
+    if (had) open(had);
+    else if (song) fresh(song);
+  };
+  useEffect(() => {
+    if (!isSignedIn) return;
+    Promise.all([api('/api/foundry'), api('/api/tracks')]).then(
+      ([f, t]: [{ sessions: Record<string, Session> }, { tracks: Song[] }]) => {
+        setPast(f.sessions);
+        setSongs(t.tracks);
+        forSong(takeSessionWish(), f.sessions, t.tracks);
+      },
+      () => {},
+    );
+  }, [api, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const on = () => forSong(takeSessionWish());
+    window.addEventListener('sk:foundry-song', on);
+    return () => window.removeEventListener('sk:foundry-song', on);
+  });
+  const vocals = s.vocals || CHECKS.map((text) => ({ text, done: !!s.checks[text] }));
   const taps = useRef<number[]>([]);
   const tap = () => {
     const now = performance.now();
@@ -475,7 +561,6 @@ const SessionTab: React.FC<{
   const camelotKey = `${(keySel.minor ? CAMELOT_MIN : CAMELOT_MAJ)[keySel.root]}${keySel.minor ? 'A' : 'B'}`;
   const genre = GENRES.find((g) => g.name === s.genre) || GENRES[0];
   const bars = s.lyrics.split('\n').filter((l) => l.trim()).length;
-  const done = CHECKS.filter((c) => s.checks[c]).length;
   return (
     <div
       className="fk-cockpit"
@@ -677,29 +762,73 @@ const SessionTab: React.FC<{
         </section>
         <section style={pane}>
           <h3 style={paneHead}>Session</h3>
+          {isSignedIn && (
+            <div style={{ padding: '6px 6px 0', display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={label}>Sessions</span>
+              <select
+                style={{ ...sfield, flex: 1, minWidth: 0 }}
+                value={past[s.id] ? s.id : ''}
+                title="Sessions save themselves to your account. Pick a past one to open it."
+                onChange={(e) => (e.target.value === 'new' ? fresh() : past[e.target.value] && open(past[e.target.value]))}
+              >
+                {!past[s.id] && <option value="">{s.song || 'Untitled'} (not saved yet)</option>}
+                {latest(past).map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.song || 'Untitled'} · {x.updated ? new Date(x.updated).toLocaleDateString() : ''}
+                  </option>
+                ))}
+                <option value="new">+ New session</option>
+              </select>
+              {past[s.id] && (
+                <button
+                  style={{ ...button, padding: '0 4px' }}
+                  title="Delete this saved session"
+                  onClick={() => {
+                    const { [s.id]: gone, ...rest } = past;
+                    api(`/api/foundry?id=${gone.id}`, { method: 'DELETE' }).then(
+                      () => (setPast(rest), fresh()),
+                      () => {},
+                    );
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
           <div style={{ padding: 6, display: 'flex', gap: 4, alignItems: 'center', borderBottom: rule }}>
             <span style={label}>Song</span>
             <input
               style={{ ...sfield, flex: 1, minWidth: 0 }}
               value={s.song}
-              placeholder="Untitled"
-              onChange={(e) => set({ song: e.target.value })}
+              placeholder="Untitled, or pick a song from Music"
+              list="foundry-songs"
+              onChange={(e) => {
+                // Typing or picking a title that's in Music ties the session to that song
+                const hit = songs.find((x) => x.title === e.target.value);
+                set({ song: e.target.value, track: hit?.id });
+                if (hit && Number(hit.bpm)) setBpm(Number(hit.bpm));
+              }}
             />
+            <datalist id="foundry-songs">
+              {songs.map((x) => (
+                <option key={x.id} value={x.title} />
+              ))}
+            </datalist>
+            {s.track && (
+              <button style={button} title="This song's page in Operations > Music" onClick={() => openSong(openWindow, s.track!)}>
+                Music
+              </button>
+            )}
+            <span style={{ color: 'var(--fk-dim)', whiteSpace: 'nowrap' }}>{saved}</span>
           </div>
-          <div style={{ padding: '4px 6px', borderBottom: rule }}>
-            <div style={{ ...label, marginBottom: 2 }}>
-              Vocals{' '}
-              <span style={mono}>
-                {done}/{CHECKS.length}
-              </span>
-            </div>
-            {CHECKS.map((c) => (
-              <label key={c} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '1px 0' }}>
-                <input type="checkbox" checked={!!s.checks[c]} onChange={(e) => set({ checks: { ...s.checks, [c]: e.target.checked } })} />
-                <span style={s.checks[c] ? { textDecoration: 'line-through', color: 'var(--fk-dim)' } : undefined}>{c}</span>
-              </label>
-            ))}
-          </div>
+          <EditList
+            title="Vocals"
+            items={vocals}
+            start={vocals}
+            set={(v) => set({ vocals: v })}
+            placeholder="e.g. Whisper track, hook stacks"
+          />
           <div style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 140 }}>
             <div style={{ ...label, marginBottom: 2 }}>
               Lyrics, one bar per line{' '}

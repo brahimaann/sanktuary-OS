@@ -1908,7 +1908,13 @@ const assertUnsealed = (user, space, abs, around = false) => {
   if (r && !sealedFor(user, space, abs)) fail(403, 'A folder in here is private to other people. Open the folders inside it instead.');
   if (r) fail(404, 'Not found');
 };
-const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
+// Who may change a release: admins, its owner and its `editors`. Everyone else who sees it can listen, comment and
+// follow. Releases from before 2026-11 have no `everyone: 'listen'`: there, everyone not in `listeners` can edit.
+const canEditRelease = (user, r) =>
+  user.admin ||
+  r.owner === user.username ||
+  !!r.editors?.includes(user.username) ||
+  (r.everyone !== 'listen' && !r.listeners?.includes(user.username));
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
 const fileRef = (v) =>
@@ -1986,6 +1992,8 @@ async function tracksApi(req, res, url) {
         writers: releaseWriters(input.writers),
         cover: null,
         members: null,
+        everyone: 'listen', // the team can listen; the owner hands out "Can edit"
+        editors: [],
         owner: me,
         created: new Date().toISOString(),
       };
@@ -2071,6 +2079,10 @@ async function tracksApi(req, res, url) {
       if (input.listeners !== undefined) {
         if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
         r.listeners = Array.isArray(input.listeners) ? userList(input.listeners).filter((u) => u !== r.owner) : [];
+      }
+      if (input.editors !== undefined) {
+        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
+        r.editors = Array.isArray(input.editors) ? userList(input.editors).filter((u) => u !== r.owner) : [];
       }
       const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
@@ -8429,6 +8441,34 @@ async function notesApi(req, res, url) {
   return json(res, { ok: true });
 }
 
+// ── /api/foundry: each member's saved Foundry sessions (song, tempo, key, checklist, lyrics), so they follow them
+// to every device and past ones can be opened again — data/foundry/<username>.json is { "<id>": session } ──
+const foundrySaved = new Map(); // username -> the last save, so two quick saves never write over each other
+async function foundryApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const file = `foundry/${user.username}.json`;
+  if (req.method === 'GET') return json(res, { sessions: await readJson(file, {}) });
+  const input = req.method === 'PUT' ? await jsonBody(req) : {};
+  const id = String(input.id ?? url.searchParams.get('id') ?? '');
+  if (!/^[\w-]{6,40}$/.test(id)) fail(400, 'Bad session id');
+  const change = async () => {
+    const all = await readJson(file, {});
+    if (req.method === 'DELETE') delete all[id];
+    else if (req.method === 'PUT') {
+      const s = input.session && typeof input.session === 'object' ? input.session : fail(400, 'Nothing to save');
+      if (JSON.stringify(s).length > 60_000) fail(413, 'That session is too long to save');
+      if (!own(all, id) && Object.keys(all).length >= 300) fail(400, 'You have 300 saved sessions already; delete some first');
+      all[id] = { ...s, updated: new Date().toISOString() };
+    } else fail(405, 'Unknown session action');
+    await mkdir(join(DATA, 'foundry'), { recursive: true });
+    await saveJson(file, all);
+  };
+  const done = (foundrySaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
+  foundrySaved.set(user.username, done);
+  await done;
+  return json(res, { ok: true });
+}
+
 // ── /api/boards: infinite canvas boards, edited live by the whole team ──
 // Each board lives in data/boards/<id>/ (board.json + assets/) on the PC's SSD, so boards work even with
 // every USB drive unplugged. Edits are per-item last-writer-wins: a client sends the whole item it changed,
@@ -10250,6 +10290,7 @@ const routes = [
   ['/api/files/', files],
   ['/api/me', me],
   ['/api/notes', notesApi],
+  ['/api/foundry', foundryApi],
   ['/api/admin/', admin],
   ['/api/boards', boardsApi],
   ['/api/logout', logout],

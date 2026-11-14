@@ -159,6 +159,7 @@ const memberIcons = (admin: boolean): DesktopIconDef[] => [
   app.producer,
   app.darkroom,
   app.filesWorkspace,
+  app.moodboards, // also a tab in Files; on the desktop so it isn't two clicks deep
   app.studio,
   app.business,
   app.teams,
