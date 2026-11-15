@@ -2224,7 +2224,16 @@ const BlogTab: React.FC = () => {
             onBlur={(e) => e.target.value !== post.body && patch({ body: e.target.value })}
           />
           <div style={{ ...row, marginTop: 6 }}>
-            <button style={{ ...button, fontWeight: 700 }} onClick={() => patch({ published: !post.published })}>
+            <button
+              style={{ ...button, fontWeight: 700 }}
+              onClick={() =>
+                run(
+                  api(`/api/blog/posts/${openId}`, { method: 'PATCH', body: JSON.stringify({ published: !post.published }) }).then(
+                    (r) => (!post.published && dialog.win(`"${post.title || 'Your post'}" is live on CITIES.`), r),
+                  ),
+                )
+              }
+            >
               {post.published ? 'Unpublish (back to draft)' : 'Publish'}
             </button>
             {post.published && (

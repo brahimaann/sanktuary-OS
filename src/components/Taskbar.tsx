@@ -3,6 +3,7 @@ import { useAuth } from '@clerk/react';
 import { useWindowManager, AppType } from '../wm/manager';
 import sound from '../utils/sound';
 import SMark from './SMark';
+import { SMood } from '../utils/dialog';
 import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
 import { openStudio } from '../apps/Studio';
@@ -106,6 +107,19 @@ export const Taskbar: React.FC = () => {
   const { windows, startMenuOpen, setStartMenuOpen, openWindow, focusWindow, minimizeWindow } = useWindowManager();
 
   const [timeStr, setTimeStr] = useState('');
+  // The S's mood and what it's saying (sayS in utils/dialog). Each event restarts its animation.
+  const [s, setS] = useState<{ mood: SMood | 'idle'; line: string; n: number }>({ mood: 'idle', line: '', n: 0 });
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout>;
+    const on = (e: Event) => {
+      const { mood, line } = (e as CustomEvent<{ mood: SMood; line: string }>).detail;
+      clearTimeout(t);
+      setS((o) => ({ mood, line, n: o.n + 1 }));
+      t = setTimeout(() => setS((o) => ({ ...o, mood: 'idle', line: '' })), line ? 5000 : 1200);
+    };
+    window.addEventListener('sk-s', on);
+    return () => (window.removeEventListener('sk-s', on), clearTimeout(t));
+  }, []);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const startMenuRef = useRef<HTMLDivElement>(null);
   const startButtonRef = useRef<HTMLButtonElement>(null);
@@ -198,8 +212,15 @@ export const Taskbar: React.FC = () => {
         title="Sanktuary"
         className={`start-button flex items-center justify-center h-[22px] px-2 m-[2px] outline-none ${startMenuOpen ? 'inset-deep' : ''}`}
       >
-        <SMark size={16} />
+        <span key={s.n} className={`sk-s sk-s-${s.mood}`}>
+          <SMark size={16} />
+        </span>
       </button>
+      {s.line && (
+        <div key={`l${s.n}`} className="sk-s-says" role="status" onClick={() => setS((o) => ({ ...o, line: '' }))}>
+          {s.line}
+        </div>
+      )}
 
       <div className="taskbar-divider h-5 w-[2px] mx-1 border-l border-gray-600 border-r border-white" />
 

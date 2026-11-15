@@ -565,7 +565,7 @@ const LocalEchoTerminal: React.FC = () => {
       `Reflection: ${echo.principle.inferencePrompt}`;
     navigator.clipboard
       .writeText(textToCopy)
-      .then(() => dialog.alert('Console output details copied to clipboard.'))
+      .then(() => dialog.done('Copied.'))
       .catch(() => dialog.alert('Failed to copy. Clipboard access denied.'));
   };
 

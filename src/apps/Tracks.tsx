@@ -681,7 +681,7 @@ const TracksApp: React.FC = () => {
           </>
         )}
       </div>
-      {release && guided && ready && <GuidedStrip ready={ready} onGo={goTo} onHide={() => guide(false)} />}
+      {release && guided && ready && <GuidedStrip key={release.id} ready={ready} onGo={goTo} onHide={() => guide(false)} />}
       <div
         ref={box}
         style={{
@@ -2420,6 +2420,16 @@ const GuidedStrip: React.FC<{ ready: Readiness; onGo: (c: Readiness['checks'][nu
 }) => {
   const due = (c: Readiness['checks'][number]) => !c.ok && (!c.later || ready.out);
   const next = STAGES.map(([st]) => ready.checks.find((c) => c.step === st && due(c))).find(Boolean);
+  // A stage that turns done while you watch gets a word from the S (not the ones already done when the page opened)
+  const doneNow = STAGES.filter(([st]) => ready.checks.some((c) => c.step === st) && ready.checks.every((c) => c.step !== st || c.ok));
+  const was = useRef<string[] | null>(null);
+  useEffect(() => {
+    const fresh = was.current && doneNow.find(([st]) => !was.current!.includes(st));
+    was.current = doneNow.map(([st]) => st);
+    if (!fresh) return;
+    const after = STAGES.find(([st]) => !was.current!.includes(st) && ready.checks.some((c) => c.step === st));
+    dialog.win(`${fresh[1]}: done.${after ? ` Next, ${after[1].toLowerCase()}.` : ' Every stage is done.'}`);
+  });
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', padding: '3px 6px', borderBottom: '1px solid #808080' }}>
       {STAGES.map(([st, label], i) => {

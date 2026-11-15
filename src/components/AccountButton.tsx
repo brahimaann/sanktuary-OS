@@ -36,7 +36,7 @@ const AccountButton: React.FC = () => {
   const unpairAll = async () => {
     if (!(await dialog.confirm('Sign out every device you signed in with a code?'))) return;
     await api('/api/pair', { method: 'DELETE' }).then(
-      () => dialog.alert('Done. Those devices are signed out.'),
+      () => dialog.done('Those devices are signed out.'),
       (e) => dialog.alert(`Couldn't sign them out: ${e.message}`),
     );
   };

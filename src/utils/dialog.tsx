@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import sound from './sound';
+import SMark from '../components/SMark';
 
 /**
  * Win98 message boxes to replace the browser's alert / confirm / prompt.
  *   await dialog.alert('Saved.')
  *   if (await dialog.confirm('Delete it?')) ...
  *   const name = await dialog.prompt('Name:', 'default')   // null when cancelled
+ *   dialog.done('Saved.')   // no box to close: a small stamp by the pointer that goes away by itself
+ *   dialog.win('Verse is up.')   // a real step forward: the S on the Start button hops and says it
  * Rendered by <DialogHost />, which App mounts once over the desktop.
  */
 type Icon = 'info' | 'warning' | 'error' | 'question';
@@ -31,6 +34,22 @@ interface Options {
 let queue: Request[] = [];
 let notify: (() => void) | null = null;
 
+// The "it worked" stamps: shown where the pointer last went down, gone after a moment
+interface Stamp {
+  id: number;
+  text: string;
+  x: number;
+  y: number;
+  big?: boolean;
+}
+let stamps: Stamp[] = [];
+
+/** The S on the Start button (Taskbar listens): 'win' hops, 'oops' slumps, 'hello' just talks. A line shows in its bubble. */
+export type SMood = 'win' | 'oops' | 'hello';
+export const sayS = (mood: SMood, line = '') => window.dispatchEvent(new CustomEvent('sk-s', { detail: { mood, line } }));
+let lastPointer = { x: 0, y: 0 };
+let stampId = 0;
+
 const open = <T,>(r: Omit<Request, 'resolve'>) =>
   new Promise<T>((resolve) => {
     queue = [...queue, { ...r, resolve }];
@@ -38,6 +57,27 @@ const open = <T,>(r: Omit<Request, 'resolve'>) =>
   });
 
 export const dialog = {
+  /** A small win (a verse posted, a take picked, a stage done, a post live), said by the S. */
+  win: (line: string) => {
+    sound.playTick();
+    sayS('win', line);
+  },
+  /** A finished action (saved, posted, copied): a stamp, a hop of the S and a soft tick. `big` is for a whole thing done. */
+  done: (text: string, o: { big?: boolean } = {}) => {
+    const id = ++stampId;
+    const { x, y } = lastPointer.x || lastPointer.y ? lastPointer : { x: innerWidth / 2, y: innerHeight / 2 };
+    stamps = [...stamps.slice(-2), { id, text, x, y, big: o.big }];
+    sound.playTick();
+    sayS('win');
+    notify?.();
+    setTimeout(
+      () => {
+        stamps = stamps.filter((s) => s.id !== id);
+        notify?.();
+      },
+      o.big ? 2200 : 1600,
+    );
+  },
   alert: (message: string, o: Options = {}) =>
     open<void>({
       kind: 'alert',
@@ -78,8 +118,30 @@ export const DialogHost: React.FC = () => {
 
   useEffect(() => {
     notify = () => setTick((t) => t + 1);
+    // A ticked box lands with a little stamp. In a Foundry checklist (or any [data-checklist]) of three or more,
+    // ticking the last one gets "All set."
+    const down = (e: PointerEvent) => (lastPointer = { x: e.clientX, y: e.clientY });
+    const change = (e: Event) => {
+      const box = e.target as HTMLInputElement;
+      if (box.type !== 'checkbox' || !box.checked) return;
+      box.classList.remove('sk-ticked');
+      void box.offsetWidth;
+      box.classList.add('sk-ticked');
+      const list = box.closest('.fk-cockpit, [data-checklist]') ? box.closest('label')?.parentElement : null;
+      const all = list
+        ? Array.from(list.children).flatMap((c) =>
+            c.tagName === 'LABEL' ? Array.from(c.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) : [],
+          )
+        : [];
+      if (all.length >= 3 && all.every((b) => b.checked)) dialog.done('All set.', { big: true });
+      else sound.playTick();
+    };
+    document.addEventListener('pointerdown', down, true);
+    document.addEventListener('change', change, true);
     return () => {
       notify = null;
+      document.removeEventListener('pointerdown', down, true);
+      document.removeEventListener('change', change, true);
     };
   }, []);
 
@@ -88,10 +150,30 @@ export const DialogHost: React.FC = () => {
     if (!req) return;
     setText(req.value || '');
     if (req.kind !== 'prompt') sound.playDing();
+    if (req.icon === 'error') sayS('oops');
     setTimeout(() => (req.kind === 'prompt' ? input.current?.select() : okBtn.current?.focus()), 0);
   }, [req]);
 
-  if (!req) return null;
+  const stampLayer = stamps.map((st) => (
+    <div
+      key={st.id}
+      role="status"
+      className={'sk-stamp' + (st.big ? ' sk-stamp-big' : '')}
+      style={{
+        left: Math.max(8, Math.min(st.x + 10, innerWidth - 180)),
+        top: Math.max(8, Math.min(st.y - 34, innerHeight - 40)),
+        animationDuration: st.big ? '0.12s, 0.3s' : undefined,
+        animationDelay: st.big ? '0s, 1.9s' : undefined,
+      }}
+    >
+      <span className="sk-stamp-s">
+        <SMark size={st.big ? 16 : 12} />
+      </span>
+      {st.text}
+    </div>
+  ));
+
+  if (!req) return <>{stampLayer}</>;
 
   const close = (answer: boolean) => {
     queue = queue.slice(1);
@@ -100,81 +182,84 @@ export const DialogHost: React.FC = () => {
   };
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 2147483000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(0,0,0,0.15)',
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          close(false);
-        }
-        if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'BUTTON') {
-          e.preventDefault();
-          close(true);
-        }
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      <div role="dialog" aria-modal="true" aria-label={req.title} style={box}>
-        <div style={titleBar}>
-          <span style={{ flex: 1, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <span style={{ background: '#fff', padding: '0 8px' }}>{req.title}</span>
-          </span>
-          <button
-            aria-label="Close"
-            onClick={() => close(false)}
-            style={{ ...btn, minWidth: 0, width: 16, height: 14, padding: 0, fontSize: 10, lineHeight: '10px', fontWeight: 700 }}
-          >
-            ✕
-          </button>
-        </div>
-        <div style={{ display: 'flex', gap: 12, padding: '14px 14px 8px', alignItems: 'flex-start' }}>
-          <img
-            src={`/images/icons/${req.icon}-32x32-8bpp.png?v=2`}
-            alt=""
-            style={{ width: 32, height: 32, flexShrink: 0, imageRendering: 'pixelated' }}
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4 }}>{req.message}</div>
-            {req.kind === 'prompt' && (
-              <input
-                ref={input}
-                type={req.password ? 'password' : 'text'}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  marginTop: 8,
-                  fontFamily: 'inherit',
-                  fontSize: 12,
-                  padding: '3px 4px',
-                  background: '#fff',
-                  border: '2px inset #808080',
-                }}
-              />
+    <>
+      {stampLayer}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 2147483000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(0,0,0,0.15)',
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            close(false);
+          }
+          if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'BUTTON') {
+            e.preventDefault();
+            close(true);
+          }
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div role="dialog" aria-modal="true" aria-label={req.title} style={box}>
+          <div style={titleBar}>
+            <span style={{ flex: 1, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ background: '#fff', padding: '0 8px' }}>{req.title}</span>
+            </span>
+            <button
+              aria-label="Close"
+              onClick={() => close(false)}
+              style={{ ...btn, minWidth: 0, width: 16, height: 14, padding: 0, fontSize: 10, lineHeight: '10px', fontWeight: 700 }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 12, padding: '14px 14px 8px', alignItems: 'flex-start' }}>
+            <img
+              src={`/images/icons/${req.icon}-32x32-8bpp.png?v=2`}
+              alt=""
+              style={{ width: 32, height: 32, flexShrink: 0, imageRendering: 'pixelated' }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4 }}>{req.message}</div>
+              {req.kind === 'prompt' && (
+                <input
+                  ref={input}
+                  type={req.password ? 'password' : 'text'}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    marginTop: 8,
+                    fontFamily: 'inherit',
+                    fontSize: 12,
+                    padding: '3px 4px',
+                    background: '#fff',
+                    border: '2px inset #808080',
+                  }}
+                />
+              )}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '6px 12px 12px' }}>
+            <button ref={okBtn} style={{ ...btn, outline: '1px solid #000', outlineOffset: -4 }} onClick={() => close(true)}>
+              {req.ok}
+            </button>
+            {req.kind !== 'alert' && (
+              <button style={btn} onClick={() => close(false)}>
+                {req.cancel}
+              </button>
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, padding: '6px 12px 12px' }}>
-          <button ref={okBtn} style={{ ...btn, outline: '1px solid #000', outlineOffset: -4 }} onClick={() => close(true)}>
-            {req.ok}
-          </button>
-          {req.kind !== 'alert' && (
-            <button style={btn} onClick={() => close(false)}>
-              {req.cancel}
-            </button>
-          )}
-        </div>
       </div>
-    </div>
+    </>
   );
 };
 
