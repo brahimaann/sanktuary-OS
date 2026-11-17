@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@clerk/react';
-import AccountButton from '../components/AccountButton';
-import RetroIcon, { IconLabel } from '../components/RetroIcon';
+import RetroIcon from '../components/RetroIcon';
+import MoreMenu, { MenuHead, MenuItem } from '../components/MoreMenu';
 import { useWindowManager } from '../wm/manager';
 import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
-import { button, extsOf, fileIcon, fileKind, shell, formatSize, hasThumb, isTouch } from './fileTypes';
+import { button, extsOf, fileIcon, fileKind, shell, formatSize, hasThumb, isRaw, isTouch } from './fileTypes';
 import { RANK, Rights } from '../utils/api';
 import { dialog } from '../utils/dialog';
 import { DRAG_FILE, Ref } from '../utils/refs';
@@ -108,7 +108,6 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   // Favourite folders (saved to your account, so every device has them), recent folders and the folder each space
   // was last left in (this device)
   const [favs, setFavs] = useState<Fav[]>([]);
-  const [favOpen, setFavOpen] = useState(false);
   const [recent, setRecent] = useState<Fav[]>([]);
   const here = path.join('/');
   const isFav = favs.some((f) => f.space === app && f.path === here);
@@ -149,7 +148,6 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     if (!r?.ok) setStatus("Couldn't save your favourites. Try again.");
   };
   const jump = (f: Fav) => {
-    setFavOpen(false);
     const to = f.path.split('/').filter(Boolean);
     if (f.space === app) return go(to);
     openWindow({
@@ -172,14 +170,15 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   const [versions, setVersions] = useState<{ file: string; list: Entry[] } | null>(null);
   const [view, setView] = useState<'list' | 'icons'>(() => {
     try {
-      return localStorage.getItem('sk_files_view') === 'icons' ? 'icons' : 'list';
+      return localStorage.getItem('sk_files_view') === 'list' ? 'list' : 'icons'; // pictures first: it's mostly photos and video
     } catch {
-      return 'list';
+      return 'icons';
     }
   });
   const uploadRef = useRef<HTMLInputElement>(null);
   // Search box, Show (this folder / Recent / Photos...) and sort order
   const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const [viewOf, setViewOf] = useState<View>('here');
   const [sort, setSort] = useState<Sort>('name');
   const [found, setFound] = useState<Entry[] | null>(null); // search / view results instead of the folder
@@ -319,6 +318,7 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   // Opening another folder leaves search; typing searches here and in every subfolder
   useEffect(() => {
     setQuery('');
+    setSearching(false);
     setViewOf('here');
   }, [app, here]);
   const findSeq = useRef(0);
@@ -349,7 +349,23 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
   }, [query, viewOf, isSignedIn, app, here]); // eslint-disable-line react-hooks/exhaustive-deps
   const full = (e: Entry) => [...path, ...(e.dir || []), e.name];
   const idOf = (e: Entry) => [...(e.dir || []), e.name].join('/');
-  const rows = [...(found || entries)].sort((a, b) => Number(b.isDir) - Number(a.isDir) || SORTS[sort](a, b));
+  const sorted = [...(found || entries)].sort((a, b) => Number(b.isDir) - Number(a.isDir) || SORTS[sort](a, b));
+  // Picture view: a camera's RAW + JPG of one shot (IMG_4019.CR2 / .JPG) is one tile, the JPG, with its RAW kept
+  // alongside (viewer, download, rename, delete). The list view shows every file.
+  const rawOf = new Map<string, Entry>();
+  if (view === 'icons') {
+    const shot = (e: Entry) =>
+      `${idOf(e)
+        .replace(/\.[^./]+$/, '')
+        .toLowerCase()}`;
+    const jpgs = new Map(sorted.filter((e) => !e.isDir && /\.jpe?g$/i.test(e.name)).map((e) => [shot(e), e]));
+    for (const e of sorted) {
+      const j = !e.isDir && isRaw(e.name) && jpgs.get(shot(e));
+      if (j) rawOf.set(idOf(j), e);
+    }
+  }
+  const pairedRaws = new Set([...rawOf.values()]);
+  const rows = sorted.filter((e) => !pairedRaws.has(e));
 
   const setViewMode = (v: 'list' | 'icons') => {
     setView(v);
@@ -371,6 +387,9 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
         dir,
         name: e.name,
         siblings: rows.filter((x) => !x.isDir && String(x.dir) === String(e.dir)).map((x) => x.name),
+        raws: Object.fromEntries(
+          rows.filter((x) => rawOf.has(idOf(x)) && String(x.dir) === String(e.dir)).map((x) => [x.name, rawOf.get(idOf(x))!.name]),
+        ),
       },
       width: 720,
       height: 520,
@@ -613,12 +632,21 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
 
   const pick = found ? undefined : entries.find((e) => e.name === selected); // the toolbar acts on this folder's items
   const pickFound = found?.find((e) => idOf(e) === selected);
+  const pickRaw = pick && rawOf.get(idOf(pick));
+  const others = recent.filter((r) => !(r.space === app && r.path === here));
+  const where = `\\\\SANKTUARY\\${[name, ...path].join('\\')}`;
 
   const renameSelected = async () => {
     const to = pick && (await dialog.prompt('Rename to:', pick.name, { title: 'Rename' }))?.trim();
     if (!pick || !to || to === pick.name) return;
     try {
       await call(`${url([...path, pick.name])}?rename=${encodeURIComponent(to)}`, 'POST');
+      // its RAW follows the JPG's new name
+      if (pickRaw)
+        await call(
+          `${url([...path, pickRaw.name])}?rename=${encodeURIComponent(to.replace(/\.[^.]+$/, '') + pickRaw.name.slice(pickRaw.name.lastIndexOf('.')))}`,
+          'POST',
+        );
       load();
     } catch (err) {
       setStatus((err as Error).message);
@@ -629,13 +657,14 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     if (
       !pick ||
       !(await dialog.confirm(
-        `Are you sure you want to delete "${pick.name}"?\n\nIt goes to the space's trash (.sk-trash) and can be recovered by an admin.`,
+        `Are you sure you want to delete "${pick.name}"${pickRaw ? ` and its RAW "${pickRaw.name}"` : ''}?\n\nIt goes to the space's trash (.sk-trash) and can be recovered by an admin.`,
         { title: 'Confirm File Delete', icon: 'warning' },
       ))
     )
       return;
     try {
       await call(url([...path, pick.name]), 'DELETE');
+      if (pickRaw) await call(url([...path, pickRaw.name]), 'DELETE');
       load();
     } catch (err) {
       setStatus((err as Error).message);
@@ -703,13 +732,6 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       WebkitTouchCallout: 'none',
     } as React.CSSProperties,
   });
-  const nav = (label: string, dir: 'back' | 'forward' | 'up', off: boolean, onClick: () => void, extra = {}) => (
-    <button style={{ ...button, display: 'flex', alignItems: 'center', gap: 3 }} disabled={off} onClick={onClick} {...extra}>
-      <RetroIcon name={dir} />
-      {label}
-    </button>
-  );
-
   return (
     <div
       style={shell}
@@ -722,65 +744,141 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       }}
       onDrop={(e) => (can('upload') && e.dataTransfer.types.includes('Files') ? onDrop(e) : e.preventDefault())}
     >
-      <div style={toolbar}>
-        {nav('Back', 'back', !hist.back.length, goBack)}
-        {nav('Forward', 'forward', !hist.fwd.length, goForward)}
-        {nav('Up', 'up', !path.length, () => go(path.slice(0, -1)), {
-          ...(path.length ? dropProps(path.slice(0, -1)) : {}),
-          style: {
-            ...button,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 3,
-            ...(path.length && over === JSON.stringify(path.slice(0, -1)) ? dropHover : {}),
-          },
-        })}
-        <div style={sep} />
-        {can('upload') && (
-          <button style={button} disabled={busy} onClick={() => uploadRef.current?.click()}>
-            <IconLabel icon="upload">Upload...</IconLabel>
-          </button>
-        )}
-        {can('upload') && (
-          <button style={button} onClick={newFolder}>
-            New Folder
-          </button>
-        )}
-        {can('edit') && (
-          <button style={button} disabled={!pick} onClick={renameSelected}>
-            Rename
-          </button>
-        )}
-        {can('upload') && (
-          <button style={button} disabled={!pick} onClick={deleteSelected} title="You can delete what you added">
-            Delete
-          </button>
-        )}
+      <div style={{ ...toolbar, flexWrap: 'nowrap', gap: 0, padding: '1px 2px' }}>
+        <button className="sk-tool" title="Back" aria-label="Back" disabled={!hist.back.length} onClick={goBack}>
+          <RetroIcon name="back" size={16} />
+        </button>
         <button
-          style={button}
-          disabled={!pick || busy}
-          title="Folders download as a .zip; an Ableton set comes zipped with its samples and recordings"
-          onClick={() => pick && (pick.project ? setProjectFor({ entry: pick, mode: 'download' }) : download(pick))}
+          className="sk-tool"
+          title="Up one folder (drop a file here to move it up)"
+          aria-label="Up"
+          disabled={!path.length}
+          onClick={() => go(path.slice(0, -1))}
+          {...(path.length ? dropProps(path.slice(0, -1)) : {})}
+          style={path.length && over === JSON.stringify(path.slice(0, -1)) ? dropHover : undefined}
         >
-          <IconLabel icon="download">Download</IconLabel>
+          <RetroIcon name="up" size={16} />
         </button>
-        {pick?.project && (
-          <button style={{ ...button, fontWeight: 700 }} onClick={() => setProjectFor({ entry: pick, mode: 'info' })}>
-            <IconLabel icon="lock">Project...</IconLabel>
+        <div style={crumb} title={where}>
+          {path.length > 0 && <span style={{ opacity: 0.6 }}>{path.length > 1 ? '… / ' : `${name} / `}</span>}
+          <b>{folderName(path)}</b>
+          {isFav && ' ★'}
+        </div>
+        <button
+          className={`sk-tool${searching || query ? ' on' : ''}`}
+          title="Search this folder and every folder in it"
+          aria-label="Search"
+          onClick={() => {
+            if (searching || query) setQuery('');
+            setSearching(!(searching || query));
+          }}
+        >
+          <RetroIcon name="search" size={16} />
+        </button>
+        <button
+          className="sk-tool"
+          title={view === 'icons' ? 'Show as a list with sizes and dates' : 'Show as pictures'}
+          aria-label={view === 'icons' ? 'List view' : 'Picture view'}
+          onClick={() => setViewMode(view === 'list' ? 'icons' : 'list')}
+        >
+          <RetroIcon name={view === 'icons' ? 'list' : 'grid'} size={16} />
+        </button>
+        {can('upload') && (
+          <button
+            className="sk-tool"
+            title="Upload files here"
+            aria-label="Upload"
+            disabled={busy}
+            onClick={() => uploadRef.current?.click()}
+          >
+            <RetroIcon name="upload" size={16} />
           </button>
         )}
-        <button style={button} disabled={!pick || pick.isDir} onClick={showVersions}>
-          <IconLabel icon="archive">Versions</IconLabel>
-        </button>
-        <button style={button} disabled={!pick} onClick={() => setSharing(true)}>
-          <IconLabel icon="share">Share...</IconLabel>
-        </button>
-        <button style={button} onClick={load}>
-          <IconLabel icon="refresh">Refresh</IconLabel>
-        </button>
-        <button style={button} onClick={() => setViewMode(view === 'list' ? 'icons' : 'list')}>
-          {view === 'list' ? 'Icons' : 'Details'}
-        </button>
+        <MoreMenu title="More: file actions, show, sort, favourites">
+          {pick && <MenuHead>{pick.name}</MenuHead>}
+          {pick && (
+            <MenuItem
+              icon="download"
+              disabled={busy}
+              title="Folders download as a .zip; an Ableton set comes zipped with its samples and recordings"
+              onClick={() => (pick.project ? setProjectFor({ entry: pick, mode: 'download' }) : download(pick))}
+            >
+              Download{pickRaw ? ' JPG' : ''}
+            </MenuItem>
+          )}
+          {pickRaw && (
+            <MenuItem icon="download" disabled={busy} onClick={() => download(pickRaw)}>
+              Download RAW ({pickRaw.name})
+            </MenuItem>
+          )}
+          {pick?.project && (
+            <MenuItem icon="lock" onClick={() => setProjectFor({ entry: pick, mode: 'info' })}>
+              Project...
+            </MenuItem>
+          )}
+          {pick && (
+            <MenuItem icon="share" onClick={() => setSharing(true)}>
+              Share...
+            </MenuItem>
+          )}
+          {pick && can('edit') && <MenuItem onClick={renameSelected}>Rename...</MenuItem>}
+          {pick && !pick.isDir && (
+            <MenuItem icon="archive" onClick={showVersions}>
+              Versions
+            </MenuItem>
+          )}
+          {pick && can('upload') && (
+            <MenuItem icon="close" title="You can delete what you added" onClick={deleteSelected}>
+              Delete
+            </MenuItem>
+          )}
+          {pickFound && (
+            <MenuItem onClick={() => go(pickFound.isDir ? full(pickFound) : full(pickFound).slice(0, -1))}>Go to its folder</MenuItem>
+          )}
+          <MenuHead>This folder</MenuHead>
+          {can('upload') && (
+            <MenuItem icon="plus" onClick={newFolder}>
+              New folder...
+            </MenuItem>
+          )}
+          <MenuItem icon="forward" disabled={!hist.fwd.length} onClick={goForward}>
+            Forward
+          </MenuItem>
+          <MenuItem icon="refresh" onClick={load}>
+            Refresh
+          </MenuItem>
+          <MenuItem onClick={toggleFav}>{isFav ? '★ Remove from favourites' : '☆ Add to favourites'}</MenuItem>
+          <MenuHead>Show</MenuHead>
+          {Object.entries(VIEWS).map(([k, v]) => (
+            <MenuItem
+              key={k}
+              on={viewOf === k}
+              onClick={() => {
+                setViewOf(k as View);
+                setSort(k === 'here' ? 'name' : 'newest');
+              }}
+            >
+              {v.label}
+            </MenuItem>
+          ))}
+          <MenuHead>Sort</MenuHead>
+          {(['name', 'newest', 'largest', 'type'] as Sort[]).map((k) => (
+            <MenuItem key={k} on={sort === k} onClick={() => setSort(k)}>
+              {k[0].toUpperCase() + k.slice(1)}
+            </MenuItem>
+          ))}
+          {(favs.length > 0 || others.length > 0) && <MenuHead>Favourites and recent</MenuHead>}
+          {favs.map((f) => (
+            <MenuItem key={`${f.space}/${f.path}`} onClick={() => jump(f)}>
+              ★ {f.name} <span style={{ opacity: 0.6 }}>{f.spaceName}</span>
+            </MenuItem>
+          ))}
+          {others.map((r) => (
+            <MenuItem key={`r-${r.space}/${r.path}`} onClick={() => jump(r)}>
+              {r.name} <span style={{ opacity: 0.6 }}>{r.spaceName}</span>
+            </MenuItem>
+          ))}
+        </MoreMenu>
         <input
           ref={uploadRef}
           type="file"
@@ -791,92 +889,24 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
             e.target.value = '';
           }}
         />
-        <div style={{ flex: 1 }} />
-        <AccountButton />
       </div>
-      <div style={{ ...address, position: 'relative' }}>
-        <span style={{ color: '#444', marginRight: 6 }}>Address</span>
-        <div style={addressBox}>\\SANKTUARY\{[name, ...path].join('\\')}</div>
-        <button
-          style={{ ...button, marginLeft: 4, fontWeight: 700, color: isFav ? '#a06000' : '#000' }}
-          onClick={toggleFav}
-          title={isFav ? 'Remove this folder from your favourites' : 'Add this folder to your favourites'}
-          aria-label={isFav ? 'Remove from favourites' : 'Add to favourites'}
-        >
-          {isFav ? '★' : '☆'}
-        </button>
-        <button style={{ ...button, marginLeft: 2 }} onClick={() => setFavOpen(!favOpen)} title="Favourite and recent folders">
-          Favorites ▾
-        </button>
-        {favOpen && (
-          <div style={favMenu} onMouseLeave={() => setFavOpen(false)}>
-            <b style={{ padding: '2px 6px' }}>Favorites</b>
-            {!favs.length && <div style={{ padding: '2px 6px', color: '#555' }}>Tap ☆ to keep a folder here.</div>}
-            {favs.map((f) => (
-              <div key={`${f.space}/${f.path}`} style={favRow} onClick={() => jump(f)}>
-                ★ {f.name}
-                <span style={{ color: '#666', marginLeft: 6 }}>{f.spaceName}</span>
-              </div>
-            ))}
-            {recent.filter((r) => !(r.space === app && r.path === here)).length > 0 && (
-              <b style={{ padding: '6px 6px 2px', borderTop: '1px solid #808080' }}>Recent</b>
-            )}
-            {recent
-              .filter((r) => !(r.space === app && r.path === here))
-              .map((r) => (
-                <div key={`r-${r.space}/${r.path}`} style={favRow} onClick={() => jump(r)}>
-                  🕘 {r.name}
-                  <span style={{ color: '#666', marginLeft: 6 }}>{r.spaceName}</span>
-                </div>
-              ))}
-          </div>
-        )}
-      </div>
-      <div style={{ ...address, gap: 4, flexWrap: 'wrap' }}>
-        <input
-          type="search"
-          style={{ ...addressBox, flex: '1 1 160px', fontFamily: 'inherit', fontSize: isTouch ? 16 : 11 }}
-          placeholder={`Search ${folderName(path)} and every folder in it`}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <label>
-          Show{' '}
-          <select
-            style={button}
-            value={viewOf}
-            onChange={(e) => {
-              const v = e.target.value as View;
-              setViewOf(v);
-              setSort(v === 'here' ? 'name' : 'newest');
-            }}
-          >
-            {Object.entries(VIEWS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Sort{' '}
-          <select style={button} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-            <option value="name">Name</option>
-            <option value="newest">Newest</option>
-            <option value="largest">Largest</option>
-            <option value="type">Type</option>
-          </select>
-        </label>
-        {pickFound && (
-          <button
-            style={button}
-            onClick={() => go(pickFound.isDir ? full(pickFound) : full(pickFound).slice(0, -1))}
-            title="Go to the folder this is in"
-          >
-            Open folder
-          </button>
-        )}
-      </div>
+      {(searching || query || viewOf !== 'here') && (
+        <div style={{ ...address, gap: 4 }}>
+          <input
+            type="search"
+            autoFocus={searching && !query}
+            style={{ ...addressBox, fontFamily: 'inherit', fontSize: isTouch ? 16 : 11 }}
+            placeholder={`Search ${folderName(path)} and every folder in it`}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {viewOf !== 'here' && (
+            <button className="sk-tool on" title="Show this folder again" onClick={() => setViewOf('here')}>
+              {VIEWS[viewOf].label} ×
+            </button>
+          )}
+        </div>
+      )}
       <div
         ref={listRef}
         style={{ ...listBox, position: 'relative', overflowX: 'hidden' }}
@@ -951,13 +981,17 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
                       src={`${url(full(e))}?thumb&t=${token}`}
                       alt=""
                       loading="lazy"
-                      style={{ maxWidth: '100%', maxHeight: '100%' }}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(ev) => {
-                        (ev.target as HTMLImageElement).src = fileIcon(e.name, false, 32);
+                        Object.assign(ev.currentTarget.style, { width: '32px', height: '32px', objectFit: 'contain' });
+                        ev.currentTarget.src = fileIcon(e.name, false, 32);
                       }}
                     />
                   ) : (
                     <img src={fileIcon(e.name, e.isDir, 32)} alt="" style={{ width: 32, height: 32 }} />
+                  )}
+                  {(rawOf.has(idOf(e)) || fileKind(e.name) === 'video') && (
+                    <span style={badge}>{rawOf.has(idOf(e)) ? 'RAW+JPG' : '▶ VIDEO'}</span>
                   )}
                 </div>
                 <div style={{ ...tileLabel, ...(selected === idOf(e) ? selectedStyle : {}) }}>
@@ -1221,25 +1255,10 @@ export const toolbar: React.CSSProperties = {
   flexWrap: 'wrap',
 };
 const address: React.CSSProperties = { display: 'flex', alignItems: 'center', padding: '3px 4px' };
-const favMenu: React.CSSProperties = {
-  position: 'absolute',
-  right: 4,
-  top: '100%',
-  zIndex: 30,
-  minWidth: 220,
-  maxWidth: 'calc(100% - 8px)',
-  maxHeight: 320,
-  overflowY: 'auto',
-  background: '#fff',
-  border: '2px outset #fff',
-  boxShadow: '2px 2px 0 #000',
-  display: 'flex',
-  flexDirection: 'column',
-  padding: 2,
-};
-const favRow: React.CSSProperties = {
-  padding: '4px 6px',
-  cursor: 'default',
+const crumb: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  padding: '0 6px',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -1268,13 +1287,6 @@ const th: React.CSSProperties = {
 const td: React.CSSProperties = { padding: isTouch ? '8px 6px' : '1px 6px', whiteSpace: 'nowrap', cursor: 'default', userSelect: 'none' };
 const selectedStyle: React.CSSProperties = { background: '#000', color: '#fff' };
 const dropHover: React.CSSProperties = { outline: '2px dotted #000', outlineOffset: -2, background: '#c8d0ff' };
-const sep: React.CSSProperties = {
-  width: 2,
-  alignSelf: 'stretch',
-  margin: '2px 2px',
-  borderLeft: '1px solid #808080',
-  borderRight: '1px solid #fff',
-};
 const dragGhost: React.CSSProperties = {
   position: 'fixed',
   zIndex: 100000,
@@ -1289,17 +1301,50 @@ const dragGhost: React.CSSProperties = {
   fontSize: 11,
   opacity: 0.85,
 };
-const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, padding: 8 };
+const grid: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: `repeat(auto-fill, minmax(${isTouch ? 96 : 120}px, 1fr))`,
+  gap: 4,
+  padding: 4,
+};
 const tile: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  alignItems: 'center',
-  gap: 4,
+  alignItems: 'stretch',
+  minWidth: 0,
+  gap: 2,
   cursor: 'default',
   userSelect: 'none',
 };
-const thumbBox: React.CSSProperties = { width: 88, height: 88, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const tileLabel: React.CSSProperties = { maxWidth: 96, textAlign: 'center', wordBreak: 'break-word', lineHeight: 1.2, padding: '0 2px' };
+const thumbBox: React.CSSProperties = {
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '1',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'hidden',
+  border: '1px solid #000',
+};
+const badge: React.CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  bottom: 0,
+  padding: '0 3px',
+  background: '#000',
+  color: '#fff',
+  fontSize: 9,
+};
+const tileLabel: React.CSSProperties = {
+  maxWidth: '100%',
+  textAlign: 'center',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  lineHeight: 1.3,
+  padding: '0 2px',
+  fontSize: 10,
+};
 const dropOverlay: React.CSSProperties = {
   position: 'absolute',
   inset: 0,
