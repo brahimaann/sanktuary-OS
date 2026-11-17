@@ -7,6 +7,8 @@ import { fileUrl, shell, toolbar, button, statusBar } from './TeamFiles';
 import { fileIcon, fileKind, isTouch, lightAudio, lightImage, needsConversion, saveToDevice } from './fileTypes';
 import Avatar from './Avatar';
 import MediaControls from '../components/MediaControls';
+import RetroIcon from '../components/RetroIcon';
+import MoreMenu, { MenuHead, MenuItem } from '../components/MoreMenu';
 import { useWindowManager } from '../wm/manager';
 import { dialog } from '../utils/dialog';
 import { sharedAudio } from '../utils/sound';
@@ -18,6 +20,7 @@ interface FilePreviewProps {
   dir: string[];
   name: string;
   siblings: string[]; // files in the same folder, for prev/next
+  raws?: Record<string, string>; // JPG -> the camera RAW of the same shot (Team Files pairs them)
 }
 interface Comment {
   id: string;
@@ -37,10 +40,12 @@ const EDITABLE_PHOTO = /\.(jpe?g|png|tiff?|webp|dng|cr2|cr3|nef|nrw|arw|srf|sr2|
 export const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
 /** Previews a team file (images, audio with waveform, video, PDF, text) with a live comment thread. */
-const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, siblings }) => {
+const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, siblings, raws = {} }) => {
   const { getToken } = useAuth();
   const { openWindow } = useWindowManager();
-  const [name, setName] = useState(initialName);
+  const [shot, setShot] = useState(initialName);
+  const [rawOn, setRawOn] = useState(false); // a paired shot: look at its RAW instead of the JPG
+  const name = rawOn && raws[shot] ? raws[shot] : shot;
   const [token, setToken] = useState('');
   const media = useRef<HTMLMediaElement | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -69,7 +74,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const { me } = useMe();
   const isAdmin = !!me?.admin;
   const [posting, setPosting] = useState(false);
-  const index = siblings.indexOf(name);
+  const index = siblings.indexOf(shot);
   const kind = fileKind(name);
   const src = token
     ? `${fileUrl(app, [...dir, name])}?t=${token}${ver ? `&version=${encodeURIComponent(ver)}` : ''}${fresh ? `&r=${fresh}` : ''}`
@@ -111,15 +116,18 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const step = (d: number) => {
     if (siblings.length < 2) return;
     setAutoPlay(false);
-    setName(siblings[(index + d + siblings.length) % siblings.length]);
+    setShot(siblings[(index + d + siblings.length) % siblings.length]);
   };
   // "Play next": the next audio file in the folder starts by itself (stops at the end of the folder)
   const playNext = () => {
     const next = siblings.slice(index + 1).find((n) => fileKind(n) === 'audio');
     if (!prefs.autoNext || !next) return;
     setAutoPlay(true);
-    setName(next);
+    setShot(next);
   };
+  const download = () => window.open(`${src}&download`, '_blank');
+  // Phones: swipe a picture sideways for the next / previous one
+  const swipeX = useRef<number | null>(null);
   const seek = (t: number) => {
     if (media.current) {
       media.current.currentTime = t;
@@ -143,21 +151,34 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         if (e.key === 'ArrowRight') step(1);
       }}
     >
-      <div style={toolbar}>
+      <div style={{ ...toolbar, flexWrap: 'nowrap', gap: 0, padding: '1px 2px' }}>
         {siblings.length > 1 && (
-          <button style={button} onClick={() => step(-1)}>
-            ◀ Prev
+          <button className="sk-tool" title="Previous" aria-label="Previous" onClick={() => step(-1)}>
+            <RetroIcon name="back" size={16} />
           </button>
         )}
         {siblings.length > 1 && (
-          <button style={button} onClick={() => step(1)}>
-            Next ▶
+          <button className="sk-tool" title="Next" aria-label="Next" onClick={() => step(1)}>
+            <RetroIcon name="forward" size={16} />
           </button>
         )}
-        {isTouch && kind === 'image' && (
+        <span style={{ margin: '0 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>
+          {name}
+        </span>
+        {raws[shot] && (
           <button
-            style={{ ...button, fontWeight: 700 }}
+            className={`sk-tool${rawOn ? ' on' : ''}`}
+            title={rawOn ? `Showing the RAW (${raws[shot]}): back to the JPG` : `Show the RAW of this shot (${raws[shot]})`}
+            onClick={() => setRawOn(!rawOn)}
+          >
+            RAW
+          </button>
+        )}
+        {isTouch && kind === 'image' ? (
+          <button
+            className="sk-tool"
             disabled={!token}
+            aria-label="Save to Photos"
             title="Opens your phone's share sheet: choose Save Image to put it in Photos"
             onClick={async () => {
               // phones can't keep RAW/PSD/TIFF: those go as the high-quality preview picture
@@ -171,106 +192,123 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
               }
             }}
           >
-            Save to Photos
+            <RetroIcon name="photo" size={16} />
+          </button>
+        ) : (
+          <button className="sk-tool" title="Download" aria-label="Download" disabled={!token} onClick={download}>
+            <RetroIcon name="download" size={16} />
           </button>
         )}
-        <button style={button} disabled={!token} onClick={() => window.open(`${src}&download`, '_blank')}>
-          Download
-        </button>
-        {versions.length > 0 && (
-          <select
-            value={ver}
-            onChange={(e) => setVer(e.target.value)}
-            title="Earlier versions are kept every time this file is replaced: pick one to hear or see it"
-          >
-            <option value="">Current version</option>
-            {versions.map((v, i) => (
-              <option key={v.name} value={v.name}>
-                Version {versions.length - i} · {new Date(v.modified).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-              </option>
-            ))}
-          </select>
-        )}
-        {ver && (
+        <MoreMenu title="More: download, open, edit, versions">
+          {isTouch && kind === 'image' && (
+            <MenuItem icon="download" disabled={!token} onClick={download}>
+              Download original
+            </MenuItem>
+          )}
+          {(kind === 'pdf' || kind === 'image') && (
+            <MenuItem
+              icon="external"
+              disabled={!token}
+              onClick={() => window.open(needsConversion(name) ? `${src}&preview` : src, '_blank')}
+            >
+              Open in new tab
+            </MenuItem>
+          )}
+          {EDITABLE_PHOTO.test(name) && (
+            <MenuItem
+              title="Open in the SANKTUARY photo editor (runs on the Sanktuary server)"
+              onClick={() =>
+                openWindow({
+                  id: `rapidraw-${app}-${path}`,
+                  title: `SANKTUARY - ${name}`,
+                  icon: '/images/icons/paint-16x16.png?v=2',
+                  appType: 'iframe',
+                  appProps: {
+                    src: `/apps/rapidraw/?file=${encodeURIComponent(`sk://${app}/${[...dir, name].map(encodeURIComponent).join('/')}`)}`,
+                  },
+                  width: 1100,
+                  height: 720,
+                })
+              }
+            >
+              Edit in SANKTUARY
+            </MenuItem>
+          )}
+          {lightImage(name) && (
+            <MenuItem
+              title="Darkroom: film looks, CCD bloom, JPEG degradation, glitch, collage..."
+              onClick={() =>
+                openWindow({
+                  id: `darkroom-${app}-${path}`,
+                  title: `Darkroom - ${name}`,
+                  icon: '/images/icons/kodak-imaging-16x16.png?v=2',
+                  appType: 'darkroom',
+                  appProps: { app, dir, name },
+                  width: 900,
+                  height: 600,
+                })
+              }
+            >
+              Darkroom
+            </MenuItem>
+          )}
+          {kind === 'video' && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
+            <MenuItem
+              title="Make a promo or lyric video from this clip (Video Editor)"
+              onClick={() =>
+                openWindow({
+                  id: `video-editor-${app}-${path}`,
+                  title: `Video Editor - ${name}`,
+                  icon: '/images/icons/video-16x16.png?v=2',
+                  appType: 'video-editor',
+                  appProps: { clip: { space: app, path } },
+                  width: 960,
+                  height: 680,
+                })
+              }
+            >
+              Edit video...
+            </MenuItem>
+          )}
+          {kind === 'video' && isAdmin && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
+            <MenuItem title="Post this video to the Sanktuary YouTube channel" onClick={() => setPosting(true)}>
+              Post to YouTube...
+            </MenuItem>
+          )}
+          {versions.length > 0 && <MenuHead>Versions</MenuHead>}
+          {versions.length > 0 && (
+            <MenuItem on={!ver} onClick={() => setVer('')}>
+              Current version
+            </MenuItem>
+          )}
+          {versions.map((v, i) => (
+            <MenuItem key={v.name} on={ver === v.name} onClick={() => setVer(v.name)}>
+              Version {versions.length - i} · {new Date(v.modified).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+            </MenuItem>
+          ))}
+        </MoreMenu>
+      </div>
+      {ver && (
+        <div style={{ ...toolbar, padding: '2px 4px' }}>
+          <span style={{ flex: 1 }}>Showing an earlier version.</span>
           <button style={{ ...button, fontWeight: 700 }} onClick={restoreVersion} title="Needs edit rights on this folder">
             Restore this version
           </button>
-        )}
-        {(kind === 'pdf' || kind === 'image') && (
-          <button style={button} disabled={!token} onClick={() => window.open(needsConversion(name) ? `${src}&preview` : src, '_blank')}>
-            Open in new tab
+          <button className="sk-tool" onClick={() => setVer('')}>
+            Back to current
           </button>
-        )}
-        {kind === 'video' && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
-          <button
-            style={button}
-            title="Make a promo or lyric video from this clip (Video Editor)"
-            onClick={() =>
-              openWindow({
-                id: `video-editor-${app}-${path}`,
-                title: `Video Editor - ${name}`,
-                icon: '/images/icons/video-16x16.png?v=2',
-                appType: 'video-editor',
-                appProps: { clip: { space: app, path } },
-                width: 960,
-                height: 680,
-              })
-            }
-          >
-            Edit video...
-          </button>
-        )}
-        {kind === 'video' && isAdmin && /\.(mp4|m4v|mov|webm)$/i.test(name) && (
-          <button style={button} onClick={() => setPosting(true)} title="Post this video to the Sanktuary YouTube channel">
-            Post to YouTube...
-          </button>
-        )}
-        {EDITABLE_PHOTO.test(name) && (
-          <button
-            style={button}
-            title="Open in the SANKTUARY photo editor (runs on the Sanktuary server)"
-            onClick={() =>
-              openWindow({
-                id: `rapidraw-${app}-${path}`,
-                title: `SANKTUARY - ${name}`,
-                icon: '/images/icons/paint-16x16.png?v=2',
-                appType: 'iframe',
-                appProps: {
-                  src: `/apps/rapidraw/?file=${encodeURIComponent(`sk://${app}/${[...dir, name].map(encodeURIComponent).join('/')}`)}`,
-                },
-                width: 1100,
-                height: 720,
-              })
-            }
-          >
-            SANKTUARY
-          </button>
-        )}
-        {lightImage(name) && (
-          <button
-            style={button}
-            title="Darkroom: film looks, CCD bloom, JPEG degradation, glitch, collage..."
-            onClick={() =>
-              openWindow({
-                id: `darkroom-${app}-${path}`,
-                title: `Darkroom - ${name}`,
-                icon: '/images/icons/kodak-imaging-16x16.png?v=2',
-                appType: 'darkroom',
-                appProps: { app, dir, name },
-                width: 900,
-                height: 600,
-              })
-            }
-          >
-            Darkroom
-          </button>
-        )}
-        <span style={{ marginLeft: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: 700 }}>
-          {name}
-        </span>
-      </div>
+        </div>
+      )}
       {posting && <YouTubePost space={app} path={path} name={name} onClose={() => setPosting(false)} />}
-      <div style={stage}>
+      <div
+        style={kind === 'image' ? { ...stage, touchAction: 'pan-y pinch-zoom' } : stage}
+        onPointerDown={(e) => (swipeX.current = kind === 'image' && e.pointerType === 'touch' ? e.clientX : null)}
+        onPointerUp={(e) => {
+          const dx = swipeX.current === null ? 0 : e.clientX - swipeX.current;
+          swipeX.current = null;
+          if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
+        }}
+      >
         {!src ? null : kind === 'image' ? (
           <img
             key={src}
@@ -351,7 +389,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
         focusSignal={commentHere}
       />
       <div style={statusBar}>
-        {siblings.length > 1 ? `${index + 1} of ${siblings.length} — use ◀ ▶ or ${kind === 'audio' ? 'N / P' : 'arrow keys'}` : name}
+        {siblings.length > 1
+          ? `${index + 1} of ${siblings.length} — ${kind === 'audio' ? 'N / P' : isTouch ? 'swipe' : 'arrow keys'} for the next one`
+          : name}
       </div>
     </div>
   );
@@ -448,8 +488,8 @@ const Comments: React.FC<{
         minHeight: 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px' }}>
-        <button style={{ ...button, padding: '0 6px' }} onClick={() => setOpen(!open)}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px' }}>
+        <button className="sk-tool" onClick={() => setOpen(!open)}>
           {open ? '▾' : '▸'} Comments ({comments.length})
         </button>
         {err && <span style={{ color: '#a00000' }}>{err}</span>}
@@ -1179,9 +1219,8 @@ const stage: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: '#808080',
-  border: '2px inset #808080',
-  margin: '0 2px',
+  background: '#fff',
+  borderTop: '1px solid #000',
   overflow: 'hidden',
 };
 
