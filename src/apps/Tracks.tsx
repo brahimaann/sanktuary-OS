@@ -19,6 +19,7 @@ import { useProfiles } from '../utils/profiles';
 import { Term } from '../utils/glossary';
 import Campaign from './Campaign';
 import OpenVerses, { takeVersesWish, Verse, VerseSlot } from './OpenVerses';
+import { ContentBoard, ContentItem, ContentList } from './ShotContent';
 
 interface Release {
   id: string;
@@ -42,6 +43,7 @@ interface Release {
   cover?: FileRef | null; // found in Artwork by a scan
   listeners?: string[]; // can listen and comment, not change it
   items?: string[]; // a Playlist's songs (track ids from other projects)
+  content?: ContentItem[]; // clips, reels, videos shot for the whole project
 }
 const STORES: [string, string][] = [
   ['presave', 'Pre-save link (shown until release day)'],
@@ -104,6 +106,7 @@ interface Track {
   explicit?: boolean | null; // null / missing: not answered yet
   regs?: Record<string, string>; // registration -> the day it was done
   master?: Master | null; // who owns the recording, and their sign-offs
+  content?: ContentItem[]; // clips, reels, videos, photos shot for this song
 }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const seconds = (v: string) => {
@@ -156,7 +159,7 @@ const TracksApp: React.FC = () => {
   const [data, setData] = useState<{ releases: Release[]; tracks: Track[]; statuses: string[]; kinds: string[] } | null>(null);
   const [releaseId, setReleaseId] = useState(''); // '' = the library
   // the library as covers, one list of every song by where it's at, or the open verses board
-  const [view, setView] = useState<'' | 'songs' | 'verses'>(() => (takeVersesWish() ? 'verses' : ''));
+  const [view, setView] = useState<'' | 'songs' | 'verses' | 'content'>(() => (takeVersesWish() ? 'verses' : ''));
   useEffect(() => {
     const on = () => takeVersesWish() && (setView('verses'), setReleaseId(''));
     window.addEventListener('sk:open-verses', on);
@@ -519,6 +522,13 @@ const TracksApp: React.FC = () => {
             >
               {view === 'verses' ? 'Covers' : 'Open verses'}
             </button>
+            <button
+              style={{ ...button, ...(view === 'content' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+              onClick={() => setView((v) => (v === 'content' ? '' : 'content'))}
+              title="Clips, reels, videos and photos shot for each song and project: how far along, and what's left"
+            >
+              {view === 'content' ? 'Covers' : 'Content'}
+            </button>
           </>
         )}
         {release && tracks.some((t) => t.bounce) && (
@@ -713,6 +723,19 @@ const TracksApp: React.FC = () => {
               const t = byId.get(id);
               if (!t) return setMsg('That song is gone from the tracker.');
               setView('');
+              setReleaseId(t.release);
+              setTrackId(t.id);
+            }}
+          />
+        ) : !release && view === 'content' ? (
+          <ContentBoard
+            releases={releases}
+            tracks={data.tracks}
+            onSaveSong={(t, content) => run(() => api(`/api/tracks/track/${t.id}`, { method: 'PATCH', body: JSON.stringify({ content }) }))}
+            onSaveProject={(r, content) =>
+              run(() => api(`/api/tracks/release/${r.id}`, { method: 'PATCH', body: JSON.stringify({ content }) }))
+            }
+            onOpenSong={(t) => {
               setReleaseId(t.release);
               setTrackId(t.id);
             }}
@@ -1684,6 +1707,10 @@ const TrackPage: React.FC<{
             {t.stems ? 'Change...' : 'Choose...'}
           </button>
         </div>
+      </Section>
+
+      <Section title="Content shot for it">
+        <ContentList items={t.content || []} onSave={(content) => save({ content })} />
       </Section>
 
       <Section title="Public page">
