@@ -6,6 +6,8 @@ import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from './Studio';
+import { showSong } from '../utils/songNav';
+import { showVerses } from './OpenVerses';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
@@ -13,7 +15,8 @@ import RetroIcon, { IconLabel } from '../components/RetroIcon';
 
 interface Entry {
   id: string;
-  source?: 'tracks' | 'opportunities'; // release days, track deadlines and opportunity deadlines: read-only here
+  source?: 'tracks' | 'opportunities' | 'verses'; // release days, track and footage deadlines, open verses, opportunity deadlines: read-only here
+  track?: string;
   title: string;
   kind: string;
   status?: string;
@@ -133,9 +136,11 @@ const TimelineApp: React.FC = () => {
         onClick={() =>
           i.source === 'opportunities'
             ? openStudio(openWindow, 'opportunities')
-            : i.source
-              ? openTracks()
-              : setOpenId(i.id === openId ? null : i.id)
+            : i.source === 'verses'
+              ? (showVerses(), openTracks())
+              : i.source
+                ? (i.release && showSong(i.release, i.track), openTracks())
+                : setOpenId(i.id === openId ? null : i.id)
         }
         style={{
           ...row,
@@ -146,7 +151,7 @@ const TimelineApp: React.FC = () => {
           i.source === 'opportunities'
             ? 'An opportunity: click to open Opportunities'
             : i.source
-              ? 'From Tracks: click to open Tracks'
+              ? 'From Music: click to open it'
               : undefined
         }
       >

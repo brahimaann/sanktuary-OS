@@ -3111,6 +3111,32 @@ async function timelineApi(req, res, url) {
           done: t.status === 'Done',
         });
     }
+    // Footage due dates (shot content on songs and whole projects) and open-verse deadlines, so the calendar has them too
+    for (const r of Object.values(tdb.releases)) {
+      if (!canSeeRelease(user, r)) continue;
+      const songs = Object.values(tdb.tracks).filter((t) => !t.deleted && t.release === r.id);
+      for (const [owner, list] of [[null, r.content], ...songs.map((t) => [t, t.content])])
+        for (const c of list || [])
+          if (c.due && c.status !== 'Posted')
+            fromTracks.push({
+              id: `content-${owner?.id || r.id}-${c.id}`,
+              source: 'tracks',
+              kind: 'Footage due',
+              title: `${c.kind}${c.title ? `: ${c.title}` : ''} for ${owner?.title || r.title} (${c.status.toLowerCase()})`,
+              start: c.due,
+              release: r.id,
+              ...(owner ? { track: owner.id } : {}),
+            });
+    }
+    for (const v of Object.values((await loadVerses()).items))
+      if (!v.archived && !v.picked && v.deadline)
+        fromTracks.push({
+          id: `verse-${v.id}`,
+          source: 'verses',
+          kind: 'Verse due',
+          title: `Open verse: ${v.title}`,
+          start: v.deadline,
+        });
     // Opportunity deadlines too (read-only here)
     for (const o of Object.values((await loadOpps()).items))
       if (!o.archived && o.deadline)

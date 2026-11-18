@@ -34,13 +34,13 @@ const STUDIO_MENU: MenuItem[] = [
   },
   {
     id: 'studio',
-    label: 'Studio (music, calendar, boards, opportunities)',
+    label: 'Operations (board, music, calendar, planner, opportunities)',
     title: 'Operations',
     appType: 'studio',
     icon: icon('media-player-32x32.png?v=2'),
     width: 960,
     height: 620,
-    props: { tab: 'music' },
+    props: { tab: 'board' },
   },
   {
     id: 'moodboards',

@@ -31,7 +31,7 @@ const app = {
     title: 'Operations',
     icon: I('media-player'),
     appType: 'studio',
-    appProps: { tab: 'music' },
+    appProps: { tab: 'board' },
     width: 960,
     height: 620,
   },

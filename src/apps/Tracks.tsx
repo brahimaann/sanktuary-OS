@@ -19,6 +19,7 @@ import { useProfiles } from '../utils/profiles';
 import { Term } from '../utils/glossary';
 import Campaign from './Campaign';
 import OpenVerses, { takeVersesWish, Verse, VerseSlot } from './OpenVerses';
+import { takeSongWish } from '../utils/songNav';
 import { ContentBoard, ContentItem, ContentList } from './ShotContent';
 
 interface Release {
@@ -192,6 +193,18 @@ const TracksApp: React.FC = () => {
     load();
   }, [load]);
   useLiveEvent('tracks', load);
+  useEffect(() => {
+    const on = () => {
+      const w = takeSongWish();
+      if (!w) return;
+      setView('');
+      setReleaseId(w.release);
+      setTrackId(w.track || null);
+    };
+    on();
+    window.addEventListener('sk:tracks-song', on);
+    return () => window.removeEventListener('sk:tracks-song', on);
+  }, []);
   useEffect(() => {
     // The New... window just made or added to a release: show it
     const show = (e: Event) => pickRelease((e as CustomEvent<string>).detail);
