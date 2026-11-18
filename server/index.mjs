@@ -1878,6 +1878,20 @@ const fileRef = (v) =>
 /** Today as YYYY-MM-DD in the server's own time zone (the home PC's), not UTC, so evening dates don't jump a day. */
 const localDate = (d = new Date()) => d.toLocaleDateString('en-CA');
 const dateOrNull = (v) => (v === null || v === '' ? null : /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fail(400, 'Dates look like 2027-06-01'));
+// Shot content (clips, reels, videos, photos) for a song or a whole project, each with where it's at and its file in a space
+const CONTENT_KINDS = ['Clip', 'Reel', 'Video', 'Visualizer', 'BTS', 'Photos', 'Other'];
+const CONTENT_STEPS = ['To shoot', 'Shot', 'Edited', 'Posted'];
+const cleanContent = (list) =>
+  (Array.isArray(list) ? list : []).slice(0, 200).map((x) => ({
+    id: /^[\w-]{1,20}$/.test(x?.id || '') ? x.id : randomUUID().slice(0, 8),
+    kind: CONTENT_KINDS.includes(x?.kind) ? x.kind : 'Clip',
+    title: String(x?.title ?? '')
+      .trim()
+      .slice(0, 120),
+    status: CONTENT_STEPS.includes(x?.status) ? x.status : 'To shoot',
+    file: x?.file ? fileRef(x.file) : null,
+    due: x?.due ? dateOrNull(x.due) : null,
+  }));
 
 async function tracksApi(req, res, url) {
   const cfg = await loadConfig();
@@ -2005,6 +2019,7 @@ async function tracksApi(req, res, url) {
           .trim()
           .slice(0, 120);
       if (input.writers !== undefined) r.writers = releaseWriters(input.writers);
+      if (input.content !== undefined) r.content = cleanContent(input.content); // shot for the whole project, not one song
       if (input.upc !== undefined) r.upc = upcOrEmpty(input.upc);
       if (input.stores !== undefined) {
         const stores = {};
@@ -2086,6 +2101,7 @@ async function tracksApi(req, res, url) {
         t.bmi = b && { ...b, signoffs: t.bmi?.signoffs || [] }; // like the master's: kept, out of date once the writers change
         log('updated the BMI sheet');
       }
+      if (input.content !== undefined) t.content = cleanContent(input.content);
       if (input.explicit !== undefined) t.explicit = input.explicit === null ? null : !!input.explicit;
       if (input.regs !== undefined)
         t.regs = Object.fromEntries(REGISTRATIONS.map((k) => [k, input.regs?.[k] ? dateOrNull(input.regs[k]) : null]).filter(([, v]) => v));
