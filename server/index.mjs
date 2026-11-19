@@ -22,6 +22,7 @@ import sharp from 'sharp';
 import webpush from 'web-push';
 import { initializeCanvas, readPsd } from 'ag-psd';
 import ffmpegPath from 'ffmpeg-static';
+import { cleanHtml, decodeXml, escAttr } from './feed-html.mjs';
 
 // ag-psd needs a pixel-buffer factory on the server (there's no canvas); we only read raw composite pixels.
 initializeCanvas(
@@ -1897,7 +1898,8 @@ const canSeeRelease = (user, r) =>
  * holds `abs`. With around, also one inside `abs`, since zipping, moving or sharing that folder would take it along. */
 function sealedFor(user, space, abs, around = false) {
   if (!user || user.admin || !tracksDb) return null;
-  const k = ownerKey(space, abs);
+  // Old versions, the bin and check-in uploads keep a copy of the path they came from: they're as private as it is
+  const k = ownerKey(space, abs).replace(/(^|[|/])\.sk-(?:versions|trash\/[^/]+|checkin-[^/]+)(?:\/|$)/g, '$1');
   const below = k.endsWith('|') ? k : k + '/';
   return (
     Object.values(tracksDb.releases).find(
@@ -4590,15 +4592,6 @@ function feedUrl(input) {
   return u.href;
 }
 
-const decodeXml = (s = '') =>
-  s
-    .replace(/^<!\[CDATA\[|\]\]>$/g, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&amp;/g, '&');
 const plainText = (html = '') =>
   decodeXml(html.replace(/<!\[CDATA\[|\]\]>/g, ''))
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
@@ -4613,60 +4606,6 @@ const slugify = (s) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
-
-// Substack post HTML, cut down to plain formatting before it's shown on our site: every tag not on this list is
-// dropped (its text kept), scripts/iframes/forms are removed with their contents, and only https links and
-// pictures survive as attributes. Nothing from the feed can run code on sanktuary.studio.
-const CLEAN_TAGS = {
-  p: [],
-  br: [],
-  hr: [],
-  h1: [],
-  h2: [],
-  h3: [],
-  h4: [],
-  strong: [],
-  b: [],
-  em: [],
-  i: [],
-  u: [],
-  s: [],
-  sup: [],
-  sub: [],
-  blockquote: [],
-  ul: [],
-  ol: [],
-  li: [],
-  pre: [],
-  code: [],
-  figure: [],
-  figcaption: [],
-  a: ['href'],
-  img: ['src', 'alt'],
-};
-const escAttr = (v) => v.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
-function cleanHtml(html) {
-  return String(html || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(
-      /<(script|style|iframe|object|embed|noscript|svg|math|form|template|button|select|textarea|video|audio)\b[\s\S]*?<\/\1\s*>/gi,
-      '',
-    )
-    .replace(/<\/?([a-zA-Z][\w-]*)([^>]*)>/g, (whole, name, attrs) => {
-      const t = name.toLowerCase();
-      if (!CLEAN_TAGS[t]) return '';
-      if (whole.startsWith('</')) return ['br', 'hr', 'img'].includes(t) ? '' : `</${t}>`;
-      let out = '';
-      for (const a of CLEAN_TAGS[t]) {
-        const m = attrs.match(new RegExp(`\\s${a}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'));
-        const v = m ? decodeXml(m[1] ?? m[2]).trim() : '';
-        if (a === 'alt' ? v : /^https:\/\//i.test(v)) out += ` ${a}="${escAttr(v)}"`;
-      }
-      if (t === 'a') out += ' target="_blank" rel="noopener noreferrer nofollow"';
-      if (t === 'img') out += ' loading="lazy" referrerpolicy="no-referrer"';
-      return `<${t}${out}>`;
-    });
-}
 
 const tag = (xml, name) => xml.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i'))?.[1] ?? '';
 const httpsOnly = (u) => (/^https:\/\//i.test(u || '') ? u : null);
@@ -7289,7 +7228,7 @@ async function liteMember(req, res, url, page, who) {
         ' / ',
       )}</p>${list.lockedBy ? `<p class="note">${h(list.lockedBy.user)} has "${h(list.lockedBy.project)}" checked out, so it can't be changed here.</p>` : ''}${
       canUpload && !pick
-        ? `<p class="sans"><input type="file" id="f" multiple> <button type="button" onclick="liteUpload('${h(api.replace(/\/$/, ''))}')">Upload</button> <span id="msg" class="dim"></span></p>${LITE_UPLOAD}`
+        ? `<p class="sans"><input type="file" id="f" multiple> <button type="button" onclick="liteUpload(${h(JSON.stringify(api.replace(/\/$/, '')))})">Upload</button> <span id="msg" class="dim"></span></p>${LITE_UPLOAD}`
         : ''
     }<div class="grid">${cards || `<p class="dim">${pick ? 'No photos in this folder.' : 'This folder is empty.'}</p>`}</div>`,
   );
@@ -8033,7 +7972,10 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   const size = Number(q.get('size') || 0);
   const chunkSize = Number(q.get('chunkSize') || size);
   const ok = /^[\w-]{8,64}$/.test(id) && Number.isInteger(chunk) && chunk >= 0 && chunk < chunks && chunkSize > 0 && chunkSize <= MAX_CHUNK;
-  if (!ok || (size && Math.ceil(size / chunkSize) !== chunks)) fail(400, 'Bad upload');
+  if (!ok || !Number.isSafeInteger(size) || size < 0 || Math.max(1, Math.ceil(size / chunkSize)) !== chunks) fail(400, 'Bad upload');
+  // The quota and the FAT32 limit are checked against `size`, so a chunk may only fill its own share of it
+  const room = Math.max(0, Math.min(chunkSize, size - chunk * chunkSize));
+  if (Number(req.headers['content-length'] || 0) > room) fail(413, 'More data than the upload said it had');
 
   const dir = dirname(target);
   const part = join(dir, `.sk-upload-${id}`);
@@ -8054,7 +7996,13 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   }
   const up = uploads.get(id);
   await up.ready; // every chunk waits until the part file exists
-  await pipeline(req, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
+  let got = 0;
+  const capped = async function* (src) {
+    for await (const c of src)
+      if ((got += c.length) > room) fail(413, 'More data than the upload said it had');
+      else yield c;
+  };
+  await pipeline(req, capped, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
   up.got.add(chunk);
   if (up.got.size < chunks || up.done) return json(res, { ok: true });
   up.done = true;
@@ -9374,7 +9322,7 @@ async function jsonBody(req) {
 
 function staticFile(req, res, url) {
   let file = normalize(join(DIST, decodeURIComponent(url.pathname)));
-  if (!file.startsWith(normalize(DIST))) fail(403, 'Forbidden');
+  if (!inside(DIST, file)) fail(403, 'Forbidden'); // not a plain prefix check: that would let ../dist-next through
   if (!existsSync(file) || !url.pathname.includes('.')) file = join(DIST, 'index.html'); // SPA fallback
   if (MEDIA.video.test(file)) return stream(req, res, new URLSearchParams(), file); // byte ranges, which Safari needs to play video
   // The page is always re-checked so browsers pick up new builds; built assets have content hashes in their

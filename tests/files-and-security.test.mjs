@@ -282,6 +282,20 @@ try {
   check('view: cannot upload', (await up('carol', 'view', 'x.txt', 'x')).status === 403);
   check('no access -> space hidden', (await call('carol', '/api/files/up/?list')).status === 404);
   check('upload: can add', (await up('bob', 'up', 'docs/new.txt', 'new')).status === 200);
+  check(
+    'upload: a chunk cannot carry more than the size it declared (quota and FAT32 checks go by it)',
+    (
+      await call(
+        'bob',
+        '/api/files/up/sneak.txt?upload=sneaky123&chunk=0&chunks=1&size=4&chunkSize=4',
+        'PUT',
+        'way more than four bytes',
+        true,
+      )
+    ).status === 413 &&
+      (await call('bob', '/api/files/up/sneak2.txt?upload=sneaky456&chunk=3&chunks=9&size=0&chunkSize=1000', 'PUT', 'x', true)).status ===
+        400,
+  );
   check('upload: cannot replace', (await up('bob', 'up', 'docs/song.txt', 'v2', '&replace=1')).status === 403);
   check(
     'upload: can replace your own file, and it keeps its name',
@@ -682,6 +696,9 @@ try {
     ).text,
   );
   await up('bob', 'up', 'Packs/Pack/Bounces/beat.txt', 'beat');
+  await up('bob', 'up', 'Packs/Pack/Bounces/beat.txt', 'beat', '&replace=1'); // replaced by itself: the first take goes to .sk-versions
+  await up('bob', 'up', 'Packs/Pack/Bounces/old.txt', 'old take');
+  await call('bob', '/api/files/up/Packs/Pack/Bounces/old.txt', 'DELETE'); // into the bin, .sk-trash
   check('open pack: carol reads its files', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
   await call('bob', `/api/tracks/release/${pack.id}`, 'PATCH', { members: [] });
   check('private pack: carol cannot read its files', (await call('carol', '/api/files/view/Packs/Pack/Bounces/beat.txt')).status === 404);
@@ -699,6 +716,22 @@ try {
     'private pack: or shared by link',
     (await call('carol', '/api/links', 'POST', { space: 'grp', path: 'Packs/Pack', days: 7 })).status === 404,
   );
+  {
+    // Old versions and the bin keep copies under hidden folders: those must be as private as the pack itself
+    const names = async (path) => JSON.parse((await call('carol', `/api/files/view/${path}?list`)).text).entries?.map((e) => e.name) || [];
+    const bin = (await names('.sk-trash')).pop();
+    check(
+      'private pack: its old versions stay private',
+      !(await names('.sk-versions/Packs')).includes('Pack') &&
+        (await call('carol', '/api/files/view/.sk-versions/Packs/Pack/Bounces/beat.txt?list')).status === 404,
+    );
+    check(
+      'private pack: and so does its bin',
+      !!bin &&
+        !(await names(`.sk-trash/${bin}/Packs`)).includes('Pack') &&
+        (await call('carol', `/api/files/view/.sk-trash/${bin}/Packs/Pack/Bounces/old.txt`)).status === 404,
+    );
+  }
   check('private pack: its owner still reads it', (await call('bob', '/api/files/up/Packs/Pack/Bounces/beat.txt')).text === 'beat');
   check('private pack: admins too', (await call('alice', '/api/files/view/Packs/Pack/Bounces/beat.txt')).text === 'beat');
   await call('bob', `/api/tracks/release/${pack.id}`, 'PATCH', { members: ['carol'] });
@@ -3614,6 +3647,11 @@ ${thisYear}-03;Comma Song;0,456`,
     check('the code signs the device in', paired.status === 303 && paired.headers.get('location') === '/lite/files' && !!devCookie);
     check('a code works once', (await (await pairWith(code1)).text()).includes('That code'));
     const liteGet = (path, c = devCookie) => fetch(B + path, { headers: { cookie: c }, redirect: 'manual' });
+    await call('bob', `/api/files/up/${encodeURIComponent("q');alert(1);('")}?mkdir`, 'POST');
+    check(
+      'Lite: a folder name cannot break out of the upload button’s script',
+      (await (await liteGet(`/lite/files/up/${encodeURIComponent("q');alert(1);('")}`)).text()).includes('onclick="liteUpload(&#34;'),
+    );
     const liteFiles = await (await liteGet('/lite/files/view')).text();
     check('Lite lists the member’s files', liteFiles.includes('Signed in as <b>bob</b>') && liteFiles.includes('/lite/files/view/docs'));
     check(
