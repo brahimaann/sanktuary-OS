@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 // Camera RAW: the server previews the JPEG inside (see RAW_PHOTO in server/index.mjs)
 const RAW = 'cr2 cr3 nef nrw arw srf sr2 dng raf orf rw2 pef srw 3fr erf kdc iiq';
-const isRaw = (name: string) => RAW.split(' ').includes(name.split('.').pop()?.toLowerCase() || '');
+export const isRaw = (name: string) => RAW.split(' ').includes(name.split('.').pop()?.toLowerCase() || '');
 
 type FileKind = 'image' | 'audio' | 'video' | 'pdf' | 'doc' | 'sheet' | 'text' | 'other';
 

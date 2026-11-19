@@ -574,6 +574,34 @@ try {
     'members can edit a track',
     edited.status === 'Mixing' && edited.bpm === '102' && edited.links.bandlab && edited.bounce.path.endsWith('kick.wav'),
   );
+  const shot = JSON.parse(
+    (
+      await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', {
+        content: [
+          { kind: 'Reel', title: 'Hook in the car', status: 'Shot', file: { space: 'up', path: 'Shoots/hook.mp4' } },
+          { kind: 'Nope', title: 'BTS', status: 'Whatever' },
+        ],
+      })
+    ).text,
+  );
+  check(
+    'shot content saves per song, unknown kinds and steps fall back',
+    shot.content.length === 2 &&
+      shot.content[0].status === 'Shot' &&
+      shot.content[0].file.path === 'Shoots/hook.mp4' &&
+      shot.content[1].kind === 'Clip' &&
+      shot.content[1].status === 'To shoot' &&
+      shot.content.every((x) => x.id),
+  );
+  check(
+    'shot content file links cannot climb out',
+    (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { content: [{ file: { space: 'up', path: '../x.mp4' } }] })).status === 400,
+  );
+  check(
+    'a project keeps its own shot content',
+    JSON.parse((await call('alice', `/api/tracks/release/${album.id}`, 'PATCH', { content: [{ kind: 'Video', title: 'Trailer' }] })).text)
+      .content[0].title === 'Trailer',
+  );
   check(
     'file links cannot climb out',
     (await call('bob', `/api/tracks/track/${song.id}`, 'PATCH', { stems: { space: 'up', path: '../x' } })).status === 400,

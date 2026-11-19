@@ -391,3 +391,90 @@
   background: transparent;
   color: inherit;
 }
+
+/* Bare toolbar icons (Team Files, previews): no box, invert on hover, the signal colour when on */
+.sk-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0 4px;
+  border: 0 !important;
+  border-image: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  color: #000;
+  font: inherit;
+  flex-shrink: 0;
+}
+.sk-tool:enabled:hover,
+.sk-tool[aria-expanded='true'] {
+  background: #000;
+  color: #fff;
+}
+.sk-tool.on {
+  background: var(--sk-signal);
+  color: #000;
+}
+@media (pointer: coarse) {
+  .sk-tool {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+/* Its dropdown: paper, 2 px ink frame, hard shadow; rows are bare */
+.sk-menu {
+  position: fixed;
+  z-index: 100000;
+  min-width: 200px;
+  max-width: calc(100vw - 8px);
+  overflow-y: auto;
+  background: #fff;
+  border: 2px solid #000;
+  box-shadow: 3px 3px 0 #000;
+  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  font-family: 'MS Sans Serif', Arial, sans-serif;
+  font-size: 11px;
+  color: #000;
+}
+.sk-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 4px 6px;
+  border: 0;
+  border-image: none;
+  box-shadow: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  min-height: 0;
+}
+.sk-menu > button.on {
+  font-weight: 700;
+}
+.sk-menu > button:enabled:hover {
+  background: var(--sk-signal);
+}
+@media (pointer: coarse) {
+  .sk-menu > button {
+    padding: 9px 16px 9px 8px;
+    font-size: 13px;
+  }
+}
+.sk-menu-head {
+  padding: 6px 6px 2px;
+  margin-top: 2px;
+  border-top: 1px solid #000;
+  font-weight: 700;
+}
+.sk-menu-head:first-child {
+  border-top: 0;
+  margin-top: 0;
+}

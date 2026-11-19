@@ -36,6 +36,8 @@ interface Props {
   app?: string;
   dir?: string[];
   name?: string;
+  /** In the Darkroom window: opens the RAW engine in place (shows a RAW... button) */
+  onRaw?: () => void;
 }
 
 // ── Collage Presets & Types ──
@@ -215,6 +217,16 @@ const TABS = [
   ['versions', 'Versions'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
+// The tools in 4 groups plus Versions, so the panel has one short row instead of 13 tabs. A group with more than one tool
+// shows its tools as a second, smaller row.
+const GROUPS: [string, Tab[]][] = [
+  ['Looks', ['swag', 'goth', 'film', 'camera', 'match']],
+  ['Colour', ['mixer']],
+  ['Effects', ['jpeg', 'ccd', 'blur', 'glitch']],
+  ['Layout', ['collage', 'carousel']],
+  ['Versions', ['versions']],
+];
+const groupOf = (t: Tab) => GROUPS.find(([, ts]) => ts.includes(t))!;
 
 /** A saved step. Undo / Redo move through these. */
 interface Version {
@@ -226,7 +238,7 @@ interface Version {
 const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const forget = (vs: Version[]) => vs.forEach((v) => v.img.src.startsWith('blob:') && URL.revokeObjectURL(v.img.src));
 
-const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
+const Darkroom: React.FC<Props> = ({ app, dir = [], name, onRaw }) => {
   const { getToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<Gl | null>(null);
@@ -902,6 +914,11 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         >
           Server Files...
         </button>
+        {onRaw && (
+          <button style={button} onClick={onRaw} title="Develop a RAW file in SANKTUARY RAW">
+            RAW...
+          </button>
+        )}
         <button
           style={{
             ...button,
@@ -1064,12 +1081,12 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
               whiteSpace: 'nowrap',
             }}
           >
-            {TABS.map(([tabId, tabTitle]) => {
-              const active = activeTab === tabId;
+            {GROUPS.map(([g, tools]) => {
+              const active = groupOf(activeTab)[0] === g;
               return (
                 <button
-                  key={tabId}
-                  onClick={() => switchTab(tabId)}
+                  key={g}
+                  onClick={() => !active && switchTab(tools[0])}
                   style={{
                     ...button,
                     borderBottom: active ? 'none' : button.borderBottom,
@@ -1081,11 +1098,25 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
                     fontSize: 11,
                   }}
                 >
-                  {tabId === 'versions' ? `${tabTitle} (${history.length})` : tabTitle}
+                  {g === 'Versions' ? `Versions (${history.length})` : g}
                 </button>
               );
             })}
           </div>
+          {groupOf(activeTab)[1].length > 1 && (
+            <div style={{ display: 'flex', gap: 4, padding: '4px 6px 0', flexWrap: 'wrap' }}>
+              {groupOf(activeTab)[1].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => switchTab(t)}
+                  aria-pressed={activeTab === t}
+                  style={{ ...button, padding: '1px 6px', fontSize: 11, ...(activeTab === t ? { background: '#000', color: '#fff' } : {}) }}
+                >
+                  {TABS.find(([id]) => id === t)![1]}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Tier 2: Category Controls & Presets */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 6 }}>
