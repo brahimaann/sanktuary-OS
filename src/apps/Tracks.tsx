@@ -29,6 +29,7 @@ interface Release {
   date: string | null;
   members: string[] | null;
   owner: string;
+  owners?: string[]; // co-owners: decide who sees, edits and listens, like whoever made it
   public?: boolean;
   folder?: FileRef | null;
   slug?: string; // its public page: /release/<slug>
@@ -278,7 +279,8 @@ const TracksApp: React.FC = () => {
       if (!first) pickRelease(pl.id);
     });
   };
-  const listenOnly = !!(release && me && release.owner !== me.username && !me.admin && release.listeners?.includes(me.username));
+  const ownsIt = !!(release && me && (release.owner === me.username || release.owners?.includes(me.username) || me.admin));
+  const listenOnly = !!(release && me && !ownsIt && release.listeners?.includes(me.username));
   const [ready, setReady] = useState<Readiness | null>(null);
   const [readyOpen, setReadyOpen] = useState(false);
   // Guided path on by default; hiding it is remembered in this browser
@@ -306,7 +308,7 @@ const TracksApp: React.FC = () => {
     else setReadyOpen(true);
   };
   useEffect(() => {
-    if (!release || ['Folder', 'Playlist'].includes(release.kind)) return setReady(null);
+    if (!release || NOT_MUSIC.includes(release.kind)) return setReady(null);
     api(`/api/tracks/release/${release.id}?ready`).then(setReady, () => setReady(null));
   }, [api, release?.id, data]); // eslint-disable-line react-hooks/exhaustive-deps
   const tracks = isPlaylist
@@ -542,7 +544,7 @@ const TracksApp: React.FC = () => {
               onClick={() => setView((v) => (v === 'content' ? '' : 'content'))}
               title="Clips, reels, videos and photos shot for each song and project: how far along, and what's left"
             >
-              {view === 'content' ? 'Covers' : 'Content'}
+              {view === 'content' ? 'Covers' : 'Footage'}
             </button>
           </>
         )}
@@ -658,7 +660,7 @@ const TracksApp: React.FC = () => {
                 </button>
               </>
             ) : (
-              (release.owner === me?.username || me?.admin) && (
+              ownsIt && (
                 <button
                   style={button}
                   onClick={() => setLinking(true)}
@@ -675,7 +677,7 @@ const TracksApp: React.FC = () => {
             >
               Campaign...
             </button>
-            <button style={button} onClick={() => setSharing(true)} title="Who can see this project, and who can edit it">
+            <button style={button} onClick={() => setSharing(true)} title="The project's owners, and who can see, edit or only listen">
               {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
               {release.listeners?.length ? `, ${release.listeners.length} listening` : ''}...
             </button>
@@ -750,6 +752,7 @@ const TracksApp: React.FC = () => {
             onSaveProject={(r, content) =>
               run(() => api(`/api/tracks/release/${r.id}`, { method: 'PATCH', body: JSON.stringify({ content }) }))
             }
+            canApprove={(r) => !!me && (me.admin || (r as Release).owner === me.username || !!(r as Release).owners?.includes(me.username))}
             onOpenSong={(t) => {
               setReleaseId(t.release);
               setTrackId(t.id);
@@ -896,7 +899,7 @@ const TracksApp: React.FC = () => {
             onAddToPlaylist={(pl) => (pl ? addToPlaylist(pl, track.id) : newPlaylist(track.id))}
             focus={focus}
             statuses={data.statuses}
-            canRemove={!isPlaylist && !!me && (release!.owner === me.username || me.admin)}
+            canRemove={!isPlaylist && ownsIt}
             overlay={narrow}
             onChange={load}
             onClose={() => setTrackId(null)}
@@ -955,12 +958,15 @@ const TracksApp: React.FC = () => {
         )}
         {sharing && release && (
           <MembersPicker
-            title={`Who can see ${release.title}`}
+            title={`Who's on ${release.title}`}
             members={release.members}
             always={release.owner}
             listeners={release.listeners || []}
-            note="Everyone = every member. Pick people to keep it private (you and admins always see it). Can listen = play, comment and follow, but not change anything."
-            onSave={(m, listeners) => patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners })}
+            owners={ownsIt ? release.owners || [] : undefined}
+            note="Everyone = every member. Pick people to keep it private (owners and admins always see it). Co-owner = decides who's on it, like you. Can edit = works on it. Can listen = play, comment and follow, but not change anything."
+            onSave={(m, listeners, owners) =>
+              patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners, ...(ownsIt ? { owners } : {}) })
+            }
             onClose={() => setSharing(false)}
           />
         )}
@@ -1116,6 +1122,8 @@ const Library: React.FC<{
 
 const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
 const INBOX = 'New songs'; // where dropped songs wait until they find their album
+/** Projects that aren't music releases: no ISRC, splits or release-day checks. */
+const NOT_MUSIC = ['Folder', 'Playlist', 'Video', 'Photos'];
 const isInbox = (r: Release) => r.kind === 'Folder' && r.title === INBOX;
 const folderSafe = (name: string) =>
   name
@@ -1248,7 +1256,7 @@ const songStage = (t: Track, r?: Release) => {
   const mixed = ['Mastering', 'Done'].includes(t.status);
   const mastered = t.status === 'Done';
   const streams = STREAMING.some((k) => t.links?.[k]);
-  const dropped = !!r?.date && !['Folder', 'Playlist'].includes(r.kind) && daysUntil(r.date) <= 0;
+  const dropped = !!r?.date && !NOT_MUSIC.includes(r.kind) && daysUntil(r.date) <= 0;
   const out = streams || (mastered && dropped);
   const step: (typeof STEPS)[number] = out
     ? 'Out'
@@ -1766,8 +1774,13 @@ const TrackPage: React.FC<{
         </div>
       </Section>
 
-      <Section title="Content shot for it">
-        <ContentList items={t.content || []} onSave={(content) => save({ content })} />
+      <Section title="Footage">
+        <ContentList
+          items={t.content || []}
+          onSave={(content) => save({ content })}
+          folder={release.folder}
+          canApprove={!!me && (me.admin || release.owner === me.username || !!release.owners?.includes(me.username))}
+        />
       </Section>
 
       <Section title="Public page">

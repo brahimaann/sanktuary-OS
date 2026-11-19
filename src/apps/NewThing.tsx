@@ -477,7 +477,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           <label style={row}>
             <span style={cap}>Kind</span>
             <select style={field} value={releaseKind} onChange={(e) => setReleaseKind(e.target.value)}>
-              {['Album', 'EP', 'Single', 'Folder'].map((k) => (
+              {['Album', 'EP', 'Single', 'Video', 'Photos', 'Folder'].map((k) => (
                 <option key={k}>{k}</option>
               ))}
             </select>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApi } from '../utils/api';
 import { useOpenRef } from '../utils/refs';
+import { dialog } from '../utils/dialog';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { button, fileKind } from './fileTypes';
 
@@ -17,6 +18,9 @@ export interface ContentItem {
   file: FileRef | null;
   /** The edited cut, attached by whoever marks it Edited. */
   edit?: FileRef | null;
+  /** Where it went live (Posted), and which owner gave the OK (Approved). */
+  link?: string;
+  okBy?: string;
   due: string | null;
 }
 interface Song {
@@ -30,18 +34,27 @@ interface Project {
   id: string;
   title: string;
   kind: string;
+  folder?: FileRef | null;
   content?: ContentItem[];
 }
 
-const KINDS = ['Clip', 'Reel', 'Video', 'Visualizer', 'BTS', 'Photos', 'Other'];
-export const CONTENT_STEPS = ['To shoot', 'Shot', 'Edited', 'Posted'];
-const NEXT: Record<string, string> = { 'To shoot': 'shoot', Shot: 'edit', Edited: 'post' };
+const KINDS = ['Clip', 'Video', 'Visualizer', 'BTS', 'Photos', 'Other'];
+/** Approved = an owner of the project OK'd the edit; only then does it get posted. */
+export const CONTENT_STEPS = ['To shoot', 'Shot', 'Edited', 'Approved', 'Posted'];
+const NEXT: Record<string, string> = { 'To shoot': 'shoot', Shot: 'edit', Edited: 'get the OK on', Approved: 'post' };
+/** The project's fixed folders for footage: raw from the shoot, the edits, and what went out. */
+export const FOOTAGE_FOLDERS = { raw: 'Shoots', edit: 'Edits', posted: 'Posted' } as const;
+/** A picker start inside one of them: a file picker opens in it, a folder picker on it. */
+const inFolder = (folder: FileRef | null | undefined, sub: string, pickFolder = false): FileRef | null =>
+  folder ? { space: folder.space, path: `${folder.path}/${sub}${pickFolder ? '' : '/'}` } : null;
 const newId = () => Math.random().toString(36).slice(2, 10);
 const media = (n: string) => ['video', 'image'].includes(fileKind(n));
 
 /** Done share of a list: To shoot 0, Shot 1/3, Edited 2/3, Posted all of it. */
 const progress = (items: ContentItem[]) =>
-  items.length ? items.reduce((t, x) => t + CONTENT_STEPS.indexOf(x.status), 0) / (items.length * 3) : 0;
+  items.length
+    ? items.reduce((t, x) => t + Math.max(0, CONTENT_STEPS.indexOf(x.status)), 0) / (items.length * (CONTENT_STEPS.length - 1))
+    : 0;
 
 /** A 1-bit bar of ten cells, filled as far as the content has come. */
 export const ContentBar: React.FC<{ items: ContentItem[]; width?: number }> = ({ items, width = 100 }) => {
@@ -67,11 +80,15 @@ const counts = (items: ContentItem[]) =>
     .join(' · ') || 'nothing yet';
 
 /** One song's (or project's) content: add, rename, move along, link the file. Saves every change. */
-export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: ContentItem[]) => void; readOnly?: boolean }> = ({
-  items,
-  onSave,
-  readOnly,
-}) => {
+export const ContentList: React.FC<{
+  items: ContentItem[];
+  onSave: (items: ContentItem[]) => void;
+  readOnly?: boolean;
+  /** The project's folder: pickers open in its Shoots / Edits folders. */
+  folder?: FileRef | null;
+  /** An owner of the project (or an admin): can give the OK. */
+  canApprove?: boolean;
+}> = ({ items, onSave, readOnly, folder, canApprove }) => {
   const api = useApi();
   const openRef = useOpenRef();
   const [picking, setPicking] = useState<null | { id: string; folder: boolean; edit?: boolean } | 'many'>(null);
@@ -154,15 +171,32 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
                   style={{ ...field, fontWeight: x.status === 'Posted' ? 400 : 700 }}
                   value={x.status}
                   disabled={readOnly}
-                  onChange={(e) =>
+                  onChange={async (e) => {
+                    const to = e.target.value;
                     // Edited means there's an edited file: ask for it, and only mark it once one is picked
-                    e.target.value === 'Edited' && !x.edit
-                      ? setPicking({ id: x.id, folder: x.kind === 'Photos', edit: true })
-                      : set(x.id, { status: e.target.value })
-                  }
+                    if (to === 'Edited' && !x.edit) return setPicking({ id: x.id, folder: x.kind === 'Photos', edit: true });
+                    // Posted: where it went live
+                    if (to === 'Posted') {
+                      const link = await dialog.prompt('Link to the post (https://...):', x.link || 'https://');
+                      if (link === null) return;
+                      if (!/^https:\/\/\S+$/.test(link.trim())) return void dialog.alert('Paste the post link, starting with https://');
+                      return set(x.id, { status: to, link: link.trim() });
+                    }
+                    set(x.id, { status: to });
+                  }}
                 >
                   {CONTENT_STEPS.map((s) => (
-                    <option key={s}>{s}</option>
+                    <option
+                      key={s}
+                      value={s}
+                      // An owner gives the OK; nobody posts before it
+                      disabled={
+                        !canApprove &&
+                        ((s === 'Approved' && x.status !== 'Approved') || (s === 'Posted' && !['Approved', 'Posted'].includes(x.status)))
+                      }
+                    >
+                      {s === 'Approved' ? (x.okBy ? `Approved (${x.okBy})` : 'Approved (owner OK)') : s}
+                    </option>
                   ))}
                 </select>
               </span>
@@ -186,6 +220,17 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
                   <button style={button} onClick={() => open(x.edit!)} title={`Edited: ${x.edit.path}`}>
                     Edit
                   </button>
+                )}
+                {x.link && (
+                  <a
+                    href={x.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ ...button, color: 'inherit', textDecoration: 'none' }}
+                    title={x.link}
+                  >
+                    Post ↗
+                  </a>
                 )}
                 {!readOnly && x.edit && (
                   <button
@@ -231,9 +276,11 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
           mode={picking === 'many' || picking.folder ? 'folder' : 'file'}
           accept={media}
           start={
-            picking !== 'many'
-              ? (picking.edit && items.find((x) => x.id === picking.id)?.edit) || items.find((x) => x.id === picking.id)?.file
-              : null
+            picking === 'many'
+              ? inFolder(folder, FOOTAGE_FOLDERS.raw, true)
+              : picking.edit
+                ? items.find((x) => x.id === picking.id)?.edit || inFolder(folder, FOOTAGE_FOLDERS.edit, picking.folder)
+                : items.find((x) => x.id === picking.id)?.file || inFolder(folder, FOOTAGE_FOLDERS.raw, picking.folder)
           }
           onPick={(r) => {
             const p = picking;
@@ -266,7 +313,8 @@ export const ContentBoard: React.FC<{
   onSaveSong: (t: Song, items: ContentItem[]) => void;
   onSaveProject: (r: Project, items: ContentItem[]) => void;
   onOpenSong: (t: Song) => void;
-}> = ({ releases, tracks, onSaveSong, onSaveProject, onOpenSong }) => {
+  canApprove?: (r: Project) => boolean;
+}> = ({ releases, tracks, onSaveSong, onSaveProject, onOpenSong, canApprove }) => {
   const [open, setOpen] = useState<string | null>(null); // a song id, or 'p:' + a project id
   const [showEmpty, setShowEmpty] = useState(false);
   const projects = releases
@@ -282,14 +330,21 @@ export const ContentBoard: React.FC<{
     const todo = items.filter((x) => x.status !== 'Posted');
     if (!todo.length) return items.length ? 'All posted ✓' : '';
     const by = (s: string) => todo.filter((x) => x.status === s).length;
-    return CONTENT_STEPS.slice(0, 3)
+    return CONTENT_STEPS.slice(0, -1)
       .filter((s) => by(s))
       .map((s) => `${NEXT[s]} ${by(s)}`)
       .join(', ');
   };
-  const row = (key: string, label: React.ReactNode, items: ContentItem[], save: (items: ContentItem[]) => void, song?: Song) => (
+  const row = (
+    key: string,
+    label: React.ReactNode,
+    items: ContentItem[],
+    save: (items: ContentItem[]) => void,
+    r: Project,
+    song?: Song,
+  ) => (
     <React.Fragment key={key}>
-      <tr onClick={() => setOpen(open === key ? null : key)} style={{ cursor: 'pointer' }} title="Show and edit its content">
+      <tr onClick={() => setOpen(open === key ? null : key)} style={{ cursor: 'pointer' }} title="Show and edit its footage">
         <td style={td}>
           {open === key ? '▼' : '►'} {label}
         </td>
@@ -302,7 +357,7 @@ export const ContentBoard: React.FC<{
       {open === key && (
         <tr>
           <td colSpan={4} style={{ padding: '4px 8px 8px 20px', borderBottom: '1px solid #000' }}>
-            <ContentList items={items} onSave={save} />
+            <ContentList items={items} onSave={save} folder={r.folder} canApprove={canApprove?.(r)} />
             {song && (
               <button style={{ ...button, marginTop: 4 }} onClick={() => onOpenSong(song)}>
                 Song page
@@ -339,8 +394,8 @@ export const ContentBoard: React.FC<{
                   <td style={{ ...td, whiteSpace: 'normal', borderBottom: 0 }}>{counts(all)}</td>
                   <td style={{ ...td, whiteSpace: 'normal', borderBottom: 0, fontWeight: 700 }}>{left(all)}</td>
                 </tr>
-                {row(`p:${r.id}`, <i>Whole project</i>, r.content || [], (items) => onSaveProject(r, items))}
-                {songs.map((t) => row(t.id, t.title, t.content || [], (items) => onSaveSong(t, items), t))}
+                {row(`p:${r.id}`, <i>Whole project</i>, r.content || [], (items) => onSaveProject(r, items), r)}
+                {songs.map((t) => row(t.id, t.title, t.content || [], (items) => onSaveSong(t, items), r, t))}
               </React.Fragment>
             ))}
             {!shown.length && (

@@ -27,6 +27,8 @@ interface Release {
   kind: string;
   date: string | null;
   content?: ContentItem[];
+  owner?: string;
+  owners?: string[];
 }
 interface Entry {
   id: string;
@@ -54,10 +56,10 @@ interface Lamp {
   go: () => void;
 }
 
-const STEP = ['To shoot', 'Shot', 'Edited', 'Posted'];
+const STEP = ['To shoot', 'Shot', 'Edited', 'Approved', 'Posted'];
 /** Week-strip tag per footage kind (the calendar entry's title starts with the kind). */
-const FOOTAGE_TAG: Record<string, string> = { Reel: 'REEL', Video: 'VIDEO', Photos: 'PHOTO', Visualizer: 'VIZ', BTS: 'BTS' };
-const NEXT: Record<string, string> = { 'To shoot': 'Shoot', Shot: 'Edit', Edited: 'Post' };
+const FOOTAGE_TAG: Record<string, string> = { Video: 'VIDEO', Photos: 'PHOTO', Visualizer: 'VIZ', BTS: 'BTS' };
+const NEXT: Record<string, string> = { 'To shoot': 'Shoot', Shot: 'Edit', Edited: 'Get the OK on', Approved: 'Post' };
 const today = () => new Date().toLocaleDateString('en-CA');
 const addDays = (d: string, n: number) => {
   const t = new Date(`${d}T12:00:00`);
@@ -75,7 +77,7 @@ const label: React.CSSProperties = { fontFamily: 'Silkscreen, monospace', fontSi
 const panel: React.CSSProperties = { border: `2px solid ${ink}`, background: paper, padding: 8 };
 const plate: React.CSSProperties = { ...label, background: ink, color: paper, padding: '2px 6px', alignSelf: 'flex-start' };
 
-/** One cell per footage item: empty = to shoot, light dots = shot, dense dots = edited, solid = posted. */
+/** One cell per footage item: empty = to shoot, light dots = shot, dense dots = edited, half = OK'd, solid = posted. */
 const Cell: React.FC<{ status: string; title: string }> = ({ status, title }) => {
   const i = STEP.indexOf(status);
   return (
@@ -88,11 +90,13 @@ const Cell: React.FC<{ status: string; title: string }> = ({ status, title }) =>
         height: 16,
         border: `2px solid ${ink}`,
         background:
-          i === 3
+          i === 4
             ? ink
-            : i > 0
-              ? `radial-gradient(${ink} ${i === 1 ? 0.6 : 1.2}px, transparent ${i === 1 ? 0.9 : 1.4}px) 0 0 / 3px 3px`
-              : 'transparent',
+            : i === 3
+              ? `linear-gradient(to top, ${ink} 50%, transparent 50%)`
+              : i > 0
+                ? `radial-gradient(${ink} ${i === 1 ? 0.6 : 1.2}px, transparent ${i === 1 ? 0.9 : 1.4}px) 0 0 / 3px 3px`
+                : 'transparent',
       }}
     />
   );
@@ -271,6 +275,21 @@ const OpsBoard: React.FC = () => {
         go: () => (enough && e.release ? goSong(e.release, shots.find((x) => x.for)?.for || undefined) : goCalendar(e.id)),
       });
     }
+    // Edits waiting on your OK, on projects you own
+    const toOk = rows.filter(
+      (x) => x.r && (x.r.owner === user || x.r.owners?.includes(user) || !!me?.admin) && x.content.some((c) => c.status === 'Edited'),
+    );
+    if (toOk.length)
+      out.push({
+        key: 'ok',
+        level: 'act',
+        label: `${plural(
+          toOk.reduce((n, x) => n + x.content.filter((c) => c.status === 'Edited').length, 0),
+          'edit',
+        )} to OK`,
+        sub: `${toOk[0].t.title} · watch it and give the OK`,
+        go: () => goSong(toOk[0].t.release, toOk[0].t.id),
+      });
     // Plan cards on you: late ones block, ones due in the next 2 days are yours to act on
     const tasks = entries
       .filter((e) => e.source === 'planner' && !e.done && e.people?.includes(user) && e.start <= addDays(now, 2))
@@ -482,7 +501,7 @@ const OpsBoard: React.FC = () => {
             </button>
           );
         })}
-        <div style={{ padding: '4px 8px', color: dim }}>□ to shoot · ░ shot · ▒ edited · ■ posted · click a song to open it</div>
+        <div style={{ padding: '4px 8px', color: dim }}>□ to shoot · ░ shot · ▒ edited · ▄ OK'd · ■ posted · click a song to open it</div>
       </div>
     </div>
   );

@@ -196,9 +196,9 @@ const Boards: React.FC<{ kind?: 'canvas' | 'kanban' }> = ({ kind = 'canvas' }) =
           disabled={!pick}
           onChange={(e) => patch({ release: e.target.value || null })}
           style={{ fontFamily: 'inherit', fontSize: 11, maxWidth: 160 }}
-          title="The release this board is for: it shows in that release's Campaign"
+          title="The project this board is for: it shows in that project's Campaign"
         >
-          <option value="">(no release)</option>
+          <option value="">(no project)</option>
           {releases.map((r) => (
             <option key={r.id} value={r.id}>
               {r.title}
