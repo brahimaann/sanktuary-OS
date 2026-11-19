@@ -1182,10 +1182,13 @@ const folderSafe = (name: string) =>
 const songKey = (name: string) =>
   name
     .replace(/\.[^.]+$/, '')
+    .replace(/\s\(\d{1,2}\)$/, '') // "Song (2).wav": a second upload under the same name
     .toLowerCase()
-    .replace(/\b(take|alt|attempt|mix|bounce)[\s#.-]*\d{1,3}\b/g, (m, _w, _at, all) => (/[a-z]/.test(all.replace(m, '')) ? ' ' : m))
+    .replace(/\b(take|alt|attempt|mix|bounce|master(?:ed)?)[\s#.-]*\d{1,3}\b/g, (m, _w, _at, all) =>
+      /[a-z]/.test(all.replace(m, '')) ? ' ' : m,
+    )
     .replace(/^\d{1,2}[\s._-]+/, '')
-    .replace(/\b(v\d+|version\s*\d+|final|master(ed)?|mix(ed)?|rough|demo|bounce)\b/g, '')
+    .replace(/\b(v\d+|version\s*\d+|final|master(ed)?|mix(ed)?|rough|demo|bounce|redo(ne)?|revised|revision|fixed|updated)\b/g, '')
     .replace(/[^a-z0-9]/g, '');
 
 /** The one question when songs come in: new songs, or a new version of one already here (and which)? */
