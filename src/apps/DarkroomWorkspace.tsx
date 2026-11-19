@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useState } from 'react';
 import { button, shell } from './fileTypes';
 
-// Darkroom is editing only, as tabs: Photos (the Darkroom editor), SANKTUARY RAW and the video editor. A tab stays loaded once
+// Darkroom is editing only, as tabs: Photos (the Darkroom editor, whose RAW... button opens SANKTUARY RAW in place) and Video. A tab stays loaded once
 // opened, so switching back keeps what you were doing. Opening a single photo from a file still opens the plain editor.
 // Files has no tabs: one place list (Moodboards, Notes, then every team space); Moodboards and Notes open in the same
 // window with a Back button, and stay loaded once opened.
@@ -15,14 +15,13 @@ export type DarkroomTab = 'photos' | 'raw' | 'video' | 'files' | 'moodboards' | 
 const SETS: Record<'edit', [DarkroomTab, string][]> = {
   edit: [
     ['photos', 'Photos'],
-    ['raw', 'RAW'],
     ['video', 'Video'],
   ],
 };
 
-const pane = (id: DarkroomTab) =>
+const pane = (id: DarkroomTab, onRaw?: () => void) =>
   id === 'photos' ? (
-    <Darkroom />
+    <Darkroom onRaw={onRaw} />
   ) : id === 'raw' ? (
     <iframe src="/apps/rapidraw/" title="SANKTUARY RAW" className="w-full h-full border-none bg-white" />
   ) : id === 'video' ? (
@@ -97,6 +96,8 @@ const EditTabs: React.FC<{ tab?: DarkroomTab }> = ({ tab }) => {
     setActive(t);
     setOpened((o) => new Set(o).add(t));
   };
+  // RAW is part of Photos: the Photos tab stays lit while the RAW engine is open
+  const on = (id: DarkroomTab) => active === id || (id === 'photos' && active === 'raw');
   return (
     <div style={shell}>
       <div style={{ display: 'flex', gap: 2, padding: '4px 4px 0', flexWrap: 'wrap' }}>
@@ -104,19 +105,27 @@ const EditTabs: React.FC<{ tab?: DarkroomTab }> = ({ tab }) => {
           <button
             key={id}
             onClick={() => show(id)}
-            style={{ ...button, fontWeight: active === id ? 700 : 400, position: 'relative', top: active === id ? 1 : 0 }}
+            style={{ ...button, fontWeight: on(id) ? 700 : 400, position: 'relative', top: on(id) ? 1 : 0 }}
           >
             {label}
           </button>
         ))}
+        {active === 'raw' && (
+          <>
+            <button style={{ ...button, marginLeft: 8 }} onClick={() => show('photos')} title="Back to the Photos editor">
+              ← Photos
+            </button>
+            <b style={{ alignSelf: 'center', marginLeft: 4 }}>RAW</b>
+          </>
+        )}
       </div>
       <div style={{ flex: 1, minHeight: 0, borderTop: '1px solid #fff', display: 'flex' }}>
         <Suspense fallback={<div style={{ padding: 12 }}>Loading...</div>}>
-          {TABS.map(
-            ([id]) =>
+          {(['photos', 'raw', 'video'] as DarkroomTab[]).map(
+            (id) =>
               opened.has(id) && (
                 <div key={id} style={{ flex: 1, minWidth: 0, display: active === id ? 'flex' : 'none', flexDirection: 'column' }}>
-                  {pane(id)}
+                  {pane(id, () => show('raw'))}
                 </div>
               ),
           )}
