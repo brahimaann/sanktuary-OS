@@ -3188,11 +3188,6 @@ async function timelineApi(req, res, url) {
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
     if (input.place !== undefined) i.place = input.place ? String(input.place).slice(0, 20) : null; // a spot in the location library
-    // Footage a shoot covers, as "<song or release id>:<footage id>", so after the shoot it can all be marked Shot at once
-    if (input.covers !== undefined)
-      i.covers = (Array.isArray(input.covers) ? input.covers : [])
-        .filter((c) => typeof c === 'string' && /^[\w-]{1,20}:[\w-]{1,20}$/.test(c))
-        .slice(0, 60);
     // The shot list: each planned shot, ticked when it's captured, with a note (take, card, what to redo)
     if (input.shots !== undefined)
       i.shots = (Array.isArray(input.shots) ? input.shots : []).slice(0, 100).map((x) => ({
@@ -3272,43 +3267,6 @@ async function timelineApi(req, res, url) {
         await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
     await timelineAlerts();
     return json(res, view(i));
-  }
-  // After a shoot: everything it covers that is still "To shoot" becomes "Shot" (anyone on the shoot, or an admin)
-  if (req.method === 'POST' && url.searchParams.has('shot')) {
-    if (!i.people.includes(me) && i.owner !== me && !user.admin) fail(403, 'Only people on the shoot can mark it');
-    const tdb = await loadTracks();
-    const now = new Date().toISOString();
-    let n = 0;
-    const touched = new Set();
-    for (const c of i.covers || []) {
-      const [owner, cid] = c.split(':');
-      const o = tdb.tracks[owner] || tdb.releases[owner];
-      const r = o && (tdb.tracks[owner] ? tdb.releases[o.release] : o);
-      if (!o || o.deleted || !r || !canSeeRelease(user, r)) continue;
-      const item = (o.content || []).find((x) => x.id === cid);
-      if (item?.status === 'To shoot') {
-        item.status = 'Shot';
-        n++;
-        touched.add(r.id);
-        if (o.history) {
-          o.history = [
-            { at: now, user: me, action: `marked ${item.kind}${item.title ? ` "${item.title}"` : ''} shot (${i.title})` },
-            ...o.history,
-          ].slice(0, 100);
-          o.updated = now;
-          o.updatedBy = me;
-        }
-      }
-    }
-    if (n) {
-      saveTracks();
-      const cfg2 = await loadConfig();
-      for (const rid of touched)
-        emit('tracks', { release: rid }, (u) =>
-          canSeeRelease({ username: u.username, admin: cfg2.admins.includes(u.username) }, tdb.releases[rid]),
-        );
-    }
-    return json(res, { ok: true, shot: n });
   }
   if (req.method === 'DELETE') {
     if (i.owner !== me && !user.admin) fail(403, 'Only whoever made it or an admin can delete it');

@@ -8,7 +8,6 @@ import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from './Studio';
 import { planWindow, showSong, takeEntryWish } from '../utils/songNav';
 import { showVerses } from './OpenVerses';
-import type { ContentItem } from './ShotContent';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
@@ -40,7 +39,6 @@ interface Entry {
   done?: boolean;
   public?: boolean;
   draft?: boolean; // only its owner sees it and nobody is told, until it goes live
-  covers?: string[]; // footage this shoot covers: "<song or release id>:<footage id>"
   shots?: Shot[]; // a shoot's shot list
 }
 interface Shot {
@@ -49,12 +47,6 @@ interface Shot {
   got: boolean;
   note: string;
   for?: string | null; // a song in the project (null: the whole project)
-}
-/** A footage row from Music, as a shoot can cover it. */
-interface Footage {
-  key: string;
-  label: string;
-  status: string;
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -273,7 +265,6 @@ const EntryPanel: React.FC<{
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState<null | 'people' | 'members'>(null);
   const [releases, setReleases] = useState<{ id: string; title: string; kind?: string }[]>([]);
-  const [footage, setFootage] = useState<Record<string, Footage[]>>({}); // release id -> its footage rows
   const [songs, setSongs] = useState<Record<string, { id: string; title: string }[]>>({}); // release id -> its songs
   const [spots, setSpots] = useState<{ id: string; name: string; address: string }[]>([]);
   const { openWindow } = useWindowManager();
@@ -281,23 +272,8 @@ const EntryPanel: React.FC<{
   useEffect(() => {
     const loadTracks = () =>
       api('/api/tracks').then(
-        (d: {
-          releases: { id: string; title: string; kind?: string; content?: ContentItem[] }[];
-          tracks: { id: string; release: string; title: string; content?: ContentItem[] }[];
-        }) => {
+        (d: { releases: { id: string; title: string; kind?: string }[]; tracks: { id: string; release: string; title: string }[] }) => {
           setReleases(d.releases);
-          const by: Record<string, Footage[]> = {};
-          const add = (rid: string, owner: string, what: string, list?: ContentItem[]) =>
-            (list || []).forEach((c) =>
-              (by[rid] ||= []).push({
-                key: `${owner}:${c.id}`,
-                label: `${what} · ${c.kind}${c.title ? `: ${c.title}` : ''}`,
-                status: c.status,
-              }),
-            );
-          d.releases.forEach((r) => add(r.id, r.id, r.title, r.content));
-          d.tracks.forEach((t) => add(t.release, t.id, t.title, t.content));
-          setFootage(by);
           const bySong: Record<string, { id: string; title: string }[]> = {};
           d.tracks.forEach((t) => (bySong[t.release] ||= []).push({ id: t.id, title: t.title }));
           setSongs(bySong);
@@ -305,12 +281,10 @@ const EntryPanel: React.FC<{
         () => {},
       );
     loadTracks();
-    window.addEventListener('sk-footage-shot', loadTracks);
     api('/api/locations').then(
       (d) => setSpots(d.items),
       () => {},
     );
-    return () => window.removeEventListener('sk-footage-shot', loadTracks);
   }, [api]);
 
   const save = async (body: object) => {
@@ -492,9 +466,6 @@ const EntryPanel: React.FC<{
         </div>
       </fieldset>
       {e.kind === 'Shoot' && <ShotList entry={e} songs={(e.release && songs[e.release]) || []} save={save} />}
-      {e.kind === 'Shoot' && (
-        <ShootCovers entry={e} rows={(e.release && footage[e.release]) || []} save={save} setMsg={setMsg} onShot={onChange} />
-      )}
       <fieldset style={fieldset}>
         <legend>Notes</legend>
         <textarea
@@ -606,58 +577,6 @@ const fieldset: React.CSSProperties = {
 };
 
 export default Timeline;
-
-/** What a shoot covers: tick the footage it's for; once it's done, one click marks all of it Shot in Music. */
-const ShootCovers: React.FC<{
-  entry: Entry;
-  rows: Footage[];
-  save: (body: object) => Promise<void>;
-  setMsg: (m: string) => void;
-  onShot: () => void;
-}> = ({ entry: e, rows, save, setMsg, onShot }) => {
-  const api = useApi();
-  const covers = e.covers || [];
-  const left = rows.filter((r) => covers.includes(r.key) && r.status === 'To shoot');
-  const markShot = async () => {
-    try {
-      const r = await api(`/api/timeline/${e.id}?shot`, { method: 'POST' });
-      setMsg(`Marked ${r.shot} shot in Music.`);
-      window.dispatchEvent(new Event('sk-footage-shot'));
-      onShot();
-    } catch (err) {
-      setMsg((err as Error).message);
-    }
-  };
-  return (
-    <fieldset style={fieldset}>
-      <legend>Footage this shoot covers</legend>
-      {!e.release ? (
-        <div style={{ color: '#555' }}>Tie it to a release above to pick the reels, photos and videos it's for.</div>
-      ) : !rows.length ? (
-        <div style={{ color: '#555' }}>That release has no footage planned yet. Add it on the song's page in Music.</div>
-      ) : (
-        <>
-          {rows.map((r) => (
-            <label key={r.key} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={covers.includes(r.key)}
-                onChange={(ev) => save({ covers: ev.target.checked ? [...covers, r.key] : covers.filter((c) => c !== r.key) })}
-              />
-              <span style={{ flex: 1 }}>{r.label}</span>
-              <span style={{ color: '#555' }}>{r.status}</span>
-            </label>
-          ))}
-          {left.length > 0 && (
-            <button style={{ ...button, alignSelf: 'flex-start', fontWeight: 700 }} onClick={markShot}>
-              Shot it: mark {left.length} as Shot
-            </button>
-          )}
-        </>
-      )}
-    </fieldset>
-  );
-};
 
 /** A shoot's shot list: plan every shot before the day, tick each one as it's captured, note the take or what to redo. */
 const ShotList: React.FC<{ entry: Entry; songs: { id: string; title: string }[]; save: (body: object) => Promise<void> }> = ({

@@ -42,8 +42,7 @@ interface Entry {
   done?: boolean;
   board?: string;
   boardName?: string;
-  covers?: string[];
-  shots?: { id: string; text: string; got: boolean }[];
+  shots?: { id: string; text: string; got: boolean; for?: string | null }[];
 }
 
 type Level = 'block' | 'act';
@@ -247,45 +246,31 @@ const OpsBoard: React.FC = () => {
         sub: open[0].title,
         go: goVerses,
       });
-    // A shoot that's happened with footage it covered still "To shoot": someone on it should mark it Shot
-    const toShoot = new Set<string>();
-    for (const o of [...(tracks?.tracks || []), ...(tracks?.releases || [])])
-      for (const c of o.content || []) if (c.status === 'To shoot') toShoot.add(`${o.id}:${c.id}`);
-    const unmarked = entries.filter(
+    // A shoot that just wrapped (last 3 days): what's next. Most of the shot list captured: on to the edit.
+    // Under half: plan a pickup shoot for the rest.
+    const wrapped = entries.filter(
       (e) =>
         !e.source &&
         e.kind === 'Shoot' &&
         e.status !== 'Cancelled' &&
+        e.status !== 'Done' &&
         (e.end || e.start) < now &&
-        (e.people?.includes(user) || !!me?.admin) &&
-        (e.covers || []).some((c) => toShoot.has(c)),
+        (e.end || e.start) >= addDays(now, -3) &&
+        !!e.shots?.length &&
+        (e.people?.includes(user) || !!me?.admin),
     );
-    if (unmarked.length)
+    for (const e of wrapped.slice(0, 2)) {
+      const shots = e.shots || [];
+      const got = shots.filter((x) => x.got).length;
+      const enough = got * 2 >= shots.length;
       out.push({
-        key: 'shot',
+        key: `wrap-${e.id}`,
         level: 'act',
-        label: 'Mark footage shot',
-        sub: `${unmarked[0].title} · ${(unmarked[0].covers || []).filter((c) => toShoot.has(c)).length} still "to shoot"`,
-        go: () => goCalendar(unmarked[0].id),
+        label: enough ? 'Next: edit' : 'Next: pickup shoot',
+        sub: `${e.title} wrapped · ${got} of ${shots.length} shots${enough ? '' : ' · plan the rest'}`,
+        go: () => (enough && e.release ? goSong(e.release, shots.find((x) => x.for)?.for || undefined) : goCalendar(e.id)),
       });
-    // A shoot that's over with shots on its list never ticked: reshoot or note why
-    const missed = entries.filter(
-      (e) =>
-        !e.source &&
-        e.kind === 'Shoot' &&
-        e.status !== 'Cancelled' &&
-        (e.end || e.start) < now &&
-        (e.people?.includes(user) || !!me?.admin) &&
-        (e.shots || []).some((x) => !x.got),
-    );
-    if (missed.length)
-      out.push({
-        key: 'missed',
-        level: 'block',
-        label: 'Shots missed',
-        sub: `${missed[0].title} · ${(missed[0].shots || []).filter((x) => !x.got).length} not captured`,
-        go: () => goCalendar(missed[0].id),
-      });
+    }
     // Plan cards on you: late ones block, ones due in the next 2 days are yours to act on
     const tasks = entries
       .filter((e) => e.source === 'planner' && !e.done && e.people?.includes(user) && e.start <= addDays(now, 2))
