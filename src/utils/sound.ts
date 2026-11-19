@@ -44,6 +44,25 @@ class SoundSynthesizer {
     osc.stop(ctx.currentTime + 0.04);
   }
 
+  /** "It worked": two quiet square blips, for saves, ticks and posts */
+  playTick() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    [1568, 2093].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t = ctx.currentTime + i * 0.045;
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(f, t);
+      gain.gain.setValueAtTime(0.03, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.04);
+    });
+  }
+
   /**
    * Error / Warning Ding
    */

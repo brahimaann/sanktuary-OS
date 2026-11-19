@@ -143,6 +143,9 @@ const OpenVerses: React.FC<{
     try {
       await fn();
       setMsg(done);
+      // The first sentence as a stamp; picking a take is the big one
+      if (done.startsWith('Picked') || done.startsWith('Take sent')) dialog.win(done);
+      else if (done && !done.startsWith('Posted')) dialog.done(done.split(/(?<=\.)\s/)[0]);
       await load();
     } catch (e) {
       setMsg((e as Error).message);
@@ -343,6 +346,8 @@ const OpenVerses: React.FC<{
               const made: Verse = await api('/api/verses', { method: 'POST', body: JSON.stringify({ ...body, beat }) });
               setPosting(false);
               setSel(made.id);
+              const open = made.slots.filter((x) => !x.by).length;
+              dialog.win(`Verse is up. ${open} spot${open === 1 ? '' : 's'} open.`);
             }, 'Posted. Everyone on the team was told.')
           }
         />

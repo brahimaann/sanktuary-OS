@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useApi, useMe } from '../utils/api';
 import { liveUser, useLiveEvent } from '../utils/live';
 import { useOpenRef } from '../utils/refs';
@@ -6,6 +6,8 @@ import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from '../apps/Studio';
 import { showVerses } from '../apps/OpenVerses';
 import RetroIcon from './RetroIcon';
+import { sayS } from '../utils/dialog';
+import { displayName, useProfiles } from '../utils/profiles';
 
 /**
  * Bottom-right notification centre for the taskbar tray:
@@ -28,6 +30,30 @@ interface Note {
 }
 
 const SEEN = 'sk_notif_seen';
+const LAST_VISIT = 'sk_last_visit';
+// What the hello counts, by kind of note
+const KINDS: [keyof Note | 'turn', string, string][] = [
+  ['turn', 'thing waiting on you', 'things waiting on you'],
+  ['verse', 'verse update', 'verse updates'],
+  ['track', 'song update', 'song updates'],
+  ['timeline', 'calendar change', 'calendar changes'],
+  ['opportunity', 'new opportunity', 'new opportunities'],
+];
+
+/** The S's hello after the loader: the member's name and what changed since they were last here. */
+export const helloLine = (name: string, since: string, notes: object[]) => {
+  if (!since) return `Welcome in, ${name}.`;
+  const fresh = (notes as Record<string, unknown>[]).filter((n) => String(n.at) > since);
+  const parts = KINDS.map(([k, one, many]) => {
+    const c = fresh.filter((n) => n[k] && (k === 'turn' || !n.turn)).length;
+    return c ? `${c} ${c === 1 ? one : many}` : '';
+  }).filter(Boolean);
+  const other = fresh.length - fresh.filter((n) => KINDS.some(([k]) => n[k])).length;
+  if (other) parts.push(`${other} other update${other === 1 ? '' : 's'}`);
+  if (!parts.length) return `Welcome back, ${name}. All quiet since you were here.`;
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+  return `Welcome back, ${name}. ${list} since you were here.`;
+};
 const MESSAGES = 'sk_notif_messages';
 const read = <T,>(k: string, d: T): T => {
   try {
@@ -52,31 +78,53 @@ export const NotificationTray: React.FC = () => {
   const [seen, setSeen] = useState<string>(() => read(SEEN, ''));
   const [open, setOpen] = useState(false);
   const [toasts, setToasts] = useState<Note[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const { byName } = useProfiles();
+  const names = useRef(byName);
+  names.current = byName;
+  const notes = useRef<Note[]>([]);
+  notes.current = server;
 
   const load = useCallback(
     () =>
-      api('/api/projects?notifications').then(
-        (list: any[]) =>
-          setServer(
-            list.map((n) => ({
-              ...n,
-              title: n.turn
-                ? "It's your turn"
-                : n.track
-                  ? 'Tracks'
-                  : n.verse
-                    ? 'Open verses'
-                    : n.timeline
-                      ? 'Timeline'
-                      : n.opportunity
-                        ? 'Opportunity'
-                        : 'Update',
-            })),
-          ),
-        () => {},
-      ),
+      api('/api/projects?notifications')
+        .then(
+          (list: any[]) =>
+            setServer(
+              list.map((n) => ({
+                ...n,
+                title: n.turn
+                  ? "It's your turn"
+                  : n.track
+                    ? 'Tracks'
+                    : n.verse
+                      ? 'Open verses'
+                      : n.timeline
+                        ? 'Timeline'
+                        : n.opportunity
+                          ? 'Opportunity'
+                          : 'Update',
+              })),
+            ),
+          () => {},
+        )
+        .finally(() => setLoaded(true)),
     [api],
   );
+  // Hello once per visit, a moment after the loader, then remember this visit for next time
+  useEffect(() => {
+    if (!loaded || !me) return;
+    try {
+      if (sessionStorage.getItem('sk_hello')) return;
+      sessionStorage.setItem('sk_hello', '1');
+    } catch {}
+    const name = me.username;
+    setTimeout(() => {
+      sayS('hello', helloLine(displayName(names.current[name], name), read(LAST_VISIT, ''), notes.current));
+      write(LAST_VISIT, new Date().toISOString());
+    }, 1500);
+    addEventListener('pagehide', () => write(LAST_VISIT, new Date().toISOString()));
+  }, [loaded, me]);
   useEffect(() => {
     if (me) load();
   }, [me, load]);

@@ -271,6 +271,150 @@ button:disabled {
   cursor: default;
 }
 
+/* "It worked" stamps (dialog.done in src/utils/dialog.tsx) and ticked boxes: stepped, 1-bit motion, no easing or glow */
+.sk-stamp {
+  position: fixed;
+  z-index: 2147483001;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px 5px;
+  background: #fff;
+  color: #000;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  font:
+    12px 'Pixelify Sans',
+    sans-serif;
+  font-variant-ligatures: none;
+  white-space: nowrap;
+  pointer-events: none;
+  animation:
+    sk-stamp-in 0.12s steps(2),
+    sk-stamp-out 0.3s steps(1) 1.3s forwards;
+}
+.sk-stamp-big {
+  padding: 5px 10px 5px 7px;
+  font-size: 14px;
+  box-shadow: 3px 3px 0 #000;
+}
+.sk-stamp-s {
+  display: inline-flex;
+  animation: sk-hop 0.36s steps(3) 0.1s 2;
+}
+@keyframes sk-stamp-in {
+  from {
+    transform: scale(1.25);
+  }
+}
+@keyframes sk-stamp-out {
+  /* blinks out like a cursor instead of fading */
+  0%,
+  66% {
+    visibility: visible;
+  }
+  33%,
+  100% {
+    visibility: hidden;
+  }
+}
+@keyframes sk-hop {
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.sk-ticked {
+  animation: sk-tick 0.16s steps(2);
+}
+@keyframes sk-tick {
+  from {
+    transform: scale(1.45);
+  }
+}
+/* The S on the Start button: blinks to ink now and then, hops on a win, slumps on an error, and says short lines */
+.sk-s {
+  display: inline-flex;
+}
+.sk-s-idle path {
+  animation: sk-s-blink 7s steps(1) infinite;
+}
+@keyframes sk-s-blink {
+  97% {
+    fill: #000;
+  }
+}
+.sk-s-win,
+.sk-s-hello {
+  animation: sk-hop 0.36s steps(3) 2;
+}
+.sk-s-oops {
+  animation: sk-slump 1.2s steps(1);
+}
+.sk-s-oops path {
+  fill: #000;
+}
+@keyframes sk-slump {
+  0%,
+  100% {
+    transform: none;
+  }
+  8% {
+    transform: translateY(2px) scaleY(0.85);
+  }
+  16%,
+  90% {
+    transform: translateY(2px) scaleY(0.85) rotate(-8deg);
+  }
+}
+.sk-s-says {
+  position: absolute;
+  left: 4px;
+  bottom: 34px;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 5px 8px;
+  background: #fff;
+  color: #000;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  font:
+    13px 'Pixelify Sans',
+    sans-serif;
+  font-variant-ligatures: none;
+  line-height: 1.35;
+  cursor: pointer;
+  animation:
+    sk-stamp-in 0.12s steps(2),
+    sk-stamp-out 0.3s steps(1) 4.7s forwards;
+}
+/* the bubble's tail: two stepped pixel blocks pointing down at the S */
+.sk-s-says::before,
+.sk-s-says::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  background: #000;
+}
+.sk-s-says::before {
+  bottom: -6px;
+  width: 6px;
+  height: 4px;
+}
+.sk-s-says::after {
+  bottom: -10px;
+  width: 3px;
+  height: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sk-s,
+  .sk-s path,
+  .sk-s-says,
+  .sk-stamp,
+  .sk-stamp-s,
+  .sk-ticked {
+    animation: none;
+  }
+}
+
 /* Notification pop-ups (src/components/Notifications.tsx): the title bar blinks a few times, then stays */
 @keyframes sk-blink {
   0%,

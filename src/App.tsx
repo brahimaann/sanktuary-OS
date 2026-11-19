@@ -35,6 +35,7 @@ const Profile = lazy(() => import('./apps/Profile'));
 const Planner = lazy(() => import('./apps/Planner'));
 const Tracks = lazy(() => import('./apps/Tracks'));
 const Timeline = lazy(() => import('./apps/Timeline'));
+const PlayDay = lazy(() => import('./apps/PlayDay'));
 const Ledger = lazy(() => import('./apps/Ledger'));
 const Welcome = lazy(() => import('./apps/Welcome'));
 const NewThing = lazy(() => import('./apps/NewThing'));
@@ -200,6 +201,9 @@ export const App: React.FC = () => {
         break;
       case 'timeline':
         content = <Timeline />;
+        break;
+      case 'play-day':
+        content = <PlayDay id={win.appProps?.id} />;
         break;
       case 'tracks':
         content = <Tracks />;

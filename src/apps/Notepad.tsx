@@ -47,7 +47,7 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
     if (filePath) {
       try {
         vfs.writeFile(filePath, content);
-        dialog.alert(`Saved successfully to ${filePath}`);
+        dialog.done('Saved.');
       } catch (err: any) {
         dialog.alert(`Error: ${err.message}`);
       }
@@ -64,7 +64,7 @@ export const Notepad: React.FC<NotepadProps> = ({ filePath: initialFilePath }) =
       try {
         vfs.writeFile(path, content);
         setFilePath(path);
-        dialog.alert(`Saved successfully to ${path}`);
+        dialog.done(path.startsWith('C:/Desktop/') ? 'Saved to the desktop.' : 'Saved.');
       } catch (err: any) {
         dialog.alert(`Error: ${err.message}`);
       }

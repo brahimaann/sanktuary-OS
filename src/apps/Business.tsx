@@ -1100,7 +1100,7 @@ const InvoiceEditor: React.FC<{
     const to = await dialog.prompt('Email this invoice to:', clients.find((c) => c.id === i.client)?.email || '');
     if (!to) return;
     await b(`/invoices/${i.id}/send`, { method: 'POST', body: JSON.stringify({ to }) }).then(
-      () => (reload(), dialog.alert(`Sent to ${to}. Replies go to the brand's email.`)),
+      () => (reload(), dialog.done(`Sent to ${to}.`)),
       fail,
     );
   };
@@ -1110,7 +1110,7 @@ const InvoiceEditor: React.FC<{
       await patch('invoices', i.id, { status: 'Sent' });
     }
     await b(`/invoices/${i.id}/page`)
-      .then((r) => navigator.clipboard.writeText(r.link).then(() => dialog.alert(`Link copied:\n${r.link}`)))
+      .then((r) => navigator.clipboard.writeText(r.link).then(() => dialog.done('Link copied.')))
       .catch(fail);
   };
   const saveTemplate = async () => {

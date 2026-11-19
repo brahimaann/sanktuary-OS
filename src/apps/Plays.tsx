@@ -5,6 +5,7 @@ import { dialog } from '../utils/dialog';
 import { useWindowManager } from '../wm/manager';
 import { showEntry } from '../utils/songNav';
 import { openStudio } from './Studio';
+import { openPlayDay } from './PlayDay';
 import { button } from './fileTypes';
 
 // Operations > Plays: every play (a calendar entry with a checklist: a shoot's shot list, a show setup, a session
@@ -93,28 +94,36 @@ const Plays: React.FC = () => {
     const n = i.shots?.length || 0;
     const got = i.shots?.filter((x) => x.got).length || 0;
     return (
-      <button
-        key={i.id}
-        onClick={() => open(i.id)}
-        style={{ ...button, display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', width: '100%' }}
-        title="Open it in the calendar to tick steps"
-      >
-        <span style={{ width: 64, flex: '0 0 64px' }}>{i.kind}</span>
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {i.title}
-          {i.location ? ` · ${i.location}` : ''}
-        </span>
-        <span style={{ display: 'flex', gap: 2 }} aria-label={`${got} of ${n} done`}>
-          {Array.from({ length: Math.min(n, 12) }, (_, k) => (
-            <span
-              key={k}
-              style={{ width: 8, height: 10, border: '1px solid currentColor', background: k < got ? 'currentColor' : 'transparent' }}
-            />
-          ))}
-        </span>
-        <span style={{ width: 92, textAlign: 'right' }}>{n ? `${got} of ${n}` : 'no list yet'}</span>
-        <span style={{ width: 84, textAlign: 'right' }}>{i.start}</span>
-      </button>
+      <div key={i.id} style={{ display: 'flex', gap: 4 }}>
+        <button
+          onClick={() => open(i.id)}
+          style={{ ...button, display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left', width: '100%' }}
+          title="Open it in the calendar to tick steps"
+        >
+          <span style={{ width: 64, flex: '0 0 64px' }}>{i.kind}</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {i.title}
+            {i.location ? ` · ${i.location}` : ''}
+          </span>
+          <span style={{ display: 'flex', gap: 2 }} aria-label={`${got} of ${n} done`}>
+            {Array.from({ length: Math.min(n, 12) }, (_, k) => (
+              <span
+                key={k}
+                style={{ width: 8, height: 10, border: '1px solid currentColor', background: k < got ? 'currentColor' : 'transparent' }}
+              />
+            ))}
+          </span>
+          <span style={{ width: 92, textAlign: 'right' }}>{n ? `${got} of ${n}` : 'no list yet'}</span>
+          <span style={{ width: 84, textAlign: 'right' }}>{i.start}</span>
+        </button>
+        <button
+          style={button}
+          title="On the day: the checklist as big rows to tap, on a phone"
+          onClick={() => openPlayDay(openWindow, i.id, i.title || i.kind)}
+        >
+          Day view
+        </button>
+      </div>
     );
   };
 

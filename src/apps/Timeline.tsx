@@ -8,6 +8,7 @@ import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from './Studio';
 import { planWindow, showSong, takeEntryWish } from '../utils/songNav';
 import { showVerses } from './OpenVerses';
+import { openPlayDay } from './PlayDay';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
@@ -466,6 +467,13 @@ const EntryPanel: React.FC<{
         </div>
       </fieldset>
       <ShotList entry={e} songs={(e.release && songs[e.release]) || []} save={save} />
+      <button
+        style={{ ...button, alignSelf: 'flex-start' }}
+        title="The checklist as big rows to tap on the day, with uploads into the project's Shoots folder"
+        onClick={() => openPlayDay(openWindow, e.id, e.title || e.kind)}
+      >
+        On the day (phone view)
+      </button>
       <fieldset style={fieldset}>
         <legend>Notes</legend>
         <textarea
