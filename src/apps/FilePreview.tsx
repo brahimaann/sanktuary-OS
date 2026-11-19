@@ -10,6 +10,8 @@ import MediaControls from '../components/MediaControls';
 import RetroIcon from '../components/RetroIcon';
 import MoreMenu, { MenuHead, MenuItem } from '../components/MoreMenu';
 import { useWindowManager } from '../wm/manager';
+import { openSession, showSong } from '../utils/songNav';
+import { openMusic } from './Studio';
 import { dialog } from '../utils/dialog';
 import { sharedAudio } from '../utils/sound';
 import { tempoAndKey, waveformPeaks } from '../utils/audioAnalysis';
@@ -76,6 +78,16 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
   const [posting, setPosting] = useState(false);
   const index = siblings.indexOf(shot);
   const kind = fileKind(name);
+  // The same song list as Projects and Foundry: is this audio file a song's current bounce?
+  const [songs, setSongs] = useState<{ id: string; release: string; title: string; bounce: { space: string; path: string } | null }[]>([]);
+  useEffect(() => {
+    if (kind === 'audio')
+      api('/api/tracks').then(
+        (d) => setSongs(d.tracks),
+        () => {},
+      );
+  }, [api, kind]);
+  const song = songs.find((t) => t.bounce?.space === app && t.bounce.path === [...dir, name].join('/'));
   const src = token
     ? `${fileUrl(app, [...dir, name])}?t=${token}${ver ? `&version=${encodeURIComponent(ver)}` : ''}${fresh ? `&r=${fresh}` : ''}`
     : '';
@@ -200,6 +212,17 @@ const FilePreview: React.FC<FilePreviewProps> = ({ app, dir, name: initialName, 
           </button>
         )}
         <MoreMenu title="More: download, open, edit, versions">
+          {/* This file is a song in Projects: its page there, and its recording sessions in Foundry */}
+          {song && (
+            <MenuItem icon="note" onClick={() => (showSong(song.release, song.id), openMusic(openWindow))}>
+              Song page
+            </MenuItem>
+          )}
+          {song && (
+            <MenuItem icon="play" onClick={() => openSession(openWindow, song.id)}>
+              Foundry session
+            </MenuItem>
+          )}
           {isTouch && kind === 'image' && (
             <MenuItem icon="download" disabled={!token} onClick={download}>
               Download original

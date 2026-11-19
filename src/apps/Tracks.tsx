@@ -19,7 +19,7 @@ import { useProfiles } from '../utils/profiles';
 import { Term } from '../utils/glossary';
 import Campaign from './Campaign';
 import OpenVerses, { takeVersesWish, Verse, VerseSlot } from './OpenVerses';
-import { takeSongWish } from '../utils/songNav';
+import { openSession, takeSongWish } from '../utils/songNav';
 import { ContentBoard, ContentItem, ContentList } from './ShotContent';
 
 interface Release {
@@ -44,6 +44,8 @@ interface Release {
   created?: string;
   cover?: FileRef | null; // found in Artwork by a scan
   listeners?: string[]; // can listen and comment, not change it
+  everyone?: 'listen'; // new projects: the team listens; only owners and `editors` change it
+  editors?: string[];
   items?: string[]; // a Playlist's songs (track ids from other projects)
   content?: ContentItem[]; // clips, reels, videos shot for the whole project
 }
@@ -280,7 +282,9 @@ const TracksApp: React.FC = () => {
     });
   };
   const ownsIt = !!(release && me && (release.owner === me.username || release.owners?.includes(me.username) || me.admin));
-  const listenOnly = !!(release && me && !ownsIt && release.listeners?.includes(me.username));
+  const listenOnly = !!(release && me && !ownsIt && !canEdit(release, me.username));
+  const myInbox = (r: Release) => isInbox(r) && r.owner === me?.username;
+  const { profiles } = useProfiles();
   const [ready, setReady] = useState<Readiness | null>(null);
   const [readyOpen, setReadyOpen] = useState(false);
   // Guided path on by default; hiding it is remembered in this browser
@@ -422,13 +426,19 @@ const TracksApp: React.FC = () => {
     try {
       const fresh = items.filter((_, i) => !picks[i]);
       if (fresh.length) {
-        let target = release && !isPlaylist ? release : releases.find(isInbox);
+        let target = release && !isPlaylist ? release : releases.find(myInbox);
         if (!target) {
           const space = uploadSpace();
           if (!space) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
           target = await api('/api/tracks/release', {
             method: 'POST',
-            body: JSON.stringify({ title: INBOX, kind: 'Folder', folder: { space: space.id, path: `Releases/${INBOX}` }, setup: true }),
+            // Everyone has their own New songs folder, so keeping yours private never hides anyone else's songs
+            body: JSON.stringify({
+              title: `${INBOX} (${me!.username})`,
+              kind: 'Folder',
+              folder: { space: space.id, path: `Releases/${INBOX} (${me!.username})` },
+              setup: true,
+            }),
           });
         }
         const f = await folderOf(target!);
@@ -467,10 +477,10 @@ const TracksApp: React.FC = () => {
    * No splits or Ledger rows: those are set when the song is published. */
   const pickVerse = async (v: Verse, s: VerseSlot) => {
     const target =
-      releases.find(isInbox) ||
+      releases.find(myInbox) ||
       (await api('/api/tracks/release', {
         method: 'POST',
-        body: JSON.stringify({ title: INBOX, kind: 'Folder' }),
+        body: JSON.stringify({ title: `${INBOX} (${me!.username})`, kind: 'Folder' }),
       }));
     const t = await api('/api/tracks/track', { method: 'POST', body: JSON.stringify({ release: target.id, title: v.title }) });
     await api(`/api/tracks/track/${t.id}`, {
@@ -556,7 +566,18 @@ const TracksApp: React.FC = () => {
         {isPlaylist && !listenOnly && (
           <button style={button} onClick={() => setSharing(true)} title="Who can see this playlist, and who can edit it">
             {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
-            {release.listeners?.length ? `, ${release.listeners.length} listening` : ''}...
+            {listenersOf(
+              release,
+              profiles.map((p) => p.username),
+            ).length
+              ? `, ${
+                  listenersOf(
+                    release,
+                    profiles.map((p) => p.username),
+                  ).length
+                } listening`
+              : ''}
+            ...
           </button>
         )}
         {listenOnly && (
@@ -679,7 +700,18 @@ const TracksApp: React.FC = () => {
             </button>
             <button style={button} onClick={() => setSharing(true)} title="The project's owners, and who can see, edit or only listen">
               {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
-              {release.listeners?.length ? `, ${release.listeners.length} listening` : ''}...
+              {listenersOf(
+                release,
+                profiles.map((p) => p.username),
+              ).length
+                ? `, ${
+                    listenersOf(
+                      release,
+                      profiles.map((p) => p.username),
+                    ).length
+                  } listening`
+                : ''}
+              ...
             </button>
             <label
               style={{ display: 'flex', gap: 3, alignItems: 'center' }}
@@ -961,11 +993,22 @@ const TracksApp: React.FC = () => {
             title={`Who's on ${release.title}`}
             members={release.members}
             always={release.owner}
-            listeners={release.listeners || []}
+            listeners={listenersOf(
+              release,
+              profiles.map((p) => p.username),
+            )}
             owners={ownsIt ? release.owners || [] : undefined}
             note="Everyone = every member. Pick people to keep it private (owners and admins always see it). Co-owner = decides who's on it, like you. Can edit = works on it. Can listen = play, comment and follow, but not change anything."
             onSave={(m, listeners, owners) =>
-              patchRelease({ members: m && m.filter((u) => u !== release.owner), listeners, ...(ownsIt ? { owners } : {}) })
+              patchRelease({
+                members: m && m.filter((u) => u !== release.owner),
+                listeners,
+                // A listen-first project lists who can edit instead: everyone on it not set to Can listen
+                ...(release.everyone === 'listen'
+                  ? { editors: (m || profiles.map((p) => p.username)).filter((u) => !listeners.includes(u) && !owners.includes(u)) }
+                  : {}),
+                ...(ownsIt ? { owners } : {}),
+              })
             }
             onClose={() => setSharing(false)}
           />
@@ -1111,7 +1154,7 @@ const Library: React.FC<{
             </b>
             <span style={{ color: '#555' }}>
               {r.kind} · {n} track(s)
-              {me && r.listeners?.includes(me) ? ' · listen only' : ''}
+              {me && !canEdit(r, me) ? ' · listen only' : ''}
             </span>
           </button>
         );
@@ -1124,7 +1167,15 @@ const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
 const INBOX = 'New songs'; // where dropped songs wait until they find their album
 /** Projects that aren't music releases: no ISRC, splits or release-day checks. */
 const NOT_MUSIC = ['Folder', 'Playlist', 'Video', 'Photos'];
-const isInbox = (r: Release) => r.kind === 'Folder' && r.title === INBOX;
+const isInbox = (r: Release) => r.kind === 'Folder' && r.title.startsWith(INBOX);
+/** Same rule as canEditRelease on the server (owners and admins aside). */
+const canEdit = (r: Release, me: string) =>
+  r.owner === me || !!r.owners?.includes(me) || !!r.editors?.includes(me) || (r.everyone !== 'listen' && !r.listeners?.includes(me));
+/** Who only listens: for a listen-first project, everyone on it who isn't an owner or editor. */
+const listenersOf = (r: Release, all: string[]) =>
+  r.everyone === 'listen'
+    ? (r.members || all).filter((u) => u !== r.owner && !r.owners?.includes(u) && !r.editors?.includes(u))
+    : r.listeners || [];
 const folderSafe = (name: string) =>
   name
     .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
@@ -1528,6 +1579,13 @@ const TrackPage: React.FC<{
           title="Track number"
         />
         <input style={{ ...input, flex: 1, fontWeight: 700, fontSize: 13 }} {...text('title')} />
+        <button
+          style={button}
+          onClick={() => openSession(openWindow, t.id)}
+          title="This song's recording sessions in Foundry: tempo, key, vocal checklist, lyrics"
+        >
+          Session
+        </button>
         <button style={button} onClick={onClose} title="Close the track page">
           <RetroIcon name="close" />
         </button>

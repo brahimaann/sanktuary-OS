@@ -126,7 +126,7 @@ export const PublicLinks: React.FC<{ item?: Ref; board?: string; onClose: () => 
   const copy = async (l: Link) => {
     try {
       await navigator.clipboard.writeText(full(l));
-      setMsg('Link copied.');
+      setMsg(`Link copied: ${full(l)}`);
     } catch {
       setMsg(full(l)); // no clipboard access: show it to copy by hand
     }
@@ -221,7 +221,7 @@ export const PublicLinks: React.FC<{ item?: Ref; board?: string; onClose: () => 
           ))}
         </div>
       )}
-      {msg && <div style={{ color: msg === 'Link copied.' ? '#000' : '#a00000', wordBreak: 'break-all' }}>{msg}</div>}
+      {msg && <div style={{ color: /^(Link copied|http)/.test(msg) ? '#000' : '#a00000', wordBreak: 'break-all' }}>{msg}</div>}
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button style={button} onClick={onClose}>
           Close
