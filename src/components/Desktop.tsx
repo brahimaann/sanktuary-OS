@@ -68,7 +68,7 @@ const app = {
     width: 1100,
     height: 720,
   },
-  // Files: Team Files, Moodboards and Notes as tabs in one window
+  // Files: one place list (Moodboards, Notes, team spaces), no tabs
   filesWorkspace: {
     id: 'files-workspace',
     title: 'Files',

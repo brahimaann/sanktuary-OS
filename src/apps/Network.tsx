@@ -7,8 +7,16 @@ import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 
 const RIGHTS_LABEL = { none: 'No access', view: 'View only', upload: 'Can upload', edit: 'Full edit' };
 
-/** "Network Neighborhood" for Sanktuary: every space this member can reach, with free space. */
-const Network: React.FC = () => {
+/** A tile that isn't a space (the Files window adds Moodboards and Notes this way). */
+export interface PlaceTile {
+  name: string;
+  sub: string;
+  icon: string;
+  open: () => void;
+}
+
+/** "Network Neighborhood" for Sanktuary: every space this member can reach, with free space, after any extra tiles. */
+const Network: React.FC<{ extras?: PlaceTile[] }> = ({ extras = [] }) => {
   const { isLoaded, isSignedIn } = useAuth();
   const { me, reload } = useMe();
   const { openWindow } = useWindowManager();
@@ -47,6 +55,21 @@ const Network: React.FC = () => {
           alignContent: 'start',
         }}
       >
+        {extras.map((t) => (
+          <div
+            key={t.name}
+            onClick={() => isTouch && t.open()}
+            onDoubleClick={t.open}
+            style={{ display: 'flex', gap: 8, padding: 6, border: '1px solid #fff', cursor: 'default', userSelect: 'none' }}
+            title="Open"
+          >
+            <img src={t.icon} alt="" style={{ width: 32, height: 32 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700 }}>{t.name}</div>
+              <div style={{ color: '#444' }}>{t.sub}</div>
+            </div>
+          </div>
+        ))}
         {me?.spaces.length === 0 && <div style={{ padding: 8 }}>No spaces are shared with you yet. Ask an admin for access.</div>}
         {me?.spaces.map((s) => {
           const [used, total] = s.quota ? [s.used || 0, s.quota] : s.total ? [s.total - (s.free || 0), s.total] : [0, 0];
