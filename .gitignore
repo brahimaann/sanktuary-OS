@@ -35,3 +35,4 @@ dist-bad/
 # tests/signed-in.mjs output
 signed-in.png
 signed-in-state.json
+/out

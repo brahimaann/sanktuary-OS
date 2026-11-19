@@ -9,6 +9,7 @@ copies `drive-watch.ps1` and `sanktuary-backup.ps1` there whenever they change (
 | `nextcloud/sanktuary-backup.ps1` | Copies every space to `<backup drive>\Sanktuary Backup` with `robocopy /E /XO` (never deletes from the backup). |
 | `deploy.ps1` | Every 2 minutes: if GitHub `main` has a commit that isn't live, pull, install, test, build and swap it in. Runs from the repo itself, not `C:\homeserver`. |
 | `rapidraw/setup.ps1` | Run by hand on the server (again to update): installs Rust + VC++ build tools if missing, builds the RapidRAW engine from github.com/brahimaann/rapidraw-sanktuary (branch `sanktuary`) and its browser editor, adds RAPIDRAW_TOKEN to .env, and registers the hidden **Sanktuary RapidRAW** task (127.0.0.1:3091). Powers **Edit photo**. |
+| `formats/formats.tsx` | The media formats' 1-bit overlay pack (FIELD OP, DEBRIEF, STATION REPORT, DECLASSIFIED openers, lower thirds, case bug), as raea compositions. On this PC: `raea render ops/formats/formats.tsx --composition field-op --alpha -o FO-001.mov`, or `raea export capcut ... --composition field-op` to drop it in a CapCut draft. Without raea, `node ops/formats/render.mjs all --prores` makes the same overlays in `out/formats`. |
 | `nextcloud/docker-compose.yml` | Nextcloud + Postgres, reachable only on the Tailscale IP. |
 | `nextcloud/.env.example` | Copy to `.env` and set a database password. |
 
