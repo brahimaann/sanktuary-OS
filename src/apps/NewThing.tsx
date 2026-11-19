@@ -10,7 +10,7 @@ import FilePicker, { FileRef } from '../components/FilePicker';
 import { IconLabel, IconName } from '../components/RetroIcon';
 import { useOpenRef } from '../utils/refs';
 
-type Kind = 'release' | 'song' | 'session' | 'article' | 'Shoot' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
+type Kind = 'release' | 'song' | 'session' | 'article' | 'Shoot' | 'Show' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
 
 const KINDS: { id: Kind; label: string; icon: IconName; hint: string }[] = [
   { id: 'release', label: 'Release', icon: 'archive', hint: 'Album, EP, single or a folder of demos, with its folders' },
@@ -20,7 +20,8 @@ const KINDS: { id: Kind; label: string; icon: IconName; hint: string }[] = [
   { id: 'Shoot', label: 'Shoot', icon: 'calendar', hint: 'Photo or video shoot' },
   { id: 'Artwork', label: 'Artwork', icon: 'calendar', hint: 'Cover, visuals, merch design (or moodboard link)' },
   { id: 'Video', label: 'Video', icon: 'play', hint: 'Music video, visualizer, video link' },
-  { id: 'Event', label: 'Show / event', icon: 'bell', hint: 'Show, session, release party' },
+  { id: 'Show', label: 'Show', icon: 'bell', hint: 'A show, with its setup checklist (load-in, line check, merch)' },
+  { id: 'Event', label: 'Event', icon: 'bell', hint: 'Release party, meetup, anything else on a date' },
   { id: 'Drop', label: 'Drop', icon: 'upload', hint: 'Merch or content drop' },
   { id: 'post', label: 'Substack post', icon: 'external', hint: 'External Substack publish' },
 ];
@@ -130,7 +131,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const spaceName = spaces.find((s) => s.id === spaceId)?.name || '';
   const parsed = useMemo(() => parseWhen(when), [when]);
   const release = releases.find((r) => r.id === releaseId);
-  const isTimeline = !!kind && ['Shoot', 'Artwork', 'Video', 'Event', 'Drop'].includes(kind);
+  const isTimeline = !!kind && ['Shoot', 'Show', 'Artwork', 'Video', 'Event', 'Drop'].includes(kind);
 
   const entryFolder = (): FileRef | null => {
     if (!isTimeline || !makeFolder || !parsed) return null;
