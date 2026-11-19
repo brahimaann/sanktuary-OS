@@ -3132,7 +3132,8 @@ async function libraryApi(req, res, url) {
 // Shoots, artwork, videos, shows, drops... with dates, people, status and a linked folder. Release dates and
 // track deadlines from Tracks are merged in (read-only) so there is one timeline for everything.
 // Entries are open to every member unless `members` lists who may see them (owner + admins always can).
-const TIMELINE_KINDS = ['Shoot', 'Artwork', 'Video', 'Event', 'Drop', 'Other'];
+// A play is any entry with a checklist (`shots`): a shoot's shot list, a show setup, a session recipe, release day...
+const TIMELINE_KINDS = ['Shoot', 'Show', 'Session', 'Artwork', 'Video', 'Event', 'Drop', 'Other'];
 const TIMELINE_STATUSES = ['Planned', 'In progress', 'Done', 'Cancelled'];
 const TIMELINE_TEXT = { title: 100, location: 200, notes: 4000, recap: 1000 }; // recap: how it went, shown to visitors once it's over
 let timelineDb = null;
@@ -3159,6 +3160,46 @@ async function timelineApi(req, res, url) {
     saveTimeline();
     emit('timeline', { id: i.id }, (u) => canSeeRelease({ username: u.username, admin: cfg.admins.includes(u.username) }, i));
   };
+
+  // Saved plays: a checklist anyone can start a new play from (no dates or people, just the steps)
+  if (id === 'templates') {
+    db.templates ??= {};
+    const tid = url.pathname.split('/')[4];
+    if (req.method === 'GET') return json(res, { templates: Object.values(db.templates) });
+    if (req.method === 'POST' && !tid) {
+      const input = await jsonBody(req);
+      const t = {
+        id: randomUUID().slice(0, 10),
+        name:
+          String(input.name ?? '')
+            .trim()
+            .slice(0, 80) || fail(400, 'Give the template a name'),
+        kind: TIMELINE_KINDS.includes(input.kind) ? input.kind : 'Other',
+        steps: (Array.isArray(input.steps) ? input.steps : [])
+          .map((x) =>
+            String(x ?? '')
+              .trim()
+              .slice(0, 200),
+          )
+          .filter(Boolean)
+          .slice(0, 100),
+        by: me,
+        created: new Date().toISOString(),
+      };
+      if (!t.steps.length) fail(400, 'A template needs at least one step');
+      db.templates[t.id] = t;
+      saveTimeline();
+      return json(res, t);
+    }
+    const t = own(db.templates, String(tid)) || fail(404, 'No such template');
+    if (req.method === 'DELETE') {
+      if (t.by !== me && !user.admin) fail(403, 'Only who saved it or an admin can remove it');
+      delete db.templates[t.id];
+      saveTimeline();
+      return json(res, { ok: true });
+    }
+    fail(405, 'Method not allowed');
+  }
 
   if (req.method === 'GET' && !id) {
     const items = Object.values(db.items)

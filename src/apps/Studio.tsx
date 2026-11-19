@@ -6,7 +6,8 @@ import { button, shell } from './fileTypes';
 // - Board: the wall (what needs someone, this week, songs in play), then the Calendar, To-dos (Planner) and Leads
 //   (Opportunities, Outreach) as folded sections under it.
 // - Projects (desk id 'music'): songs, bounces, open verses and footage, then the Library (books, Renaissance Radio, our archive) folded under it.
-// - Plays (desk id 'shoots'): the shoot location map; shoots become one kind of play.
+// - Plays (desk id 'shoots'): every play (shoot, show setup, session recipe...) with its checklist progress and the
+//   saved plays, then Sites (the shoot location map) folded under it.
 // Each part is the full app it replaces; once opened it stays loaded, so switching desks keeps what you were doing.
 // openStudio() still takes the old tab names: they open the right desk and unfold that section.
 const OpsBoard = lazy(() => import('./OpsBoard'));
@@ -17,8 +18,9 @@ const Opportunities = lazy(() => import('./Opportunities'));
 const Library = lazy(() => import('./Library'));
 const Outreach = lazy(() => import('./Outreach'));
 const Locations = lazy(() => import('./Locations'));
+const Plays = lazy(() => import('./Plays'));
 
-export type StudioTab = 'board' | 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'library';
+export type StudioTab = 'board' | 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'library' | 'plays';
 type Desk = 'board' | 'music' | 'shoots';
 const DESKS: [Desk, string][] = [
   ['board', 'Board'],
@@ -37,7 +39,7 @@ const PARTS: Record<Desk, { main: StudioTab; sections: [StudioTab, string][] }> 
     ],
   },
   music: { main: 'music', sections: [['library', 'Library (books, Renaissance Radio, archive)']] },
-  shoots: { main: 'locations', sections: [] },
+  shoots: { main: 'plays', sections: [['locations', 'Sites (shoot locations)']] },
 };
 const deskOf = (t: StudioTab): Desk =>
   (Object.keys(PARTS) as Desk[]).find((d) => PARTS[d].main === t || PARTS[d].sections.some(([id]) => id === t))!;
@@ -51,6 +53,8 @@ const part = (id: StudioTab) =>
     <Timeline />
   ) : id === 'locations' ? (
     <Locations />
+  ) : id === 'plays' ? (
+    <Plays />
   ) : id === 'boards' ? (
     <Boards kind="kanban" />
   ) : id === 'opportunities' ? (

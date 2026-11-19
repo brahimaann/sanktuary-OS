@@ -466,7 +466,7 @@ const EntryPanel: React.FC<{
           </select>
         </div>
       </fieldset>
-      {e.kind === 'Shoot' && <ShotList entry={e} songs={(e.release && songs[e.release]) || []} save={save} />}
+      <ShotList entry={e} songs={(e.release && songs[e.release]) || []} save={save} />
       <button
         style={{ ...button, alignSelf: 'flex-start' }}
         title="The checklist as big rows to tap on the day, with uploads into the project's Shoots folder"
@@ -586,33 +586,116 @@ const fieldset: React.CSSProperties = {
 
 export default Timeline;
 
-/** A shoot's shot list: plan every shot before the day, tick each one as it's captured, note the take or what to redo. */
+/** Words for a play's checklist: a shoot has a shot list, a show a setup, a session a recipe. */
+const PLAY_WORDS: Record<string, { list: string; item: string; done: string; hint: string; note: string }> = {
+  Shoot: {
+    list: 'Shot list',
+    item: 'shot',
+    done: 'captured',
+    hint: 'Add a shot (e.g. wide of the car, hook, 10 s)',
+    note: 'Take, card, or what to redo',
+  },
+  Show: { list: 'Setup', item: 'step', done: 'done', hint: 'Add a step (e.g. line check, merch table)', note: 'Who, or what is missing' },
+  Session: {
+    list: 'Session recipe',
+    item: 'step',
+    done: 'done',
+    hint: 'Add a step (e.g. SM7B, gain to -12 dB)',
+    note: 'Setting, or what to change',
+  },
+};
+const playWords = (kind: string) => PLAY_WORDS[kind] || { list: 'Checklist', item: 'step', done: 'done', hint: 'Add a step', note: 'Note' };
+
+interface PlayTemplate {
+  id: string;
+  name: string;
+  kind: string;
+  steps: string[];
+  by: string;
+}
+
+/**
+ * A play's checklist (a shoot's shot list, a show setup, a session recipe): plan every step before the day, tick each
+ * one as it's done, note the take or what to redo. Start from a saved template, or save this one as a template.
+ */
 const ShotList: React.FC<{ entry: Entry; songs: { id: string; title: string }[]; save: (body: object) => Promise<void> }> = ({
   entry: e,
   songs,
   save,
 }) => {
+  const api = useApi();
   const shots = e.shots || [];
+  const w = playWords(e.kind);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState('');
+  const [templates, setTemplates] = useState<PlayTemplate[] | null>(null);
+  const [tmsg, setTmsg] = useState('');
   useEffect(() => setNotes({}), [e.shots]);
+  const loadTemplates = () =>
+    api('/api/timeline/templates')
+      .then((r: { templates: PlayTemplate[] }) => setTemplates(r.templates))
+      .catch(() => setTemplates([]));
+  useEffect(() => {
+    loadTemplates();
+  }, []);
   const put = (list: Shot[]) => save({ shots: list });
   const set = (id: string, patch: Partial<Shot>) => put(shots.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const newId = () => Math.random().toString(36).slice(2, 10);
   const add = () => {
     const text = adding.trim();
     if (!text) return;
     setAdding('');
-    put([...shots, { id: Math.random().toString(36).slice(2, 10), text, got: false, note: '' }]);
+    put([...shots, { id: newId(), text, got: false, note: '' }]);
   };
+  const useTemplate = (id: string) => {
+    const t = templates?.find((x) => x.id === id);
+    if (!t) return;
+    put([...shots, ...t.steps.map((text) => ({ id: newId(), text, got: false, note: '' }))]);
+    setTmsg(`Added ${t.steps.length} from "${t.name}".`);
+  };
+  const saveTemplate = async () => {
+    const name = await dialog.prompt(`Name this ${w.list.toLowerCase()} so anyone can reuse it`, e.title, { title: 'Save as a play' });
+    if (!name?.trim()) return;
+    try {
+      await api('/api/timeline/templates', {
+        method: 'POST',
+        body: JSON.stringify({ name, kind: e.kind, steps: shots.map((x) => x.text) }),
+      });
+      setTmsg(`Saved "${name.trim()}". Anyone can start a play from it.`);
+      loadTemplates();
+    } catch (err) {
+      setTmsg((err as Error).message);
+    }
+  };
+  const mine = (templates || []).filter((t) => t.kind === e.kind);
+  const others = (templates || []).filter((t) => t.kind !== e.kind);
   const got = shots.filter((x) => x.got).length;
   return (
     <fieldset style={fieldset}>
-      <legend>Shot list{shots.length ? ` · ${got} of ${shots.length} captured` : ''}</legend>
+      <legend>
+        {w.list}
+        {shots.length ? ` · ${got} of ${shots.length} ${w.done}` : ''}
+      </legend>
+      {!!templates?.length && (
+        <select
+          style={{ ...input, alignSelf: 'flex-start' }}
+          value=""
+          title="Add the steps of a saved play"
+          onChange={(ev) => useTemplate(ev.target.value)}
+        >
+          <option value="">Start from a saved play…</option>
+          {[...mine, ...others].map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name} ({t.kind}, {t.steps.length})
+            </option>
+          ))}
+        </select>
+      )}
       {shots.map((x, i) => (
         <div key={x.id} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <label
             style={{ display: 'flex', gap: 6, alignItems: 'center', flex: '1 1 200px', minWidth: 0 }}
-            title="Tick it once it's captured"
+            title={`Tick it once it's ${w.done}`}
           >
             <input type="checkbox" checked={x.got} onChange={(ev) => set(x.id, { got: ev.target.checked })} />
             <span style={{ textDecoration: x.got ? 'line-through' : undefined }}>
@@ -636,12 +719,12 @@ const ShotList: React.FC<{ entry: Entry; songs: { id: string; title: string }[];
           )}
           <input
             style={{ ...input, flex: '1 1 160px' }}
-            placeholder="Take, card, or what to redo"
+            placeholder={w.note}
             value={notes[x.id] ?? x.note}
             onChange={(ev) => setNotes({ ...notes, [x.id]: ev.target.value })}
             onBlur={() => notes[x.id] !== undefined && notes[x.id] !== x.note && set(x.id, { note: notes[x.id] })}
           />
-          <button style={button} title="Remove this shot" onClick={() => put(shots.filter((y) => y.id !== x.id))}>
+          <button style={button} title={`Remove this ${w.item}`} onClick={() => put(shots.filter((y) => y.id !== x.id))}>
             ✕
           </button>
         </div>
@@ -649,7 +732,7 @@ const ShotList: React.FC<{ entry: Entry; songs: { id: string; title: string }[];
       <div style={{ display: 'flex', gap: 6 }}>
         <input
           style={{ ...input, flex: 1 }}
-          placeholder="Add a shot (e.g. wide of the car, hook, 10 s) and press Enter"
+          placeholder={`${w.hint} and press Enter`}
           value={adding}
           onChange={(ev) => setAdding(ev.target.value)}
           onKeyDown={(ev) => ev.key === 'Enter' && add()}
@@ -657,7 +740,13 @@ const ShotList: React.FC<{ entry: Entry; songs: { id: string; title: string }[];
         <button style={button} onClick={add} disabled={!adding.trim()}>
           Add
         </button>
+        {!!shots.length && (
+          <button style={button} onClick={saveTemplate} title="Save these steps so anyone can start a play from them">
+            Save as a play…
+          </button>
+        )}
       </div>
+      {tmsg && <div style={{ fontSize: 12 }}>{tmsg}</div>}
     </fieldset>
   );
 };
