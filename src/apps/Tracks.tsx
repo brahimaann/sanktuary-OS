@@ -73,7 +73,7 @@ interface Found {
 }
 /** "Found 2 new track(s), 1 bounce(s)..." or "Nothing new in the folder." */
 const foundText = (f: Found) => {
-  if (f.offline) return "The release's drive is offline.";
+  if (f.offline) return "The project's drive is offline.";
   const bits = [
     f.added.length && `${f.added.length} new track(s)`,
     f.bounces.length && `${f.bounces.length} bounce(s)`,
@@ -366,7 +366,7 @@ const TracksApp: React.FC = () => {
     let target = release;
     if (
       oneFolder &&
-      (!release || (await dialog.confirm(`Make "${oneFolder}" a new release?`, { ok: 'New release', cancel: `Add to ${release.title}` })))
+      (!release || (await dialog.confirm(`Make "${oneFolder}" a new project?`, { ok: 'New project', cancel: `Add to ${release.title}` })))
     ) {
       const space = uploadSpace();
       if (!space) return setMsg("You can't add files to any team space. Ask an admin for upload rights.");
@@ -382,7 +382,7 @@ const TracksApp: React.FC = () => {
       items.forEach((i) => (i.sub = i.sub!.slice(1))); // the folder's contents go straight into the release folder
       pickRelease(target!.id);
     }
-    if (!target?.folder) return setMsg('Link this release to a folder first (Folder... in the toolbar), then drop files on it.');
+    if (!target?.folder) return setMsg('Link this project to a folder first (Folder... in the toolbar), then drop files on it.');
     const f = target.folder;
     items.forEach((i) => !i.sub?.length && AUDIO.test(i.name) && (i.sub = ['Bounces']));
     setBusy(true);
@@ -612,7 +612,7 @@ const TracksApp: React.FC = () => {
                 Guide
               </button>
             )}
-            <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of release">
+            <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of project">
               {data.kinds
                 .filter((k) => k !== 'Playlist')
                 .map((k) => (
@@ -682,11 +682,7 @@ const TracksApp: React.FC = () => {
               </>
             ) : (
               ownsIt && (
-                <button
-                  style={button}
-                  onClick={() => setLinking(true)}
-                  title="Point this release at a folder: its files fill the tracks in"
-                >
+                <button style={button} onClick={() => setLinking(true)} title="Point this project at a folder: its files fill the songs in">
                   <IconLabel icon="link">Folder...</IconLabel>
                 </button>
               )
@@ -1967,7 +1963,7 @@ const TrackPage: React.FC<{
           <button
             style={button}
             onClick={async () =>
-              (await dialog.confirm(`Remove "${t.title}" from the release? Its files are not touched.`, { icon: 'warning' })) &&
+              (await dialog.confirm(`Remove "${t.title}" from the project? Its files are not touched.`, { icon: 'warning' })) &&
               api(`/api/tracks/track/${t.id}`, { method: 'DELETE' }).then(
                 () => (onClose(), onChange()),
                 (e) => setMsg(e.message),

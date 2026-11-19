@@ -451,7 +451,7 @@ const CardEditor: React.FC<{
                 ))}
               </select>
             ) : (
-              <span style={{ color: '#555' }}>Tie this plan to a project (Planner list) to link its footage</span>
+              <span style={{ color: '#555' }}>Tie this plan to a project (in the plans list) to link its footage</span>
             )}
           </label>
           <label style={row}>
