@@ -52,6 +52,8 @@ interface Lamp {
 }
 
 const STEP = ['To shoot', 'Shot', 'Edited', 'Posted'];
+/** Week-strip tag per footage kind (the calendar entry's title starts with the kind). */
+const FOOTAGE_TAG: Record<string, string> = { Reel: 'REEL', Video: 'VIDEO', Photos: 'PHOTO', Visualizer: 'VIZ', BTS: 'BTS' };
 const NEXT: Record<string, string> = { 'To shoot': 'Shoot', Shot: 'Edit', Edited: 'Post' };
 const today = () => new Date().toLocaleDateString('en-CA');
 const addDays = (d: string, n: number) => {
@@ -160,7 +162,9 @@ const OpsBoard: React.FC = () => {
       const posted = content.filter((c) => c.status === 'Posted').length;
       const lateFootage = content.filter((c) => c.due && c.due < now && c.status !== 'Posted');
       const late = !!t.deadline && t.deadline < now && t.status !== 'Done';
-      const next = lateFootage[0] || content.find((c) => c.status !== 'Posted'); // late items first
+      // late items first, then whatever is due soonest (undated last)
+      const next =
+        lateFootage[0] || content.filter((c) => c.status !== 'Posted').sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'))[0];
       const r = releases.get(t.release);
       return { t, r, content, posted, lateFootage, late, next };
     });
@@ -247,7 +251,7 @@ const OpsBoard: React.FC = () => {
         e.status !== 'Cancelled' &&
         e.start >= now &&
         e.start <= addDays(now, 2) &&
-        (!e.people?.length || e.people.includes(user)),
+        (!e.people?.length || e.people.includes(user) || !!me?.admin), // the Director hears about every shoot
     );
     if (shoots.length)
       out.push({
@@ -274,7 +278,7 @@ const OpsBoard: React.FC = () => {
               : e.kind === 'Verse due'
                 ? 'VERSE'
                 : e.kind === 'Footage due'
-                  ? 'CLIP'
+                  ? FOOTAGE_TAG[e.title.split(':')[0].split(' ')[0]] || 'CLIP'
                   : e.kind === 'Track due'
                     ? 'DUE'
                     : e.kind.toUpperCase().slice(0, 5);

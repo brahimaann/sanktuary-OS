@@ -2144,6 +2144,7 @@ async function tracksApi(req, res, url) {
       }
       for (const k of ['bounce', 'project', 'stems'])
         if (input[k] !== undefined) {
+          if (k === 'bounce') keepEarlier(t, t.bounce, input[k], me);
           t[k] = fileRef(input[k]);
           log(t[k] ? `set the ${k} to ${t[k].path}` : `removed the ${k}`);
           if (k === 'bounce' && t[k]) news.push(`New bounce of ${t.title}: ${t[k].path.split('/').pop()} (${me}).`);
@@ -2172,6 +2173,16 @@ async function tracksApi(req, res, url) {
     }
   }
   fail(404, 'Unknown tracks action');
+}
+
+/** A replaced bounce stays on the song as an earlier take or mix (newest first), so trying versions never loses one
+ * and a rescan of the folder doesn't turn old takes back into songs. */
+function keepEarlier(t, prev, next, by) {
+  if (!prev?.path || (next?.space === prev.space && next?.path === prev.path)) return;
+  const rest = (t.earlier || []).filter(
+    (e) => !(e.space === prev.space && e.path === prev.path) && !(e.space === next?.space && e.path === next?.path),
+  );
+  t.earlier = [{ space: prev.space, path: prev.path, at: new Date().toISOString(), by }, ...rest].slice(0, 30);
 }
 
 function newTrack(db, r, title, by, action) {
@@ -2230,7 +2241,10 @@ function songName(name, isFile = true) {
   const n = Number(base.match(/^(\d{1,2})(?=[\s._)-])/)?.[1]) || null;
   base = base.replace(/^\d{1,2}[\s._)-]+/, '');
   const version = Number(base.match(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i)?.[1]) || 0;
-  const plain = base.replace(/_/g, ' ');
+  // "Keep Going take 2" / "mix 3" are versions of Keep Going (but a song called "Take 5" stays itself)
+  const spaced = base.replace(/_/g, ' ');
+  const untaken = spaced.replace(/\b(?:take|alt|attempt|mix|bounce)[\s#.-]*\d{1,3}\b/gi, ' ');
+  const plain = /\p{L}/u.test(untaken) ? untaken : spaced;
   const variant = new RegExp(SONG_VARIANT.source, 'i').test(plain);
   const words = plain
     .replace(SONG_VARIANT, ' ')
@@ -2369,7 +2383,9 @@ async function scanReleaseNow(r, by) {
   // Any song's bounce, whichever project it's in now: a song moved out of New songs keeps its file there, and a
   // rescan must not bring it back as a new track (its newer versions still find it)
   const byBounce = new Map(
-    Object.values(db.tracks).flatMap((t) => (t.bounce && !t.deleted ? [[`${t.bounce.space}|${t.bounce.path}`, t]] : [])),
+    Object.values(db.tracks).flatMap((t) =>
+      t.deleted ? [] : [t.bounce, ...(t.earlier || [])].filter(Boolean).map((b) => [`${b.space}|${b.path}`, t]),
+    ),
   );
   const now = new Date().toISOString();
   const log = (t, action) => {
@@ -2397,8 +2413,10 @@ async function scanReleaseNow(r, by) {
         LOSSLESS_EXT.has(extname(b.name).toLowerCase()) - LOSSLESS_EXT.has(extname(a.name).toLowerCase()),
     )[0];
     const next = ref(best.rel);
-    if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path) {
+    const earlier = (t.earlier || []).some((e) => e.space === next.space && e.path === next.path);
+    if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path && !earlier) {
       const first = !t.bounce;
+      keepEarlier(t, t.bounce, next, by);
       t.bounce = next;
       log(t, `set the bounce to ${next.path} (from the release folder)`);
       found.bounces.push(best.name);

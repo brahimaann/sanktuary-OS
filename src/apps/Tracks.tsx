@@ -93,6 +93,8 @@ interface Track {
   notes: string;
   deadline: string | null;
   bounce: FileRef | null;
+  /** Bounces it had before, newest first: earlier takes and mixes. */
+  earlier?: (FileRef & { at: string; by: string })[];
   project: FileRef | null;
   stems: FileRef | null;
   links: Partial<Record<(typeof LINKS)[number][0], string>>;
@@ -1125,6 +1127,7 @@ const songKey = (name: string) =>
   name
     .replace(/\.[^.]+$/, '')
     .toLowerCase()
+    .replace(/\b(take|alt|attempt|mix|bounce)[\s#.-]*\d{1,3}\b/g, (m, _w, _at, all) => (/[a-z]/.test(all.replace(m, '')) ? ' ' : m))
     .replace(/^\d{1,2}[\s._-]+/, '')
     .replace(/\b(v\d+|version\s*\d+|final|master(ed)?|mix(ed)?|rough|demo|bounce)\b/g, '')
     .replace(/[^a-z0-9]/g, '');
@@ -1634,6 +1637,47 @@ const TrackPage: React.FC<{
                 <audio ref={(el) => void (media.current = el)} src={bounceSrc} preload="metadata" />
                 <MediaControls media={media} src={bounceSrc} />
               </>
+            )}
+            {!!t.earlier?.length && (
+              <details open>
+                <summary>Earlier takes and mixes ({t.earlier.length})</summary>
+                {t.earlier.map((e) => {
+                  const src = `${fileUrl(e.space, e.path.split('/'))}?t=${token}`;
+                  const on = comparing === e.path;
+                  return (
+                    <div key={e.space + e.path} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span
+                        style={{ flex: 1, fontWeight: on ? 700 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={e.path}
+                      >
+                        {e.path.split('/').pop()}
+                        <span style={{ color: '#555' }}>
+                          {' '}
+                          · {new Date(e.at).toLocaleDateString()}
+                          {on ? ' (playing)' : ''}
+                        </span>
+                      </span>
+                      <button
+                        style={button}
+                        title="Flip between this one and the current bounce at the same moment in the song"
+                        onClick={() => {
+                          abSwitch(on ? bounceSrc! : src);
+                          setComparing(on ? null : e.path);
+                        }}
+                      >
+                        {on ? 'Back to current' : 'A/B'}
+                      </button>
+                      <button
+                        style={button}
+                        title="Make this the song's bounce again"
+                        onClick={() => save({ bounce: { space: e.space, path: e.path } })}
+                      >
+                        Use this
+                      </button>
+                    </div>
+                  );
+                })}
+              </details>
             )}
             {versions.length > 0 && (
               <details>
