@@ -107,6 +107,22 @@ html {
   -moz-osx-font-smoothing: none;
 }
 
+/* Dark theme (default; White is the option in the tray). The OS is 1-bit, so dark = the same screen inverted.
+   hue-rotate brings the signal green back near green. Filter on the root element keeps position: fixed working.
+   Photos, video, canvases and embeds are flipped back so they keep their real colours; UI art under /images and /icons stays inverted. */
+html[data-theme='dark'] {
+  filter: invert(1) hue-rotate(180deg);
+  background: #fff;
+}
+html[data-theme='dark'] img:not([src^='/images/']):not([src^='/icons/']),
+html[data-theme='dark'] video,
+html[data-theme='dark'] canvas,
+html[data-theme='dark'] iframe,
+html[data-theme='dark'] .live-sky-photo,
+html[data-theme='dark'] [data-keep-colors] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* Full-screen app root */
 .crt-wrapper {
   position: relative;

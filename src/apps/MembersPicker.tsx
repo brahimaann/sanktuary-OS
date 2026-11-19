@@ -15,19 +15,28 @@ const MembersPicker: React.FC<{
   allowEveryone?: boolean;
   note?: string;
   listeners?: string[];
-  onSave: (members: string[] | null, listeners: string[]) => void;
+  /** With `owners`, a person can also be made a co-owner: they then decide who sees, edits and listens too. */
+  owners?: string[];
+  onSave: (members: string[] | null, listeners: string[], owners: string[]) => void;
   onClose: () => void;
-}> = ({ title, members, always, allowEveryone = true, note, listeners, onSave, onClose }) => {
+}> = ({ title, members, always, allowEveryone = true, note, listeners, owners, onSave, onClose }) => {
   const { profiles } = useProfiles();
   const [everyone, setEveryone] = useState(allowEveryone && members === null);
   const [picked, setPicked] = useState<Set<string>>(new Set([...(members || []), ...(always ? [always] : [])]));
   const [listen, setListen] = useState(new Set(listeners));
-  const setRole = (u: string, onlyListen: boolean) =>
+  const [own, setOwn] = useState(new Set(owners));
+  const setRole = (u: string, role: string) => {
     setListen((l) => {
       const n = new Set(l);
-      onlyListen ? n.add(u) : n.delete(u);
+      role === 'listen' ? n.add(u) : n.delete(u);
       return n;
     });
+    setOwn((o) => {
+      const n = new Set(o);
+      role === 'own' ? n.add(u) : n.delete(u);
+      return n;
+    });
+  };
   const toggle = (u: string) =>
     setPicked((p) => {
       const n = new Set(p);
@@ -93,13 +102,14 @@ const MembersPicker: React.FC<{
                 />
                 <Avatar username={p.username} avatar={p.avatar} size={18} />
                 {displayName(p)}
-                {p.username === always ? ' (creator)' : ''}
+                {p.username === always ? (owners ? ' (owner)' : ' (creator)') : ''}
                 {listeners && p.username !== always && (everyone || picked.has(p.username)) && (
                   <select
                     style={{ marginLeft: 'auto', fontSize: 11 }}
-                    value={listen.has(p.username) ? 'listen' : 'edit'}
-                    onChange={(e) => setRole(p.username, e.target.value === 'listen')}
+                    value={own.has(p.username) ? 'own' : listen.has(p.username) ? 'listen' : 'edit'}
+                    onChange={(e) => setRole(p.username, e.target.value)}
                   >
+                    {owners && <option value="own">Co-owner</option>}
                     <option value="edit">Can edit</option>
                     <option value="listen">Can listen</option>
                   </select>
@@ -117,10 +127,8 @@ const MembersPicker: React.FC<{
             style={{ ...button, fontWeight: 700 }}
             onClick={() => {
               const m = everyone ? null : [...picked];
-              onSave(
-                m,
-                [...listen].filter((u) => u !== always && (!m || m.includes(u))),
-              );
+              const inIt = (u: string) => u !== always && (!m || m.includes(u));
+              onSave(m, [...listen].filter(inIt), [...own].filter(inIt));
             }}
           >
             OK
