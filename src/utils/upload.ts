@@ -31,6 +31,7 @@ export interface UploadItem {
   file: File | Blob;
   name: string;
   sub?: string[]; // subfolders under the destination (a dropped folder keeps its layout)
+  replace?: boolean; // write over the file at this exact name (the old one is kept as a version) instead of saving beside it
 }
 
 /**
@@ -53,11 +54,11 @@ export async function uploadFiles(
       total,
     );
   await pool([...items.keys()], PARALLEL, async (i) => {
-    const { file, name, sub = [] } = items[i];
+    const { file, name, sub = [], replace } = items[i];
     const id = crypto.randomUUID();
     const chunks = Math.max(1, Math.ceil(file.size / CHUNK));
     const at = `/api/files/${space}/${[...dir, ...sub, name].map(encodeURIComponent).join('/')}`;
-    const base = `${at}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}`;
+    const base = `${at}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${replace ? '&replace=1' : ''}`;
     await pool([...Array(chunks).keys()], PARALLEL, async (c) => {
       for (let attempt = 0; ; attempt++) {
         try {

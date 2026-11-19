@@ -248,7 +248,7 @@ function folderLabels(folders, cfg) {
 /** Every space this user can see, including their personal space ("me"). A space with several folders
  * ("combined") shows each folder as a top-level folder inside it; see partOf(). */
 function spacesFor(user, cfg, status) {
-  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s) })).filter((s) => RANK[s.rights] > 0);
+  const list = cfg.spaces.map((s) => ({ ...s, rights: rightsIn(user, cfg, s), viewer: user })).filter((s) => RANK[s.rights] > 0);
   const mine = cfg.members[user.username];
   if (mine?.drive) {
     list.unshift({
@@ -364,7 +364,16 @@ async function files(req, res, url) {
       }
       if (req.method === 'GET' && q.has('find')) {
         // Search every connected folder of the space, as one newest-first list
-        const found = await Promise.all(whole.sources.filter((f) => f.online).map((f) => findIn(f.root, ...findArgs(q), [f.label])));
+        await loadTracks();
+        const found = await Promise.all(
+          whole.sources
+            .filter((f) => f.online)
+            .map(async (f) => {
+              const got = await findIn(f.root, ...findArgs(q), [f.label]);
+              const part = partOf(whole, f.label);
+              return { ...got, entries: got.entries.filter((e) => !sealedFor(user, part, join(f.root, ...e.dir.slice(1), e.name))) };
+            }),
+        );
         const entries = found.flatMap((f) => f.entries).sort((a, b) => b.modified.localeCompare(a.modified));
         return json(res, { entries: entries.slice(0, 300), more: entries.length > 300 || found.some((f) => f.more) });
       }
@@ -379,6 +388,10 @@ async function files(req, res, url) {
   const root = resolve(space.root);
   const target = resolve(root, ...parts);
   if (!inside(root, target)) fail(400, 'Bad path');
+  await loadTracks();
+  // Zipping, moving, renaming or deleting a folder takes everything in it along; listing and searching just leave private folders out
+  assertUnsealed(user, space, target, !(req.method === 'GET' && (q.has('list') || q.has('find'))) && req.method !== 'PUT');
+  const open = (list, at = (e) => join(target, ...(e.dir || []), e.name)) => list.filter((e) => !sealedFor(user, space, at(e)));
   const rel = relative(root, target);
   const need = (level) => RANK[space.rights] >= RANK[level] || fail(403, `You need ${level} rights here`);
   /** A path as the member sees it in the space (with the folder's name first in a combined space). */
@@ -392,7 +405,7 @@ async function files(req, res, url) {
     need('view');
     if (q.has('list')) {
       const all = await loadProjects();
-      const entries = await listDir(target);
+      const entries = open(await listDir(target));
       // Subfolders are checked for a project file 12 at a time (was one after another; all at once would queue
       // thousands of disk reads ahead of everyone else's downloads on a huge folder)
       let next = 0;
@@ -414,7 +427,10 @@ async function files(req, res, url) {
         ...(space.id === 'me' ? { used: await folderSize(root), quota: (space.quotaGB || 0) * 1024 ** 3 } : {}),
       });
     }
-    if (q.has('find')) return json(res, await findIn(target, ...findArgs(q)));
+    if (q.has('find')) {
+      const found = await findIn(target, ...findArgs(q));
+      return json(res, { ...found, entries: open(found.entries) });
+    }
     if (q.has('versions')) return json(res, await listDir(join(root, '.sk-versions', rel), true));
     // ?version=<name>: an earlier version of this file, which previews, measures and downloads like the current one
     const file = q.has('version') ? join(root, '.sk-versions', rel, safeName(q.get('version'))) : target;
@@ -1121,6 +1137,7 @@ function locateIn(space, relPath) {
   const root = resolve(space.root);
   const abs = resolve(root, ...parts);
   if (!inside(root, abs)) fail(400, 'Bad path');
+  assertUnsealed(space.viewer, space, abs);
   return { root, abs };
 }
 
@@ -1344,6 +1361,7 @@ async function linksApi(req, res, url) {
   if (!space.online) fail(503, 'Drive offline');
   const { root, abs } = locateIn(space, q.path);
   if (abs === root) fail(400, 'Share a folder or file inside the space');
+  if (req.method === 'POST') assertUnsealed(user, space, abs, true);
   const key = ownerKey(space, abs);
 
   if (req.method === 'GET') {
@@ -1875,7 +1893,35 @@ const canSeeRelease = (user, r) =>
   !r.deleted &&
   !(r.draft && r.owner !== user.username) &&
   (!r.members || user.admin || isReleaseOwner(user, r) || r.members.includes(user.username));
-const canEditRelease = (user, r) => user.admin || isReleaseOwner(user, r) || !r.listeners?.includes(user.username);
+/** A private project's folder is as private as the project: the project (if any) this member can't see whose folder
+ * holds `abs`. With around, also one inside `abs`, since zipping, moving or sharing that folder would take it along. */
+function sealedFor(user, space, abs, around = false) {
+  if (!user || user.admin || !tracksDb) return null;
+  const k = ownerKey(space, abs);
+  const below = k.endsWith('|') ? k : k + '/';
+  return (
+    Object.values(tracksDb.releases).find(
+      (r) =>
+        r.members &&
+        !r.deleted &&
+        r.folderKey &&
+        !canSeeRelease(user, r) &&
+        (k === r.folderKey || k.startsWith(r.folderKey + '/') || (around && r.folderKey.startsWith(below))),
+    ) || null
+  );
+}
+const assertUnsealed = (user, space, abs, around = false) => {
+  const r = sealedFor(user, space, abs, around);
+  if (r && !sealedFor(user, space, abs)) fail(403, 'A folder in here is private to other people. Open the folders inside it instead.');
+  if (r) fail(404, 'Not found');
+};
+// Who may change a project: admins, its owners and its `editors`. Everyone else who sees it can listen, comment and
+// follow. Projects from before 2026-11 have no `everyone: 'listen'`: there, everyone not in `listeners` can edit.
+const canEditRelease = (user, r) =>
+  user.admin ||
+  isReleaseOwner(user, r) ||
+  !!r.editors?.includes(user.username) ||
+  (r.everyone !== 'listen' && !r.listeners?.includes(user.username));
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
 const fileRef = (v) =>
@@ -2002,6 +2048,8 @@ async function tracksApi(req, res, url) {
         writers: releaseWriters(input.writers),
         cover: null,
         members: null,
+        everyone: 'listen', // the team can listen; the owner hands out "Can edit"
+        editors: [],
         owner: me,
         created: new Date().toISOString(),
       };
@@ -2102,6 +2150,10 @@ async function tracksApi(req, res, url) {
         r.listeners = Array.isArray(input.listeners)
           ? userList(input.listeners).filter((u) => u !== r.owner && !r.owners?.includes(u))
           : [];
+      }
+      if (input.editors !== undefined) {
+        if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can change who can edit it");
+        r.editors = Array.isArray(input.editors) ? userList(input.editors).filter((u) => u !== r.owner && !r.owners?.includes(u)) : [];
       }
       const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
@@ -7931,7 +7983,9 @@ const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
 const BIG_BUFFER = { highWaterMark: 1024 * 1024 }; // 1 MB disk reads/writes instead of 64 KB
 
 async function upload(req, res, q, { status, space, root, target, need, log, user, transfer, staged }) {
-  need(q.get('replace') ? 'edit' : 'upload');
+  // Replacing needs edit rights, except your own upload: a new take keeps its path, so links already sent still work
+  const mine = q.get('replace') && existsSync(target) && (await ownsAll(space, target, user.username));
+  need(q.get('replace') && !mine ? 'edit' : 'upload');
   const id = q.get('upload') || '';
   const chunk = Number(q.get('chunk') || 0);
   const chunks = Number(q.get('chunks') || 1);
@@ -8473,6 +8527,48 @@ async function notesApi(req, res, url) {
   };
   const done = (notesSaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
   notesSaved.set(user.username, done);
+  await done;
+  return json(res, { ok: true });
+}
+
+// ── /api/foundry: each member's saved Foundry sessions (song, tempo, key, checklist, lyrics), so they follow them
+// to every device and past ones can be opened again — data/foundry/<username>.json is { "<id>": session } ──
+const foundrySaved = new Map(); // username -> the last save, so two quick saves never write over each other
+async function foundryApi(req, res, url) {
+  const user = await currentUser(req, url, await loadConfig());
+  const file = `foundry/${user.username}.json`;
+  if (req.method === 'GET') {
+    // Yours, plus everyone else's sessions for songs you can see (a session tied to a song is shared with the song's people)
+    const db = await loadTracks();
+    const shared = [];
+    for (const f of await readdir(join(DATA, 'foundry')).catch(() => [])) {
+      const by = f.slice(0, -5);
+      if (!f.endsWith('.json') || by === user.username) continue;
+      for (const [sid, s] of Object.entries(await readJson(`foundry/${f}`, {}))) {
+        const t = s.track && own(db.tracks, String(s.track));
+        if (t && !t.deleted && own(db.releases, t.release) && canSeeRelease(user, db.releases[t.release]))
+          shared.push({ ...s, id: sid, by });
+      }
+    }
+    return json(res, { sessions: await readJson(file, {}), shared });
+  }
+  const input = req.method === 'PUT' ? await jsonBody(req) : {};
+  const id = String(input.id ?? url.searchParams.get('id') ?? '');
+  if (!/^[\w-]{6,40}$/.test(id)) fail(400, 'Bad session id');
+  const change = async () => {
+    const all = await readJson(file, {});
+    if (req.method === 'DELETE') delete all[id];
+    else if (req.method === 'PUT') {
+      const s = input.session && typeof input.session === 'object' ? input.session : fail(400, 'Nothing to save');
+      if (JSON.stringify(s).length > 60_000) fail(413, 'That session is too long to save');
+      if (!own(all, id) && Object.keys(all).length >= 300) fail(400, 'You have 300 saved sessions already; delete some first');
+      all[id] = { ...s, updated: new Date().toISOString() };
+    } else fail(405, 'Unknown session action');
+    await mkdir(join(DATA, 'foundry'), { recursive: true });
+    await saveJson(file, all);
+  };
+  const done = (foundrySaved.get(user.username) || Promise.resolve()).catch(() => {}).then(change);
+  foundrySaved.set(user.username, done);
   await done;
   return json(res, { ok: true });
 }
@@ -10325,6 +10421,7 @@ const routes = [
   ['/api/files/', files],
   ['/api/me', me],
   ['/api/notes', notesApi],
+  ['/api/foundry', foundryApi],
   ['/api/admin/', admin],
   ['/api/boards', boardsApi],
   ['/api/logout', logout],

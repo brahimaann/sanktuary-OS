@@ -138,12 +138,12 @@ const Table: React.FC<{ head: string[]; rows: (string | number)[][]; wrap?: bool
   </table>
 );
 
-/** A checklist kept on this device: add a line, tick it off, remove it. */
-interface Item {
+/** A checklist you can edit: add a line, tick it off, remove it. */
+export interface Item {
   text: string;
   done?: boolean;
 }
-const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder: string }> = ({ items, set, placeholder }) => {
+export const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder: string }> = ({ items, set, placeholder }) => {
   const [draft, setDraft] = useState('');
   const add = () => {
     if (!draft.trim()) return;
@@ -182,6 +182,28 @@ const List: React.FC<{ items: Item[]; set: (items: Item[]) => void; placeholder:
           Add
         </button>
       </div>
+    </div>
+  );
+};
+
+/** An editable checklist under a title with its count. `start` is the list it begins as until it's first changed. */
+export const EditList: React.FC<{
+  title: string;
+  items: Item[] | undefined;
+  start: Item[];
+  set: (items: Item[]) => void;
+  placeholder: string;
+}> = ({ title, items, start, set, placeholder }) => {
+  const list = items || start;
+  return (
+    <div>
+      <div style={{ ...label, padding: '4px 6px 0' }}>
+        {title}{' '}
+        <span style={mono}>
+          {list.filter((c) => c.done).length}/{list.length}
+        </span>
+      </div>
+      <List items={list} set={set} placeholder={placeholder} />
     </div>
   );
 };
