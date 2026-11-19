@@ -31,14 +31,18 @@ import SevenSegmentDisplay from '../components/SevenSegmentDisplay';
 // checklist with a lyric bar count and the genre's vocal chain, all on one screen. Drop a song to get its tempo, key, loudness and tonal balance
 // (worked out in the browser: nothing is uploaded), compare a mix with a reference, get delay and reverb times
 // for the tempo, the key's scale and chords, and a guide of chains, tips and tools. Open to everyone.
-type Tab = 'session' | 'analyze' | 'compare' | 'convert' | 'guide';
+// Two tabs: Session (the cockpit) and Tools (Analyze, Compare and To WAV on one page, then the Guide folded at the bottom).
+type Tab = 'session' | 'tools';
 const TABS: [Tab, string][] = [
   ['session', 'Session'],
-  ['analyze', 'Analyze'],
-  ['compare', 'Compare'],
-  ['convert', 'To WAV'],
-  ['guide', 'Guide'],
+  ['tools', 'Tools'],
 ];
+const Part: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <section style={{ borderBottom: '1px solid #000', paddingBottom: 12, marginBottom: 12 }}>
+    <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>{title}</h3>
+    {children}
+  </section>
+);
 const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(2)} s` : `${Math.round(v)} ms`);
 const db = (v: number) => (Number.isFinite(v) ? v.toFixed(1) : '-∞');
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
@@ -74,11 +78,26 @@ const Producer: React.FC = () => {
         ))}
       </div>
       <div style={{ flex: 1, overflow: 'auto', background: '#fff', borderTop: '1px solid #fff', padding: tab === 'session' ? 0 : 8 }}>
-        {tab === 'analyze' && <AnalyzeTab current={mine} onDone={adopt} />}
-        {tab === 'compare' && <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />}
         {tab === 'session' && <FoundryRoles recording={<SessionTab bpm={bpm} setBpm={setBpm} keySel={key} setKey={setKey} />} />}
-        {tab === 'convert' && <ConvertTab />}
-        {tab === 'guide' && <GuideTab />}
+        {tab === 'tools' && (
+          <>
+            <Part title="Analyze">
+              <AnalyzeTab current={mine} onDone={adopt} />
+            </Part>
+            <Part title="Compare with a reference">
+              <CompareTab mine={mine} onMine={adopt} onClearMine={() => setMine(null)} />
+            </Part>
+            <Part title="To WAV">
+              <ConvertTab />
+            </Part>
+            <details>
+              <summary style={{ fontWeight: 700, cursor: 'pointer' }}>Guide: chains, tips and tools</summary>
+              <div style={{ marginTop: 6 }}>
+                <GuideTab />
+              </div>
+            </details>
+          </>
+        )}
       </div>
       <div style={statusBar}>Files are measured on this device. Nothing is uploaded.</div>
     </div>

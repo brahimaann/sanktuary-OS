@@ -68,21 +68,44 @@ interface Health {
   rapidraw?: Check;
 }
 
-const GROUPS = {
+type Tab =
+  | 'Health'
+  | 'Usage'
+  | 'Log'
+  | 'Members'
+  | 'Drives'
+  | 'Spaces'
+  | 'Backups'
+  | 'Front page'
+  | 'CITIES'
+  | 'Stories'
+  | 'Mailing list'
+  | 'Shop & pool';
+// The side menu: each item is one page, and Server and Storage stack their parts on that page (fewer things to click through)
+type Page = 'Server' | 'Members' | 'Storage' | 'Front page' | 'CITIES' | 'Stories' | 'Mailing list' | 'Shop & pool';
+const PAGES: Record<Page, Tab[]> = {
   Server: ['Health', 'Usage', 'Log'],
-  People: ['Members'],
+  Members: ['Members'],
   Storage: ['Drives', 'Spaces', 'Backups'],
+  'Front page': ['Front page'],
+  CITIES: ['CITIES'],
+  Stories: ['Stories'],
+  'Mailing list': ['Mailing list'],
+  'Shop & pool': ['Shop & pool'],
+};
+const GROUPS: Record<string, Page[]> = {
+  '': ['Server', 'Members', 'Storage'],
   Website: ['Front page', 'CITIES', 'Stories', 'Mailing list', 'Shop & pool'],
-} as const;
-type Tab = (typeof GROUPS)[keyof typeof GROUPS][number];
-// Tabs that edit the shared config, and so use the Save / Discard bar
-const CONFIG_TABS: Tab[] = ['Drives', 'Spaces', 'Members', 'Backups'];
+};
+// Pages that edit the shared config, and so use the Save / Discard bar
+const CONFIG_PAGES: Page[] = ['Storage', 'Members'];
 
 /** Admin panel: server health, which drives are connected, who can reach what, members, backups. */
 const AdminPanel: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
   const api = useApi();
-  const [tab, setTab] = useState<Tab>('Health');
+  const [view, setView] = useState<Page>('Server');
+  const shows = (t: Tab) => PAGES[view].includes(t);
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -147,18 +170,18 @@ const AdminPanel: React.FC = () => {
     <div style={shell}>
       <div style={{ flex: 1, display: 'flex', minHeight: 0, padding: '4px 0 0' }}>
         <nav style={{ width: 112, flexShrink: 0, overflow: 'auto', padding: '0 0 0 4px' }}>
-          {Object.entries(GROUPS).map(([group, tabs]) => (
+          {Object.entries(GROUPS).map(([group, pages]) => (
             <div key={group} style={{ marginBottom: 8 }}>
-              <div style={{ color: '#404040', padding: '0 4px 2px', fontSize: 10, textTransform: 'uppercase' }}>{group}</div>
-              {tabs.map((t) => (
+              {group && <div style={{ color: '#404040', padding: '0 4px 2px', fontSize: 10, textTransform: 'uppercase' }}>{group}</div>}
+              {pages.map((t) => (
                 <div
                   key={t}
-                  onClick={() => setTab(t)}
+                  onClick={() => setView(t)}
                   style={{
                     padding: '3px 6px',
                     cursor: 'pointer',
-                    background: tab === t ? '#000' : 'transparent',
-                    color: tab === t ? '#fff' : 'inherit',
+                    background: view === t ? '#000' : 'transparent',
+                    color: view === t ? '#fff' : 'inherit',
                   }}
                 >
                   {t}
@@ -168,9 +191,9 @@ const AdminPanel: React.FC = () => {
           ))}
         </nav>
         <div style={page}>
-          {tab === 'Health' && <HealthTab state={state} health={health} refresh={loadHealth} />}
+          {shows('Health') && <HealthTab state={state} health={health} refresh={loadHealth} />}
 
-          {tab === 'Drives' && (
+          {shows('Drives') && (
             <>
               <p style={hint}>
                 Every external drive this PC has seen. Tick <b>Connected</b> to make it available to Sanktuary; untick to take it offline
@@ -253,21 +276,21 @@ const AdminPanel: React.FC = () => {
             </>
           )}
 
-          {tab === 'Spaces' && <SpacesTab draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} usernames={usernames} />}
+          {shows('Spaces') && <SpacesTab draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} usernames={usernames} />}
 
-          {tab === 'Log' && <LogTab />}
-          {tab === 'CITIES' && <BlogTab />}
-          {tab === 'Front page' && <FrontTab />}
-          {tab === 'Mailing list' && <MailTab />}
-          {tab === 'Usage' && <UsageTab />}
-          {tab === 'Stories' && <StoriesTab />}
-          {tab === 'Shop & pool' && <ShopTab />}
+          {shows('Log') && <LogTab />}
+          {shows('CITIES') && <BlogTab />}
+          {shows('Front page') && <FrontTab />}
+          {shows('Mailing list') && <MailTab />}
+          {shows('Usage') && <UsageTab />}
+          {shows('Stories') && <StoriesTab />}
+          {shows('Shop & pool') && <ShopTab />}
 
-          {tab === 'Members' && (
+          {shows('Members') && (
             <MembersTab state={state} draft={draft} edit={edit} driveIds={driveIds} driveName={driveName} reload={load} setMsg={setMsg} />
           )}
 
-          {tab === 'Backups' && (
+          {shows('Backups') && (
             <>
               <p style={hint}>
                 Copies every space and member space to <b>&lt;backup drive&gt;\Sanktuary Backup</b>. It only adds and updates files, and
@@ -350,7 +373,7 @@ const AdminPanel: React.FC = () => {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 4 }}>
         <div style={{ ...statusBar, flex: 1, margin: 0 }}>{msg || (dirty ? 'You have unsaved changes.' : '')}</div>
-        {(dirty || CONFIG_TABS.includes(tab)) && (
+        {(dirty || CONFIG_PAGES.includes(view)) && (
           <>
             <button style={button} disabled={!dirty} onClick={() => setDraft(structuredClone(state.config))}>
               Discard

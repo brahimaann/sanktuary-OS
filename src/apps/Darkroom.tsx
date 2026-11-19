@@ -36,6 +36,8 @@ interface Props {
   app?: string;
   dir?: string[];
   name?: string;
+  /** In the Darkroom window: opens the RAW engine in place (shows a RAW... button) */
+  onRaw?: () => void;
 }
 
 // ── Collage Presets & Types ──
@@ -236,7 +238,7 @@ interface Version {
 const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const forget = (vs: Version[]) => vs.forEach((v) => v.img.src.startsWith('blob:') && URL.revokeObjectURL(v.img.src));
 
-const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
+const Darkroom: React.FC<Props> = ({ app, dir = [], name, onRaw }) => {
   const { getToken } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<Gl | null>(null);
@@ -912,6 +914,11 @@ const Darkroom: React.FC<Props> = ({ app, dir = [], name }) => {
         >
           Server Files...
         </button>
+        {onRaw && (
+          <button style={button} onClick={onRaw} title="Develop a RAW file in SANKTUARY RAW">
+            RAW...
+          </button>
+        )}
         <button
           style={{
             ...button,
