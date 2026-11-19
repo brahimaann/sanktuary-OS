@@ -1478,7 +1478,7 @@ async function publicShare(req, res, url) {
 // can only listen, comment and follow: they can't change the release or its songs.
 const TRACK_STATUSES = ['Idea', 'Writing', 'Recording', 'Mixing', 'Mastering', 'Done'];
 // A Folder holds loose songs (demos, beats); a Playlist holds no songs of its own, only `items`: songs from other projects
-const RELEASE_KINDS = ['Album', 'EP', 'Single', 'Folder', 'Playlist'];
+const RELEASE_KINDS = ['Album', 'EP', 'Single', 'Video', 'Photos', 'Folder', 'Playlist']; // Video, Photos: a video or photo set that is its own project
 // A song's BMI work-registration sheet (and split sheet): only the song's team sees it, never public pages.
 // Identifiers are checked for shape here; shares adding up to 100% is checked in the app (drafts may not yet).
 const PROS = ['BMI', 'ASCAP', 'SESAC', 'GMR', 'SOCAN', 'PRS', 'Other', 'None'];
@@ -1859,14 +1859,23 @@ async function findStreamingLinks(db, r, link, done) {
 }
 let tracksDb = null;
 let tracksSaved = Promise.resolve();
-const loadTracks = async () => (tracksDb ??= await readJson('tracks.json', { releases: {}, tracks: {} }));
+const loadTracks = async () => {
+  if (tracksDb) return tracksDb;
+  tracksDb = await readJson('tracks.json', { releases: {}, tracks: {} });
+  // Reels are Videos now (2026-11-19)
+  for (const o of [...Object.values(tracksDb.releases), ...Object.values(tracksDb.tracks)])
+    for (const c of o.content || []) if (c.kind === 'Reel') c.kind = 'Video';
+  return tracksDb;
+};
 const saveTracks = () => (tracksSaved = tracksSaved.then(() => saveJson('tracks.json', tracksDb)).catch(console.error));
 // A draft (calendar entry, spot, board) is its owner's sandbox: nobody else sees it, admins included, until it goes live
+/** A project's owners: whoever made it plus its co-owners. Owners decide who sees it, who edits and who only listens. */
+const isReleaseOwner = (user, r) => r.owner === user.username || !!r.owners?.includes(user.username);
 const canSeeRelease = (user, r) =>
   !r.deleted &&
   !(r.draft && r.owner !== user.username) &&
-  (!r.members || user.admin || r.owner === user.username || r.members.includes(user.username));
-const canEditRelease = (user, r) => user.admin || r.owner === user.username || !r.listeners?.includes(user.username);
+  (!r.members || user.admin || isReleaseOwner(user, r) || r.members.includes(user.username));
+const canEditRelease = (user, r) => user.admin || isReleaseOwner(user, r) || !r.listeners?.includes(user.username);
 const editRelease = (user, r) => canEditRelease(user, r) || fail(403, `You can listen to "${r.title}" but not change it`);
 const userList = (list) => [...new Set(list.map(String).filter((u) => /^[\w.-]{1,64}$/.test(u)))];
 const fileRef = (v) =>
@@ -1879,19 +1888,54 @@ const fileRef = (v) =>
 const localDate = (d = new Date()) => d.toLocaleDateString('en-CA');
 const dateOrNull = (v) => (v === null || v === '' ? null : /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fail(400, 'Dates look like 2027-06-01'));
 // Shot content (clips, reels, videos, photos) for a song or a whole project, each with where it's at and its file in a space
-const CONTENT_KINDS = ['Clip', 'Reel', 'Video', 'Visualizer', 'BTS', 'Photos', 'Other'];
-const CONTENT_STEPS = ['To shoot', 'Shot', 'Edited', 'Posted'];
+const CONTENT_KINDS = ['Clip', 'Video', 'Visualizer', 'BTS', 'Photos', 'Other']; // 'Reel' is folded into Video
+const CONTENT_STEPS = ['To shoot', 'Shot', 'Edited', 'Approved', 'Posted']; // Approved: a project owner's OK
 const cleanContent = (list) =>
   (Array.isArray(list) ? list : []).slice(0, 200).map((x) => ({
     id: /^[\w-]{1,20}$/.test(x?.id || '') ? x.id : randomUUID().slice(0, 8),
-    kind: CONTENT_KINDS.includes(x?.kind) ? x.kind : 'Clip',
+    kind: x?.kind === 'Reel' ? 'Video' : CONTENT_KINDS.includes(x?.kind) ? x.kind : 'Clip',
     title: String(x?.title ?? '')
       .trim()
       .slice(0, 120),
     status: CONTENT_STEPS.includes(x?.status) ? x.status : 'To shoot',
     file: x?.file ? fileRef(x.file) : null,
+    edit: x?.edit ? fileRef(x.edit) : null, // the edited cut (required to mark it Edited in the app)
+    link: /^https:\/\/\S+$/.test(String(x?.link || '').trim()) ? String(x.link).trim().slice(0, 300) : '', // where it was posted
+    okBy: null, // filled in by footageSteps from who gave the OK
     due: x?.due ? dateOrNull(x.due) : null,
   }));
+
+/** Footage moving along: only a project owner (or an admin) gives the OK (Approved), and nothing is posted before it. */
+function footageSteps(prev, next, user, r) {
+  const owner = user.admin || isReleaseOwner(user, r);
+  const was = new Map((prev || []).map((x) => [x.id, x]));
+  for (const n of next) {
+    const p = was.get(n.id);
+    const from = p?.status || 'To shoot';
+    if (n.status === 'Approved' && from !== 'Approved' && !owner) fail(403, `Only ${r.title}'s owners can give the OK`);
+    if (n.status === 'Posted' && !['Approved', 'Posted'].includes(from) && !owner)
+      fail(403, `${n.title || n.kind} needs an owner's OK before it's posted`);
+    n.okBy =
+      n.status === 'Approved' && from !== 'Approved' ? user.username : ['Approved', 'Posted'].includes(n.status) ? p?.okBy || null : null;
+  }
+  return next;
+}
+
+/** A project's fixed footage folders (Shoots, Edits, Posted), made the first time footage is saved on it. */
+async function footageFolders(r, user, cfg) {
+  if (!r.folder) return;
+  try {
+    const space = await releaseSpace(r.folder.space, user, cfg, 'upload');
+    const { abs } = locateIn(space, r.folder.path);
+    for (const n of FOOTAGE_SUBFOLDERS) {
+      const d = join(abs, n);
+      if (!existsSync(d)) {
+        await mkdir(d, { recursive: true });
+        await setOwner(space, d, user);
+      }
+    }
+  } catch {} // no upload rights or the drive is offline: the pickers just open at the project folder
+}
 
 async function tracksApi(req, res, url) {
   const cfg = await loadConfig();
@@ -1993,7 +2037,7 @@ async function tracksApi(req, res, url) {
     if (req.method === 'PATCH') {
       const input = await jsonBody(req);
       if (input.folder !== undefined) {
-        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change its folder');
+        if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can change its folder");
         if (input.folder === null) r.folder = r.folderKey = null;
         else await linkReleaseFolder(r, input.folder, user, cfg, !!input.setup);
       }
@@ -2019,7 +2063,10 @@ async function tracksApi(req, res, url) {
           .trim()
           .slice(0, 120);
       if (input.writers !== undefined) r.writers = releaseWriters(input.writers);
-      if (input.content !== undefined) r.content = cleanContent(input.content); // shot for the whole project, not one song
+      if (input.content !== undefined) {
+        r.content = footageSteps(r.content, cleanContent(input.content), user, r); // shot for the whole project, not one song
+        await footageFolders(r, user, cfg);
+      }
       if (input.upc !== undefined) r.upc = upcOrEmpty(input.upc);
       if (input.stores !== undefined) {
         const stores = {};
@@ -2038,19 +2085,30 @@ async function tracksApi(req, res, url) {
           : null;
       if (input.story !== undefined) r.story = input.story ? String(input.story).slice(0, 80) : null; // a Story as its visual world
       if (input.members !== undefined) {
-        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who sees it');
+        if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can change who sees it");
         r.members = Array.isArray(input.members) ? userList(input.members) : null;
       }
+      if (input.owners !== undefined) {
+        if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can add owners");
+        r.owners = Array.isArray(input.owners)
+          ? userList(input.owners)
+              .filter((u) => u !== r.owner)
+              .slice(0, 20)
+          : [];
+        r.listeners = (r.listeners || []).filter((u) => !r.owners.includes(u));
+      }
       if (input.listeners !== undefined) {
-        if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can change who can edit it');
-        r.listeners = Array.isArray(input.listeners) ? userList(input.listeners).filter((u) => u !== r.owner) : [];
+        if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can change who can edit it");
+        r.listeners = Array.isArray(input.listeners)
+          ? userList(input.listeners).filter((u) => u !== r.owner && !r.owners?.includes(u))
+          : [];
       }
       const found = input.folder ? await scanRelease(r, me) : null;
       changed(r);
       return json(res, { ...r, folderKey: undefined, found });
     }
     if (req.method === 'DELETE') {
-      if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can delete it');
+      if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can delete it");
       r.deleted = new Date().toISOString(); // kept in the file, just hidden: recoverable
       changed(r);
       return json(res, { ok: true });
@@ -2101,7 +2159,10 @@ async function tracksApi(req, res, url) {
         t.bmi = b && { ...b, signoffs: t.bmi?.signoffs || [] }; // like the master's: kept, out of date once the writers change
         log('updated the BMI sheet');
       }
-      if (input.content !== undefined) t.content = cleanContent(input.content);
+      if (input.content !== undefined) {
+        t.content = footageSteps(t.content, cleanContent(input.content), user, r);
+        await footageFolders(r, user, cfg);
+      }
       if (input.explicit !== undefined) t.explicit = input.explicit === null ? null : !!input.explicit;
       if (input.regs !== undefined)
         t.regs = Object.fromEntries(REGISTRATIONS.map((k) => [k, input.regs?.[k] ? dateOrNull(input.regs[k]) : null]).filter(([, v]) => v));
@@ -2144,6 +2205,7 @@ async function tracksApi(req, res, url) {
       }
       for (const k of ['bounce', 'project', 'stems'])
         if (input[k] !== undefined) {
+          if (k === 'bounce') keepEarlier(t, t.bounce, input[k], me);
           t[k] = fileRef(input[k]);
           log(t[k] ? `set the ${k} to ${t[k].path}` : `removed the ${k}`);
           if (k === 'bounce' && t[k]) news.push(`New bounce of ${t.title}: ${t[k].path.split('/').pop()} (${me}).`);
@@ -2165,13 +2227,23 @@ async function tracksApi(req, res, url) {
       return json(res, { ...t, following: t.followers.includes(me), followers: t.followers.length });
     }
     if (req.method === 'DELETE') {
-      if (r.owner !== me && !user.admin) fail(403, 'Only whoever made the release or an admin can remove tracks');
+      if (!isReleaseOwner(user, r) && !user.admin) fail(403, "Only the project's owners or an admin can remove tracks");
       t.deleted = new Date().toISOString();
       changed(r);
       return json(res, { ok: true });
     }
   }
   fail(404, 'Unknown tracks action');
+}
+
+/** A replaced bounce stays on the song as an earlier take or mix (newest first), so trying versions never loses one
+ * and a rescan of the folder doesn't turn old takes back into songs. */
+function keepEarlier(t, prev, next, by) {
+  if (!prev?.path || (next?.space === prev.space && next?.path === prev.path)) return;
+  const rest = (t.earlier || []).filter(
+    (e) => !(e.space === prev.space && e.path === prev.path) && !(e.space === next?.space && e.path === next?.path),
+  );
+  t.earlier = [{ space: prev.space, path: prev.path, at: new Date().toISOString(), by }, ...rest].slice(0, 30);
 }
 
 function newTrack(db, r, title, by, action) {
@@ -2213,7 +2285,8 @@ function newTrack(db, r, title, by, action) {
 // song, reads the BPM from Ableton sets, and uses an image in Artwork as the cover. A scan only fills what's empty
 // or what an earlier scan set from inside the folder, so nothing picked by hand is replaced. Personal spaces can't
 // be used: "me" is a different folder for every member.
-const RELEASE_SUBFOLDERS = ['Bounces', 'Stems', 'Projects', 'Artwork'];
+const FOOTAGE_SUBFOLDERS = ['Shoots', 'Edits', 'Posted']; // raw from shoots, edited cuts, what went out
+const RELEASE_SUBFOLDERS = ['Bounces', 'Stems', 'Projects', 'Artwork', ...FOOTAGE_SUBFOLDERS];
 const BOUNCE_EXT = new Set(['.wav', '.aif', '.aiff', '.flac', '.mp3', '.m4a', '.ogg']);
 const LOSSLESS_EXT = new Set(['.wav', '.aif', '.aiff', '.flac']);
 const ART_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.psd', '.ai']);
@@ -2230,7 +2303,10 @@ function songName(name, isFile = true) {
   const n = Number(base.match(/^(\d{1,2})(?=[\s._)-])/)?.[1]) || null;
   base = base.replace(/^\d{1,2}[\s._)-]+/, '');
   const version = Number(base.match(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i)?.[1]) || 0;
-  const plain = base.replace(/_/g, ' ');
+  // "Keep Going take 2" / "mix 3" are versions of Keep Going (but a song called "Take 5" stays itself)
+  const spaced = base.replace(/_/g, ' ');
+  const untaken = spaced.replace(/\b(?:take|alt|attempt|mix|bounce)[\s#.-]*\d{1,3}\b/gi, ' ');
+  const plain = /\p{L}/u.test(untaken) ? untaken : spaced;
   const variant = new RegExp(SONG_VARIANT.source, 'i').test(plain);
   const words = plain
     .replace(SONG_VARIANT, ' ')
@@ -2317,7 +2393,7 @@ async function scanReleaseNow(r, by) {
       const r2 = rel ? `${rel}/${e.name}` : e.name;
       const ext = extname(e.name).toLowerCase();
       if (e.isDirectory()) {
-        if (/^(samples|backup|ableton project info)$/i.test(e.name)) continue;
+        if (/^(samples|backup|ableton project info|shoots|edits|posted)$/i.test(e.name)) continue; // footage folders hold no songs
         const kind = await projectKind(abs, true);
         if (kind) {
           const inner = (await readdir(abs).catch(() => [])).filter((n) => PROJECT_FILES[extname(n).toLowerCase()]);
@@ -2369,7 +2445,9 @@ async function scanReleaseNow(r, by) {
   // Any song's bounce, whichever project it's in now: a song moved out of New songs keeps its file there, and a
   // rescan must not bring it back as a new track (its newer versions still find it)
   const byBounce = new Map(
-    Object.values(db.tracks).flatMap((t) => (t.bounce && !t.deleted ? [[`${t.bounce.space}|${t.bounce.path}`, t]] : [])),
+    Object.values(db.tracks).flatMap((t) =>
+      t.deleted ? [] : [t.bounce, ...(t.earlier || [])].filter(Boolean).map((b) => [`${b.space}|${b.path}`, t]),
+    ),
   );
   const now = new Date().toISOString();
   const log = (t, action) => {
@@ -2397,8 +2475,10 @@ async function scanReleaseNow(r, by) {
         LOSSLESS_EXT.has(extname(b.name).toLowerCase()) - LOSSLESS_EXT.has(extname(a.name).toLowerCase()),
     )[0];
     const next = ref(best.rel);
-    if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path) {
+    const earlier = (t.earlier || []).some((e) => e.space === next.space && e.path === next.path);
+    if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path && !earlier) {
       const first = !t.bounce;
+      keepEarlier(t, t.bounce, next, by);
       t.bounce = next;
       log(t, `set the bounce to ${next.path} (from the release folder)`);
       found.bounces.push(best.name);
@@ -3111,6 +3191,34 @@ async function timelineApi(req, res, url) {
           done: t.status === 'Done',
         });
     }
+    // Footage due dates (shot content on songs and whole projects) and open-verse deadlines, so the calendar has them too
+    for (const r of Object.values(tdb.releases)) {
+      if (!canSeeRelease(user, r)) continue;
+      const songs = Object.values(tdb.tracks).filter((t) => !t.deleted && t.release === r.id);
+      for (const [owner, list] of [[null, r.content], ...songs.map((t) => [t, t.content])])
+        for (const c of list || [])
+          if (c.due && c.status !== 'Posted')
+            fromTracks.push({
+              id: `content-${owner?.id || r.id}-${c.id}`,
+              source: 'tracks',
+              kind: 'Footage due',
+              title: `${c.kind}${c.title ? `: ${c.title}` : ''} for ${owner?.title || r.title} (${c.status.toLowerCase()})`,
+              start: c.due,
+              release: r.id,
+              ...(owner ? { track: owner.id } : {}),
+            });
+    }
+    for (const v of Object.values((await loadVerses()).items))
+      if (!v.archived && !v.picked && v.deadline)
+        fromTracks.push({
+          id: `verse-${v.id}`,
+          source: 'verses',
+          kind: 'Verse due',
+          title: `Open verse: ${v.title}`,
+          start: v.deadline,
+        });
+    // Planner cards with a due date (not in a Done column): the task, who it's on, and the release its plan is for
+    for (const t of await plannerTasks(user)) fromTracks.push(t);
     // Opportunity deadlines too (read-only here)
     for (const o of Object.values((await loadOpps()).items))
       if (!o.archived && o.deadline)
@@ -3141,6 +3249,15 @@ async function timelineApi(req, res, url) {
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
     if (input.place !== undefined) i.place = input.place ? String(input.place).slice(0, 20) : null; // a spot in the location library
+    // The shot list: each planned shot, ticked when it's captured, with a note (take, card, what to redo)
+    if (input.shots !== undefined)
+      i.shots = (Array.isArray(input.shots) ? input.shots : []).slice(0, 100).map((x) => ({
+        id: /^[\w-]{1,20}$/.test(x?.id || '') ? x.id : randomUUID().slice(0, 8),
+        text: String(x?.text ?? '').slice(0, 200),
+        got: !!x?.got,
+        note: String(x?.note ?? '').slice(0, 300),
+        for: /^[\w-]{1,20}$/.test(x?.for || '') ? x.for : null, // the song in the project it's for (null: the whole project)
+      }));
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
     if (input.draft !== undefined) i.draft = !!input.draft; // only its owner sees it, nobody is told, until it goes live
     if (i.draft) i.public = false;
@@ -8408,6 +8525,34 @@ const validItem = (kind, i) =>
   (kind === 'kanban'
     ? Number.isFinite(i.order) && typeof i.title === 'string' && (i.type === 'column' || (i.type === 'card' && typeof i.col === 'string'))
     : ITEM_TYPES.has(i.type) && ['x', 'y', 'w', 'h'].every((k) => Number.isFinite(i[k])));
+
+/** Dated cards on every plan this member may see, as calendar entries (kind 'Task', people = the card's assignee). */
+async function plannerTasks(user) {
+  await mkdir(join(DATA, 'boards'), { recursive: true });
+  const out = [];
+  for (const e of await readdir(join(DATA, 'boards'), { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const b = openBoards.get(e.name) || (await readJson(`boards/${e.name}/board.json`, null).catch(() => null));
+    if (!b || b.meta.kind !== 'kanban' || !canSeeBoard(user, b.meta)) continue;
+    const items = b.items instanceof Map ? [...b.items.values()] : b.items || [];
+    const done = new Set(items.filter((i) => i.type === 'column' && /done/i.test(i.title)).map((i) => i.id));
+    for (const c of items)
+      if (c.type === 'card' && !c.deleted && /^\d{4}-\d{2}-\d{2}$/.test(c.due || ''))
+        out.push({
+          id: `task-${b.meta.id}-${c.id}`,
+          source: 'planner',
+          kind: 'Task',
+          title: `${c.title || 'Untitled card'} (${b.meta.name})`,
+          start: c.due,
+          people: c.assignee ? [c.assignee] : [],
+          release: b.meta.release || null,
+          board: b.meta.id,
+          boardName: b.meta.name,
+          done: done.has(c.col),
+        });
+  }
+  return out;
+}
 
 async function boardsApi(req, res, url) {
   const cfg = await loadConfig();

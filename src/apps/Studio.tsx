@@ -2,9 +2,10 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Operations (the Studio window): Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner),
+// Operations (the Studio window): the Board (what needs someone, this week, songs in play), Music (songs, bounces, beat handoff, All songs status), the calendar (Timeline), shoot locations, to-do boards (Planner),
 // opportunities (grants, calls, gigs), outreach and the Library (books, Renaissance Radio, our archive) in one window.
 // Each tab is the full app it replaces; a tab stays loaded once opened, so switching back keeps what you were doing.
+const OpsBoard = lazy(() => import('./OpsBoard'));
 const Tracks = lazy(() => import('./Tracks'));
 const Timeline = lazy(() => import('./Timeline'));
 const Boards = lazy(() => import('./Boards'));
@@ -13,8 +14,9 @@ const Library = lazy(() => import('./Library'));
 const Outreach = lazy(() => import('./Outreach'));
 const Locations = lazy(() => import('./Locations'));
 
-export type StudioTab = 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'library';
+export type StudioTab = 'board' | 'music' | 'calendar' | 'locations' | 'boards' | 'opportunities' | 'outreach' | 'library';
 const TABS: [StudioTab, string][] = [
+  ['board', 'Board'],
   ['music', 'Music'],
   ['calendar', 'Calendar'],
   ['locations', 'Locations'],
@@ -72,7 +74,9 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
             ([id]) =>
               opened.has(id) && (
                 <div key={id} style={{ flex: 1, minWidth: 0, display: active === id ? 'flex' : 'none', flexDirection: 'column' }}>
-                  {id === 'music' ? (
+                  {id === 'board' ? (
+                    <OpsBoard />
+                  ) : id === 'music' ? (
                     <Tracks />
                   ) : id === 'calendar' ? (
                     <Timeline />

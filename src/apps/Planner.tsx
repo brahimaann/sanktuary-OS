@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useBoard } from '../utils/useBoard';
 import { dialog } from '../utils/dialog';
@@ -7,6 +7,9 @@ import { Ref, refFromDrop, useOpenRef } from '../utils/refs';
 import { RefChip } from './Chat';
 import Avatar from './Avatar';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
+import { useApi } from '../utils/api';
+import { useLiveEvent } from '../utils/live';
+import { CONTENT_STEPS, ContentItem } from './ShotContent';
 
 /** Kanban planner: columns of cards, edited live by the whole team (same live board engine as Moodboards). */
 interface Column {
@@ -26,8 +29,61 @@ interface Card {
   due?: string;
   color?: string;
   refs?: Ref[];
+  /** The footage item this card is for: the card takes the file and is done once the footage is Edited. */
+  footage?: { owner: string; id: string };
 }
 type PlanItem = Column | Card;
+/** A footage item on the plan's project, where it lives (a song, or the project itself). */
+interface Footage {
+  owner: string;
+  ownerKind: 'track' | 'release';
+  item: ContentItem;
+  label: string;
+}
+const footageDone = (f?: Footage) => !!f && CONTENT_STEPS.indexOf(f.item.status) >= CONTENT_STEPS.indexOf('Edited');
+
+/** The plan's project and its footage, live. */
+function useProjectFootage(boardId: string) {
+  const api = useApi();
+  const [project, setProject] = useState<string | null>(null);
+  const [footage, setFootage] = useState<Footage[]>([]);
+  const load = useCallback(async () => {
+    const boards: { id: string; release?: string | null }[] = await api('/api/boards?kind=kanban').catch(() => []);
+    const rid = boards.find((b) => b.id === boardId)?.release || null;
+    setProject(rid);
+    if (!rid) return setFootage([]);
+    const d: {
+      releases: { id: string; title: string; content?: ContentItem[] }[];
+      tracks: { id: string; release: string; title: string; content?: ContentItem[] }[];
+    } = await api('/api/tracks');
+    const r = d.releases.find((x) => x.id === rid);
+    const list: Footage[] = [];
+    for (const c of r?.content || [])
+      list.push({ owner: rid, ownerKind: 'release', item: c, label: `${r!.title} · ${c.kind}${c.title ? `: ${c.title}` : ''}` });
+    for (const t of d.tracks.filter((x) => x.release === rid))
+      for (const c of t.content || [])
+        list.push({ owner: t.id, ownerKind: 'track', item: c, label: `${t.title} · ${c.kind}${c.title ? `: ${c.title}` : ''}` });
+    setFootage(list);
+  }, [api, boardId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  useLiveEvent('tracks', load);
+  // The edited file dropped on a card: the footage item takes it and is marked Edited
+  const attachEdit = async (f: Footage, file: { space: string; path: string }) => {
+    const d = await api('/api/tracks');
+    const o =
+      f.ownerKind === 'track'
+        ? d.tracks.find((t: { id: string }) => t.id === f.owner)
+        : d.releases.find((r: { id: string }) => r.id === f.owner);
+    const content = (o?.content || []).map((c: ContentItem) =>
+      c.id === f.item.id ? { ...c, edit: file, status: CONTENT_STEPS.indexOf(c.status) > 2 ? c.status : 'Edited' } : c,
+    );
+    await api(`/api/tracks/${f.ownerKind}/${f.owner}`, { method: 'PATCH', body: JSON.stringify({ content }) });
+    await load();
+  };
+  return { project, footage, attachEdit };
+}
 
 const LABELS = ['', '#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa'];
 const CARD_MIME = 'application/x-sk-card';
@@ -46,11 +102,32 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
   const { profiles, byName } = useProfiles();
   const [editing, setEditing] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
+  const { project, footage, attachEdit } = useProjectFootage(boardId);
+  const footageOf = (c: Card) => (c.footage ? footage.find((f) => f.owner === c.footage!.owner && f.item.id === c.footage!.id) : undefined);
 
   const all = Object.values(items);
   const columns = all.filter((i): i is Column => i.type === 'column').sort((a, b) => a.order - b.order);
   const cardsIn = (col: string) => all.filter((i): i is Card => i.type === 'card' && i.col === col).sort((a, b) => a.order - b.order);
   const doneCol = columns.find((c) => /done/i.test(c.title))?.id;
+  // A card linked to footage is done once the footage is Edited: it moves to Done by itself
+  useEffect(() => {
+    if (!doneCol) return;
+    const move: Record<string, Card> = {};
+    for (const c of all) if (c.type === 'card' && c.col !== doneCol && footageDone(footageOf(c))) move[c.id] = { ...c, col: doneCol };
+    if (Object.keys(move).length) queue(move, true);
+  }, [footage, doneCol]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dropEdit = async (e: React.DragEvent, c: Card) => {
+    const f = footageOf(c);
+    const r = refFromDrop(e.dataTransfer);
+    if (!f || !r || r.kind !== 'file' || !r.app) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await attachEdit(f, { space: r.app, path: [...(r.dir || []), r.name || r.title].join('/') });
+    } catch (err) {
+      dialog.alert((err as Error).message, { icon: 'warning' });
+    }
+  };
 
   const addColumn = async () => {
     const title = (await dialog.prompt('Column name:', '', { title: 'Add column' }))?.trim();
@@ -185,13 +262,14 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
               <div style={{ overflow: 'auto', padding: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {cards.map((c) => {
                   const late = c.due && c.due < today() && c.col !== doneCol;
+                  const f = footageOf(c);
                   return (
                     <div
                       key={c.id}
                       draggable
                       onDragStart={(e) => e.dataTransfer.setData(CARD_MIME, c.id)}
                       onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => dropCard(e, col.id, c)}
+                      onDrop={(e) => (f && !footageDone(f) && !e.dataTransfer.getData(CARD_MIME) ? dropEdit(e, c) : dropCard(e, col.id, c))}
                       onClick={() => setEditing(c.id)}
                       style={{
                         background: '#fff',
@@ -222,6 +300,21 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
                         )}
                         {!!c.refs?.length && <span>🔗 {c.refs.length}</span>}
                       </div>
+                      {f && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            padding: '3px 4px',
+                            border: footageDone(f) ? '1px solid #808080' : '1px dashed #000',
+                            color: footageDone(f) ? '#555' : '#000',
+                          }}
+                          title={f.label}
+                        >
+                          {footageDone(f)
+                            ? `✓ ${f.item.status}: ${f.label}`
+                            : `⬇ Drop the edited file here · ${f.label} (${f.item.status.toLowerCase()})`}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -240,6 +333,7 @@ const Plan: React.FC<{ boardId: string }> = ({ boardId }) => {
           columns={columns}
           people={profiles.map((p) => p.username)}
           nameOf={(u) => displayName(byName[u], u)}
+          footage={project ? footage : null}
           onChange={(c) => queue({ [c.id]: c })}
           onDelete={async () => {
             if (await dialog.confirm(`Delete "${editCard.title}"?`, { icon: 'warning' })) {
@@ -259,10 +353,11 @@ const CardEditor: React.FC<{
   columns: Column[];
   people: string[];
   nameOf: (u: string) => string;
+  footage: Footage[] | null;
   onChange: (c: Card) => void;
   onDelete: () => void;
   onClose: () => void;
-}> = ({ card, columns, people, nameOf, onChange, onDelete, onClose }) => {
+}> = ({ card, columns, people, nameOf, footage, onChange, onDelete, onClose }) => {
   const openRef = useOpenRef();
   const set = (patch: Partial<Card>) => onChange({ ...card, ...patch });
   const onDrop = (e: React.DragEvent) => {
@@ -336,6 +431,28 @@ const CardEditor: React.FC<{
                 </option>
               ))}
             </select>
+          </label>
+          <label style={row} title="Link a footage item: the card takes the edited file and is done once it's Edited">
+            Footage
+            {footage ? (
+              <select
+                value={card.footage ? `${card.footage.owner}:${card.footage.id}` : ''}
+                onChange={(e) => {
+                  const [owner, id] = e.target.value.split(':');
+                  set({ footage: e.target.value ? { owner, id } : undefined });
+                }}
+                style={field}
+              >
+                <option value="">(not linked)</option>
+                {footage.map((f) => (
+                  <option key={`${f.owner}:${f.item.id}`} value={`${f.owner}:${f.item.id}`}>
+                    {f.label} ({f.item.status.toLowerCase()})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span style={{ color: '#555' }}>Tie this plan to a project (Planner list) to link its footage</span>
+            )}
           </label>
           <label style={row}>
             Due date

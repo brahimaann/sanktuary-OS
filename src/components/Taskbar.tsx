@@ -5,6 +5,7 @@ import sound from '../utils/sound';
 import SMark from './SMark';
 import { liveUser, useLiveEvent } from '../utils/live';
 import NotificationTray from './Notifications';
+import { getTheme, setTheme, type Theme } from '../utils/theme';
 import { openStudio } from '../apps/Studio';
 import { button } from '../apps/fileTypes';
 
@@ -33,13 +34,13 @@ const STUDIO_MENU: MenuItem[] = [
   },
   {
     id: 'studio',
-    label: 'Studio (music, calendar, boards, opportunities)',
+    label: 'Operations (board, music, calendar, planner, opportunities)',
     title: 'Operations',
     appType: 'studio',
     icon: icon('media-player-32x32.png?v=2'),
     width: 960,
     height: 620,
-    props: { tab: 'music' },
+    props: { tab: 'board' },
   },
   {
     id: 'moodboards',
@@ -226,6 +227,7 @@ export const Taskbar: React.FC = () => {
         className="tray flex items-center h-[22px] px-2 m-[2px] bg-white border-2 border-inset text-xs text-black"
         style={{ borderStyle: 'solid', borderColor: '#000' }}
       >
+        <ThemeTray />
         <TeamsTray />
         <NotificationTray />
         {isPplsStoryRunning && (
@@ -404,6 +406,30 @@ export const Taskbar: React.FC = () => {
   );
 };
 export default Taskbar;
+
+/** Dark / White switch. A half-filled pixel square: the filled half is the theme you'd switch to. */
+const ThemeTray: React.FC = () => {
+  const [theme, setT] = useState<Theme>(getTheme);
+  useEffect(() => {
+    const on = () => setT(getTheme());
+    window.addEventListener('sk-theme', on);
+    return () => window.removeEventListener('sk-theme', on);
+  }, []);
+  const next: Theme = theme === 'dark' ? 'white' : 'dark';
+  return (
+    <button
+      onClick={() => setTheme(next)}
+      aria-label={next === 'white' ? 'Switch to white' : 'Switch to dark'}
+      title={next === 'white' ? 'White' : 'Dark'}
+      className="mr-2 cursor-pointer border-none bg-transparent outline-none flex items-center justify-center p-0"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" shapeRendering="crispEdges" aria-hidden="true">
+        <rect x="0.5" y="0.5" width="11" height="11" fill="none" stroke="#000" />
+        <rect x="6" y="1" width="5" height="10" fill="#000" />
+      </svg>
+    </button>
+  );
+};
 
 /** Envelope in the tray when a Teams message arrives while its chat window isn't in front. Click opens Teams. */
 const TeamsTray: React.FC = () => {
