@@ -20,7 +20,14 @@ interface Entry {
   status?: string;
   location?: string;
   source?: string;
+  release?: string | null;
   shots?: { got: boolean }[];
+}
+interface Project {
+  id: string;
+  title: string;
+  kind: string;
+  folder?: { space: string; path: string } | null;
 }
 interface PlayTemplate {
   id: string;
@@ -31,7 +38,17 @@ interface PlayTemplate {
 }
 
 const PLAY_KINDS = ['Shoot', 'Show', 'Session'];
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => new Date().toLocaleDateString('en-CA');
+// A play uses a folder its project already has (no new folders): a shoot's raw files in Shoots, a session's sets
+// in Projects, a show in the project folder itself.
+const PLAY_FOLDER: Record<string, string> = { Shoot: '/Shoots', Session: '/Projects', Show: '' };
+const field: React.CSSProperties = {
+  font: 'inherit',
+  padding: '2px 4px',
+  border: '1px solid currentColor',
+  background: 'transparent',
+  color: 'inherit',
+};
 
 const Plays: React.FC = () => {
   const api = useApi();
@@ -40,7 +57,13 @@ const Plays: React.FC = () => {
   const [items, setItems] = useState<Entry[] | null>(null);
   const [templates, setTemplates] = useState<PlayTemplate[]>([]);
   const [msg, setMsg] = useState('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  // The play being started: what, when and for which project, before it goes on the calendar
+  const [draft, setDraft] = useState<{ kind: string; title: string; start: string; release: string; t?: PlayTemplate } | null>(null);
   const load = useCallback(() => {
+    api('/api/tracks')
+      .then((r: { releases: (Project & { deleted?: boolean })[] }) => setProjects(r.releases.filter((x) => !x.deleted)))
+      .catch(() => setProjects([]));
     api('/api/timeline')
       .then((r: { items: Entry[] }) => setItems(r.items.filter((i) => !i.source)))
       .catch((e: Error) => setMsg(e.message));
@@ -55,15 +78,25 @@ const Plays: React.FC = () => {
     showEntry(id);
     openStudio(openWindow, 'calendar');
   };
-  const start = async (kind: string, t?: PlayTemplate) => {
-    const title = await dialog.prompt(`Name the ${kind.toLowerCase()}`, t?.name || '', { title: 'New play' });
-    if (!title?.trim()) return;
+  const start = (kind: string, t?: PlayTemplate) =>
+    setDraft({ kind, title: t?.name || '', start: today(), release: draft?.release || '', t });
+  const create = async () => {
+    if (!draft?.title.trim()) return setMsg('Give the play a name.');
+    const p = projects.find((x) => x.id === draft.release);
     try {
-      const steps = (t?.steps || []).map((text) => ({ text, got: false, note: '' }));
       const e = await api('/api/timeline', {
         method: 'POST',
-        body: JSON.stringify({ title, kind, start: today(), shots: steps }),
+        body: JSON.stringify({
+          title: draft.title,
+          kind: draft.kind,
+          start: draft.start || today(),
+          release: p?.id || null,
+          folder: p?.folder ? { space: p.folder.space, path: p.folder.path + PLAY_FOLDER[draft.kind] } : null,
+          shots: (draft.t?.steps || []).map((text) => ({ text, got: false, note: '' })),
+        }),
       });
+      setDraft(null);
+      setMsg('');
       open(e.id);
     } catch (err) {
       setMsg((err as Error).message);
@@ -103,6 +136,7 @@ const Plays: React.FC = () => {
           <span style={{ width: 64, flex: '0 0 64px' }}>{i.kind}</span>
           <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {i.title}
+            {i.release ? ` · ${projects.find((p) => p.id === i.release)?.title || ''}` : ''}
             {i.location ? ` · ${i.location}` : ''}
           </span>
           <span style={{ display: 'flex', gap: 2 }} aria-label={`${got} of ${n} done`}>
@@ -137,6 +171,58 @@ const Plays: React.FC = () => {
           </button>
         ))}
       </div>
+      {draft && (
+        <div style={{ border: '2px solid currentColor', padding: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <b>New {draft.kind.toLowerCase()}</b>
+          <input
+            autoFocus
+            style={{ ...field, flex: '2 1 160px' }}
+            placeholder={
+              draft.kind === 'Shoot'
+                ? 'e.g. Photo shoot: cover + press'
+                : draft.kind === 'Show'
+                  ? 'e.g. Release show'
+                  : 'e.g. Vocal session'
+            }
+            value={draft.title}
+            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && create()}
+          />
+          <input type="date" style={field} value={draft.start} onChange={(e) => setDraft({ ...draft, start: e.target.value })} />
+          <select
+            style={{ ...field, flex: '1 1 140px' }}
+            value={draft.release}
+            title="The project this play is for: it shows on the project's countdown and uses the project's folder"
+            onChange={(e) => setDraft({ ...draft, release: e.target.value })}
+          >
+            <option value="">(no project)</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title} ({p.kind})
+              </option>
+            ))}
+          </select>
+          <button style={button} onClick={create}>
+            Start
+          </button>
+          <button style={button} onClick={() => setDraft(null)}>
+            Cancel
+          </button>
+          {draft.t && (
+            <span style={{ width: '100%', opacity: 0.8 }}>
+              From "{draft.t.name}": {draft.t.steps.length} steps.
+            </span>
+          )}
+          {draft.release && (
+            <span style={{ width: '100%', opacity: 0.8 }}>
+              {(() => {
+                const f = projects.find((x) => x.id === draft.release)?.folder;
+                return f ? `Files go in ${f.path}${PLAY_FOLDER[draft.kind]}` : 'This project has no folder yet.';
+              })()}
+            </span>
+          )}
+        </div>
+      )}
       {msg && <div>{msg}</div>}
       <div style={{ fontWeight: 700 }}>Coming up · {coming.length}</div>
       {coming.length ? coming.map(row) : <div style={{ opacity: 0.8 }}>No plays coming up. Start one above.</div>}
