@@ -193,39 +193,38 @@ const fakeResend = http
   })
   .listen(3191);
 
-const srv = spawn(process.execPath, [SERVER], {
-  env: {
-    ...process.env,
-    PORT: '3196',
-    DATA_DIR: join(dir, 'data'),
-    THUMB_CACHE: join(dir, 'cache'), // never touch the real preview cache
-    CLERK_SECRET_KEY: SECRET,
-    CLERK_API_URL: 'http://127.0.0.1:3197',
-    CLERK_JWT_KEY: jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }),
-    SITE_ORIGINS: '',
-    STRIPE_API_URL: 'http://127.0.0.1:3195',
-    STRIPE_SECRET_KEY: 'sk_test_fake',
-    STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    RAPIDRAW_BRIDGE: 'http://127.0.0.1:3193',
-    RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
-    RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
-    AUTO_SCAN_MS: '400', // long enough for a test to set a bounce by hand right after uploading it
-    RESEND_API_URL: 'http://127.0.0.1:3191',
-    RESEND_API_KEY: 're_test',
-    MAIL_FROM: 'Sanktuary <hello@sanktuary.test>',
-    GOOGLE_CLIENT_ID: 'gid',
-    GOOGLE_CLIENT_SECRET: 'gsecret',
-    GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
-    GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
-    YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
-    ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
-    TILE_SOURCE: 'http://127.0.0.1:3192/tiles',
-    // The headless Darkroom renderer only in CI: the home PC's deploy tests run against the old build, and a
-    // browser left behind there kept the tests (and so the deploy) waiting for hours
-    ...(process.env.CI ? {} : { DARKROOM_BROWSER: 'off' }),
-    YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
-  },
-});
+const env = {
+  ...process.env,
+  PORT: '3196',
+  DATA_DIR: join(dir, 'data'),
+  THUMB_CACHE: join(dir, 'cache'), // never touch the real preview cache
+  CLERK_SECRET_KEY: SECRET,
+  CLERK_API_URL: 'http://127.0.0.1:3197',
+  CLERK_JWT_KEY: jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }),
+  SITE_ORIGINS: '',
+  STRIPE_API_URL: 'http://127.0.0.1:3195',
+  STRIPE_SECRET_KEY: 'sk_test_fake',
+  STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
+  RAPIDRAW_BRIDGE: 'http://127.0.0.1:3193',
+  RAPIDRAW_TOKEN: 'raw-token-for-tests-123',
+  RAPIDRAW_UI: join(dir, 'no-rapidraw-ui'),
+  AUTO_SCAN_MS: '400', // long enough for a test to set a bounce by hand right after uploading it
+  RESEND_API_URL: 'http://127.0.0.1:3191',
+  RESEND_API_KEY: 're_test',
+  MAIL_FROM: 'Sanktuary <hello@sanktuary.test>',
+  GOOGLE_CLIENT_ID: 'gid',
+  GOOGLE_CLIENT_SECRET: 'gsecret',
+  GOOGLE_AUTH_URL: 'http://127.0.0.1:3192/auth',
+  GOOGLE_TOKEN_URL: 'http://127.0.0.1:3192/token',
+  YOUTUBE_API_URL: 'http://127.0.0.1:3192/yt',
+  ODESLI_API_URL: 'http://127.0.0.1:3192/odesli',
+  TILE_SOURCE: 'http://127.0.0.1:3192/tiles',
+  // The headless Darkroom renderer only in CI: the home PC's deploy tests run against the old build, and a
+  // browser left behind there kept the tests (and so the deploy) waiting for hours
+  ...(process.env.CI ? {} : { DARKROOM_BROWSER: 'off' }),
+  YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
+};
+const srv = spawn(process.execPath, [SERVER], { env });
 let srvOut = '';
 srv.stdout.on('data', (d) => (srvOut += d));
 srv.stderr.on('data', (d) => (srvOut += d));
@@ -1413,6 +1412,31 @@ try {
   );
   check('file reassembled byte for byte', Buffer.compare(readFileSync(join(drive, 'team', 'stems', 'big.bin')), big) === 0);
   check('no leftover part files', !readdirSync(join(drive, 'team', 'stems')).some((f) => f.startsWith('.sk-upload')));
+  // The server restarts (auto-deploy) partway through an upload: the rest of the chunks still finish the file
+  {
+    const rid = 'restart' + Date.now();
+    const rq = (c) => `/api/files/ed/stems/restart.bin?upload=${rid}&chunk=${c}&chunks=3&size=${big.length}&chunkSize=${cs}`;
+    for (const c of [0, 1]) await call('bob', rq(c), 'PUT', big.subarray(c * cs, (c + 1) * cs), true);
+    const next = spawn(process.execPath, [SERVER], { env: { ...env, PORT: '3188' } });
+    await new Promise((r) => next.stdout.on('data', (d) => String(d).includes('sanktuary-os on') && r()));
+    const last = await fetch(`http://127.0.0.1:3188${rq(2)}`, {
+      method: 'PUT',
+      headers: { cookie: cookie('bob') },
+      body: big.subarray(2 * cs),
+    });
+    next.kill();
+    check('an upload finishes across a server restart', (await last.json()).name === 'restart.bin');
+    check(
+      'restarted upload reassembled byte for byte',
+      Buffer.compare(readFileSync(join(drive, 'team', 'stems', 'restart.bin')), big) === 0,
+    );
+    check('no leftover part files after restart', !readdirSync(join(drive, 'team', 'stems')).some((f) => f.startsWith('.sk-upload')));
+    const first = await call('bob', '/api/files/ed/stems/restart.bin');
+    const again = await fetch(B + '/api/files/ed/stems/restart.bin', {
+      headers: { cookie: cookie('bob'), 'if-modified-since': first.headers.get('last-modified') },
+    });
+    check('opening an unchanged file again gets a 304, not the whole file', again.status === 304 && first.status === 200);
+  }
   check(
     'chunk offsets must line up',
     (await call('bob', `/api/files/ed/x.bin?upload=badchunk1&chunk=0&chunks=5&size=10&chunkSize=4`, 'PUT', 'x', true)).status === 400,
