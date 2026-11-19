@@ -42,8 +42,6 @@ interface Activity {
   t?: number | null;
 }
 
-const TABS = ['Buddies', 'Channels', 'Activity'] as const;
-
 /** Messages (was Sanktuary Teams): AIM-style buddy list, channels + DMs, and the team activity feed. */
 const Teams: React.FC = () => {
   const { isLoaded, isSignedIn } = useAuth();
@@ -56,7 +54,6 @@ const BuddyList: React.FC = () => {
   const api = useApi();
   const { openWindow } = useWindowManager();
   const { profiles, byName } = useProfiles();
-  const [tab, setTab] = useState<(typeof TABS)[number]>('Buddies');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [dms, setDms] = useState<Dm[]>([]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -168,65 +165,51 @@ const BuddyList: React.FC = () => {
           Profile
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 2, padding: '4px 4px 0' }}>
-        {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} style={{ ...button, fontWeight: tab === t ? 700 : 400 }}>
-            {t}
-            {t === 'Channels' && [...channels, ...dms].some((c) => unread(c.id, c.lastAt)) ? ' •' : ''}
-          </button>
-        ))}
-      </div>
       <div style={{ flex: 1, overflow: 'auto', background: '#fff', border: '2px inset #808080', margin: 2 }}>
-        {tab === 'Buddies' && (
-          <>
-            <Group title={`Online (${online.length})`}>
-              {online.map((p) => (
-                <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />
-              ))}
-            </Group>
-            <Group title={`Offline (${offline.length})`}>
-              {offline.map((p) => (
-                <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />
-              ))}
-            </Group>
-            {others.length === 0 && (
-              <div style={{ padding: 8, color: '#666' }}>No other members yet. Admins can add members in the Admin Panel.</div>
-            )}
-          </>
+        {/* One list, no tabs: channels and DMs, then who's online, then recent activity folded at the bottom */}
+        <Group title="Channels">
+          {channels.map((c) => (
+            <Row key={c.id} {...open(() => openChat(c.id, `#${c.name}`))} bold={unread(c.id, c.lastAt)}>
+              <b>{c.private ? '🔒' : '#'}</b>&nbsp;{c.name}
+              {c.topic && <span style={{ color: '#666', marginLeft: 6 }}>{c.topic}</span>}
+            </Row>
+          ))}
+        </Group>
+        <Group title="Direct messages">
+          {dms.map((d) => (
+            <Row
+              key={d.id}
+              {...open(() => openChat(d.id, `${displayName(byName[d.with], d.with)} — Instant Message`))}
+              bold={unread(d.id, d.lastAt)}
+            >
+              <Avatar username={d.with} avatar={byName[d.with]?.avatar} size={16} online={byName[d.with]?.online} />
+              &nbsp;{displayName(byName[d.with], d.with)}
+            </Row>
+          ))}
+          {dms.length === 0 && <div style={{ padding: '2px 8px', color: '#666' }}>Double-click a buddy to start one.</div>}
+        </Group>
+        <Group title={`Online (${online.length})`}>
+          {online.map((p) => (
+            <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />
+          ))}
+        </Group>
+        <Group title={`Offline (${offline.length})`}>
+          {offline.map((p) => (
+            <Buddy key={p.username} p={p} {...open(() => openDm(p))} onInfo={() => openProfile(p.username)} />
+          ))}
+        </Group>
+        {others.length === 0 && (
+          <div style={{ padding: 8, color: '#666' }}>No other members yet. Admins can add members in the Admin Panel.</div>
         )}
-        {tab === 'Channels' && (
-          <>
-            <Group title="Channels">
-              {channels.map((c) => (
-                <Row key={c.id} {...open(() => openChat(c.id, `#${c.name}`))} bold={unread(c.id, c.lastAt)}>
-                  <b>{c.private ? '🔒' : '#'}</b>&nbsp;{c.name}
-                  {c.topic && <span style={{ color: '#666', marginLeft: 6 }}>{c.topic}</span>}
-                </Row>
-              ))}
-            </Group>
-            <Group title="Direct messages">
-              {dms.map((d) => (
-                <Row
-                  key={d.id}
-                  {...open(() => openChat(d.id, `${displayName(byName[d.with], d.with)} — Instant Message`))}
-                  bold={unread(d.id, d.lastAt)}
-                >
-                  <Avatar username={d.with} avatar={byName[d.with]?.avatar} size={16} online={byName[d.with]?.online} />
-                  &nbsp;{displayName(byName[d.with], d.with)}
-                </Row>
-              ))}
-              {dms.length === 0 && <div style={{ padding: '2px 8px', color: '#666' }}>Double-click a buddy to start one.</div>}
-            </Group>
-          </>
-        )}
-        {tab === 'Activity' && <ActivityFeed byName={byName} />}
+        <details style={{ borderTop: '1px solid #ccc' }}>
+          <summary style={{ padding: '3px 6px', fontWeight: 700, background: '#e8e8e8', cursor: 'pointer' }}>Recent activity</summary>
+          <ActivityFeed byName={byName} />
+        </details>
       </div>
       <div style={{ display: 'flex', gap: 4, padding: 4 }}>
-        {tab === 'Channels' && (
-          <button style={button} onClick={newChannel}>
-            New channel...
-          </button>
-        )}
+        <button style={button} onClick={newChannel}>
+          New channel...
+        </button>
         <div style={{ ...statusBar, flex: 1, margin: 0 }}>{online.length} buddy(s) online</div>
       </div>
     </div>
