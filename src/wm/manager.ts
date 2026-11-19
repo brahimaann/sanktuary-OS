@@ -31,6 +31,7 @@ export type AppType =
   | 'planner'
   | 'tracks'
   | 'timeline'
+  | 'play-day'
   | 'business'
   | 'welcome'
   | 'new'

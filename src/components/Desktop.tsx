@@ -264,6 +264,19 @@ export const Desktop: React.FC = () => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
     // Arrived from the share menu: show what was shared and ask where it goes
     const q = new URLSearchParams(location.search);
+    const play = q.get('play'); // a crew link to a play's day view
+    if (play && /^[\w-]{1,20}$/.test(play)) {
+      history.replaceState(null, '', location.pathname);
+      return openWindow({
+        id: `play-day-${play}`,
+        title: 'Play day',
+        icon: '/images/icons/video-16x16.png?v=2',
+        appType: 'play-day',
+        appProps: { id: play },
+        width: 420,
+        height: 640,
+      });
+    }
     if (!q.has('share')) return;
     history.replaceState(null, '', location.pathname);
     openWindow({
