@@ -64,13 +64,16 @@ export const formatSize = (b: number) =>
 /** Phones/tablets: open things with one tap instead of a double-click. */
 export const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 
+/** The paragraph font: Fixedsys, the 1-bit terminal face CITIES and the public pages use (Pixelify while it loads). */
+export const FONT = "'Fixedsys Excelsior', 'Pixelify Sans', monospace";
+
 export const shell: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   width: '100%',
   height: '100%',
   background: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   overflow: 'hidden',
 };

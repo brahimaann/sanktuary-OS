@@ -11,6 +11,7 @@ import { Ref, refFromDrop, refIcon, useOpenRef } from '../utils/refs';
 import Avatar from './Avatar';
 import { LogOn, shell, button, statusBar } from './TeamFiles';
 import AddFileButton from '../components/AddFileButton';
+import { FONT } from './fileTypes';
 
 export interface Message {
   id: string;
@@ -231,7 +232,7 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
           border: '2px inset #808080',
           margin: 2,
           padding: 6,
-          fontFamily: 'Arial, sans-serif',
+          fontFamily: FONT,
           fontSize: 13,
           lineHeight: 1.45,
         }}
@@ -333,7 +334,7 @@ const Conversation: React.FC<{ channel: string }> = ({ channel }) => {
           }}
           placeholder="Type a message. Enter sends, Shift+Enter for a new line. Drag files, folders or boards here to share them."
           rows={2}
-          style={{ flex: 1, resize: 'none', fontFamily: 'Arial, sans-serif', fontSize: 13, border: '2px inset #808080', padding: 4 }}
+          style={{ flex: 1, resize: 'none', fontFamily: FONT, fontSize: 13, border: '2px inset #808080', padding: 4 }}
         />
         <button style={{ ...button, minWidth: 60, fontWeight: 700 }} onClick={send}>
           Send
@@ -363,7 +364,7 @@ export const RefChip: React.FC<{ r: Ref; onOpen?: () => void; onRemove?: () => v
       borderBottom: '1px solid #000',
       cursor: onOpen ? 'pointer' : 'default',
       fontSize: 11,
-      fontFamily: '"MS Sans Serif", Arial, sans-serif',
+      fontFamily: FONT,
       maxWidth: 260,
     }}
   >

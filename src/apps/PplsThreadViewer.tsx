@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { HISTORICAL_THREADS, TIMELINE_EVENTS } from './pplsStoryData';
 import { useWindowManager } from '../wm/manager';
+import { FONT } from './fileTypes';
 
 interface PplsThreadViewerProps {
   threadId: string;
@@ -13,7 +14,7 @@ const PplsThreadViewer: React.FC<PplsThreadViewerProps> = ({ threadId }) => {
   const thread = HISTORICAL_THREADS.find((t) => t.id === threadId);
 
   if (!thread) {
-    return <div style={{ padding: 20, textAlign: 'center', fontFamily: '"MS Sans Serif", Arial' }}>Historical Thread not found.</div>;
+    return <div style={{ padding: 20, textAlign: 'center', fontFamily: FONT }}>Historical Thread not found.</div>;
   }
 
   const handleEventClick = (eventId: string) => {
@@ -119,7 +120,7 @@ const container: React.CSSProperties = {
   width: '100%',
   height: '100%',
   background: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   padding: 6,
   boxSizing: 'border-box',
@@ -167,7 +168,7 @@ const tabBtn: React.CSSProperties = {
   borderTopRightRadius: 3,
   cursor: 'pointer',
   outline: 'none',
-  fontFamily: '"MS Sans Serif", Arial',
+  fontFamily: FONT,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',

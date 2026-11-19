@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { FONT } from './fileTypes';
 
 interface VideoPlayerProps {
   videoSrc: string;
@@ -317,7 +318,7 @@ const shell: React.CSSProperties = {
   width: '100%',
   height: '100%',
   background: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   overflow: 'hidden',
   color: '#000',

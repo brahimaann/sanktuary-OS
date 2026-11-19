@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { displayName, useProfiles } from '../utils/profiles';
+import { displayName, memberFor, useProfiles } from '../utils/profiles';
+import { useWindowManager } from '../wm/manager';
 import Avatar from './Avatar';
 import { button } from './TeamFiles';
 
@@ -140,3 +141,62 @@ const MembersPicker: React.FC<{
 };
 
 export default MembersPicker;
+
+/** Artist credits ("HIMA, Prince") with each name that's a member linked to their profile, matched as you type. */
+export const ArtistLinks: React.FC<{ names: string | string[]; onRemove?: (i: number) => void }> = ({ names, onRemove }) => {
+  const { profiles } = useProfiles();
+  const { openWindow } = useWindowManager();
+  const list = (Array.isArray(names) ? names : names.split(',')).map((n) => n.trim()).filter(Boolean);
+  return (
+    <>
+      {list.map((n, i) => {
+        const p = memberFor(n, profiles);
+        return (
+          <span key={n} className="sk-chip" title={p ? `${displayName(p)}'s profile` : 'Not a member (yet)'}>
+            {p ? (
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  openWindow({
+                    id: `profile-${p.username}`,
+                    title: `${displayName(p)} — Info`,
+                    icon: '/images/icons/my-documents-16x16.png?v=2',
+                    appType: 'profile',
+                    appProps: { username: p.username },
+                    width: 420,
+                    height: 520,
+                  });
+                }}
+                style={{ color: 'inherit' }}
+              >
+                {n} <span style={{ opacity: 0.6 }}>@{p.username}</span>
+              </a>
+            ) : (
+              n
+            )}
+            {onRemove && (
+              <button className="sk-chip-x" title={`Remove ${n}`} onClick={() => onRemove(i)}>
+                ×
+              </button>
+            )}
+          </span>
+        );
+      })}
+    </>
+  );
+};
+
+/** Member names to suggest in an artist box (pair with <input list="sk-members">). */
+export const MemberOptions: React.FC = () => {
+  const { profiles } = useProfiles();
+  return (
+    <datalist id="sk-members">
+      {profiles.map((p) => (
+        <option key={p.username} value={displayName(p)}>
+          @{p.username}
+        </option>
+      ))}
+    </datalist>
+  );
+};

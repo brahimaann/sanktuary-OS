@@ -29,6 +29,7 @@ interface Release {
   content?: ContentItem[];
   owner?: string;
   owners?: string[];
+  folder?: { space: string; path: string } | null;
 }
 interface Entry {
   id: string;
@@ -57,6 +58,24 @@ interface Lamp {
   to: string; // where the lamp takes you
   go: () => void;
 }
+
+/** What the wall's calendar can add in place, and the project subfolder each one's files go in. */
+const QUICK_FOLDER: Record<string, string> = {
+  Event: 'Events',
+  Show: 'Shows',
+  Shoot: 'Shoots',
+  Session: 'Projects',
+  Artwork: 'Artwork',
+  Video: 'Shoots',
+  Drop: 'Events',
+};
+const QUICK_KINDS = Object.keys(QUICK_FOLDER);
+const folderSafe = (s: string) =>
+  s
+    .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
+    .trim()
+    .replace(/[. ]+$/, '')
+    .slice(0, 80);
 
 const STEP = ['To shoot', 'Shot', 'Edited', 'Approved', 'Posted'];
 const PLAY_KINDS = ['Shoot', 'Show', 'Session'];
@@ -91,6 +110,7 @@ const paper = 'var(--sk-paper)';
 const dim = '#888';
 const label: React.CSSProperties = { fontFamily: 'Silkscreen, monospace', fontSize: 10, letterSpacing: 0.5 };
 const panel: React.CSSProperties = { border: `2px solid ${ink}`, background: paper, padding: 8 };
+const field: React.CSSProperties = { font: 'inherit', border: `2px solid ${ink}`, background: paper, color: ink, padding: '2px 4px' };
 
 /** One cell per footage item: empty = to shoot, light dots = shot, dense dots = edited, half = OK'd, solid = posted. */
 const Cell: React.FC<{ status: string; title: string }> = ({ status, title }) => {
@@ -175,6 +195,45 @@ const OpsBoard: React.FC = () => {
   const goCalendar = (id: string) => {
     showEntry(id);
     openStudio(openWindow, 'calendar');
+  };
+  const openEntry = (e: Entry) =>
+    e.source === 'planner' && e.board
+      ? openWindow(planWindow(e.board, e.boardName || 'Plan'))
+      : e.source
+        ? e.release
+          ? goSong(e.release, e.track)
+          : goVerses()
+        : goCalendar(e.id);
+
+  // Click a day on the wall's calendar to see what's on and add to it right there
+  const [day, setDay] = useState<string | null>(null);
+  const [quick, setQuick] = useState({ title: '', kind: 'Event', time: '', release: '' });
+  const pickDay = (d: string | null) => (setDay(d), setMsg(''));
+  const onDay = day ? entries.filter((e) => e.start === day || (e.end && e.start <= day && e.end >= day)) : [];
+  const addOnDay = async () => {
+    const title = quick.title.trim();
+    if (!day || !title) return;
+    const r = tracks?.releases.find((x) => x.id === quick.release);
+    // Same place New... puts it: inside the project's folder (Shoots, Shows, Projects...), one folder per entry
+    const folder = r?.folder && {
+      space: r.folder.space,
+      path: `${r.folder.path}/${QUICK_FOLDER[quick.kind]}/${folderSafe(`${day} ${title}`)}`,
+    };
+    try {
+      if (folder)
+        await api(`/api/files/${folder.space}/${folder.path.split('/').map(encodeURIComponent).join('/')}?mkdir&parents`, {
+          method: 'POST',
+        });
+      await api('/api/timeline', {
+        method: 'POST',
+        body: JSON.stringify({ title, kind: quick.kind, start: day, time: quick.time, release: r?.id ?? null, folder: folder || null }),
+      });
+      setQuick({ ...quick, title: '', time: '' });
+      setMsg(`Added "${title}"${folder ? ` with a folder in ${r!.title}` : ''}.`);
+      loadTimeline();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
   };
 
   // Songs still in play: not done, or done with footage left to post
@@ -607,20 +666,11 @@ const OpsBoard: React.FC = () => {
             return (
               <button
                 key={w.d}
-                title={w.titles || 'Nothing on'}
-                onClick={() =>
-                  w.first &&
-                  (w.first.source === 'planner' && w.first.board
-                    ? openWindow(planWindow(w.first.board, w.first.boardName || 'Plan'))
-                    : w.first.source
-                      ? w.first.release
-                        ? goSong(w.first.release, w.first.track)
-                        : goVerses()
-                      : goCalendar(w.first.id))
-                }
+                title={w.titles ? `${w.titles}\n(click to see the day or add to it)` : 'Nothing on: click to add something'}
+                onClick={() => pickDay(w.d === day ? null : w.d)}
                 style={{
                   font: 'inherit',
-                  cursor: w.first ? 'pointer' : 'default',
+                  cursor: 'pointer',
                   minHeight: cal === 'week' ? 52 : 40,
                   padding: '4px 2px',
                   display: 'flex',
@@ -631,7 +681,7 @@ const OpsBoard: React.FC = () => {
                   border: `2px ${w.tags.length || isToday ? 'solid' : 'dotted'} ${w.tags.length || isToday ? ink : dim}`,
                   background: isToday ? ink : paper,
                   color: isToday ? paper : ink,
-                  outline: w.out ? '2px solid var(--sk-signal)' : 'none',
+                  outline: w.d === day ? `2px dashed ${ink}` : w.out ? '2px solid var(--sk-signal)' : 'none',
                   outlineOffset: 2,
                 }}
               >
@@ -645,6 +695,57 @@ const OpsBoard: React.FC = () => {
             );
           })}
         </div>
+        {day && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: `2px solid ${ink}`, paddingTop: 6 }}>
+            <div style={label}>
+              {new Date(`${day}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }).toUpperCase()}
+            </div>
+            {onDay.map((e) => (
+              <button key={e.id} style={row} onClick={() => openEntry(e)}>
+                <b>{e.kind}</b> · {e.title}
+              </button>
+            ))}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+              <input
+                autoFocus
+                value={quick.title}
+                onChange={(e) => setQuick({ ...quick, title: e.target.value })}
+                onKeyDown={(e) => e.key === 'Enter' && addOnDay()}
+                placeholder={onDay.length ? 'Add another...' : 'Add something on this day...'}
+                style={{ ...field, flex: '1 1 160px' }}
+              />
+              <select value={quick.kind} onChange={(e) => setQuick({ ...quick, kind: e.target.value })} style={field} title="What it is">
+                {QUICK_KINDS.map((k) => (
+                  <option key={k}>{k}</option>
+                ))}
+              </select>
+              <input
+                type="time"
+                value={quick.time}
+                onChange={(e) => setQuick({ ...quick, time: e.target.value })}
+                style={field}
+                title="Time (optional)"
+              />
+              <select
+                value={quick.release}
+                onChange={(e) => setQuick({ ...quick, release: e.target.value })}
+                style={{ ...field, maxWidth: 160 }}
+                title="The project it's for: its files go in that project's folder"
+              >
+                <option value="">No project</option>
+                {(tracks.releases || []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.title}
+                  </option>
+                ))}
+              </select>
+              <button style={toggle(true)} disabled={!quick.title.trim()} onClick={addOnDay}>
+                ADD
+              </button>
+            </div>
+            {msg && <div style={{ color: dim }}>{msg}</div>}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>

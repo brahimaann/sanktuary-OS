@@ -75,6 +75,17 @@ export const EMPTY_PORTFOLIO: Portfolio = {
 
 export const displayName = (p?: Profile, fallback = '') => p?.displayName || p?.username || fallback;
 
+/** The member an artist credit names: their username, display name or one word of it, else the one member
+ * whose name holds it ("hima" finds Brahima). Nothing when it's too short or could be more than one person. */
+export const memberFor = (name: string, profiles: Profile[]) => {
+  const n = name.trim().replace(/^@/, '').toLowerCase();
+  if (n.length < 3) return undefined;
+  const names = (p: Profile) => [p.username, p.displayName || ''].map((s) => s.toLowerCase());
+  const exact = profiles.find((p) => names(p).some((s) => s === n || s.split(/\s+/).includes(n)));
+  const near = profiles.filter((p) => names(p).some((s) => s.includes(n)));
+  return exact || (near.length === 1 ? near[0] : undefined);
+};
+
 /** Every member's profile, kept live: profile edits and who's online arrive over the live connection. */
 export function useProfiles() {
   const api = useApi();

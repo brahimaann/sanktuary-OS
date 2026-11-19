@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { ClerkProvider } from '@clerk/react';
 import App from './App';
 import './styles/system.css';
+import { FONT } from './apps/fileTypes';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -12,7 +13,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       appearance={{
         variables: {
           borderRadius: '0px',
-          fontFamily: '"MS Sans Serif", Arial, sans-serif',
+          fontFamily: FONT,
           colorPrimary: '#000',
           colorBackground: '#fff',
           colorForeground: '#000000',
