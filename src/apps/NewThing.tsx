@@ -13,16 +13,16 @@ import { useOpenRef } from '../utils/refs';
 type Kind = 'release' | 'song' | 'session' | 'article' | 'Shoot' | 'Show' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
 
 const KINDS: { id: Kind; label: string; icon: IconName; hint: string }[] = [
-  { id: 'release', label: 'Release', icon: 'archive', hint: 'Album, EP, single or a folder of demos, with its folders' },
+  { id: 'release', label: 'Project', icon: 'archive', hint: 'A song, EP, album, video or photo set, with its folders' },
   { id: 'song', label: 'Song', icon: 'note', hint: 'A track, with its bounce' },
-  { id: 'session', label: 'Studio Scratch', icon: 'note', hint: 'Walk-in session with scratch folder & tags' },
+  { id: 'session', label: 'Scratch session', icon: 'note', hint: 'Walk-in session with scratch folder & tags' },
   { id: 'article', label: 'Article / Draft', icon: 'link', hint: 'Native blog post or essay draft' },
   { id: 'Shoot', label: 'Shoot', icon: 'calendar', hint: 'Photo or video shoot' },
   { id: 'Artwork', label: 'Artwork', icon: 'calendar', hint: 'Cover, visuals, merch design (or moodboard link)' },
   { id: 'Video', label: 'Video', icon: 'play', hint: 'Music video, visualizer, video link' },
   { id: 'Show', label: 'Show', icon: 'bell', hint: 'A show, with its setup checklist (load-in, line check, merch)' },
   { id: 'Event', label: 'Event', icon: 'bell', hint: 'Release party, meetup, anything else on a date' },
-  { id: 'Drop', label: 'Drop', icon: 'upload', hint: 'Merch or content drop' },
+  { id: 'Drop', label: 'Drop', icon: 'upload', hint: 'Merch or footage drop' },
   { id: 'post', label: 'Substack post', icon: 'external', hint: 'External Substack publish' },
 ];
 
@@ -221,7 +221,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
 
     try {
       if (kind === 'release') {
-        setBusy('Making the release...');
+        setBusy('Making the project...');
         const folder = releaseFolder(name);
         if (folderMode === 'existing' && !folder) return setMsg('Pick the folder first.');
         const r = await post('/api/tracks/release', {
@@ -573,7 +573,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         <label style={row}>
           <span style={cap}>{kind === 'song' ? 'On' : 'For'}</span>
           <select style={field} value={release ? release.id : ''} onChange={(e) => setReleaseId(e.target.value)}>
-            <option value="">{kind === 'song' ? 'A new single (its own release)' : 'No release'}</option>
+            <option value="">{kind === 'song' ? 'A new single (its own project)' : 'No project'}</option>
             {releases.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.title} ({r.kind})
@@ -590,7 +590,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           {!release || release.folder ? (
             <>
               <input type="file" accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.m4a" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-              <span style={{ color: '#444', fontSize: 11 }}>optional; goes in the release's Bounces folder</span>
+              <span style={{ color: '#444', fontSize: 11 }}>optional; goes in the project's Bounces folder</span>
             </>
           ) : (
             <span style={{ color: '#444', fontSize: 11 }}>{release.title} has no folder yet: link one in Tracks to add files here.</span>
@@ -667,7 +667,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
 
       {picking && (
         <FilePicker
-          title="Choose the release's folder"
+          title="Choose the project's folder"
           mode="folder"
           start={existing}
           onPick={(r) => {
