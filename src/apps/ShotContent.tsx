@@ -48,7 +48,8 @@ export const FOOTAGE_FOLDERS = { raw: 'Shoots', edit: 'Edits', posted: 'Posted' 
 const inFolder = (folder: FileRef | null | undefined, sub: string, pickFolder = false): FileRef | null =>
   folder ? { space: folder.space, path: `${folder.path}/${sub}${pickFolder ? '' : '/'}` } : null;
 const newId = () => Math.random().toString(36).slice(2, 10);
-const media = (n: string) => ['video', 'image'].includes(fileKind(n));
+// iPhone photos that arrive as files (AirDrop, a card reader) are HEIC: footage too, even where they don't preview
+const media = (n: string) => ['video', 'image'].includes(fileKind(n)) || /\.hei[cf]$/i.test(n);
 
 /** Done share of a list: To shoot 0, Shot 1/3, Edited 2/3, Posted all of it. */
 const progress = (items: ContentItem[]) =>
@@ -101,19 +102,34 @@ export const ContentList: React.FC<{
   };
   // Every clip and picture in a folder becomes one Shot item (the shoot's card dump, say)
   const addFolder = async (r: FileRef) => {
-    const d = await api(`/api/files/${r.space}/${r.path.split('/').map(encodeURIComponent).join('/')}?list`);
+    const list = async (path: string) =>
+      (await api(`/api/files/${r.space}/${path.split('/').map(encodeURIComponent).join('/')}?list`)).entries as {
+        name: string;
+        isDir: boolean;
+      }[];
+    // The folder's own files, then one level of subfolders: phone uploads from a play's day view land in
+    // Shoots/<date> <play>, so picking Shoots itself still finds them
+    const found: string[] = [];
+    for (const e of await list(r.path)) {
+      if (!e.isDir) found.push(`${r.path}/${e.name}`);
+      else for (const f of await list(`${r.path}/${e.name}`).catch(() => [])) if (!f.isDir) found.push(`${r.path}/${e.name}/${f.name}`);
+    }
     const have = new Set(items.map((x) => x.file && `${x.file.space}/${x.file.path}`));
-    const added: ContentItem[] = (d.entries as { name: string; isDir: boolean }[])
-      .filter((e) => !e.isDir && media(e.name) && !have.has(`${r.space}/${r.path}/${e.name}`))
-      .map((e) => ({
+    const added: ContentItem[] = found
+      .filter((path) => media(path.split('/').pop()!) && !have.has(`${r.space}/${path}`))
+      .map((path) => ({
         id: newId(),
-        kind: fileKind(e.name) === 'image' ? 'Photos' : 'Clip',
-        title: e.name.replace(/\.[^.]+$/, ''),
+        kind: fileKind(path) === 'image' ? 'Photos' : 'Clip',
+        title: path
+          .split('/')
+          .pop()!
+          .replace(/\.[^.]+$/, ''),
         status: 'Shot',
-        file: { space: r.space, path: `${r.path}/${e.name}` },
+        file: { space: r.space, path },
         due: null,
       }));
     if (added.length) onSave([...items, ...added]);
+    else dialog.alert('No new clips or pictures in that folder (or the folders inside it).');
   };
   const field: React.CSSProperties = {
     fontFamily: 'inherit',

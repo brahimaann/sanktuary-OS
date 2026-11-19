@@ -603,6 +603,13 @@ const PLAY_WORDS: Record<string, { list: string; item: string; done: string; hin
     hint: 'Add a step (e.g. SM7B, gain to -12 dB)',
     note: 'Setting, or what to change',
   },
+  Event: {
+    list: 'Run of show',
+    item: 'step',
+    done: 'done',
+    hint: 'Add a step (e.g. guest list, play order, speaker check)',
+    note: 'Who, or what is missing',
+  },
 };
 const playWords = (kind: string) => PLAY_WORDS[kind] || { list: 'Checklist', item: 'step', done: 'done', hint: 'Add a step', note: 'Note' };
 

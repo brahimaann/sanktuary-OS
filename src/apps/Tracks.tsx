@@ -581,8 +581,9 @@ const TracksApp: React.FC = () => {
           </button>
         )}
         {listenOnly && (
-          <span style={{ padding: '0 6px', color: '#444' }} title="Ask whoever made it for edit access">
-            🎧 {release!.title}: you can listen and comment
+          <span style={{ padding: '0 6px', opacity: 0.8 }} title="Owners add people under Can edit with the people button">
+            🎧 {release!.title}: you can listen and comment. To add mixes or takes, ask{' '}
+            {[release!.owner, ...(release!.owners || [])].filter(Boolean).join(' or ')} for Can edit.
           </span>
         )}
         {release && !listenOnly && !isPlaylist && (

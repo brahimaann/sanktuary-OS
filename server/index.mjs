@@ -2354,9 +2354,14 @@ function songName(name, isFile = true) {
   let base = isFile ? name.slice(0, name.length - extname(name).length) : name;
   const n = Number(base.match(/^(\d{1,2})(?=[\s._)-])/)?.[1]) || null;
   base = base.replace(/^\d{1,2}[\s._)-]+/, '');
-  const version = Number(base.match(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i)?.[1]) || 0;
-  // "Keep Going take 2" / "mix 3" are versions of Keep Going (but a song called "Take 5" stays itself)
   const spaced = base.replace(/_/g, ' ');
+  // "Keep Going take 2" / "mix 3" are versions of Keep Going (but a song called "Take 5" stays itself). A mix comes
+  // after the takes it was made from, so any mix outranks any take, and a higher number wins within each.
+  const numbered = (re) => Number(spaced.match(re)?.[1]) || 0;
+  const mix = numbered(/\b(?:mix|bounce)[\s#.-]*(\d{1,3})\b/i);
+  const take = numbered(/\b(?:take|alt|attempt)[\s#.-]*(\d{1,3})\b/i);
+  const v = numbered(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i);
+  const version = mix ? 2000 + mix : take ? 1000 + take : v;
   const untaken = spaced.replace(/\b(?:take|alt|attempt|mix|bounce)[\s#.-]*\d{1,3}\b/gi, ' ');
   const plain = /\p{L}/u.test(untaken) ? untaken : spaced;
   const variant = new RegExp(SONG_VARIANT.source, 'i').test(plain);
@@ -2527,6 +2532,14 @@ async function scanReleaseNow(r, by) {
         LOSSLESS_EXT.has(extname(b.name).toLowerCase()) - LOSSLESS_EXT.has(extname(a.name).toLowerCase()),
     )[0];
     const next = ref(best.rel);
+    // The rest of the batch (take 1 when take 3 and mix 2 came in together) stays on the song as earlier takes and
+    // mixes for A/B, instead of sitting unlinked in the folder
+    const known = (x) => [t.bounce, ...(t.earlier || [])].some((e) => e && e.space === x.space && e.path === x.path);
+    for (const f of g.files.slice(1).reverse()) {
+      const x = ref(f.rel);
+      if (known(x) || x.path === next.path) continue;
+      t.earlier = [{ space: x.space, path: x.path, at: new Date(f.mtime).toISOString(), by }, ...(t.earlier || [])].slice(0, 30);
+    }
     const earlier = (t.earlier || []).some((e) => e.space === next.space && e.path === next.path);
     if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path && !earlier) {
       const first = !t.bounce;
