@@ -2,11 +2,11 @@ import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useWindowManager } from '../wm/manager';
 import { button, shell } from './fileTypes';
 
-// Operations (the Studio window) has three desks instead of eight tabs:
+// Operations (the Studio window) has three desks instead of eight tabs (labels in DESKS):
 // - Board: the wall (what needs someone, this week, songs in play), then the Calendar, To-dos (Planner) and Leads
 //   (Opportunities, Outreach) as folded sections under it.
-// - Music: songs, bounces, open verses and footage, then the Library (books, Renaissance Radio, our archive) folded under it.
-// - Shoots: the shoot location map.
+// - Projects (desk id 'music'): songs, bounces, open verses and footage, then the Library (books, Renaissance Radio, our archive) folded under it.
+// - Plays (desk id 'shoots'): the shoot location map; shoots become one kind of play.
 // Each part is the full app it replaces; once opened it stays loaded, so switching desks keeps what you were doing.
 // openStudio() still takes the old tab names: they open the right desk and unfold that section.
 const OpsBoard = lazy(() => import('./OpsBoard'));
@@ -22,8 +22,8 @@ export type StudioTab = 'board' | 'music' | 'calendar' | 'locations' | 'boards' 
 type Desk = 'board' | 'music' | 'shoots';
 const DESKS: [Desk, string][] = [
   ['board', 'Board'],
-  ['music', 'Music'],
-  ['shoots', 'Shoots'],
+  ['music', 'Projects'],
+  ['shoots', 'Plays'],
 ];
 // Each desk: its main part, then the folded sections under it
 const PARTS: Record<Desk, { main: StudioTab; sections: [StudioTab, string][] }> = {
