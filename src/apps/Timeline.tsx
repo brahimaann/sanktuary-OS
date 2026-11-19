@@ -6,8 +6,9 @@ import { dialog } from '../utils/dialog';
 import { useOpenRef } from '../utils/refs';
 import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from './Studio';
-import { showSong } from '../utils/songNav';
+import { planWindow, showSong, takeEntryWish } from '../utils/songNav';
 import { showVerses } from './OpenVerses';
+import type { ContentItem } from './ShotContent';
 import { LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import MembersPicker from './MembersPicker';
@@ -15,7 +16,9 @@ import RetroIcon, { IconLabel } from '../components/RetroIcon';
 
 interface Entry {
   id: string;
-  source?: 'tracks' | 'opportunities' | 'verses'; // release days, track and footage deadlines, open verses, opportunity deadlines: read-only here
+  source?: 'tracks' | 'opportunities' | 'verses' | 'planner'; // release days, track and footage deadlines, open verses, opportunity deadlines, plan cards: read-only here
+  board?: string;
+  boardName?: string;
   track?: string;
   title: string;
   kind: string;
@@ -37,6 +40,21 @@ interface Entry {
   done?: boolean;
   public?: boolean;
   draft?: boolean; // only its owner sees it and nobody is told, until it goes live
+  covers?: string[]; // footage this shoot covers: "<song or release id>:<footage id>"
+  shots?: Shot[]; // a shoot's shot list
+}
+interface Shot {
+  id: string;
+  text: string;
+  got: boolean;
+  note: string;
+  for?: string | null; // a song in the project (null: the whole project)
+}
+/** A footage row from Music, as a shoot can cover it. */
+interface Footage {
+  key: string;
+  label: string;
+  status: string;
 }
 
 const KIND_COLORS: Record<string, string> = {
@@ -49,6 +67,7 @@ const KIND_COLORS: Record<string, string> = {
   Release: '#008000',
   'Track due': '#404040',
   Deadline: '#806000',
+  Task: '#004080',
 };
 const today = () => new Date().toLocaleDateString('en-CA'); // local YYYY-MM-DD, not UTC
 const dayLabel = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: 'short', day: 'numeric' });
@@ -68,7 +87,7 @@ const TimelineApp: React.FC = () => {
   const [data, setData] = useState<{ items: Entry[]; kinds: string[]; statuses: string[] } | null>(null);
   const [kind, setKind] = useState('');
   const [showClosed, setShowClosed] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(() => takeEntryWish());
   const [msg, setMsg] = useState('');
   const todayRow = useRef<HTMLDivElement>(null);
 
@@ -80,7 +99,7 @@ const TimelineApp: React.FC = () => {
   useLiveEvent('tracks', load);
   useEffect(() => {
     // The New... window just added an entry: open it
-    const show = (ev: Event) => setOpenId((ev as CustomEvent<string>).detail);
+    const show = (ev: Event) => (setOpenId((ev as CustomEvent<string>).detail), takeEntryWish());
     window.addEventListener('sk:timeline-entry', show);
     return () => window.removeEventListener('sk:timeline-entry', show);
   }, []);
@@ -93,7 +112,7 @@ const TimelineApp: React.FC = () => {
   const now = today();
   const items = data.items
     .filter((i) => !kind || i.kind === kind)
-    .filter((i) => showClosed || !(i.status === 'Cancelled' || (i.status === 'Done' && (i.end || i.start) < now)))
+    .filter((i) => showClosed || !(i.status === 'Cancelled' || ((i.status === 'Done' || i.done) && (i.end || i.start) < now)))
     .sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
   const entry = data.items.find((i) => i.id === openId && !i.source);
   const upcoming = items.filter((i) => (i.end || i.start) >= now).length;
@@ -138,9 +157,11 @@ const TimelineApp: React.FC = () => {
             ? openStudio(openWindow, 'opportunities')
             : i.source === 'verses'
               ? (showVerses(), openTracks())
-              : i.source
-                ? (i.release && showSong(i.release, i.track), openTracks())
-                : setOpenId(i.id === openId ? null : i.id)
+              : i.source === 'planner' && i.board
+                ? openWindow(planWindow(i.board, i.boardName || 'Plan'))
+                : i.source
+                  ? (i.release && showSong(i.release, i.track), openTracks())
+                  : setOpenId(i.id === openId ? null : i.id)
         }
         style={{
           ...row,
@@ -150,9 +171,11 @@ const TimelineApp: React.FC = () => {
         title={
           i.source === 'opportunities'
             ? 'An opportunity: click to open Opportunities'
-            : i.source
-              ? 'From Music: click to open it'
-              : undefined
+            : i.source === 'planner'
+              ? 'A card on a plan: click to open the plan'
+              : i.source
+                ? 'From Music: click to open it'
+                : undefined
         }
       >
         <span style={{ width: 88, flexShrink: 0 }}>
@@ -182,7 +205,7 @@ const TimelineApp: React.FC = () => {
         </button>
         <select value={kind} onChange={(e) => setKind(e.target.value)} style={input}>
           <option value="">All kinds</option>
-          {[...data.kinds, 'Release', 'Track due'].map((k) => (
+          {[...data.kinds, 'Release', 'Track due', 'Footage due', 'Task'].map((k) => (
             <option key={k}>{k}</option>
           ))}
         </select>
@@ -216,7 +239,9 @@ const TimelineApp: React.FC = () => {
           />
         )}
       </div>
-      <div style={statusBar}>{msg || `${upcoming} coming up · ${data.items.filter((i) => i.source).length} dates from Tracks`}</div>
+      <div style={statusBar}>
+        {msg || `${upcoming} coming up · ${data.items.filter((i) => i.source).length} dates from Music, plans and verses`}
+      </div>
     </div>
   );
 };
@@ -247,19 +272,45 @@ const EntryPanel: React.FC<{
   const [draft, setDraft] = useState(e);
   const [picking, setPicking] = useState(false);
   const [choosing, setChoosing] = useState<null | 'people' | 'members'>(null);
-  const [releases, setReleases] = useState<{ id: string; title: string }[]>([]);
+  const [releases, setReleases] = useState<{ id: string; title: string; kind?: string }[]>([]);
+  const [footage, setFootage] = useState<Record<string, Footage[]>>({}); // release id -> its footage rows
+  const [songs, setSongs] = useState<Record<string, { id: string; title: string }[]>>({}); // release id -> its songs
   const [spots, setSpots] = useState<{ id: string; name: string; address: string }[]>([]);
   const { openWindow } = useWindowManager();
   useEffect(() => setDraft(e), [e]);
   useEffect(() => {
-    api('/api/tracks').then(
-      (d) => setReleases(d.releases),
-      () => {},
-    );
+    const loadTracks = () =>
+      api('/api/tracks').then(
+        (d: {
+          releases: { id: string; title: string; kind?: string; content?: ContentItem[] }[];
+          tracks: { id: string; release: string; title: string; content?: ContentItem[] }[];
+        }) => {
+          setReleases(d.releases);
+          const by: Record<string, Footage[]> = {};
+          const add = (rid: string, owner: string, what: string, list?: ContentItem[]) =>
+            (list || []).forEach((c) =>
+              (by[rid] ||= []).push({
+                key: `${owner}:${c.id}`,
+                label: `${what} · ${c.kind}${c.title ? `: ${c.title}` : ''}`,
+                status: c.status,
+              }),
+            );
+          d.releases.forEach((r) => add(r.id, r.id, r.title, r.content));
+          d.tracks.forEach((t) => add(t.release, t.id, t.title, t.content));
+          setFootage(by);
+          const bySong: Record<string, { id: string; title: string }[]> = {};
+          d.tracks.forEach((t) => (bySong[t.release] ||= []).push({ id: t.id, title: t.title }));
+          setSongs(bySong);
+        },
+        () => {},
+      );
+    loadTracks();
+    window.addEventListener('sk-footage-shot', loadTracks);
     api('/api/locations').then(
       (d) => setSpots(d.items),
       () => {},
     );
+    return () => window.removeEventListener('sk-footage-shot', loadTracks);
   }, [api]);
 
   const save = async (body: object) => {
@@ -428,17 +479,22 @@ const EntryPanel: React.FC<{
           )}
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ minWidth: 60 }}>Release</span>
+          <span style={{ minWidth: 60 }}>Project</span>
           <select value={e.release || ''} onChange={(ev) => save({ release: ev.target.value || null })} style={input}>
-            <option value="">(not tied to a release)</option>
+            <option value="">{e.kind === 'Shoot' ? '(this shoot is its own project)' : '(not tied to a project)'}</option>
             {releases.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.title}
+                {r.kind ? ` (${r.kind === 'Folder' ? 'project' : r.kind})` : ''}
               </option>
             ))}
           </select>
         </div>
       </fieldset>
+      {e.kind === 'Shoot' && <ShotList entry={e} songs={(e.release && songs[e.release]) || []} save={save} />}
+      {e.kind === 'Shoot' && (
+        <ShootCovers entry={e} rows={(e.release && footage[e.release]) || []} save={save} setMsg={setMsg} onShot={onChange} />
+      )}
       <fieldset style={fieldset}>
         <legend>Notes</legend>
         <textarea
@@ -550,3 +606,131 @@ const fieldset: React.CSSProperties = {
 };
 
 export default Timeline;
+
+/** What a shoot covers: tick the footage it's for; once it's done, one click marks all of it Shot in Music. */
+const ShootCovers: React.FC<{
+  entry: Entry;
+  rows: Footage[];
+  save: (body: object) => Promise<void>;
+  setMsg: (m: string) => void;
+  onShot: () => void;
+}> = ({ entry: e, rows, save, setMsg, onShot }) => {
+  const api = useApi();
+  const covers = e.covers || [];
+  const left = rows.filter((r) => covers.includes(r.key) && r.status === 'To shoot');
+  const markShot = async () => {
+    try {
+      const r = await api(`/api/timeline/${e.id}?shot`, { method: 'POST' });
+      setMsg(`Marked ${r.shot} shot in Music.`);
+      window.dispatchEvent(new Event('sk-footage-shot'));
+      onShot();
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  };
+  return (
+    <fieldset style={fieldset}>
+      <legend>Footage this shoot covers</legend>
+      {!e.release ? (
+        <div style={{ color: '#555' }}>Tie it to a release above to pick the reels, photos and videos it's for.</div>
+      ) : !rows.length ? (
+        <div style={{ color: '#555' }}>That release has no footage planned yet. Add it on the song's page in Music.</div>
+      ) : (
+        <>
+          {rows.map((r) => (
+            <label key={r.key} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                checked={covers.includes(r.key)}
+                onChange={(ev) => save({ covers: ev.target.checked ? [...covers, r.key] : covers.filter((c) => c !== r.key) })}
+              />
+              <span style={{ flex: 1 }}>{r.label}</span>
+              <span style={{ color: '#555' }}>{r.status}</span>
+            </label>
+          ))}
+          {left.length > 0 && (
+            <button style={{ ...button, alignSelf: 'flex-start', fontWeight: 700 }} onClick={markShot}>
+              Shot it: mark {left.length} as Shot
+            </button>
+          )}
+        </>
+      )}
+    </fieldset>
+  );
+};
+
+/** A shoot's shot list: plan every shot before the day, tick each one as it's captured, note the take or what to redo. */
+const ShotList: React.FC<{ entry: Entry; songs: { id: string; title: string }[]; save: (body: object) => Promise<void> }> = ({
+  entry: e,
+  songs,
+  save,
+}) => {
+  const shots = e.shots || [];
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [adding, setAdding] = useState('');
+  useEffect(() => setNotes({}), [e.shots]);
+  const put = (list: Shot[]) => save({ shots: list });
+  const set = (id: string, patch: Partial<Shot>) => put(shots.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const add = () => {
+    const text = adding.trim();
+    if (!text) return;
+    setAdding('');
+    put([...shots, { id: Math.random().toString(36).slice(2, 10), text, got: false, note: '' }]);
+  };
+  const got = shots.filter((x) => x.got).length;
+  return (
+    <fieldset style={fieldset}>
+      <legend>Shot list{shots.length ? ` · ${got} of ${shots.length} captured` : ''}</legend>
+      {shots.map((x, i) => (
+        <div key={x.id} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label
+            style={{ display: 'flex', gap: 6, alignItems: 'center', flex: '1 1 200px', minWidth: 0 }}
+            title="Tick it once it's captured"
+          >
+            <input type="checkbox" checked={x.got} onChange={(ev) => set(x.id, { got: ev.target.checked })} />
+            <span style={{ textDecoration: x.got ? 'line-through' : undefined }}>
+              {i + 1}. {x.text}
+            </span>
+          </label>
+          {songs.length > 1 && (
+            <select
+              style={{ ...input, maxWidth: 160 }}
+              value={x.for || ''}
+              title="The song in this project the shot is for"
+              onChange={(ev) => set(x.id, { for: ev.target.value || null })}
+            >
+              <option value="">Whole project</option>
+              {songs.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            style={{ ...input, flex: '1 1 160px' }}
+            placeholder="Take, card, or what to redo"
+            value={notes[x.id] ?? x.note}
+            onChange={(ev) => setNotes({ ...notes, [x.id]: ev.target.value })}
+            onBlur={() => notes[x.id] !== undefined && notes[x.id] !== x.note && set(x.id, { note: notes[x.id] })}
+          />
+          <button style={button} title="Remove this shot" onClick={() => put(shots.filter((y) => y.id !== x.id))}>
+            ✕
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          style={{ ...input, flex: 1 }}
+          placeholder="Add a shot (e.g. wide of the car, hook, 10 s) and press Enter"
+          value={adding}
+          onChange={(ev) => setAdding(ev.target.value)}
+          onKeyDown={(ev) => ev.key === 'Enter' && add()}
+        />
+        <button style={button} onClick={add} disabled={!adding.trim()}>
+          Add
+        </button>
+      </div>
+    </fieldset>
+  );
+};

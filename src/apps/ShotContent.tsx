@@ -15,6 +15,8 @@ export interface ContentItem {
   title: string;
   status: string;
   file: FileRef | null;
+  /** The edited cut, attached by whoever marks it Edited. */
+  edit?: FileRef | null;
   due: string | null;
 }
 interface Song {
@@ -72,7 +74,7 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
 }) => {
   const api = useApi();
   const openRef = useOpenRef();
-  const [picking, setPicking] = useState<null | { id: string; folder: boolean } | 'many'>(null);
+  const [picking, setPicking] = useState<null | { id: string; folder: boolean; edit?: boolean } | 'many'>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const set = (id: string, patch: Partial<ContentItem>) => onSave(items.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const open = (r: FileRef) => {
@@ -152,7 +154,12 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
                   style={{ ...field, fontWeight: x.status === 'Posted' ? 400 : 700 }}
                   value={x.status}
                   disabled={readOnly}
-                  onChange={(e) => set(x.id, { status: e.target.value })}
+                  onChange={(e) =>
+                    // Edited means there's an edited file: ask for it, and only mark it once one is picked
+                    e.target.value === 'Edited' && !x.edit
+                      ? setPicking({ id: x.id, folder: x.kind === 'Photos', edit: true })
+                      : set(x.id, { status: e.target.value })
+                  }
                 >
                   {CONTENT_STEPS.map((s) => (
                     <option key={s}>{s}</option>
@@ -173,6 +180,20 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
                 {x.file && (
                   <button style={button} onClick={() => open(x.file!)} title={x.file.path}>
                     Open
+                  </button>
+                )}
+                {x.edit && (
+                  <button style={button} onClick={() => open(x.edit!)} title={`Edited: ${x.edit.path}`}>
+                    Edit
+                  </button>
+                )}
+                {!readOnly && x.edit && (
+                  <button
+                    style={button}
+                    onClick={() => setPicking({ id: x.id, folder: x.kind === 'Photos', edit: true })}
+                    title="Replace the edited file"
+                  >
+                    Edit file...
                   </button>
                 )}
                 {!readOnly && (
@@ -196,16 +217,31 @@ export const ContentList: React.FC<{ items: ContentItem[]; onSave: (items: Conte
       )}
       {picking && (
         <FilePicker
-          title={picking === 'many' ? 'The folder with the clips' : picking.folder ? 'The folder of photos' : 'The clip or video'}
+          title={
+            picking === 'many'
+              ? 'The folder with the clips'
+              : picking.edit
+                ? picking.folder
+                  ? 'The folder of edited photos'
+                  : 'The edited cut'
+                : picking.folder
+                  ? 'The folder of photos'
+                  : 'The clip or video'
+          }
           mode={picking === 'many' || picking.folder ? 'folder' : 'file'}
           accept={media}
-          start={picking !== 'many' ? items.find((x) => x.id === picking.id)?.file : null}
+          start={
+            picking !== 'many'
+              ? (picking.edit && items.find((x) => x.id === picking.id)?.edit) || items.find((x) => x.id === picking.id)?.file
+              : null
+          }
           onPick={(r) => {
             const p = picking;
             setPicking(null);
             if (!r) return;
             if (p === 'many') return void addFolder(r);
             const x = items.find((y) => y.id === p.id);
+            if (p.edit) return set(p.id, { edit: r, status: x?.status === 'Posted' ? 'Posted' : 'Edited' });
             set(p.id, {
               file: r,
               title:

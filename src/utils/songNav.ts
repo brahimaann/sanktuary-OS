@@ -9,3 +9,26 @@ export const takeSongWish = () => {
   wish = null;
   return w;
 };
+
+/** The window spec that opens a plan (Planner board): from the calendar or the Board. */
+export const planWindow = (id: string, name: string) => ({
+  id: `planner-${id}`,
+  title: name,
+  icon: '/images/icons/task-16x16.png?v=2',
+  appType: 'planner' as const,
+  appProps: { boardId: id },
+  width: 1000,
+  height: 640,
+});
+
+/** Open one calendar entry (now, or when the calendar next opens), e.g. from a lamp on the Board. */
+let entryWish: string | null = null;
+export const showEntry = (id: string) => {
+  entryWish = id;
+  window.dispatchEvent(new CustomEvent('sk:timeline-entry', { detail: id }));
+};
+export const takeEntryWish = () => {
+  const w = entryWish;
+  entryWish = null;
+  return w;
+};

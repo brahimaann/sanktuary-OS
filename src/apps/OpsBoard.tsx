@@ -3,7 +3,7 @@ import { useApi, useMe } from '../utils/api';
 import { useLiveEvent } from '../utils/live';
 import { useWindowManager } from '../wm/manager';
 import { openMusic, openStudio } from './Studio';
-import { showSong } from '../utils/songNav';
+import { planWindow, showEntry, showSong } from '../utils/songNav';
 import { showVerses, Verse } from './OpenVerses';
 import { ContentItem } from './ShotContent';
 
@@ -40,6 +40,10 @@ interface Entry {
   release?: string;
   track?: string;
   done?: boolean;
+  board?: string;
+  boardName?: string;
+  covers?: string[];
+  shots?: { id: string; text: string; got: boolean }[];
 }
 
 type Level = 'block' | 'act';
@@ -151,7 +155,7 @@ const OpsBoard: React.FC = () => {
     openMusic(openWindow);
   };
   const goCalendar = (id: string) => {
-    window.dispatchEvent(new CustomEvent('sk:timeline-entry', { detail: id }));
+    showEntry(id);
     openStudio(openWindow, 'calendar');
   };
 
@@ -243,6 +247,60 @@ const OpsBoard: React.FC = () => {
         sub: open[0].title,
         go: goVerses,
       });
+    // A shoot that's happened with footage it covered still "To shoot": someone on it should mark it Shot
+    const toShoot = new Set<string>();
+    for (const o of [...(tracks?.tracks || []), ...(tracks?.releases || [])])
+      for (const c of o.content || []) if (c.status === 'To shoot') toShoot.add(`${o.id}:${c.id}`);
+    const unmarked = entries.filter(
+      (e) =>
+        !e.source &&
+        e.kind === 'Shoot' &&
+        e.status !== 'Cancelled' &&
+        (e.end || e.start) < now &&
+        (e.people?.includes(user) || !!me?.admin) &&
+        (e.covers || []).some((c) => toShoot.has(c)),
+    );
+    if (unmarked.length)
+      out.push({
+        key: 'shot',
+        level: 'act',
+        label: 'Mark footage shot',
+        sub: `${unmarked[0].title} · ${(unmarked[0].covers || []).filter((c) => toShoot.has(c)).length} still "to shoot"`,
+        go: () => goCalendar(unmarked[0].id),
+      });
+    // A shoot that's over with shots on its list never ticked: reshoot or note why
+    const missed = entries.filter(
+      (e) =>
+        !e.source &&
+        e.kind === 'Shoot' &&
+        e.status !== 'Cancelled' &&
+        (e.end || e.start) < now &&
+        (e.people?.includes(user) || !!me?.admin) &&
+        (e.shots || []).some((x) => !x.got),
+    );
+    if (missed.length)
+      out.push({
+        key: 'missed',
+        level: 'block',
+        label: 'Shots missed',
+        sub: `${missed[0].title} · ${(missed[0].shots || []).filter((x) => !x.got).length} not captured`,
+        go: () => goCalendar(missed[0].id),
+      });
+    // Plan cards on you: late ones block, ones due in the next 2 days are yours to act on
+    const tasks = entries
+      .filter((e) => e.source === 'planner' && !e.done && e.people?.includes(user) && e.start <= addDays(now, 2))
+      .sort((a, b) => a.start.localeCompare(b.start));
+    if (tasks.length) {
+      const late = tasks.filter((e) => e.start < now);
+      const first = late[0] || tasks[0];
+      out.push({
+        key: 'tasks',
+        level: late.length ? 'block' : 'act',
+        label: late.length ? `${plural(late.length, 'task')} late` : plural(tasks.length, 'task') + ' on you',
+        sub: `${first.title} · ${first.start === now ? 'today' : first.start.slice(5)}`,
+        go: () => first.board && openWindow(planWindow(first.board, first.boardName || 'Plan')),
+      });
+    }
     const shoots = entries.filter(
       (e) =>
         !e.source &&
@@ -258,7 +316,9 @@ const OpsBoard: React.FC = () => {
         key: 'shoot',
         level: 'act',
         label: 'Shoot in 48h',
-        sub: `${shoots[0].title} · ${shoots[0].start === now ? 'today' : shoots[0].start.slice(5)}`,
+        sub: `${shoots[0].title} · ${shoots[0].start === now ? 'today' : shoots[0].start.slice(5)} · ${
+          shoots[0].shots?.length ? plural(shoots[0].shots.length, 'shot') + ' planned' : 'no shot list yet'
+        }`,
         go: () => goCalendar(shoots[0].id),
       });
     return out.slice(0, 5);
@@ -279,9 +339,11 @@ const OpsBoard: React.FC = () => {
                 ? 'VERSE'
                 : e.kind === 'Footage due'
                   ? FOOTAGE_TAG[e.title.split(':')[0].split(' ')[0]] || 'CLIP'
-                  : e.kind === 'Track due'
-                    ? 'DUE'
-                    : e.kind.toUpperCase().slice(0, 5);
+                  : e.kind === 'Task'
+                    ? 'TASK'
+                    : e.kind === 'Track due'
+                      ? 'DUE'
+                      : e.kind.toUpperCase().slice(0, 5);
         return {
           d,
           day: new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),

@@ -1890,6 +1890,7 @@ const cleanContent = (list) =>
       .slice(0, 120),
     status: CONTENT_STEPS.includes(x?.status) ? x.status : 'To shoot',
     file: x?.file ? fileRef(x.file) : null,
+    edit: x?.edit ? fileRef(x.edit) : null, // the edited cut (required to mark it Edited in the app)
     due: x?.due ? dateOrNull(x.due) : null,
   }));
 
@@ -3155,6 +3156,8 @@ async function timelineApi(req, res, url) {
           title: `Open verse: ${v.title}`,
           start: v.deadline,
         });
+    // Planner cards with a due date (not in a Done column): the task, who it's on, and the release its plan is for
+    for (const t of await plannerTasks(user)) fromTracks.push(t);
     // Opportunity deadlines too (read-only here)
     for (const o of Object.values((await loadOpps()).items))
       if (!o.archived && o.deadline)
@@ -3185,6 +3188,20 @@ async function timelineApi(req, res, url) {
     if (input.folder !== undefined) i.folder = fileRef(input.folder);
     if (input.release !== undefined) i.release = input.release ? String(input.release).slice(0, 20) : null;
     if (input.place !== undefined) i.place = input.place ? String(input.place).slice(0, 20) : null; // a spot in the location library
+    // Footage a shoot covers, as "<song or release id>:<footage id>", so after the shoot it can all be marked Shot at once
+    if (input.covers !== undefined)
+      i.covers = (Array.isArray(input.covers) ? input.covers : [])
+        .filter((c) => typeof c === 'string' && /^[\w-]{1,20}:[\w-]{1,20}$/.test(c))
+        .slice(0, 60);
+    // The shot list: each planned shot, ticked when it's captured, with a note (take, card, what to redo)
+    if (input.shots !== undefined)
+      i.shots = (Array.isArray(input.shots) ? input.shots : []).slice(0, 100).map((x) => ({
+        id: /^[\w-]{1,20}$/.test(x?.id || '') ? x.id : randomUUID().slice(0, 8),
+        text: String(x?.text ?? '').slice(0, 200),
+        got: !!x?.got,
+        note: String(x?.note ?? '').slice(0, 300),
+        for: /^[\w-]{1,20}$/.test(x?.for || '') ? x.for : null, // the song in the project it's for (null: the whole project)
+      }));
     if (input.public !== undefined) i.public = !!input.public; // shown on the public Welcome window
     if (input.draft !== undefined) i.draft = !!input.draft; // only its owner sees it, nobody is told, until it goes live
     if (i.draft) i.public = false;
@@ -3255,6 +3272,43 @@ async function timelineApi(req, res, url) {
         await notify(u, `${me} put you on "${i.title}" (${i.kind}, ${i.start}).`, { timeline: i.id });
     await timelineAlerts();
     return json(res, view(i));
+  }
+  // After a shoot: everything it covers that is still "To shoot" becomes "Shot" (anyone on the shoot, or an admin)
+  if (req.method === 'POST' && url.searchParams.has('shot')) {
+    if (!i.people.includes(me) && i.owner !== me && !user.admin) fail(403, 'Only people on the shoot can mark it');
+    const tdb = await loadTracks();
+    const now = new Date().toISOString();
+    let n = 0;
+    const touched = new Set();
+    for (const c of i.covers || []) {
+      const [owner, cid] = c.split(':');
+      const o = tdb.tracks[owner] || tdb.releases[owner];
+      const r = o && (tdb.tracks[owner] ? tdb.releases[o.release] : o);
+      if (!o || o.deleted || !r || !canSeeRelease(user, r)) continue;
+      const item = (o.content || []).find((x) => x.id === cid);
+      if (item?.status === 'To shoot') {
+        item.status = 'Shot';
+        n++;
+        touched.add(r.id);
+        if (o.history) {
+          o.history = [
+            { at: now, user: me, action: `marked ${item.kind}${item.title ? ` "${item.title}"` : ''} shot (${i.title})` },
+            ...o.history,
+          ].slice(0, 100);
+          o.updated = now;
+          o.updatedBy = me;
+        }
+      }
+    }
+    if (n) {
+      saveTracks();
+      const cfg2 = await loadConfig();
+      for (const rid of touched)
+        emit('tracks', { release: rid }, (u) =>
+          canSeeRelease({ username: u.username, admin: cfg2.admins.includes(u.username) }, tdb.releases[rid]),
+        );
+    }
+    return json(res, { ok: true, shot: n });
   }
   if (req.method === 'DELETE') {
     if (i.owner !== me && !user.admin) fail(403, 'Only whoever made it or an admin can delete it');
@@ -8452,6 +8506,34 @@ const validItem = (kind, i) =>
   (kind === 'kanban'
     ? Number.isFinite(i.order) && typeof i.title === 'string' && (i.type === 'column' || (i.type === 'card' && typeof i.col === 'string'))
     : ITEM_TYPES.has(i.type) && ['x', 'y', 'w', 'h'].every((k) => Number.isFinite(i[k])));
+
+/** Dated cards on every plan this member may see, as calendar entries (kind 'Task', people = the card's assignee). */
+async function plannerTasks(user) {
+  await mkdir(join(DATA, 'boards'), { recursive: true });
+  const out = [];
+  for (const e of await readdir(join(DATA, 'boards'), { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const b = openBoards.get(e.name) || (await readJson(`boards/${e.name}/board.json`, null).catch(() => null));
+    if (!b || b.meta.kind !== 'kanban' || !canSeeBoard(user, b.meta)) continue;
+    const items = b.items instanceof Map ? [...b.items.values()] : b.items || [];
+    const done = new Set(items.filter((i) => i.type === 'column' && /done/i.test(i.title)).map((i) => i.id));
+    for (const c of items)
+      if (c.type === 'card' && !c.deleted && /^\d{4}-\d{2}-\d{2}$/.test(c.due || ''))
+        out.push({
+          id: `task-${b.meta.id}-${c.id}`,
+          source: 'planner',
+          kind: 'Task',
+          title: `${c.title || 'Untitled card'} (${b.meta.name})`,
+          start: c.due,
+          people: c.assignee ? [c.assignee] : [],
+          release: b.meta.release || null,
+          board: b.meta.id,
+          boardName: b.meta.name,
+          done: done.has(c.col),
+        });
+  }
+  return out;
+}
 
 async function boardsApi(req, res, url) {
   const cfg = await loadConfig();
