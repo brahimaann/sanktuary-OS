@@ -26,7 +26,7 @@ const KINDS: { id: Kind; label: string; icon: IconName; hint: string }[] = [
   { id: 'post', label: 'Substack post', icon: 'external', hint: 'External Substack publish' },
 ];
 
-const FOLDER_BY_DEFAULT: Kind[] = ['Shoot', 'Artwork', 'Video', 'session'];
+const FOLDER_BY_DEFAULT: Kind[] = ['Shoot', 'Show', 'Artwork', 'Video', 'session'];
 const SUBSTACK_NEW_POST = 'https://boroma.substack.com/publish/post';
 
 interface Release {
@@ -137,7 +137,8 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     if (!isTimeline || !makeFolder || !parsed) return null;
     const name = folderName(`${parsed.date} ${title}`);
     if (release?.folder) {
-      const sub = kind === 'Video' ? 'Video' : kind === 'Shoot' || kind === 'Artwork' ? 'Artwork' : 'Events';
+      // Inside the project's own folder: a shoot's (or video shoot's) raw files go in Shoots, next to Edits and Posted
+      const sub = kind === 'Shoot' || kind === 'Video' ? 'Shoots' : kind === 'Artwork' ? 'Artwork' : kind === 'Show' ? 'Shows' : 'Events';
       return { space: release.folder.space, path: `${release.folder.path}/${sub}/${name}` };
     }
     return spaceId ? { space: spaceId, path: `Timeline/${name}` } : null;

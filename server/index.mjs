@@ -2445,7 +2445,7 @@ async function scanReleaseNow(r, by) {
       const r2 = rel ? `${rel}/${e.name}` : e.name;
       const ext = extname(e.name).toLowerCase();
       if (e.isDirectory()) {
-        if (/^(samples|backup|ableton project info|shoots|edits|posted)$/i.test(e.name)) continue; // footage folders hold no songs
+        if (/^(samples|backup|ableton project info|shoots|edits|posted|shows|events)$/i.test(e.name)) continue; // footage, show and event folders hold no songs
         const kind = await projectKind(abs, true);
         if (kind) {
           const inner = (await readdir(abs).catch(() => [])).filter((n) => PROJECT_FILES[extname(n).toLowerCase()]);
