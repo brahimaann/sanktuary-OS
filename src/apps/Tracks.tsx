@@ -358,18 +358,30 @@ const TracksApp: React.FC = () => {
   // Drop files or folders on Tracks: they go into the release's folder (loose audio into Bounces, folders as they
   // are, so "Stems" / "Projects" folders land where the scan looks), then the folder is scanned.
   // A single folder dropped with no release selected (or on request) becomes a new release of its own.
-  const drop = async (e: React.DragEvent) => {
+  // Dropped on a project's cover (desktop): it opens and the files go into that project, same questions as inside it.
+  const drop = async (e: React.DragEvent, onto?: Release) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragging(false);
     if (busy) return;
     const items = await droppedItems(e.dataTransfer); // reads the drop's entries before its first await
     if (!items.length) return;
+    if (onto) {
+      if (onto.kind === 'Playlist') return setMsg(`${onto.title} is a playlist: drop files on a project instead.`);
+      if (me && !me.admin && onto.owner !== me.username && !onto.owners?.includes(me.username) && !canEdit(onto, me.username))
+        return setMsg(`${onto.title} is listen only for you, so files can't go in it.`);
+      pickRelease(onto.id);
+    }
     // Loose songs: one quick question (new, or a new version of one already here?), then straight in
-    if (!isPlaylist && !listenOnly && items.every((i) => !i.sub?.length && AUDIO.test(i.name))) return setAdding(items);
+    const songsOnly = items.every((i) => !i.sub?.length && AUDIO.test(i.name));
+    if (songsOnly && (onto || (!isPlaylist && !listenOnly))) return setAdding(items);
     const tops = new Set(items.map((i) => i.sub?.[0] ?? ''));
     const oneFolder = tops.size === 1 && !tops.has('') ? [...tops][0] : null;
-    let target = release;
+    let target = onto || release;
+    if (!target && !oneFolder)
+      return setMsg("Drop these on a project's cover to file them in it, or drop one folder to make a new project.");
     if (
+      !onto &&
       oneFolder &&
       (!release || (await dialog.confirm(`Make "${oneFolder}" a new project?`, { ok: 'New project', cancel: `Add to ${release.title}` })))
     ) {
@@ -392,8 +404,12 @@ const TracksApp: React.FC = () => {
   /** Files into a project's folder: loose songs into Bounces, folders as they are, and anything else where the
    * question below says (a shoot, artwork, stems...), then the folder is scanned. */
   const putInProject = async (items: UploadItem[], target: Release) => {
-    if (!target.folder) return setMsg('Link this project to a folder first (Folder... in the toolbar), then drop files on it.');
-    const f = target.folder;
+    let f: FileRef;
+    try {
+      f = await folderOf(target); // a project with no folder yet gets Projects/<title>
+    } catch (err) {
+      return setMsg((err as Error).message);
+    }
     items.forEach((i) => !i.sub?.length && AUDIO.test(i.name) && (i.sub = ['Bounces']));
     const loose = items.filter((i) => !i.sub?.length);
     if (loose.length) {
@@ -877,6 +893,7 @@ const TracksApp: React.FC = () => {
             tracks={data.tracks}
             me={me?.username}
             onOpen={pickRelease}
+            onDropOn={narrow ? undefined : drop}
             onPlay={(r) =>
               playAll(
                 r.kind === 'Playlist'
@@ -1164,8 +1181,10 @@ const Library: React.FC<{
   me?: string;
   onOpen: (id: string) => void;
   onPlay: (r: Release) => void;
-}> = ({ releases, tracks, me, onOpen, onPlay }) => {
+  onDropOn?: (e: React.DragEvent, r: Release) => void; // desktop: drop files on a cover to put them in that project
+}> = ({ releases, tracks, me, onOpen, onPlay, onDropOn }) => {
   const { getToken } = useAuth();
+  const [over, setOver] = useState<string | null>(null);
   const [token, setToken] = useState('');
   useEffect(() => {
     getToken().then((x) => setToken(x || ''));
@@ -1196,14 +1215,30 @@ const Library: React.FC<{
           <button
             key={r.id}
             onClick={() => onOpen(r.id)}
-            title={`Open ${r.title}`}
+            title={onDropOn ? `Open ${r.title}, or drop files on it to add them` : `Open ${r.title}`}
             style={{ all: 'unset', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}
+            onDragOver={
+              onDropOn &&
+              ((e) => {
+                if (![...e.dataTransfer.types].includes('Files')) return;
+                e.preventDefault();
+                setOver(r.id);
+              })
+            }
+            onDragLeave={onDropOn && ((e) => !e.currentTarget.contains(e.relatedTarget as Node) && setOver(null))}
+            onDrop={
+              onDropOn &&
+              ((e) => {
+                setOver(null);
+                onDropOn(e, r);
+              })
+            }
           >
             <div
               style={{
                 aspectRatio: '1',
-                border: '2px outset #fff',
-                background: cover ? `#000 url("${cover}") center / cover` : STATUS_COLORS.Mixing,
+                border: over === r.id ? '2px dashed #fff' : '2px outset #fff',
+                background: over === r.id ? '#000' : cover ? `#000 url("${cover}") center / cover` : STATUS_COLORS.Mixing,
                 color: '#fff',
                 display: 'flex',
                 alignItems: 'center',
@@ -1213,7 +1248,11 @@ const Library: React.FC<{
                 position: 'relative',
               }}
             >
-              {!cover && (r.kind === 'Playlist' ? '♫' : r.kind === 'Folder' ? '📁' : r.title.slice(0, 1).toUpperCase())}
+              {over === r.id ? (
+                <span style={{ fontSize: 14, textAlign: 'center' }}>+ Drop to add to {r.title}</span>
+              ) : (
+                !cover && (r.kind === 'Playlist' ? '♫' : r.kind === 'Folder' ? '📁' : r.title.slice(0, 1).toUpperCase())
+              )}
               <span
                 role="button"
                 title={`Play ${r.title}`}
