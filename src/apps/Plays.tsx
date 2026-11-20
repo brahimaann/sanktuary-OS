@@ -37,11 +37,11 @@ interface PlayTemplate {
   by: string;
 }
 
-const PLAY_KINDS = ['Shoot', 'Show', 'Session'];
+const PLAY_KINDS = ['Shoot', 'Show', 'Session', 'Event'];
 const today = () => new Date().toLocaleDateString('en-CA');
 // A play uses a folder its project already has (no new folders): a shoot's raw files in Shoots, a session's sets
-// in Projects, a show in the project folder itself.
-const PLAY_FOLDER: Record<string, string> = { Shoot: '/Shoots', Session: '/Projects', Show: '' };
+// in Projects, a show in the project folder itself, an event (a listening party, say) in Events.
+const PLAY_FOLDER: Record<string, string> = { Shoot: '/Shoots', Session: '/Projects', Show: '', Event: '/Events' };
 const field: React.CSSProperties = {
   font: 'inherit',
   padding: '2px 4px',
@@ -182,7 +182,9 @@ const Plays: React.FC = () => {
                 ? 'e.g. Photo shoot: cover + press'
                 : draft.kind === 'Show'
                   ? 'e.g. Release show'
-                  : 'e.g. Vocal session'
+                  : draft.kind === 'Event'
+                    ? 'e.g. Keep Going listening party'
+                    : 'e.g. Vocal session'
             }
             value={draft.title}
             onChange={(e) => setDraft({ ...draft, title: e.target.value })}

@@ -2345,7 +2345,9 @@ const BOUNCE_EXT = new Set(['.wav', '.aif', '.aiff', '.flac', '.mp3', '.m4a', '.
 const LOSSLESS_EXT = new Set(['.wav', '.aif', '.aiff', '.flac']);
 const ART_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.psd', '.ai']);
 const SONG_NOISE = new Set(
-  'master mastered mix mixed mixdown bounce bounced final rough demo wip ref reference project stems stem version v'.split(' '),
+  'master mastered mix mixed mixdown bounce bounced final rough demo wip ref reference project stems stem version v redo redone revised revision fixed updated'.split(
+    ' ',
+  ),
 );
 const SONG_VARIANT = /\b(?:instrumental|inst|a ?capp?ella|acc?apella|clean|tv track|radio edit|sped up|slowed)\b/gi;
 const SCAN_LIMIT = 4000; // entries walked per scan
@@ -2356,10 +2358,33 @@ function songName(name, isFile = true) {
   let base = isFile ? name.slice(0, name.length - extname(name).length) : name;
   const n = Number(base.match(/^(\d{1,2})(?=[\s._)-])/)?.[1]) || null;
   base = base.replace(/^\d{1,2}[\s._)-]+/, '');
-  const version = Number(base.match(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i)?.[1]) || 0;
-  // "Keep Going take 2" / "mix 3" are versions of Keep Going (but a song called "Take 5" stays itself)
+  // "Keep Going master (2).wav" is the server's name for a second upload under the same name: a redo, not a song
+  const clash = Number(base.match(/\s\((\d{1,2})\)$/)?.[1]) || 0;
+  if (clash) base = base.replace(/\s\(\d{1,2}\)$/, '');
   const spaced = base.replace(/_/g, ' ');
-  const untaken = spaced.replace(/\b(?:take|alt|attempt|mix|bounce)[\s#.-]*\d{1,3}\b/gi, ' ');
+  // "Keep Going take 2" / "mix 3" / "master 2 redo" are versions of Keep Going (but a song called "Take 5" stays
+  // itself). Stages run take < mix < master, so any master outranks any mix; within a stage the higher number
+  // wins, and a redo beats the one it redoes ("mix 2 redo" over "mix 2").
+  const numbered = (re) => Number(spaced.match(re)?.[1]) || 0;
+  const v = numbered(/(?:^|[^a-z])v(?:ersion)?[\s._]*(\d{1,3})(?!\d)/i);
+  const n2 = (re) => numbered(re) || v;
+  const stage = /\bmaster(?:ed)?\b/i.test(spaced)
+    ? 3
+    : /\b(?:mix(?:ed|down)?|bounce)\b/i.test(spaced)
+      ? 2
+      : /\b(?:take|alt|attempt)[\s#.-]*\d/i.test(spaced)
+        ? 1
+        : 0;
+  const num =
+    [
+      0,
+      n2(/\b(?:take|alt|attempt)[\s#.-]*(\d{1,3})\b/i),
+      n2(/\b(?:mix|bounce)[\s#.-]*(\d{1,3})\b/i),
+      n2(/\bmaster(?:ed)?[\s#.-]*(\d{1,3})\b/i),
+    ][stage] || v;
+  const redo = /\b(?:redo(?:ne)?|revised|revision|fixed|updated)\b/i.test(spaced) ? 0.5 : 0;
+  const version = stage * 1000 + num + redo + clash / 100;
+  const untaken = spaced.replace(/\b(?:take|alt|attempt|mix|bounce|master(?:ed)?)[\s#.-]*\d{1,3}\b/gi, ' ');
   const plain = /\p{L}/u.test(untaken) ? untaken : spaced;
   const variant = new RegExp(SONG_VARIANT.source, 'i').test(plain);
   const words = plain
@@ -2529,6 +2554,14 @@ async function scanReleaseNow(r, by) {
         LOSSLESS_EXT.has(extname(b.name).toLowerCase()) - LOSSLESS_EXT.has(extname(a.name).toLowerCase()),
     )[0];
     const next = ref(best.rel);
+    // The rest of the batch (take 1 when take 3 and mix 2 came in together) stays on the song as earlier takes and
+    // mixes for A/B, instead of sitting unlinked in the folder
+    const known = (x) => [t.bounce, ...(t.earlier || [])].some((e) => e && e.space === x.space && e.path === x.path);
+    for (const f of g.files.slice(1).reverse()) {
+      const x = ref(f.rel);
+      if (known(x) || x.path === next.path) continue;
+      t.earlier = [{ space: x.space, path: x.path, at: new Date(f.mtime).toISOString(), by }, ...(t.earlier || [])].slice(0, 30);
+    }
     const earlier = (t.earlier || []).some((e) => e.space === next.space && e.path === next.path);
     if ((!t.bounce || fromFolder(t.bounce)) && t.bounce?.path !== next.path && !earlier) {
       const first = !t.bounce;
