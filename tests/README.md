@@ -4,6 +4,9 @@
 and checks rights, path safety, safe file serving, private boards/channels, live updates and the activity feed.
 Nothing touches your real `data/` folder, drives or Clerk account.
 
+`tests/properties.test.mjs` runs first: fast-check throws thousands of generated inputs at the feed HTML cleaner
+(`server/feed-html.mjs`), which puts other blogs' HTML on CITIES pages, and checks nothing it lets through can run code.
+
 To look at pages behind the sign-in (for Claude sessions too, no Clerk keys needed), `tests/signed-in.mjs` runs the
 server on temporary data with a fake Clerk, the Vite dev server with `FAKE_CLERK=1` (which swaps `@clerk/react` for
 `tests/fake-clerk.js`), and a headless browser signed in as `admin` or `member`:

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node tests/web-images.test.mjs && node tests/files-and-security.test.mjs && node tests/private-and-multiuser.test.mjs"
+    "test": "node tests/properties.test.mjs && node tests/web-images.test.mjs && node tests/files-and-security.test.mjs && node tests/private-and-multiuser.test.mjs"
   },
   "dependencies": {
     "@clerk/react": "^6.16.1",
@@ -25,6 +25,7 @@
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react-swc": "^3.11.0",
+    "fast-check": "^4.10.3",
     "prettier": "^3.9.9",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.3",
