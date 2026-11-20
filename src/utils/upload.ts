@@ -1,8 +1,43 @@
 // Uploads files into a team space from anywhere in the app (Tracks drops, the New... window, Share to Sanktuary),
 // the same way Team Files does: 32 MB chunks (Cloudflare caps a request at 100 MB), a few at once, each chunk
 // retried on a dropped connection. The server never overwrites: a clashing name becomes "name (2).ext".
-const CHUNK = 32 * 1024 * 1024;
+// Phones send 8 MB chunks, so a connection dropped on mobile data resends 8 MB, not 32.
+const CHUNK = (matchMedia('(pointer: coarse)').matches ? 8 : 32) * 1024 * 1024;
 const PARALLEL = 3;
+
+// A phone stops uploading when its screen locks, so keep the screen on while anything is uploading
+let busy = 0;
+let lock: { release(): Promise<void> } | null = null;
+const holdScreen = async () => {
+  try {
+    if (!lock && document.visibilityState === 'visible')
+      lock =
+        (await (navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<typeof lock> } }).wakeLock?.request('screen')) ??
+        null;
+  } catch {
+    // not supported, or refused (low battery): the upload still waits out a lock below
+  }
+};
+document.addEventListener('visibilitychange', () => {
+  if (busy && document.visibilityState === 'visible') {
+    lock = null; // the browser drops the lock when the page is hidden
+    void holdScreen();
+  }
+});
+
+/** Resolves once the page is on screen and online again (a locked phone or a dead signal pauses the upload). */
+const backOnline = () =>
+  new Promise<void>((resolve) => {
+    const check = () => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return;
+      document.removeEventListener('visibilitychange', check);
+      removeEventListener('online', check);
+      resolve();
+    };
+    document.addEventListener('visibilitychange', check);
+    addEventListener('online', check);
+    check();
+  });
 
 async function pool<T>(items: T[], n: number, worker: (item: T) => Promise<void>) {
   let next = 0;
@@ -32,10 +67,11 @@ export interface UploadItem {
   name: string;
   sub?: string[]; // subfolders under the destination (a dropped folder keeps its layout)
   replace?: boolean; // write over the file at this exact name (the old one is kept as a version) instead of saving beside it
+  query?: string; // more of the upload URL, e.g. a project check-in's stage=...&project=...
 }
 
 /**
- * Uploads items into space/dir. onProgress gets (bytes sent, total bytes). Throws the server's message on refusal.
+ * Uploads items into space/dir. onProgress gets (bytes sent, total bytes, files finished). Throws the server's message on refusal.
  * Returns the name each file was saved under, in order (the server renames a clash to "name (2).ext").
  */
 export async function uploadFiles(
@@ -43,41 +79,60 @@ export async function uploadFiles(
   space: string,
   dir: string[],
   items: UploadItem[],
-  onProgress?: (sent: number, total: number) => void,
+  onProgress?: (sent: number, total: number, filesDone: number) => void,
 ) {
   const total = items.reduce((n, u) => n + u.file.size, 0) || 1;
   const sent = new Map<string, number>();
   const saved = items.map((u) => u.name);
+  let filesDone = 0;
   const report = () =>
     onProgress?.(
       [...sent.values()].reduce((a, b) => a + b, 0),
       total,
+      filesDone,
     );
-  await pool([...items.keys()], PARALLEL, async (i) => {
-    const { file, name, sub = [], replace } = items[i];
-    const id = crypto.randomUUID();
-    const chunks = Math.max(1, Math.ceil(file.size / CHUNK));
-    const at = `/api/files/${space}/${[...dir, ...sub, name].map(encodeURIComponent).join('/')}`;
-    const base = `${at}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${replace ? '&replace=1' : ''}`;
-    await pool([...Array(chunks).keys()], PARALLEL, async (c) => {
-      for (let attempt = 0; ; attempt++) {
-        try {
-          const reply = await sendChunk(`${base}&chunk=${c}`, (await getToken()) || '', file.slice(c * CHUNK, (c + 1) * CHUNK), (n) => {
-            sent.set(`${id}:${c}`, n);
-            report();
-          });
-          const done = /^{/.test(reply) && JSON.parse(reply).name; // only the chunk that completes the file names it
-          if (done) saved[i] = done;
-          return;
-        } catch (err) {
-          const status = (err as { status?: number }).status ?? 0;
-          if (attempt >= 4 || (status !== 0 && status !== 429 && status < 500)) throw err;
-          sent.set(`${id}:${c}`, 0);
-          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+  busy++;
+  void holdScreen();
+  try {
+    await pool([...items.keys()], PARALLEL, async (i) => {
+      const { file, name, sub = [], replace, query } = items[i];
+      const id = crypto.randomUUID();
+      const chunks = Math.max(1, Math.ceil(file.size / CHUNK));
+      const at = `/api/files/${space}/${[...dir, ...sub, name].map(encodeURIComponent).join('/')}`;
+      const base = `${at}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${replace ? '&replace=1' : ''}${query ? '&' + query : ''}`;
+      let finished = false;
+      await pool([...Array(chunks).keys()], PARALLEL, async (c) => {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const reply = await sendChunk(`${base}&chunk=${c}`, (await getToken()) || '', file.slice(c * CHUNK, (c + 1) * CHUNK), (n) => {
+              sent.set(`${id}:${c}`, n);
+              report();
+            });
+            const done = /^{/.test(reply) && JSON.parse(reply).name; // only the chunk that completes the file names it
+            if (done) [saved[i], finished] = [done, true];
+            return;
+          } catch (err) {
+            const status = (err as { status?: number }).status ?? 0;
+            sent.set(`${id}:${c}`, 0);
+            // Dropped while the screen was locked or the signal was gone: wait for it to come back, without using up a retry
+            if (status === 0 && (document.visibilityState !== 'visible' || !navigator.onLine)) {
+              await backOnline();
+              attempt--;
+              continue;
+            }
+            if (attempt >= 4 || (status !== 0 && status !== 429 && status < 500)) throw err;
+            await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+          }
         }
-      }
+      });
+      if (!finished) throw new Error(`${name} didn't finish saving on the server. Try it again.`);
+      filesDone++;
+      report();
     });
-  });
+  } finally {
+    if (!--busy) void lock?.release().catch(() => {});
+    if (!busy) lock = null;
+  }
   return saved;
 }
 

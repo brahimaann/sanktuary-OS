@@ -9,6 +9,7 @@ import { useTeamLogin } from '../utils/teamLogin';
 import { button, extsOf, fileIcon, fileKind, shell, formatSize, hasThumb, isRaw, isTouch } from './fileTypes';
 import { RANK, Rights } from '../utils/api';
 import { dialog } from '../utils/dialog';
+import { uploadFiles } from '../utils/upload';
 import { DRAG_FILE, Ref } from '../utils/refs';
 import ShareDialog from './ShareDialog';
 import ProjectPanel, { ProjectInfo } from './ProjectPanel';
@@ -59,20 +60,6 @@ interface Upload {
   file: File;
   rel: string[]; // path under the current folder, e.g. ['stems', 'kick.wav'] for folder drops
   replace?: boolean; // edit rights: swap in and keep the old file as a version
-}
-
-const CHUNK = 32 * 1024 * 1024; // Cloudflare rejects request bodies over 100 MB
-const PARALLEL_FILES = 3;
-const PARALLEL_CHUNKS = 3;
-
-/** Runs worker over items with at most `n` running at once; rejects on the first failure. */
-async function pool<T>(items: T[], n: number, worker: (item: T) => Promise<void>) {
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(n, items.length) }, async () => {
-      while (next < items.length) await worker(items[next++]);
-    }),
-  );
 }
 
 export const fileUrl = (app: string, parts: string[]) => `/api/files/${app}/${parts.map(encodeURIComponent).join('/')}`;
@@ -396,34 +383,6 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
     });
   };
 
-  // One chunk via XHR so we get upload progress (fetch can't report it).
-  const sendChunk = (target: string, body: Blob, onProgress: (loaded: number) => void) =>
-    new Promise<void>(async (resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', target);
-      xhr.setRequestHeader('Authorization', `Bearer ${await getToken()}`);
-      xhr.upload.onprogress = (ev) => onProgress(ev.loaded);
-      xhr.onload = () =>
-        xhr.status < 300 ? resolve() : reject(Object.assign(new Error(xhr.responseText || `HTTP ${xhr.status}`), { status: xhr.status }));
-      xhr.onerror = () => reject(Object.assign(new Error('Network error'), { status: 0 }));
-      xhr.send(body);
-    });
-
-  // A dropped connection or a server hiccup retries just that chunk (after 1, 2, 4, 8 s); the server takes
-  // chunks in any order and a resent chunk simply overwrites itself. Refusals (full, no rights...) don't retry.
-  const putChunk = async (target: string, body: Blob, onProgress: (loaded: number) => void) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await sendChunk(target, body, onProgress);
-      } catch (err) {
-        const status = (err as { status?: number }).status ?? 0;
-        if (attempt >= 4 || (status !== 0 && status !== 429 && status < 500)) throw err;
-        onProgress(0);
-        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
-      }
-    }
-  };
-
   /** Uploads files here, or with stage: into a project's check-in staging (rel is then relative to the project). */
   const uploadAll = async (items: Upload[], stage?: { id: string; project: string[] }): Promise<boolean> => {
     if (!items.length || busy) return false;
@@ -444,33 +403,19 @@ const TeamFiles: React.FC<TeamFilesProps> = ({ app, name, initialPath }) => {
       clashes.forEach((u) => (u.replace = true));
     }
     setBusy(true);
-    const total = items.reduce((n, u) => n + u.file.size, 0) || 1;
-    const sent = new Map<string, number>(); // bytes sent per in-flight chunk, for one combined progress figure
-    let filesDone = 0;
     const started = Date.now();
-    const progress = () => {
-      const bytes = [...sent.values()].reduce((a, b) => a + b, 0);
-      setXfer({ label: `Uploading ${filesDone}/${items.length}`, done: bytes, total, started });
-    };
-    progress();
+    const progress = (done: number, total: number, filesDone = 0) =>
+      setXfer({ label: `Uploading ${filesDone}/${items.length}`, done, total, started });
+    progress(0, 1);
     try {
-      // Several files at once, and several chunks of each big file at once: one connection through
-      // Cloudflare is often throttled, parallel ones fill the line.
-      await pool(items, PARALLEL_FILES, async ({ file, rel, replace }) => {
-        const id = crypto.randomUUID();
-        const chunks = Math.max(1, Math.ceil(file.size / CHUNK));
-        const at = stage ? url([...stage.project, ...rel]) : url([...path, ...rel]);
-        const extra = stage ? `&stage=${stage.id}&project=${encodeURIComponent(stage.project.join('/'))}` : replace ? '&replace=1' : '';
-        const base = `${at}?upload=${id}&chunks=${chunks}&size=${file.size}&chunkSize=${CHUNK}${extra}`;
-        await pool([...Array(chunks).keys()], PARALLEL_CHUNKS, (c) =>
-          putChunk(`${base}&chunk=${c}`, file.slice(c * CHUNK, (c + 1) * CHUNK), (loaded) => {
-            sent.set(`${id}:${c}`, loaded);
-            progress();
-          }),
-        );
-        filesDone++;
-        progress();
-      });
+      const extra = stage && `stage=${stage.id}&project=${encodeURIComponent(stage.project.join('/'))}`;
+      await uploadFiles(
+        getToken,
+        app,
+        stage ? stage.project : path,
+        items.map(({ file, rel, replace }) => ({ file, name: rel[rel.length - 1], sub: rel.slice(0, -1), replace, query: extra })),
+        progress,
+      );
       setStatus(`Uploaded ${items.length} file(s) in ${duration((Date.now() - started) / 1000)}.`);
     } catch (err) {
       setStatus(`Upload stopped: ${(err as Error).message}`);

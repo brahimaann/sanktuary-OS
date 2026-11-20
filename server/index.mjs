@@ -7957,6 +7957,8 @@ function freeName(dir, name) {
 // Uploads arrive in chunks (Cloudflare caps a request at 100 MB), several at once for speed. Each chunk is written
 // at its own offset in a hidden part file next to the destination; when every chunk has landed the part file is
 // renamed into place. ?replace=1 (edit rights) swaps the new file in and keeps the old one as a version.
+// Landed chunks are also listed in a .got file beside the part, so an upload carries on across a server restart
+// (auto-deploy swaps the server in every few minutes) instead of never finishing.
 // ponytail: abandoned .sk-upload-* parts are never cleaned up; sweep old ones if they start piling up.
 const MAX_CHUNK = 95 * 1024 ** 2;
 const uploads = new Map(); // upload id -> { got: Set<chunk>, done: boolean }
@@ -7979,6 +7981,7 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
 
   const dir = dirname(target);
   const part = join(dir, `.sk-upload-${id}`);
+  const gotFile = part + '.got';
   if (!uploads.has(id)) {
     // First chunk to arrive (any order) registers the upload straight away (no await before this, so chunks
     // arriving together can't each start their own), then checks space and creates the part file.
@@ -7990,8 +7993,11 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
       const made = await mkdir(dir, { recursive: true }); // folder uploads create their subfolders
       await writeFile(part, '', { flag: 'a' });
       if (made) await setOwner(space, made.replace(/^\\\\\?\\/, ''), user); // Windows returns it as \\?\C:\...
+      const before = await readFile(gotFile, 'utf8').catch(() => ''); // chunks that landed before a restart
+      for (const c of before.split('\n')) if (c) entry.got.add(Number(c));
     })();
-    uploads.set(id, { got: new Set(), done: false, ready });
+    const entry = { got: new Set(), done: false, ready };
+    uploads.set(id, entry);
     ready.catch(() => uploads.delete(id)); // refused: a retry starts fresh
   }
   const up = uploads.get(id);
@@ -8004,9 +8010,13 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   };
   await pipeline(req, capped, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
   up.got.add(chunk);
-  if (up.got.size < chunks || up.done) return json(res, { ok: true });
+  if (up.got.size < chunks || up.done) {
+    await appendFile(gotFile, chunk + '\n');
+    return json(res, { ok: true });
+  }
   up.done = true;
   uploads.delete(id);
+  await rm(gotFile, { force: true });
 
   let name = target.split(sep).pop();
   if (staged) {
@@ -8298,6 +8308,12 @@ async function stream(req, res, q, file, transfer) {
     headers['content-disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(q.get('name') || file.split(sep).pop())}`;
   }
   if (!SAFE_INLINE.test(type)) headers['content-security-policy'] = "sandbox; default-src 'none'";
+  // Opening the same photo or video again asks "changed?" and gets a bodiless 304 instead of the whole file
+  if (!res.hasHeader('cache-control')) headers['cache-control'] = 'private, no-cache';
+  if (!req.headers.range && Date.parse(req.headers['if-modified-since']) >= Math.floor(s.mtimeMs / 1000) * 1000) {
+    res.writeHead(304, headers);
+    return res.end();
+  }
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
   if (range && s.size > 0) {
     const start = range[1] ? Number(range[1]) : Math.max(0, s.size - Number(range[2]));
