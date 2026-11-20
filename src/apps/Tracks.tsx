@@ -1178,6 +1178,8 @@ const folderSafe = (name: string) =>
     .replace(/[<>:"|?*\\/\x00-\x1f]/g, '')
     .trim()
     .replace(/[. ]+$/, '');
+/** A master ("Keep Going master 2.wav", "mastered") rather than a mix: the two are only ever compared with their own kind. */
+const isMasterFile = (path: string) => /\bmaster(ed)?\b/i.test(path.split('/').pop() || '');
 /** "03 Summer Nights v2 (master).wav" -> "summernights": to guess which song a new version belongs to. */
 const songKey = (name: string) =>
   name
@@ -1704,47 +1706,106 @@ const TrackPage: React.FC<{
                 <MediaControls media={media} src={bounceSrc} />
               </>
             )}
-            {!!t.earlier?.length && (
-              <details open>
-                <summary>Earlier takes and mixes ({t.earlier.length})</summary>
-                {t.earlier.map((e) => {
-                  const src = `${fileUrl(e.space, e.path.split('/'))}?t=${token}`;
-                  const on = comparing === e.path;
-                  return (
-                    <div key={e.space + e.path} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <span
-                        style={{ flex: 1, fontWeight: on ? 700 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                        title={e.path}
-                      >
-                        {e.path.split('/').pop()}
-                        <span style={{ color: '#555' }}>
-                          {' '}
-                          · {new Date(e.at).toLocaleDateString()}
-                          {on ? ' (playing)' : ''}
+            {!!t.earlier?.length &&
+              // Mixes are compared with mixes and masters with masters, never across: each group A/Bs against its
+              // newest (the song's bounce when it's that kind, else the newest earlier one of that kind)
+              (['Masters', 'Mixes'] as const).map((group) => {
+                const kind = (path: string) => (isMasterFile(path) ? 'Masters' : 'Mixes');
+                const all = t.earlier!.filter((e) => kind(e.path) === group);
+                if (!all.length) return null;
+                const cur = t.bounce && kind(t.bounce.path) === group ? null : all[0]; // null: the bounce is this group's newest
+                const rows = cur ? all.slice(1) : all;
+                const srcOf = (e: { space: string; path: string }) => `${fileUrl(e.space, e.path.split('/'))}?t=${token}`;
+                const refSrc = cur ? srcOf(cur) : bounceSrc!;
+                const latest = group === 'Masters' ? 'latest master' : 'latest mix';
+                return (
+                  <details open key={group}>
+                    <summary>
+                      Earlier {group.toLowerCase()} ({rows.length})
+                    </summary>
+                    {cur && (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <span
+                          style={{
+                            flex: 1,
+                            fontWeight: comparing === cur.path ? 700 : 400,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={cur.path}
+                        >
+                          {cur.path.split('/').pop()}
+                          <span style={{ opacity: 0.7 }}>
+                            {' '}
+                            · {latest}
+                            {comparing === cur.path ? ' (playing)' : ''}
+                          </span>
                         </span>
-                      </span>
-                      <button
-                        style={button}
-                        title="Flip between this one and the current bounce at the same moment in the song"
-                        onClick={() => {
-                          abSwitch(on ? bounceSrc! : src);
-                          setComparing(on ? null : e.path);
-                        }}
-                      >
-                        {on ? 'Back to current' : 'A/B'}
-                      </button>
-                      <button
-                        style={button}
-                        title="Make this the song's bounce again"
-                        onClick={() => save({ bounce: { space: e.space, path: e.path } })}
-                      >
-                        Use this
-                      </button>
-                    </div>
-                  );
-                })}
-              </details>
-            )}
+                        <button
+                          style={button}
+                          title={`Play the ${latest}, then A/B the earlier ones against it`}
+                          onClick={() => {
+                            const on = comparing === cur.path;
+                            abSwitch(on ? bounceSrc! : refSrc);
+                            setComparing(on ? null : cur.path);
+                          }}
+                        >
+                          {comparing === cur.path ? 'Back to current' : 'Play'}
+                        </button>
+                        <button
+                          style={button}
+                          title="Make this the song's bounce"
+                          onClick={() => save({ bounce: { space: cur.space, path: cur.path } })}
+                        >
+                          Use this
+                        </button>
+                      </div>
+                    )}
+                    {rows.map((e) => {
+                      const on = comparing === e.path;
+                      return (
+                        <div key={e.space + e.path} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span
+                            style={{
+                              flex: 1,
+                              fontWeight: on ? 700 : 400,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title={e.path}
+                          >
+                            {e.path.split('/').pop()}
+                            <span style={{ opacity: 0.7 }}>
+                              {' '}
+                              · {new Date(e.at).toLocaleDateString()}
+                              {on ? ' (playing)' : ''}
+                            </span>
+                          </span>
+                          <button
+                            style={button}
+                            title={`Flip between this one and the ${cur ? latest : 'current bounce'} at the same moment in the song`}
+                            onClick={() => {
+                              abSwitch(on ? refSrc : srcOf(e));
+                              setComparing(on ? (cur ? cur.path : null) : e.path);
+                            }}
+                          >
+                            {on ? `Back to ${cur ? latest : 'current'}` : 'A/B'}
+                          </button>
+                          <button
+                            style={button}
+                            title="Make this the song's bounce again"
+                            onClick={() => save({ bounce: { space: e.space, path: e.path } })}
+                          >
+                            Use this
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </details>
+                );
+              })}
             {versions.length > 0 && (
               <details>
                 <summary>Earlier bounces ({versions.length})</summary>
