@@ -523,6 +523,16 @@ const TracksApp: React.FC = () => {
       setTrackId(t.id);
     });
   };
+  const openFolder = () => {
+    const parts = release!.folder!.path.split('/');
+    openRef({
+      kind: 'folder',
+      title: parts[parts.length - 1],
+      app: release!.folder!.space,
+      dir: parts.slice(0, -1),
+      name: parts[parts.length - 1],
+    });
+  };
   const patchRelease = (body: object) =>
     run(() => api(`/api/tracks/release/${release!.id}`, { method: 'PATCH', body: JSON.stringify(body) }));
 
@@ -534,7 +544,7 @@ const TracksApp: React.FC = () => {
       <div style={toolbar}>
         {release ? (
           <button style={button} onClick={() => pickRelease('')} title="All projects">
-            ◄ Library
+            {narrow ? '◄' : '◄ Library'}
           </button>
         ) : (
           <>
@@ -549,30 +559,54 @@ const TracksApp: React.FC = () => {
             <button style={button} onClick={newRelease} title="An album, EP or single to gather songs into">
               New project...
             </button>
-            <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
-              New playlist...
-            </button>
-            <button
-              style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
-              title="Every song in one list: mixed, mastered, out, and what each needs next"
-            >
-              {view === 'songs' ? 'Covers' : 'All songs'}
-            </button>
-            <button
-              style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
-              title="Songs with an open verse: hop on, send a take, the poster picks one"
-            >
-              {view === 'verses' ? 'Covers' : 'Open verses'}
-            </button>
-            <button
-              style={{ ...button, ...(view === 'content' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setView((v) => (v === 'content' ? '' : 'content'))}
-              title="Clips, reels, videos and photos shot for each song and project: how far along, and what's left"
-            >
-              {view === 'content' ? 'Covers' : 'Footage'}
-            </button>
+            {narrow ? (
+              <MoreMenu title="More: playlists, all songs, open verses, footage, library">
+                <MenuItem onClick={() => newPlaylist()}>New playlist...</MenuItem>
+                <MenuHead>Show</MenuHead>
+                <MenuItem on={!view} onClick={() => setView('')}>
+                  Covers
+                </MenuItem>
+                <MenuItem on={view === 'songs'} onClick={() => setView('songs')}>
+                  All songs
+                </MenuItem>
+                <MenuItem on={view === 'verses'} onClick={() => setView('verses')}>
+                  Open verses
+                </MenuItem>
+                <MenuItem on={view === 'content'} onClick={() => setView('content')}>
+                  Footage
+                </MenuItem>
+                <MenuItem onClick={() => window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: 'library' }))}>
+                  Library (books, radio, archive)
+                </MenuItem>
+              </MoreMenu>
+            ) : (
+              <>
+                <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
+                  New playlist...
+                </button>
+                <button
+                  style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+                  onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
+                  title="Every song in one list: mixed, mastered, out, and what each needs next"
+                >
+                  {view === 'songs' ? 'Covers' : 'All songs'}
+                </button>
+                <button
+                  style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+                  onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
+                  title="Songs with an open verse: hop on, send a take, the poster picks one"
+                >
+                  {view === 'verses' ? 'Covers' : 'Open verses'}
+                </button>
+                <button
+                  style={{ ...button, ...(view === 'content' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+                  onClick={() => setView((v) => (v === 'content' ? '' : 'content'))}
+                  title="Clips, reels, videos and photos shot for each song and project: how far along, and what's left"
+                >
+                  {view === 'content' ? 'Covers' : 'Footage'}
+                </button>
+              </>
+            )}
           </>
         )}
         {release && tracks.some((t) => t.bounce) && (
@@ -622,34 +656,23 @@ const TracksApp: React.FC = () => {
               </button>
             )}
             <span style={{ flex: 1, minWidth: 0, display: 'flex', gap: 4, alignItems: 'center', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-              <button
-                style={{ ...button, ...(details ? { border: '2px inset #fff' } : {}) }}
-                onClick={() => setDetails((d) => !d)}
-                title="Kind, artists, writers and out date"
-              >
-                {release.kind}
-                {release.date
-                  ? ` · out ${new Date(`${release.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-                  : ''}{' '}
-                ▾
-              </button>
-              <ArtistLinks names={release.artist || ''} />
+              {!narrow && (
+                <button
+                  style={{ ...button, ...(details ? { border: '2px inset #fff' } : {}) }}
+                  onClick={() => setDetails((d) => !d)}
+                  title="Kind, artists, writers and out date"
+                >
+                  {release.kind}
+                  {release.date
+                    ? ` · out ${new Date(`${release.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                    : ''}{' '}
+                  ▾
+                </button>
+              )}
+              {!narrow && <ArtistLinks names={release.artist || ''} />}
             </span>
-            {release.folder ? (
-              <button
-                style={button}
-                title={`Open ${release.folder.path}`}
-                onClick={() => {
-                  const parts = release.folder!.path.split('/');
-                  openRef({
-                    kind: 'folder',
-                    title: parts[parts.length - 1],
-                    app: release.folder!.space,
-                    dir: parts.slice(0, -1),
-                    name: parts[parts.length - 1],
-                  });
-                }}
-              >
+            {narrow ? null : release.folder ? (
+              <button style={button} title={`Open ${release.folder.path}`} onClick={openFolder}>
                 <IconLabel icon="external">Folder</IconLabel>
               </button>
             ) : (
@@ -659,21 +682,45 @@ const TracksApp: React.FC = () => {
                 </button>
               )
             )}
-            <button style={button} onClick={() => setSharing(true)} title="The project's owners, and who can see, edit or only listen">
-              {release.members ? `🔒 ${release.members.length + 1}` : 'Everyone'}
-              {listenersOf(
-                release,
-                profiles.map((p) => p.username),
-              ).length
-                ? ` · ${
-                    listenersOf(
-                      release,
-                      profiles.map((p) => p.username),
-                    ).length
-                  } listen`
-                : ''}
-            </button>
+            {!narrow && (
+              <button style={button} onClick={() => setSharing(true)} title="The project's owners, and who can see, edit or only listen">
+                {release.members ? `🔒 ${release.members.length + 1}` : 'Everyone'}
+                {listenersOf(
+                  release,
+                  profiles.map((p) => p.username),
+                ).length
+                  ? ` · ${
+                      listenersOf(
+                        release,
+                        profiles.map((p) => p.username),
+                      ).length
+                    } listen`
+                  : ''}
+              </button>
+            )}
             <MoreMenu title="More: add a track or files, scan, campaign, public page">
+              {narrow && (
+                <>
+                  <MenuItem on={details} onClick={() => setDetails((d) => !d)}>
+                    {release.kind}
+                    {release.date ? ` · out ${release.date.slice(5)}` : ''}: details
+                  </MenuItem>
+                  {release.folder ? (
+                    <MenuItem icon="external" onClick={openFolder}>
+                      Open the folder
+                    </MenuItem>
+                  ) : (
+                    ownsIt && (
+                      <MenuItem icon="link" onClick={() => setLinking(true)}>
+                        Link a folder...
+                      </MenuItem>
+                    )
+                  )}
+                  <MenuItem onClick={() => setSharing(true)}>
+                    Who's on it ({release.members ? `${release.members.length + 1} people` : 'everyone'})...
+                  </MenuItem>
+                </>
+              )}
               <MenuItem icon="note" onClick={addTrack}>
                 Add track (no file yet)...
               </MenuItem>
@@ -764,7 +811,7 @@ const TracksApp: React.FC = () => {
           </label>
         </div>
       )}
-      {release && guided && ready && <GuidedStrip key={release.id} ready={ready} onGo={goTo} onHide={() => guide(false)} />}
+      {release && guided && ready && <GuidedStrip key={release.id} narrow={narrow} ready={ready} onGo={goTo} onHide={() => guide(false)} />}
       <div
         ref={box}
         style={{
@@ -1024,7 +1071,7 @@ const TracksApp: React.FC = () => {
             onClose={() => setAdding(null)}
           />
         )}
-        {campaign && release && <Campaign release={release} tracks={tracks} onClose={() => setCampaign(false)} />}
+        {campaign && release && <Campaign release={release} tracks={tracks} full={narrow} onClose={() => setCampaign(false)} />}
         {readyOpen && release && (
           <ReadinessPanel release={release} ready={ready} onUpc={(upc) => patchRelease({ upc })} onClose={() => setReadyOpen(false)} />
         )}
@@ -2695,8 +2742,9 @@ const whereFor = (c: Readiness['checks'][number]) =>
           ? 'regs'
           : 'master';
 
-const GuidedStrip: React.FC<{ ready: Readiness; onGo: (c: Readiness['checks'][number]) => void; onHide: () => void }> = ({
+const GuidedStrip: React.FC<{ ready: Readiness; narrow?: boolean; onGo: (c: Readiness['checks'][number]) => void; onHide: () => void }> = ({
   ready,
+  narrow,
   onGo,
   onHide,
 }) => {
@@ -2714,22 +2762,24 @@ const GuidedStrip: React.FC<{ ready: Readiness; onGo: (c: Readiness['checks'][nu
   });
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', padding: '3px 6px', borderBottom: '1px solid #808080' }}>
-      {STAGES.map(([st, label], i) => {
-        const mine = ready.checks.filter((c) => c.step === st);
-        const done = mine.length > 0 && mine.every((c) => c.ok);
-        return (
-          <React.Fragment key={st}>
-            {i > 0 && <span style={{ color: '#808080' }}>›</span>}
-            <span
-              style={{ color: done ? '#006000' : st === 'register' && !ready.out ? '#808080' : '#000' }}
-              title={mine.map((c) => `${c.ok ? '✓' : '○'} ${c.song ? `${c.song}: ` : ''}${c.text}`).join('\n')}
-            >
-              {done ? '✓ ' : ''}
-              {label}
-            </span>
-          </React.Fragment>
-        );
-      })}
+      {/* On a phone only the next step shows; the stages are in each one's tooltip on a computer */}
+      {!narrow &&
+        STAGES.map(([st, label], i) => {
+          const mine = ready.checks.filter((c) => c.step === st);
+          const done = mine.length > 0 && mine.every((c) => c.ok);
+          return (
+            <React.Fragment key={st}>
+              {i > 0 && <span style={{ color: '#808080' }}>›</span>}
+              <span
+                style={{ color: done ? '#006000' : st === 'register' && !ready.out ? '#808080' : '#000' }}
+                title={mine.map((c) => `${c.ok ? '✓' : '○'} ${c.song ? `${c.song}: ` : ''}${c.text}`).join('\n')}
+              >
+                {done ? '✓ ' : ''}
+                {label}
+              </span>
+            </React.Fragment>
+          );
+        })}
       <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
         {next ? (
           <>
