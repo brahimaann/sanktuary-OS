@@ -24,6 +24,7 @@ interface Props {
   };
   tracks: { id: string; title: string; n: number }[];
   onClose: () => void;
+  full?: boolean; // a phone: take the whole screen, with a close button that stays at the top
 }
 
 const iso = (d: Date) => d.toLocaleDateString('en-CA'); // local YYYY-MM-DD
@@ -58,7 +59,7 @@ const VIDEOS: [title: string, offset: (release: string) => string, notes: string
   ],
 ];
 
-const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
+const Campaign: React.FC<Props> = ({ release, tracks, onClose, full }) => {
   const api = useApi();
   const [tab, setTab] = useState<'plan' | 'pitch' | 'linked'>('plan');
   const [picked, setPicked] = useState<string[]>(tracks.slice(0, 3).map((t) => t.id));
@@ -164,7 +165,7 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
   return (
     <div
       style={{
-        position: 'absolute',
+        position: full ? 'fixed' : 'absolute',
         inset: 0,
         background: 'rgba(0,0,0,0.25)',
         display: 'flex',
@@ -173,9 +174,33 @@ const Campaign: React.FC<Props> = ({ release, tracks, onClose }) => {
         zIndex: 20,
       }}
     >
-      <div style={{ width: 'min(700px, 98%)', maxHeight: '96%', overflow: 'auto', background: '#fff', border: '2px outset #fff' }}>
-        <div style={{ background: 'linear-gradient(90deg,#000,#000)', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
-          Campaign: {release.title}
+      <div
+        style={{
+          width: full ? '100%' : 'min(700px, 98%)',
+          height: full ? '100%' : undefined,
+          maxHeight: full ? undefined : '96%',
+          overflow: 'auto',
+          background: '#fff',
+          border: '2px outset #fff',
+        }}
+      >
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            background: '#000',
+            color: '#fff',
+            fontWeight: 700,
+            padding: '3px 6px',
+          }}
+        >
+          <span style={{ flex: 1 }}>Campaign: {release.title}</span>
+          <button style={{ ...button, padding: '0 8px' }} title="Close" onClick={onClose}>
+            ×
+          </button>
         </div>
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 4 }}>

@@ -4,6 +4,7 @@ import Avatar from '../apps/Avatar';
 import RetroIcon, { IconName } from './RetroIcon';
 import { useApi } from '../utils/api';
 import { dialog } from '../utils/dialog';
+import { FONT } from '../apps/fileTypes';
 
 /** Win98-style account menu (replaces Clerk's modern UserButton popup): who you are, account settings, log off. */
 const AccountButton: React.FC = () => {
@@ -116,7 +117,7 @@ const menu: React.CSSProperties = {
   border: '2px outset #fff',
   boxShadow: '1px 1px 0 #000',
   padding: 2,
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   color: '#000',
 };

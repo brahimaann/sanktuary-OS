@@ -9,6 +9,8 @@ import { LogOn, shell, button } from './TeamFiles';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { IconLabel, IconName } from '../components/RetroIcon';
 import { useOpenRef } from '../utils/refs';
+import { dialog } from '../utils/dialog';
+import { ArtistLinks, MemberOptions } from './MembersPicker';
 
 type Kind = 'release' | 'song' | 'session' | 'article' | 'Shoot' | 'Show' | 'Artwork' | 'Video' | 'Event' | 'Drop' | 'post';
 
@@ -68,7 +70,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
   const api = useApi();
   const { me } = useMe();
   const { getToken } = useAuth();
-  const { openWindow } = useWindowManager();
+  const { openWindow, closeWindow } = useWindowManager();
   const openRef = useOpenRef();
 
   const [kind, setKind] = useState<Kind | null>(initial || null);
@@ -148,7 +150,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
     folderMode === 'existing'
       ? existing
       : folderMode === 'new' && spaceId
-        ? { space: spaceId, path: `Releases/${folderName(name)}` }
+        ? { space: spaceId, path: `Projects/${folderName(name)}` }
         : null;
 
   const openTracks = (id: string) => {
@@ -240,7 +242,7 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         let r = release;
         if (!r) {
           setBusy('Making the single...');
-          const folder = spaceId ? { space: spaceId, path: `Releases/${folderName(name)}` } : null;
+          const folder = spaceId ? { space: spaceId, path: `Projects/${folderName(name)}` } : null;
           r = await post('/api/tracks/release', { title: name, kind: 'Single', folder, setup: !!folder, ...credits() });
         }
         setBusy('Adding the track...');
@@ -314,6 +316,9 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         openTimeline(e.id);
       }
       reset();
+      // Made: stamp it and get the New window out of the way (what was made is already open)
+      dialog.done(kind === 'article' ? 'Draft made: finish it on /write' : 'Created');
+      closeWindow('new');
     } catch (e) {
       setMsg((e as Error).message);
     } finally {
@@ -362,29 +367,11 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
           <span style={{ ...cap, marginTop: 4 }}>Artists</span>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-              {artists.map((a, i) => (
-                <span
-                  key={a}
-                  style={{
-                    background: '#e0e0e0',
-                    border: '1px solid #808080',
-                    padding: '1px 6px',
-                    borderRadius: 2,
-                    fontSize: 11,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  {a}
-                  <span onClick={() => removeArtist(i)} style={{ cursor: 'pointer', fontWeight: 700, color: '#a00000', fontSize: 10 }}>
-                    ×
-                  </span>
-                </span>
-              ))}
+              <ArtistLinks names={artists} onRemove={removeArtist} />
               <input
                 style={{ ...field, width: 140 }}
                 value={artistInput}
+                list="sk-members"
                 onChange={(e) => setArtistInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -398,7 +385,8 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
                 Add
               </button>
             </div>
-            <div style={{ fontSize: 10, color: '#666' }}>Multi-artist credits will be saved to track metadata.</div>
+            <MemberOptions />
+            <div style={{ fontSize: 10, color: '#666' }}>A member's name (or part of it, like "hima") links to their profile.</div>
           </div>
         </div>
       )}
@@ -599,34 +587,38 @@ const NewForm: React.FC<{ initial?: Kind }> = ({ initial }) => {
         </div>
       )}
 
-      {/* Release Folders */}
+      {/* Release Folders: every project gets its own folder under Projects on the server */}
       {kind === 'release' && (
-        <fieldset
-          style={{ border: '2px groove #fff', margin: 0, padding: '4px 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}
-        >
-          <legend>Files</legend>
-          <label style={row}>
-            <input type="radio" checked={folderMode === 'new'} disabled={!spaces.length} onChange={() => setFolderMode('new')} />
-            Make its folders in <SpaceSelect spaces={spaces} value={spaceId} onChange={setSpace} /> › Releases ›{' '}
-            {folderName(title) || '...'}
-          </label>
-          <label style={row}>
-            <input
-              type="radio"
-              checked={folderMode === 'existing'}
-              onChange={() => (setFolderMode('existing'), !existing && setPicking(true))}
-            />
-            Use a folder that's already there
-            {existing ? <b>{existing.path}</b> : null}
-            <button style={button} onClick={() => (setFolderMode('existing'), setPicking(true))}>
-              Choose...
-            </button>
-          </label>
-          <label style={row}>
-            <input type="radio" checked={folderMode === 'none'} onChange={() => setFolderMode('none')} />
-            No folder for now
-          </label>
-        </fieldset>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={row}>
+            <span style={cap}>Folder</span>
+            {folderMode === 'new' && spaces.length ? (
+              <span>
+                <SpaceSelect spaces={spaces} value={spaceId} onChange={setSpace} /> › Projects › <b>{folderName(title) || '...'}</b>
+              </span>
+            ) : folderMode === 'existing' ? (
+              <b>{existing?.path || '(pick one)'}</b>
+            ) : (
+              <span>None for now</span>
+            )}
+          </div>
+          <details style={{ marginLeft: 81, color: '#444' }}>
+            <summary style={{ cursor: 'pointer' }}>Use another folder</summary>
+            <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+              {folderMode !== 'new' && spaces.length > 0 && (
+                <button style={button} onClick={() => setFolderMode('new')}>
+                  Projects folder
+                </button>
+              )}
+              <button style={button} onClick={() => (setFolderMode('existing'), setPicking(true))}>
+                One that's already there...
+              </button>
+              <button style={button} onClick={() => setFolderMode('none')}>
+                No folder for now
+              </button>
+            </div>
+          </details>
+        </div>
       )}
 
       {/* Scratch Session Space */}

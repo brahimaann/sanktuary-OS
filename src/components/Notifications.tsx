@@ -359,7 +359,7 @@ const win: React.CSSProperties = {
   background: '#fff',
   border: '2px outset #fff',
   boxShadow: '2px 2px 0 rgba(0,0,0,0.5)',
-  font: '11px "MS Sans Serif", Arial, sans-serif',
+  font: "11px 'Fixedsys Excelsior', 'Pixelify Sans', monospace",
   color: '#000',
   cursor: 'default',
 };

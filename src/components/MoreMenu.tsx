@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import RetroIcon, { IconName } from './RetroIcon';
 
@@ -7,6 +7,11 @@ const MoreMenu: React.FC<{ children: React.ReactNode; title?: string }> = ({ chi
   const [at, setAt] = useState<DOMRect | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  // A wide menu under a ⋯ near the left edge (a phone) would run off screen: pin it to the left edge instead
+  useLayoutEffect(() => {
+    const m = menu.current;
+    if (m && m.getBoundingClientRect().left < 4) Object.assign(m.style, { left: '4px', right: 'auto' });
+  }, [at]);
   useEffect(() => {
     if (!at) return;
     const close = (e: PointerEvent) => !btn.current?.contains(e.target as Node) && !menu.current?.contains(e.target as Node) && setAt(null);
@@ -31,7 +36,11 @@ const MoreMenu: React.FC<{ children: React.ReactNode; title?: string }> = ({ chi
             ref={menu}
             role="menu"
             className="sk-menu"
-            style={{ top: at.bottom + 2, right: Math.max(4, innerWidth - at.right), maxHeight: innerHeight - at.bottom - 10 }}
+            style={{
+              top: at.bottom + 2,
+              right: Math.max(4, innerWidth - at.right),
+              maxHeight: innerHeight - at.bottom - 10,
+            }}
             onClick={(e) => (e.target as HTMLElement).closest('button:not([data-keep])') && setAt(null)}
           >
             {children}

@@ -11,6 +11,7 @@ import {
   type Region,
   type TimelineEvent,
 } from './pplsStoryData';
+import { FONT } from './fileTypes';
 
 // ──────────────────────────────────────────────
 // Civic Alert System Data
@@ -777,7 +778,7 @@ const WorldMap: React.FC<WorldMapProps> = ({
             border: '1px solid #000',
             padding: '4px 6px',
             boxShadow: '1px 1px 0 rgba(0,0,0,0.3)',
-            fontFamily: '"MS Sans Serif", Arial, sans-serif',
+            fontFamily: FONT,
             fontSize: 10,
             color: '#000',
             pointerEvents: 'none',
@@ -1367,7 +1368,7 @@ const shell: React.CSSProperties = {
   width: '100%',
   height: '100%',
   background: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   overflow: 'hidden',
   color: '#000',
@@ -1427,7 +1428,7 @@ const retroBtn: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   outline: 'none',
-  fontFamily: '"MS Sans Serif", Arial',
+  fontFamily: FONT,
 };
 
 const regionTabs: React.CSSProperties = {
@@ -1445,7 +1446,7 @@ const regionTab: React.CSSProperties = {
   borderBottom: 'none',
   cursor: 'pointer',
   textAlign: 'center',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   outline: 'none',
 };
 
@@ -1513,7 +1514,7 @@ const sidebarTab: React.CSSProperties = {
   borderBottom: 'none',
   cursor: 'pointer',
   textAlign: 'center',
-  fontFamily: '"MS Sans Serif", Arial',
+  fontFamily: FONT,
   outline: 'none',
 };
 
@@ -1670,7 +1671,7 @@ const reflectHeader: React.CSSProperties = {
   padding: '3px 8px',
   fontWeight: 700,
   fontSize: 10,
-  fontFamily: '"MS Sans Serif", Arial',
+  fontFamily: FONT,
 };
 
 const reflectBody: React.CSSProperties = {
@@ -1706,7 +1707,7 @@ const actionBtn: React.CSSProperties = {
   color: '#fff',
   border: '2px outset #000',
   cursor: 'pointer',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
 };
 
 const actionBtnAlt: React.CSSProperties = {
@@ -1717,7 +1718,7 @@ const actionBtnAlt: React.CSSProperties = {
   color: '#000',
   border: '2px outset #e0e0e0',
   cursor: 'pointer',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
 };
 
 const actionBtnSmall: React.CSSProperties = {
@@ -1727,7 +1728,7 @@ const actionBtnSmall: React.CSSProperties = {
   color: '#444',
   border: '1px outset #e0e0e0',
   cursor: 'pointer',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
 };
 
 const actionBtnTrace: React.CSSProperties = {
@@ -1738,7 +1739,7 @@ const actionBtnTrace: React.CSSProperties = {
   color: '#fff',
   border: '2px outset #ff4040',
   cursor: 'pointer',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
 };
 
 const statusBar: React.CSSProperties = {

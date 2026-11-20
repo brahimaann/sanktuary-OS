@@ -6,7 +6,7 @@ import MoreMenu, { MenuHead, MenuItem } from '../components/MoreMenu';
 import { useWindowManager } from '../wm/manager';
 import { getCookie } from '../utils/cookies';
 import { useTeamLogin } from '../utils/teamLogin';
-import { button, extsOf, fileIcon, fileKind, shell, formatSize, hasThumb, isRaw, isTouch } from './fileTypes';
+import { FONT, button, extsOf, fileIcon, fileKind, shell, formatSize, hasThumb, isRaw, isTouch } from './fileTypes';
 import { RANK, Rights } from '../utils/api';
 import { dialog } from '../utils/dialog';
 import { uploadFiles } from '../utils/upload';
@@ -1242,7 +1242,7 @@ const dragGhost: React.CSSProperties = {
   padding: '2px 6px',
   background: '#000',
   color: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   opacity: 0.85,
 };

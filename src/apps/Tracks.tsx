@@ -13,7 +13,8 @@ import { Ref } from '../utils/refs';
 import { fileUrl, LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 import MediaControls from '../components/MediaControls';
 import FilePicker, { FileRef } from '../components/FilePicker';
-import MembersPicker from './MembersPicker';
+import MembersPicker, { ArtistLinks, MemberOptions } from './MembersPicker';
+import MoreMenu, { MenuHead, MenuItem } from '../components/MoreMenu';
 import { ProjectInfo } from './ProjectPanel';
 import { useProfiles } from '../utils/profiles';
 import { Term } from '../utils/glossary';
@@ -179,6 +180,10 @@ const TracksApp: React.FC = () => {
   const [pageSetup, setPageSetup] = useState(false);
   const [campaign, setCampaign] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [details, setDetails] = useState(false); // the project's kind, artists, writers and date, under the toolbar
+  const filePicker = useRef<HTMLInputElement>(null);
+  // Files that aren't songs: which project folder they go in (asked once per batch)
+  const [routing, setRouting] = useState<{ names: string[]; release: Release; done: (sub: string | null) => void } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const { getToken } = useAuth();
@@ -308,7 +313,7 @@ const TracksApp: React.FC = () => {
       setTrackId(c.track);
       setFocus({ where: whereFor(c), n: Date.now() });
     } else if (c.step === 'songs') addTrack();
-    else if (c.step === 'artist') artistBox.current?.focus();
+    else if (c.step === 'artist') (setDetails(true), setTimeout(() => artistBox.current?.focus()));
     else setReadyOpen(true);
   };
   useEffect(() => {
@@ -374,7 +379,7 @@ const TracksApp: React.FC = () => {
       try {
         target = await api('/api/tracks/release', {
           method: 'POST',
-          body: JSON.stringify({ title: name, folder: { space: space.id, path: `Releases/${name}` }, setup: true }),
+          body: JSON.stringify({ title: name, folder: { space: space.id, path: `Projects/${name}` }, setup: true }),
         });
       } catch (err) {
         return setMsg((err as Error).message);
@@ -382,9 +387,21 @@ const TracksApp: React.FC = () => {
       items.forEach((i) => (i.sub = i.sub!.slice(1))); // the folder's contents go straight into the release folder
       pickRelease(target!.id);
     }
-    if (!target?.folder) return setMsg('Link this project to a folder first (Folder... in the toolbar), then drop files on it.');
+    if (target) await putInProject(items, target);
+  };
+  /** Files into a project's folder: loose songs into Bounces, folders as they are, and anything else where the
+   * question below says (a shoot, artwork, stems...), then the folder is scanned. */
+  const putInProject = async (items: UploadItem[], target: Release) => {
+    if (!target.folder) return setMsg('Link this project to a folder first (Folder... in the toolbar), then drop files on it.');
     const f = target.folder;
     items.forEach((i) => !i.sub?.length && AUDIO.test(i.name) && (i.sub = ['Bounces']));
+    const loose = items.filter((i) => !i.sub?.length);
+    if (loose.length) {
+      const sub = await new Promise<string | null>((done) => setRouting({ names: loose.map((i) => i.name), release: target, done }));
+      setRouting(null);
+      if (sub === null) return;
+      loose.forEach((i) => (i.sub = sub ? sub.split('/') : []));
+    }
     setBusy(true);
     try {
       await uploadFiles(getToken, f.space, f.path.split('/'), items, (s, n) =>
@@ -407,14 +424,14 @@ const TracksApp: React.FC = () => {
     } catch {}
     return spaces.find((s) => s.id === last) || spaces[0];
   };
-  /** A project's folder, made in a team space (Releases/<title>) if it has none yet. */
+  /** A project's folder, made in a team space (Projects/<title>) if it has none yet. */
   const folderOf = async (r: Release): Promise<FileRef> => {
     if (r.folder) return r.folder;
     const space = uploadSpace();
     if (!space) throw new Error("You can't add files to any team space. Ask an admin for upload rights.");
     const x = await api(`/api/tracks/release/${r.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ folder: { space: space.id, path: `Releases/${folderSafe(r.title) || r.id}` }, setup: true }),
+      body: JSON.stringify({ folder: { space: space.id, path: `Projects/${folderSafe(r.title) || r.id}` }, setup: true }),
     });
     return x.folder;
   };
@@ -436,7 +453,7 @@ const TracksApp: React.FC = () => {
             body: JSON.stringify({
               title: `${INBOX} (${me!.username})`,
               kind: 'Folder',
-              folder: { space: space.id, path: `Releases/${INBOX} (${me!.username})` },
+              folder: { space: space.id, path: `Projects/${INBOX} (${me!.username})` },
               setup: true,
             }),
           });
@@ -506,6 +523,16 @@ const TracksApp: React.FC = () => {
       setTrackId(t.id);
     });
   };
+  const openFolder = () => {
+    const parts = release!.folder!.path.split('/');
+    openRef({
+      kind: 'folder',
+      title: parts[parts.length - 1],
+      app: release!.folder!.space,
+      dir: parts.slice(0, -1),
+      name: parts[parts.length - 1],
+    });
+  };
   const patchRelease = (body: object) =>
     run(() => api(`/api/tracks/release/${release!.id}`, { method: 'PATCH', body: JSON.stringify(body) }));
 
@@ -517,7 +544,7 @@ const TracksApp: React.FC = () => {
       <div style={toolbar}>
         {release ? (
           <button style={button} onClick={() => pickRelease('')} title="All projects">
-            ◄ Library
+            {narrow ? '◄' : '◄ Library'}
           </button>
         ) : (
           <>
@@ -532,30 +559,54 @@ const TracksApp: React.FC = () => {
             <button style={button} onClick={newRelease} title="An album, EP or single to gather songs into">
               New project...
             </button>
-            <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
-              New playlist...
-            </button>
-            <button
-              style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
-              title="Every song in one list: mixed, mastered, out, and what each needs next"
-            >
-              {view === 'songs' ? 'Covers' : 'All songs'}
-            </button>
-            <button
-              style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
-              title="Songs with an open verse: hop on, send a take, the poster picks one"
-            >
-              {view === 'verses' ? 'Covers' : 'Open verses'}
-            </button>
-            <button
-              style={{ ...button, ...(view === 'content' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
-              onClick={() => setView((v) => (v === 'content' ? '' : 'content'))}
-              title="Clips, reels, videos and photos shot for each song and project: how far along, and what's left"
-            >
-              {view === 'content' ? 'Covers' : 'Footage'}
-            </button>
+            {narrow ? (
+              <MoreMenu title="More: playlists, all songs, open verses, footage, library">
+                <MenuItem onClick={() => newPlaylist()}>New playlist...</MenuItem>
+                <MenuHead>Show</MenuHead>
+                <MenuItem on={!view} onClick={() => setView('')}>
+                  Covers
+                </MenuItem>
+                <MenuItem on={view === 'songs'} onClick={() => setView('songs')}>
+                  All songs
+                </MenuItem>
+                <MenuItem on={view === 'verses'} onClick={() => setView('verses')}>
+                  Open verses
+                </MenuItem>
+                <MenuItem on={view === 'content'} onClick={() => setView('content')}>
+                  Footage
+                </MenuItem>
+                <MenuItem onClick={() => window.dispatchEvent(new CustomEvent('sk:studio-tab', { detail: 'library' }))}>
+                  Library (books, radio, archive)
+                </MenuItem>
+              </MoreMenu>
+            ) : (
+              <>
+                <button style={button} onClick={() => newPlaylist()} title="Songs from any project, in your order">
+                  New playlist...
+                </button>
+                <button
+                  style={{ ...button, ...(view === 'songs' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+                  onClick={() => setView((v) => (v === 'songs' ? '' : 'songs'))}
+                  title="Every song in one list: mixed, mastered, out, and what each needs next"
+                >
+                  {view === 'songs' ? 'Covers' : 'All songs'}
+                </button>
+                <button
+                  style={{ ...button, ...(view === 'verses' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+                  onClick={() => setView((v) => (v === 'verses' ? '' : 'verses'))}
+                  title="Songs with an open verse: hop on, send a take, the poster picks one"
+                >
+                  {view === 'verses' ? 'Covers' : 'Open verses'}
+                </button>
+                <button
+                  style={{ ...button, ...(view === 'content' ? { border: '2px inset #fff', fontWeight: 700 } : {}) }}
+                  onClick={() => setView((v) => (v === 'content' ? '' : 'content'))}
+                  title="Clips, reels, videos and photos shot for each song and project: how far along, and what's left"
+                >
+                  {view === 'content' ? 'Covers' : 'Footage'}
+                </button>
+              </>
+            )}
           </>
         )}
         {release && tracks.some((t) => t.bounce) && (
@@ -595,9 +646,6 @@ const TracksApp: React.FC = () => {
             >
               <IconLabel icon="plus">Add songs...</IconLabel>
             </button>
-            <button style={button} onClick={addTrack} title="A song with no file yet, just a title">
-              <IconLabel icon="note">Add track...</IconLabel>
-            </button>
             {ready && (
               <button
                 style={{ ...button, color: ready.ready < ready.of ? '#a00000' : '#006000' }}
@@ -607,79 +655,26 @@ const TracksApp: React.FC = () => {
                 Ready? {ready.ready}/{ready.of}
               </button>
             )}
-            {!guided && (
-              <button style={button} onClick={() => guide(true)} title="Show the guided path: stages and the next thing to do">
-                Guide
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', gap: 4, alignItems: 'center', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+              {!narrow && (
+                <button
+                  style={{ ...button, ...(details ? { border: '2px inset #fff' } : {}) }}
+                  onClick={() => setDetails((d) => !d)}
+                  title="Kind, artists, writers and out date"
+                >
+                  {release.kind}
+                  {release.date
+                    ? ` · out ${new Date(`${release.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                    : ''}{' '}
+                  ▾
+                </button>
+              )}
+              {!narrow && <ArtistLinks names={release.artist || ''} />}
+            </span>
+            {narrow ? null : release.folder ? (
+              <button style={button} title={`Open ${release.folder.path}`} onClick={openFolder}>
+                <IconLabel icon="external">Folder</IconLabel>
               </button>
-            )}
-            <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of project">
-              {data.kinds
-                .filter((k) => k !== 'Playlist')
-                .map((k) => (
-                  <option key={k}>{k}</option>
-                ))}
-            </select>
-            <input
-              ref={artistBox}
-              key={`artist-${release.id}`}
-              style={{ ...input, width: 120 }}
-              defaultValue={release.artist || ''}
-              placeholder="Artist"
-              title="Who it's by (starts each song's BMI sheet)"
-              onBlur={(e) => e.target.value.trim() !== (release.artist || '') && patchRelease({ artist: e.target.value.trim() })}
-            />
-            <input
-              key={`writers-${release.id}`}
-              style={{ ...input, width: 140 }}
-              defaultValue={(release.writers || []).map((w) => w.name).join(', ')}
-              placeholder="Written by"
-              title="Its songwriters, comma-separated (each song's BMI sheet starts with them)"
-              onBlur={(e) => {
-                const names = e.target.value
-                  .split(',')
-                  .map((n) => n.trim())
-                  .filter(Boolean);
-                if (names.join(', ') === (release.writers || []).map((w) => w.name).join(', ')) return;
-                // keep what's known about writers already listed (PRO, IPI, publisher)
-                patchRelease({ writers: names.map((name) => release.writers?.find((w) => w.name === name) || { name, pro: 'BMI' }) });
-              }}
-            />
-            <label title="Release date">
-              Out{' '}
-              <input
-                type="date"
-                value={release.date || ''}
-                onChange={(e) => patchRelease({ date: e.target.value || null })}
-                style={input}
-              />
-            </label>
-            {release.folder ? (
-              <>
-                <button
-                  style={button}
-                  title={`Open ${release.folder.path}`}
-                  onClick={() => {
-                    const parts = release.folder!.path.split('/');
-                    openRef({
-                      kind: 'folder',
-                      title: parts[parts.length - 1],
-                      app: release.folder!.space,
-                      dir: parts.slice(0, -1),
-                      name: parts[parts.length - 1],
-                    });
-                  }}
-                >
-                  <IconLabel icon="external">Folder</IconLabel>
-                </button>
-                <button
-                  style={button}
-                  disabled={busy}
-                  onClick={scan}
-                  title="Look for new bounces, projects, stems and artwork in the folder"
-                >
-                  <IconLabel icon="refresh">Scan</IconLabel>
-                </button>
-              </>
             ) : (
               ownsIt && (
                 <button style={button} onClick={() => setLinking(true)} title="Point this project at a folder: its files fill the songs in">
@@ -687,56 +682,136 @@ const TracksApp: React.FC = () => {
                 </button>
               )
             )}
-            <button
-              style={button}
-              onClick={() => setCampaign(true)}
-              title="Plan the singles and a 3-video campaign; pitches for radio, playlists and press"
-            >
-              Campaign...
-            </button>
-            <button style={button} onClick={() => setSharing(true)} title="The project's owners, and who can see, edit or only listen">
-              {release.members ? `🔒 ${release.members.length + 1} people` : 'Everyone'}
-              {listenersOf(
-                release,
-                profiles.map((p) => p.username),
-              ).length
-                ? `, ${
-                    listenersOf(
-                      release,
-                      profiles.map((p) => p.username),
-                    ).length
-                  } listening`
-                : ''}
-              ...
-            </button>
-            <label
-              style={{ display: 'flex', gap: 3, alignItems: 'center' }}
-              title="Announce it in the Welcome window visitors see (title, kind and release date only)"
-            >
-              <input
-                type="checkbox"
-                checked={!!release.public}
-                disabled={!!release.members}
-                onChange={(e) => patchRelease({ public: e.target.checked })}
-              />
-              Announce publicly
-            </label>
-            {release.public && !release.members && (
-              <>
-                <button style={button} onClick={() => setPageSetup(true)} title="What the public page says: blurb and its story">
-                  Public page...
-                </button>
-                {release.slug && (
-                  <a href={`/release/${release.slug}`} target="_blank" rel="noopener noreferrer" title="Open the public page">
-                    /release/{release.slug}
-                  </a>
-                )}
-              </>
+            {!narrow && (
+              <button style={button} onClick={() => setSharing(true)} title="The project's owners, and who can see, edit or only listen">
+                {release.members ? `🔒 ${release.members.length + 1}` : 'Everyone'}
+                {listenersOf(
+                  release,
+                  profiles.map((p) => p.username),
+                ).length
+                  ? ` · ${
+                      listenersOf(
+                        release,
+                        profiles.map((p) => p.username),
+                      ).length
+                    } listen`
+                  : ''}
+              </button>
             )}
+            <MoreMenu title="More: add a track or files, scan, campaign, public page">
+              {narrow && (
+                <>
+                  <MenuItem on={details} onClick={() => setDetails((d) => !d)}>
+                    {release.kind}
+                    {release.date ? ` · out ${release.date.slice(5)}` : ''}: details
+                  </MenuItem>
+                  {release.folder ? (
+                    <MenuItem icon="external" onClick={openFolder}>
+                      Open the folder
+                    </MenuItem>
+                  ) : (
+                    ownsIt && (
+                      <MenuItem icon="link" onClick={() => setLinking(true)}>
+                        Link a folder...
+                      </MenuItem>
+                    )
+                  )}
+                  <MenuItem onClick={() => setSharing(true)}>
+                    Who's on it ({release.members ? `${release.members.length + 1} people` : 'everyone'})...
+                  </MenuItem>
+                </>
+              )}
+              <MenuItem icon="note" onClick={addTrack}>
+                Add track (no file yet)...
+              </MenuItem>
+              <MenuItem icon="plus" disabled={busy || !release.folder} onClick={() => filePicker.current?.click()}>
+                Add files (shoots, artwork, stems)...
+              </MenuItem>
+              {release.folder && (
+                <MenuItem
+                  icon="refresh"
+                  disabled={busy}
+                  onClick={scan}
+                  title="Look for new bounces, projects, stems and artwork in the folder"
+                >
+                  Scan the folder
+                </MenuItem>
+              )}
+              <MenuItem
+                onClick={() => setCampaign(true)}
+                title="Plan the singles and a 3-video campaign; pitches for radio, playlists and press"
+              >
+                Campaign...
+              </MenuItem>
+              <MenuItem on={guided} onClick={() => guide(!guided)}>
+                Guided path
+              </MenuItem>
+              <MenuHead>Public</MenuHead>
+              <MenuItem
+                on={!!release.public}
+                disabled={!!release.members}
+                title="Announce it in the Welcome window visitors see (title, kind and release date only)"
+                onClick={() => patchRelease({ public: !release.public })}
+              >
+                Announce publicly
+              </MenuItem>
+              {release.public && !release.members && (
+                <MenuItem onClick={() => setPageSetup(true)} title="What the public page says: blurb and its story">
+                  Public page...
+                </MenuItem>
+              )}
+              {release.public && !release.members && release.slug && (
+                <MenuItem icon="external" onClick={() => window.open(`/release/${release.slug}`, '_blank', 'noopener')}>
+                  /release/{release.slug}
+                </MenuItem>
+              )}
+            </MoreMenu>
           </>
         )}
       </div>
-      {release && guided && ready && <GuidedStrip key={release.id} ready={ready} onGo={goTo} onHide={() => guide(false)} />}
+      {release && !listenOnly && !isPlaylist && details && (
+        <div style={{ ...toolbar, borderTop: 'none' }}>
+          <select value={release.kind} onChange={(e) => patchRelease({ kind: e.target.value })} style={input} title="Kind of project">
+            {data.kinds
+              .filter((k) => k !== 'Playlist')
+              .map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+          </select>
+          <input
+            ref={artistBox}
+            key={`artist-${release.id}`}
+            list="sk-members"
+            style={{ ...input, width: 140 }}
+            defaultValue={release.artist || ''}
+            placeholder="Artists"
+            title="Who it's by, comma-separated. A member's name (or part of it, like hima) links to their profile."
+            onBlur={(e) => e.target.value.trim() !== (release.artist || '') && patchRelease({ artist: e.target.value.trim() })}
+          />
+          <MemberOptions />
+          <input
+            key={`writers-${release.id}`}
+            style={{ ...input, width: 140 }}
+            defaultValue={(release.writers || []).map((w) => w.name).join(', ')}
+            placeholder="Written by"
+            title="Its songwriters, comma-separated (each song's BMI sheet starts with them)"
+            onBlur={(e) => {
+              const names = e.target.value
+                .split(',')
+                .map((n) => n.trim())
+                .filter(Boolean);
+              if (names.join(', ') === (release.writers || []).map((w) => w.name).join(', ')) return;
+              // keep what's known about writers already listed (PRO, IPI, publisher)
+              patchRelease({ writers: names.map((name) => release.writers?.find((w) => w.name === name) || { name, pro: 'BMI' }) });
+            }}
+          />
+          <label title="Release date">
+            Out{' '}
+            <input type="date" value={release.date || ''} onChange={(e) => patchRelease({ date: e.target.value || null })} style={input} />
+          </label>
+        </div>
+      )}
+      {release && guided && ready && <GuidedStrip key={release.id} narrow={narrow} ready={ready} onGo={goTo} onHide={() => guide(false)} />}
       <div
         ref={box}
         style={{
@@ -970,6 +1045,22 @@ const TracksApp: React.FC = () => {
             if (files.length) setAdding(files.map((file) => ({ file, name: file.name })));
           }}
         />
+        <input
+          ref={filePicker}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const files = [...(e.target.files || [])];
+            e.target.value = '';
+            if (files.length && release)
+              putInProject(
+                files.map((file) => ({ file, name: file.name, sub: AUDIO.test(file.name) ? undefined : [] })),
+                release,
+              );
+          }}
+        />
+        {routing && <WhereTo {...routing} />}
         {adding && (
           <AddSongs
             items={adding}
@@ -980,7 +1071,7 @@ const TracksApp: React.FC = () => {
             onClose={() => setAdding(null)}
           />
         )}
-        {campaign && release && <Campaign release={release} tracks={tracks} onClose={() => setCampaign(false)} />}
+        {campaign && release && <Campaign release={release} tracks={tracks} full={narrow} onClose={() => setCampaign(false)} />}
         {readyOpen && release && (
           <ReadinessPanel release={release} ready={ready} onUpc={(upc) => patchRelease({ upc })} onClose={() => setReadyOpen(false)} />
         )}
@@ -1287,6 +1378,93 @@ const AddSongs: React.FC<{
               Add
             </button>
             <button style={button} onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Where a project's non-song files can go: its fixed subfolders (see RELEASE_SUBFOLDERS on the server). */
+const DESTINATIONS: [string, string][] = [
+  ['Shoots', 'From a shoot (raw photos or video)'],
+  ['Edits', 'Edited photos or video'],
+  ['Posted', 'What went out (posted)'],
+  ['Shows', 'From a show'],
+  ['Events', 'From an event or listening party'],
+  ['Artwork', 'Artwork (cover, visuals)'],
+  ['Stems', 'Stems'],
+  ['Projects', 'Session files (Ableton, FL Studio)'],
+  ['Bounces', 'A mix or master'],
+  ['', 'Just the project folder'],
+];
+/** The likely answer from the file names: video, RAW and HEIC from a shoot, DAW sets as session files, images as artwork. */
+const guessWhere = (names: string[]) => {
+  const ext = (n: string) => n.split('.').pop()!.toLowerCase();
+  if (names.every((n) => /^(als|flp|ptx|logicx|rpp|cpr|band|zip)$/.test(ext(n)))) return 'Projects';
+  if (names.some((n) => /^(mov|mp4|m4v|cr2|cr3|nef|arw|raf|dng|orf|rw2|heic)$/.test(ext(n)))) return 'Shoots';
+  if (names.every((n) => /^(png|psd|jpg|jpeg|webp|gif|svg|ai)$/.test(ext(n)))) return 'Artwork';
+  return '';
+};
+
+/** Asks once per batch what the files are, so they land in the right folder (or a play's own folder). */
+const WhereTo: React.FC<{ names: string[]; release: Release; done: (sub: string | null) => void }> = ({ names, release, done }) => {
+  const api = useApi();
+  const [where, setWhere] = useState(() => guessWhere(names));
+  // Plays and events of this project that have their own folder (made by New... or the Board's calendar)
+  const [plays, setPlays] = useState<{ id: string; kind: string; title: string; start: string; folder: FileRef }[]>([]);
+  useEffect(() => {
+    api('/api/timeline').then(
+      (d: {
+        items: { id: string; kind: string; title: string; start: string; release?: string; folder?: FileRef | null; source?: string }[];
+      }) =>
+        setPlays(
+          d.items
+            .filter((e) => !e.source && e.release === release.id && e.folder?.path.startsWith(`${release.folder!.path}/`))
+            .map((e) => ({ ...e, folder: e.folder! }))
+            .sort((a, b) => b.start.localeCompare(a.start)),
+        ),
+      () => {},
+    );
+  }, [api, release]);
+  const opt = (value: string, text: string) => (
+    <label key={value} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <input type="radio" checked={where === value} onChange={() => setWhere(value)} />
+      {text}
+    </label>
+  );
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.25)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 20,
+      }}
+    >
+      <div style={{ width: 'min(420px, 96%)', maxHeight: '96%', overflow: 'auto', background: '#fff', border: '2px solid #000' }}>
+        <div style={{ background: '#000', color: '#fff', fontWeight: 700, padding: '3px 6px' }}>
+          What {names.length === 1 ? `is ${names[0]}` : `are these ${names.length} files`}?
+        </div>
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {plays.length > 0 && <b>For a play</b>}
+          {plays.map((p) => opt(p.folder.path.slice(release.folder!.path.length + 1), `${p.kind}: ${p.title} (${p.start.slice(5)})`))}
+          {plays.length > 0 && <b style={{ marginTop: 4 }}>Or</b>}
+          {DESTINATIONS.map(([v, t]) => opt(v, t))}
+          <div style={{ color: '#555' }}>
+            They go in {release.folder!.path}
+            {where ? `/${where}` : ''}.
+          </div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button style={{ ...button, fontWeight: 700 }} onClick={() => done(where)}>
+              Upload
+            </button>
+            <button style={button} onClick={() => done(null)}>
               Cancel
             </button>
           </div>
@@ -2564,8 +2742,9 @@ const whereFor = (c: Readiness['checks'][number]) =>
           ? 'regs'
           : 'master';
 
-const GuidedStrip: React.FC<{ ready: Readiness; onGo: (c: Readiness['checks'][number]) => void; onHide: () => void }> = ({
+const GuidedStrip: React.FC<{ ready: Readiness; narrow?: boolean; onGo: (c: Readiness['checks'][number]) => void; onHide: () => void }> = ({
   ready,
+  narrow,
   onGo,
   onHide,
 }) => {
@@ -2583,22 +2762,24 @@ const GuidedStrip: React.FC<{ ready: Readiness; onGo: (c: Readiness['checks'][nu
   });
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', padding: '3px 6px', borderBottom: '1px solid #808080' }}>
-      {STAGES.map(([st, label], i) => {
-        const mine = ready.checks.filter((c) => c.step === st);
-        const done = mine.length > 0 && mine.every((c) => c.ok);
-        return (
-          <React.Fragment key={st}>
-            {i > 0 && <span style={{ color: '#808080' }}>›</span>}
-            <span
-              style={{ color: done ? '#006000' : st === 'register' && !ready.out ? '#808080' : '#000' }}
-              title={mine.map((c) => `${c.ok ? '✓' : '○'} ${c.song ? `${c.song}: ` : ''}${c.text}`).join('\n')}
-            >
-              {done ? '✓ ' : ''}
-              {label}
-            </span>
-          </React.Fragment>
-        );
-      })}
+      {/* On a phone only the next step shows; the stages are in each one's tooltip on a computer */}
+      {!narrow &&
+        STAGES.map(([st, label], i) => {
+          const mine = ready.checks.filter((c) => c.step === st);
+          const done = mine.length > 0 && mine.every((c) => c.ok);
+          return (
+            <React.Fragment key={st}>
+              {i > 0 && <span style={{ color: '#808080' }}>›</span>}
+              <span
+                style={{ color: done ? '#006000' : st === 'register' && !ready.out ? '#808080' : '#000' }}
+                title={mine.map((c) => `${c.ok ? '✓' : '○'} ${c.song ? `${c.song}: ` : ''}${c.text}`).join('\n')}
+              >
+                {done ? '✓ ' : ''}
+                {label}
+              </span>
+            </React.Fragment>
+          );
+        })}
       <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
         {next ? (
           <>

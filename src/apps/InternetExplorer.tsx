@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { FONT } from './fileTypes';
 
 interface InternetExplorerProps {
   src?: string;
@@ -382,7 +383,7 @@ const shell: React.CSSProperties = {
   width: '100%',
   height: '100%',
   background: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   overflow: 'hidden',
   color: '#000',
@@ -428,7 +429,7 @@ const toolBtn: React.CSSProperties = {
   background: 'transparent',
   border: '1px solid transparent',
   cursor: 'default',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 9,
   minWidth: 44,
 };
@@ -474,7 +475,7 @@ const addressInput: React.CSSProperties = {
   background: '#fff',
   border: '1px solid',
   borderColor: '#808080 #fff #fff #808080',
-  fontFamily: '"MS Sans Serif", Arial, monospace',
+  fontFamily: FONT,
   fontSize: 11,
   outline: 'none',
   color: '#000',
@@ -485,7 +486,7 @@ const goBtn: React.CSSProperties = {
   background: '#fff',
   border: '2px solid',
   borderColor: '#fff #808080 #808080 #fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   cursor: 'default',
   flexShrink: 0,

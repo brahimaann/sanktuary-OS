@@ -137,7 +137,13 @@ const Studio: React.FC<{ tab?: StudioTab }> = ({ tab = 'calendar' }) => {
                         refs.current[id] = el;
                       }}
                       open={unfolded.has(id)}
-                      onToggle={(e) => fold(id, (e.currentTarget as HTMLDetailsElement).open)}
+                      onToggle={(e) => {
+                        const el = e.currentTarget as HTMLDetailsElement;
+                        fold(id, el.open);
+                        // opened from a menu (or a phone, where it was hidden until now): bring it into view
+                        if (el.open) el.scrollIntoView({ block: 'start' });
+                      }}
+                      className="sk-fold"
                       style={{ borderTop: '1px solid currentColor' }}
                     >
                       <summary style={{ padding: '4px 6px', fontWeight: 700, cursor: 'pointer' }}>{label}</summary>

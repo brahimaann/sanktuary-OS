@@ -1,6 +1,7 @@
 import React from 'react';
 import { useWindowManager } from '../wm/manager';
 import { VIDEO_COLLECTIONS, getThumbnail, type Video } from './videoData';
+import { FONT } from './fileTypes';
 
 interface VideoFolderProps {
   collectionId: string;
@@ -16,7 +17,7 @@ const VideoFolder: React.FC<VideoFolderProps> = ({ collectionId }) => {
   const collection = VIDEO_COLLECTIONS[collectionId];
 
   if (!collection) {
-    return <div style={{ padding: 16, fontFamily: 'MS Sans Serif, Arial, sans-serif', fontSize: 12 }}>Collection not found.</div>;
+    return <div style={{ padding: 16, fontFamily: FONT, fontSize: 12 }}>Collection not found.</div>;
   }
 
   const openVideo = (video: Video) => {
@@ -114,7 +115,7 @@ const shell: React.CSSProperties = {
   width: '100%',
   height: '100%',
   background: '#fff',
-  fontFamily: '"MS Sans Serif", Arial, sans-serif',
+  fontFamily: FONT,
   fontSize: 11,
   overflow: 'hidden',
 };

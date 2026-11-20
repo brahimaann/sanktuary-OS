@@ -551,3 +551,33 @@ button:disabled {
     display: none;
   }
 }
+
+/* A name chip (artists, writers): 1-bit box, a member's name links to their profile */
+.sk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  white-space: nowrap;
+}
+.sk-chip .sk-chip-x {
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Folded sections under a desk (Library under Projects...): on a phone they stay out of the way until asked for from a menu */
+@media (max-width: 640px) {
+  details.sk-fold:not([open]) {
+    display: none;
+  }
+}
