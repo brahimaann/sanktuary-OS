@@ -22,6 +22,7 @@ import Campaign from './Campaign';
 import OpenVerses, { takeVersesWish, Verse, VerseSlot } from './OpenVerses';
 import { openSession, takeSongWish } from '../utils/songNav';
 import { ContentBoard, ContentItem, ContentList } from './ShotContent';
+import { Comment, Comments } from '../components/FileComments';
 
 interface Release {
   id: string;
@@ -404,17 +405,52 @@ const TracksApp: React.FC = () => {
     }
     setBusy(true);
     try {
-      await uploadFiles(getToken, f.space, f.path.split('/'), items, (s, n) =>
+      const saved = await uploadFiles(getToken, f.space, f.path.split('/'), items, (s, n) =>
         setMsg(`Uploading ${items.length} file(s) to ${target!.title}... ${Math.round((s / n) * 100)}%`),
       );
       const found: Found = await api(`/api/tracks/release/${target.id}?scan`, { method: 'POST' });
+      const footage = await addFootage(items, saved, target);
       await load();
-      setMsg(`Uploaded ${items.length} file(s). ${foundText(found)}`);
+      setMsg(`Uploaded ${items.length} file(s). ${foundText(found)}${footage ? ` ${footage} added to Footage.` : ''}`);
     } catch (err) {
       setMsg(`Upload stopped: ${(err as Error).message}`);
     } finally {
       setBusy(false);
     }
+  };
+  /** Clips and pictures dropped into Shoots (or a shoot's folder) become Shot footage; into Edits, Edited footage with
+   * the file as its edit. A one-song project keeps them on the song's page, a bigger one on the whole project. */
+  const addFootage = async (items: UploadItem[], saved: string[], target: Release) => {
+    const made: ContentItem[] = [];
+    items.forEach((i, n) => {
+      const kind = fileKind(saved[n]);
+      const top = i.sub?.[0];
+      if (!['video', 'image'].includes(kind) || (top !== 'Shoots' && top !== 'Edits')) return;
+      const file = { space: target.folder!.space, path: [target.folder!.path, ...i.sub!, saved[n]].join('/') };
+      const edited = top === 'Edits';
+      made.push({
+        id: Math.random().toString(36).slice(2, 10),
+        kind: kind === 'image' ? 'Photos' : edited ? 'Video' : 'Clip',
+        title: saved[n].replace(/\.[^.]+$/, ''),
+        status: edited ? 'Edited' : 'Shot',
+        file,
+        edit: edited ? file : null,
+        due: null,
+      });
+    });
+    if (!made.length) return 0;
+    const now: { releases: Release[]; tracks: Track[] } = await api('/api/tracks');
+    const songs = now.tracks.filter((t) => t.release === target.id);
+    const owner = songs.length === 1 ? songs[0] : now.releases.find((r) => r.id === target.id);
+    const have = new Set((owner?.content || []).map((x) => x.file && `${x.file.space}/${x.file.path}`));
+    const fresh = made.filter((x) => !have.has(`${x.file!.space}/${x.file!.path}`));
+    if (!fresh.length) return 0;
+    const content = [...(owner?.content || []), ...fresh];
+    await api(songs.length === 1 ? `/api/tracks/track/${songs[0].id}` : `/api/tracks/release/${target.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    });
+    return fresh.length;
   };
   const uploadSpace = () => {
     const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && ['upload', 'edit'].includes(s.rights));
@@ -1632,6 +1668,7 @@ const TrackPage: React.FC<{
   const [picking, setPicking] = useState<null | 'bounce' | 'project' | 'stems'>(null);
   const [token, setToken] = useState('');
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
+  const [notes, setNotes] = useState<Comment[]>([]); // the notesheet of the version playing
   const [comparing, setComparing] = useState<string | null>(null); // the earlier bounce playing in place of the current one
   // A/B: swap what the player plays, keeping the moment in the song and whether it was playing
   const abSwitch = (src: string) => {
@@ -1876,6 +1913,32 @@ const TrackPage: React.FC<{
               <>
                 <audio ref={(el) => void (media.current = el)} src={bounceSrc} preload="metadata" />
                 <MediaControls media={media} src={bounceSrc} />
+                {/* The notesheet follows the version playing: A/B to an earlier one and its notes come up */}
+                {(() => {
+                  const on = t.earlier?.find((e) => e.path === comparing) || t.bounce;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #000', marginTop: 4 }}>
+                      <div style={{ padding: '2px 4px', fontWeight: 700 }}>
+                        Notes on {on.path.split('/').pop()}
+                        {on === t.bounce ? '' : ' (earlier version)'}
+                      </div>
+                      <Comments
+                        key={on.space + on.path}
+                        app={on.space}
+                        path={on.path}
+                        comments={notes}
+                        setComments={setNotes}
+                        media={media}
+                        timed
+                        onSeek={(at) => {
+                          if (!media.current) return;
+                          media.current.currentTime = at;
+                          media.current.play();
+                        }}
+                      />
+                    </div>
+                  );
+                })()}
               </>
             )}
             {!!t.earlier?.length && (
@@ -2119,7 +2182,7 @@ const TrackPage: React.FC<{
           {...text('credits')}
         />
       </Section>
-      <Section title="Notes">
+      <Section title="Ideas">
         <textarea
           rows={4}
           style={{ ...input, width: '100%', resize: 'vertical' }}
