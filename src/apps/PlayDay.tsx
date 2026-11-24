@@ -106,9 +106,11 @@ const PlayDay: React.FC<{ id: string }> = ({ id }) => {
     if (list.every((x) => x.got)) dialog.win(`Every shot captured. Next: edit.`);
     else dialog.done('Captured.');
   };
-  const capture = async (files: FileList | null) => {
+  const capture = async (picked: FileList | null) => {
     const s = shots.find((x) => x.id === shotFor.current);
-    if (!files?.length || !dest || !s) return;
+    // Copy the list now: the input is cleared right after this starts, which empties the live FileList
+    const files = Array.from(picked || []);
+    if (!files.length || !dest || !s) return;
     const day = `${e.start} ${e.title || e.kind}`.replace(/[<>:"|?*\\/]/g, '-').trim();
     const dir = [...dest.path.split('/').filter(Boolean), day];
     try {
@@ -116,7 +118,7 @@ const PlayDay: React.FC<{ id: string }> = ({ id }) => {
         getToken,
         dest.space,
         dir,
-        Array.from(files).map((f) => ({ file: f, name: `${String(shots.indexOf(s) + 1).padStart(2, '0')} ${f.name}` })),
+        files.map((f) => ({ file: f, name: `${String(shots.indexOf(s) + 1).padStart(2, '0')} ${f.name}` })),
         (n, of) => setMsg(`Uploading... ${Math.round((n / of) * 100)}%`),
       );
       setMsg('');

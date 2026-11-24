@@ -78,7 +78,7 @@ const folderSafe = (s: string) =>
     .slice(0, 80);
 
 const STEP = ['To shoot', 'Shot', 'Edited', 'Approved', 'Posted'];
-const PLAY_KINDS = ['Shoot', 'Show', 'Session'];
+const PLAY_KINDS = ['Shoot', 'Show', 'Session', 'Event'];
 /** Week-strip tag per footage kind (the calendar entry's title starts with the kind). */
 const FOOTAGE_TAG: Record<string, string> = { Video: 'VIDEO', Photos: 'PHOTO', Visualizer: 'VIZ', BTS: 'BTS' };
 const NEXT: Record<string, string> = { 'To shoot': 'Shoot', Shot: 'Edit', Edited: 'Get the OK on', Approved: 'Post' };

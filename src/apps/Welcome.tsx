@@ -63,7 +63,7 @@ const VISITOR_TOUR: Step[] = [
 const MEMBER_TOUR: Step[] = [
   {
     title: 'New... adds anything',
-    text: 'A release, a song, a shoot, a show, a drop. It asks two or three things and understands dates like "next sat 8pm". Releases get their folders made for you.',
+    text: 'A release, a song, a shoot, a show, a drop. It asks two or three things and understands dates like "next sat 8pm". Projects get their folders made for you.',
     open: win('new', 'New', 'new', 'file-32x32.png?v=2', 460, 420),
   },
   {
