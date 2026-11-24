@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi } from '../utils/api';
-import { drawText, TEXT_STYLES, TextOverlayItem, TextStyle } from '../utils/captions';
+import { drawText, TEXT_STYLES, TextOverlayItem, TextStyle, WORD_STYLES } from '../utils/captions';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { sharedAudio } from '../utils/sound';
 import { waveformPeaks } from '../utils/audioAnalysis';
@@ -14,8 +14,8 @@ import { fileUrl, LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
  * up in one tap, for a post in about fifteen minutes.
  */
 type Format = '9:16' | '4:5' | '1:1' | '16:9';
-type Fit = 'crop' | 'fit' | 'stretch' | 'duo';
-type Look = 'none' | 'lux' | 'faded' | 'bw' | 'cold' | 'tungsten' | 'club';
+type Fit = 'crop' | 'fit' | 'stretch' | 'duo' | 'film' | 'scope';
+type Look = 'none' | 'lux' | 'faded' | 'bw' | 'cold' | 'tungsten' | 'club' | 'film' | 'vhs';
 interface Cap {
   id: string;
   text: string;
@@ -24,6 +24,7 @@ interface Cap {
   style: TextStyle;
   size: number;
   y: number;
+  words?: number[]; // when each word is sung (seconds into the edit), from tap timing
 }
 
 const SIZES: Record<Format, [number, number]> = { '9:16': [1080, 1920], '4:5': [1080, 1350], '1:1': [1080, 1080], '16:9': [1920, 1080] };
@@ -32,7 +33,16 @@ const FITS: [Fit, string][] = [
   ['fit', 'Whole clip (bars)'],
   ['stretch', 'Stretch'],
   ['duo', 'Stretch duo'],
+  ['film', '4:3 picture'],
+  ['scope', 'Widescreen bars'],
 ];
+// "4:3 picture" and "Widescreen bars" crop the clip to that shape and centre it in the frame on black (the same
+// sum is in server/index.mjs videoBox)
+const BOX: Partial<Record<Fit, number>> = { film: 4 / 3, scope: 2.39 };
+const box = (W: number, H: number, aspect: number) => {
+  const w = Math.min(W, H * aspect);
+  return [2 * Math.round(w / 2), 2 * Math.round(w / aspect / 2)];
+};
 // Each look's live preview is a CSS filter close to the server's ffmpeg version (server/index.mjs VIDEO_LOOKS)
 const LOOKS: [Look, string, string][] = [
   ['none', 'None', ''],
@@ -42,11 +52,32 @@ const LOOKS: [Look, string, string][] = [
   ['cold', 'Cold VHS', 'saturate(0.55) contrast(0.88) sepia(0.25) hue-rotate(170deg)'],
   ['tungsten', 'Tungsten Cam', 'brightness(0.85) saturate(0.75) sepia(0.45)'],
   ['club', 'Club Flash', 'contrast(1.15) saturate(1.2) hue-rotate(-20deg)'],
+  ['film', 'Film grain', 'contrast(0.9) brightness(1.05) saturate(0.8) sepia(0.2)'],
+  ['vhs', 'VHS bleed', 'contrast(0.85) brightness(0.95) saturate(1.3) sepia(0.15) blur(0.6px)'],
 ];
+// One-tap lyric templates, from the team's reference videos: all lowercase, small type, the words doing the motion
+const LYRIC_TEMPLATES: { label: string; fit: Fit; look: Look; style: TextStyle; size: number; y: number }[] = [
+  { label: 'One word', fit: 'scope', look: 'tungsten', style: 'word', size: 80, y: 50 },
+  { label: 'Film subtitle', fit: 'film', look: 'faded', style: 'sub', size: 34, y: 66 },
+  { label: 'Serif subtitle', fit: 'crop', look: 'film', style: 'serif', size: 36, y: 74 },
+  { label: 'Centre line', fit: 'film', look: 'bw', style: 'sub', size: 34, y: 50 },
+  { label: 'Build-up', fit: 'crop', look: 'none', style: 'build', size: 52, y: 50 },
+  { label: 'Stack', fit: 'film', look: 'vhs', style: 'stack', size: 80, y: 50 },
+  { label: 'Spread grid', fit: 'crop', look: 'none', style: 'grid', size: 44, y: 50 },
+];
+const styleSize = (st: TextStyle) => LYRIC_TEMPLATES.find((x) => x.style === st)?.size ?? (st === 'grid' ? 110 : 60);
 const VIDEO = /\.(mp4|m4v|mov|webm)$/i;
 const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
 const newId = () => Math.random().toString(36).slice(2, 9);
-const asItem = (c: Cap): TextOverlayItem => ({
+// When each word shows: the tapped times, or spread evenly over the caption for the word-by-word styles
+const wordTimes = (c: Cap) => {
+  if (c.words?.length) return c.words;
+  if (!WORD_STYLES.includes(c.style)) return [];
+  const n = c.text.trim().split(/\s+/).length;
+  return Array.from({ length: n }, (_, i) => c.start + ((c.end - c.start) * i) / n);
+};
+const asItem = (c: Cap, now = Infinity): TextOverlayItem => ({
+  shown: wordTimes(c).length ? wordTimes(c).filter((w) => w <= now).length : undefined,
   id: c.id,
   text: c.text,
   fontSize: c.size,
@@ -199,7 +230,14 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         fc.fillRect(0, 0, W, H);
         if (v.videoWidth) {
           const [iw, ih] = [v.videoWidth, v.videoHeight];
-          if (fit === 'stretch') fc.drawImage(v, 0, 0, W, H);
+          const aspect = BOX[fit];
+          if (aspect) {
+            // crop the clip to the box's shape, centred, and put it in the middle of the frame
+            const [bw, bh] = box(W, H, aspect);
+            const s = Math.max(bw / iw, bh / ih);
+            const [sw, sh] = [bw / s, bh / s];
+            fc.drawImage(v, (iw - sw) / 2, (ih - sh) / 2, sw, sh, (W - bw) / 2, (H - bh) / 2, bw, bh);
+          } else if (fit === 'stretch') fc.drawImage(v, 0, 0, W, H);
           else if (fit === 'duo') {
             fc.drawImage(v, 0, 0, W / 2, H);
             fc.drawImage(v, W / 2, 0, W / 2, H);
@@ -212,7 +250,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         const a = audio.current;
         if (playing && a && !a.paused && !a.seeking && Math.abs(a.currentTime - songAt - now) > 0.1) a.currentTime = songAt + now;
         cc.clearRect(0, 0, W, H);
-        for (const c of caps) if (now >= c.start && now < c.end) drawText(cc, asItem(c), W, H);
+        for (const c of caps) if (now >= c.start && now < c.end) drawText(cc, asItem(c, now), W, H);
         if (Math.abs(now - shown.current) > 0.04) setT((shown.current = now)); // the time readout, not every frame
       }
       raf = requestAnimationFrame(draw);
@@ -255,14 +293,75 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         start: Math.round(i * each * 10) / 10,
         end: Math.round((i + 1) * each * 10) / 10,
         style: capStyle,
-        size: capStyle === 'grid' ? 110 : 60,
-        y: 50,
+        size: styleSize(capStyle),
+        y: caps[0]?.y ?? 50,
       })),
     );
+  };
+
+  // Tap timing: the edit plays and every tap (the button, T or Enter) marks when the next word is sung, or the
+  // next line for the line styles. The lyrics become captions with those times.
+  const [tap, setTap] = useState<null | { byWord: boolean; times: number[] }>(null);
+  const lyricLines = lyrics
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/).filter(Boolean))
+    .filter((l) => l.length)
+    .slice(0, 80);
+  const tapUnits = tap ? (tap.byWord ? lyricLines.flat() : lyricLines.map((l) => l.join(' '))) : [];
+  const startTap = () => {
+    const byWord = WORD_STYLES.includes(capStyle);
+    setTap({ byWord, times: [] });
+    if (playing) play();
+    seek(0);
+    setTimeout(play, 50);
+    setMsg(`Tap on every ${byWord ? 'word' : 'line'} as it's sung: the button, T or Enter.`);
+  };
+  const finishTap = (times: number[]) => {
+    if (!tap) return;
+    if (playing) play();
+    const y = caps[0]?.y ?? 50;
+    const out: Cap[] = [];
+    let k = 0;
+    lyricLines.forEach((line, i) => {
+      const own = tap.byWord ? times.slice(k, k + line.length) : times.slice(i, i + 1);
+      k += line.length;
+      if (!own.length) return;
+      const next = tap.byWord ? times[k] : times[i + 1];
+      const end = Math.min(duration, next ?? Infinity, own[own.length - 1] + (tap.byWord ? 2 : 5));
+      out.push({
+        id: newId(),
+        text: line.join(' '),
+        start: own[0],
+        end: Math.max(end, own[0] + 0.2),
+        style: capStyle,
+        size: styleSize(capStyle),
+        y,
+        words: tap.byWord ? own : undefined,
+      });
+    });
+    setCaps(out);
+    setTap(null);
+    setMsg(`${out.length} lines timed. Play it back; drag a line's times to fix it, or tap again.`);
+  };
+  const tapNow = () => {
+    if (!tap) return;
+    const now = Math.round((video.current ? video.current.currentTime - start : t) * 100) / 100;
+    const times = [...tap.times, now];
+    if (times.length >= tapUnits.length) finishTap(times);
+    else setTap({ ...tap, times });
   };
   const setCap = (id: string, k: keyof Cap, v: string | number) => setCaps(caps.map((c) => (c.id === id ? { ...c, [k]: v } : c)));
 
   // One tap: format, fill, look and a caption set to start from
+  const lyricTemplate = (tp: (typeof LYRIC_TEMPLATES)[number]) => {
+    setFormat('9:16');
+    setFit(tp.fit);
+    setLook(tp.look);
+    setCapStyle(tp.style);
+    setLyrics(lyrics.toLowerCase());
+    setCaps(caps.map((c) => ({ ...c, text: c.text.toLowerCase(), style: tp.style, size: tp.size, y: tp.y })));
+    if (!caps.length) setMsg(`${tp.label}: paste the lyrics (one line each), then Tap timing or Spread over clip.`);
+  };
   const template = (k: 'lyric' | 'stretch' | 'brat' | 'card' | 'stacked') => {
     setFormat('9:16');
     if (k === 'lyric') {
@@ -299,16 +398,30 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const render = async () => {
     if (!clip) return;
     setMsg('Preparing captions...');
-    // each caption drawn once at full size on a transparent picture: the server lays them over the video
-    const pngs = caps
-      .filter((c) => c.text.trim() && c.end > c.start)
-      .map((c) => {
-        const cv = document.createElement('canvas');
-        cv.width = W;
-        cv.height = H;
-        drawText(cv.getContext('2d')!, asItem(c), W, H);
-        return { start: Math.max(0, c.start), end: Math.min(duration, c.end), png: cv.toDataURL('image/png') };
-      });
+    // The captions as a run of full-size transparent pictures, one for each stretch where what's on screen
+    // doesn't change (a new word, a new line), drawn exactly like the preview: the server lays them over the video
+    const live = caps.filter((c) => c.text.trim() && c.end > c.start);
+    const cuts = [...new Set([0, duration, ...live.flatMap((c) => [c.start, c.end, ...wordTimes(c)])])]
+      .filter((x) => x >= 0 && x <= duration)
+      .sort((a, b) => a - b);
+    const pngs: { start: number; end: number; png: string }[] = [];
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const g = cv.getContext('2d')!;
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const [a, b] = [cuts[i], cuts[i + 1]];
+      if (b - a < 0.01) continue;
+      const on = live.filter((c) => c.start <= a && c.end > a);
+      if (!on.length) continue;
+      g.clearRect(0, 0, W, H);
+      for (const c of on) drawText(g, asItem(c, a + 0.001), W, H);
+      const png = cv.toDataURL('image/png');
+      const prev = pngs[pngs.length - 1];
+      if (prev && prev.png === png && Math.abs(prev.end - a) < 0.001) prev.end = b;
+      else pngs.push({ start: a, end: b, png });
+    }
+    if (pngs.length > 600) return setMsg('Too many caption changes for one video (600 at most): shorten it or use fewer words.');
     const parts = clip.path.split('/');
     try {
       await api('/api/video/render', {
@@ -344,7 +457,8 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         if (!clip || ['TEXTAREA', 'INPUT', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
         const step = e.shiftKey ? 1 : 1 / 30; // a frame, or a second with Shift
         const now = video.current ? video.current.currentTime - start : t; // t is rounded for the readout
-        if (e.key === ' ') play();
+        if (tap && (e.key === 't' || e.key === 'T' || e.key === 'Enter')) tapNow();
+        else if (e.key === ' ') play();
         else if (e.key === 'ArrowLeft') seek(Math.max(0, now - step));
         else if (e.key === 'ArrowRight') seek(Math.min(duration, now + step));
         else return;
@@ -375,6 +489,18 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         ).map(([k, label]) => (
           <button key={k} style={button} onClick={() => template(k)}>
             {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ ...toolbar, flexWrap: 'wrap' }}>
+        <span>Lyric templates:</span>
+        {LYRIC_TEMPLATES.map((tp) => (
+          <button
+            key={tp.label}
+            style={{ ...button, fontWeight: capStyle === tp.style && fit === tp.fit && look === tp.look ? 700 : 400 }}
+            onClick={() => lyricTemplate(tp)}
+          >
+            {tp.label}
           </button>
         ))}
       </div>
@@ -547,6 +673,28 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
               <button style={button} disabled={!lyrics.trim()} onClick={spread}>
                 Spread over clip
               </button>
+              {tap ? (
+                <>
+                  <button style={{ ...button, fontWeight: 700, minWidth: 140 }} onClick={tapNow} title="T or Enter">
+                    TAP: {tapUnits[tap.times.length]}
+                  </button>
+                  <span>
+                    {tap.times.length}/{tapUnits.length}
+                  </span>
+                  <button style={button} onClick={() => finishTap(tap.times)}>
+                    Stop
+                  </button>
+                </>
+              ) : (
+                <button
+                  style={button}
+                  disabled={!clip || !lyrics.trim()}
+                  onClick={startTap}
+                  title="Play the edit and tap along to time the lyrics"
+                >
+                  Tap timing
+                </button>
+              )}
               <button
                 style={button}
                 onClick={() =>

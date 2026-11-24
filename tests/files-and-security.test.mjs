@@ -3586,9 +3586,14 @@ ${thisYear}-03;Comma Song;0,456`,
       start: 0,
       duration: 2,
       format: '9:16',
-      fit: 'duo',
-      look: 'lux',
-      captions: [{ start: 0, end: 1, png: PNG1 }],
+      fit: 'film',
+      look: 'vhs',
+      // word-by-word lyrics: a run of pictures in order, with a gap between them
+      captions: [
+        { start: 0, end: 0.4, png: PNG1 },
+        { start: 0.4, end: 1, png: PNG1 },
+        { start: 1.5, end: 2, png: PNG1 },
+      ],
       out: { space: 'up', dir: '' },
       name: 'drill edit',
       ...over,
@@ -3599,6 +3604,17 @@ ${thisYear}-03;Comma Song;0,456`,
   check(
     'captions must be PNG pictures',
     (await renderJob('bob', { captions: [{ start: 0, end: 1, png: 'data:image/png;base64,PHN2Zz4=' }] })).status === 400,
+  );
+  check(
+    'caption pictures must be in order, not overlapping',
+    (
+      await renderJob('bob', {
+        captions: [
+          { start: 0, end: 1, png: PNG1 },
+          { start: 0.5, end: 2, png: PNG1 },
+        ],
+      })
+    ).status === 400,
   );
   check('only videos as clips', (await renderJob('bob', { clip: { space: 'up', path: 'notes.txt' } })).status === 400);
   check('paths stay inside the space', (await renderJob('bob', { clip: { space: 'up', path: '../../x.mp4' } })).status === 400);

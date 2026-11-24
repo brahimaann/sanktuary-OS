@@ -5,15 +5,24 @@
  * How a caption is laid out (from lyric videos and 2012-era edits):
  * plain: one line; grid: words spaced out in even columns, row by row; stacked: one huge word per line filling
  * the width; soft: a small, slightly blurred line (white on black cards); brat: the lime "brat" cover card.
+ * From the team's lyric references: word: one bold yellow word at a time; sub / serif: a small film subtitle line;
+ * build: words add one by one until the line is full; stack: one word per line, a cream left-hand column.
  */
-export type TextStyle = 'plain' | 'grid' | 'stacked' | 'soft' | 'brat';
+export type TextStyle = 'plain' | 'grid' | 'stacked' | 'soft' | 'brat' | 'word' | 'sub' | 'serif' | 'build' | 'stack';
 export const TEXT_STYLES: [TextStyle, string][] = [
   ['plain', 'Plain'],
   ['grid', 'Word grid'],
   ['stacked', 'Big stacked'],
   ['soft', 'Soft'],
   ['brat', 'brat card'],
+  ['word', 'One word'],
+  ['sub', 'Subtitle'],
+  ['serif', 'Serif subtitle'],
+  ['build', 'Build-up'],
+  ['stack', 'Stack'],
 ];
+/** Styles that show the words one at a time (word timing matters for these) */
+export const WORD_STYLES: TextStyle[] = ['word', 'build', 'grid'];
 
 export interface TextOverlayItem {
   id: string;
@@ -26,6 +35,7 @@ export interface TextOverlayItem {
   yPercent: number;
   shadow: boolean;
   style?: TextStyle; // how the words are laid out (plain line if missing)
+  shown?: number; // word styles: how many words are showing so far (all if missing)
 }
 
 /** Draws one caption onto a W×H canvas (sizes are relative, so it looks the same at any resolution). */
@@ -47,7 +57,52 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
   ctx.textBaseline = 'middle';
   const style = txt.style || 'plain';
   const words = txt.text.trim().split(/\s+/);
-  if (style === 'brat') {
+  const shown = Math.max(1, Math.min(words.length, txt.shown ?? words.length));
+  if (style === 'word') {
+    // one bold condensed yellow word at a time, in the middle
+    ctx.font = `bold ${size}px "Arial Narrow", "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = size / 6;
+    ctx.fillStyle = '#f5d90a';
+    ctx.fillText(words[shown - 1], tx, ty);
+  } else if (style === 'sub' || style === 'serif' || style === 'build') {
+    // film subtitles: a small line, wrapped to 80% of the width; build-up lays the whole line out and shows the
+    // words said so far, so nothing jumps as they appear
+    ctx.font = style === 'serif' ? `${size}px Georgia, "Times New Roman", serif` : `${size}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+    ctx.shadowBlur = size / 4;
+    ctx.fillStyle = style === 'serif' ? '#f1e2b3' : '#fff';
+    const space = ctx.measureText(' ').width;
+    const lines: { w: string; x: number }[][] = [[]];
+    let lineW = 0;
+    for (const w of words) {
+      const ww = ctx.measureText(w).width;
+      if (lineW && lineW + space + ww > W * 0.8) {
+        lines.push([]);
+        lineW = 0;
+      }
+      lines[lines.length - 1].push({ w, x: lineW + (lineW ? space : 0) });
+      lineW += (lineW ? space : 0) + ww;
+    }
+    const lineH = size * 1.2;
+    let n = 0;
+    lines.forEach((line, i) => {
+      const last = line[line.length - 1];
+      const left = tx - (last.x + ctx.measureText(last.w).width) / 2;
+      const y = ty + (i - (lines.length - 1) / 2) * lineH;
+      for (const { w, x } of line) if (n++ < (style === 'build' ? shown : words.length)) ctx.fillText(w, left + x, y);
+    });
+  } else if (style === 'stack') {
+    // one word per line down a left-hand column, bold and cream
+    ctx.font = `bold ${size}px "Arial Rounded MT Bold", "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = size / 5;
+    ctx.fillStyle = '#f3ead2';
+    words.forEach((w, i) => ctx.fillText(w, W * 0.28, ty + (i - (words.length - 1) / 2) * size * 0.95));
+  } else if (style === 'brat') {
     // the brat cover: the whole frame lime green, lowercase narrow type, stretched wide and a little out of focus
     ctx.fillStyle = '#8ace00';
     ctx.fillRect(0, 0, W, H);
@@ -70,7 +125,7 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
     const rows = Math.ceil(words.length / cols);
     ctx.font = `${size}px "${txt.fontFamily}", Arial, sans-serif`;
     ctx.textAlign = 'left';
-    words.forEach((w, i) => put(w, W * 0.08 + (i % cols) * colW, ty + (Math.floor(i / cols) - (rows - 1) / 2) * lineH));
+    words.slice(0, shown).forEach((w, i) => put(w, W * 0.08 + (i % cols) * colW, ty + (Math.floor(i / cols) - (rows - 1) / 2) * lineH));
   } else if (style === 'stacked') {
     // one word per line, as big as the widest word allows across 90% of the width
     ctx.font = `bold 100px "${txt.fontFamily}", Arial, sans-serif`;

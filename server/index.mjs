@@ -9855,6 +9855,13 @@ const VIDEO_LOOKS = {
   cold: "colorbalance=rs=-0.1:bs=0.14:rm=-0.08:bm=0.1,eq=contrast=0.88:saturation=0.6,curves=all='0/0.1 1/0.9',noise=alls=6:allf=t",
   tungsten: 'eq=brightness=-0.06:saturation=0.75:gamma=0.85,colorbalance=rs=0.15:gs=0.02:bs=-0.2:rm=0.12:bm=-0.15,vignette=PI/3.2',
   club: 'colorbalance=rs=0.04:gs=-0.08:bs=0.16,eq=contrast=1.15:saturation=1.2,vignette=PI/4',
+  film: "curves=all='0/0.08 1/0.95',eq=saturation=0.8,colorbalance=rh=0.06:bh=-0.06,noise=alls=12:allf=t",
+  vhs: 'rgbashift=rh=-4:bh=4,eq=contrast=0.85:saturation=1.3,gblur=sigma=0.8,noise=alls=8:allf=t',
+};
+// "4:3 picture" / "Widescreen bars": the largest box of that shape that fits the frame, in even pixels (as the editor)
+const videoBox = (W, H, aspect) => {
+  const w = Math.min(W, H * aspect);
+  return [2 * Math.round(w / 2), 2 * Math.round(w / aspect / 2)];
 };
 const videoJobs = new Map(); // id -> job (until the server restarts)
 let videoQueue = Promise.resolve();
@@ -9904,13 +9911,17 @@ async function videoApi(req, res, url) {
   const duration = num(input.duration, 1, 180, 'length (up to 3 minutes)');
   const songAt = song ? num(input.songAt ?? 0, 0, 36000, 'song start') : 0;
   const [W, H] = own(VIDEO_FORMATS, input.format) || fail(400, 'Pick a format');
-  const fit = ['crop', 'fit', 'stretch', 'duo'].includes(input.fit) ? input.fit : fail(400, 'Pick how the clip fills the frame');
+  const fit = ['crop', 'fit', 'stretch', 'duo', 'film', 'scope'].includes(input.fit)
+    ? input.fit
+    : fail(400, 'Pick how the clip fills the frame');
   const look = own(VIDEO_LOOKS, input.look) || fail(400, 'Pick a look');
-  const captions = (Array.isArray(input.captions) ? input.captions : []).slice(0, 80).map((c) => {
+  // captions: a run of pictures in time order, each covering a stretch where nothing on screen changes
+  let lastTo = 0;
+  const captions = (Array.isArray(input.captions) ? input.captions : []).slice(0, 600).map((c) => {
     const png = Buffer.from(String(c?.png || '').replace(/^data:image\/png;base64,/, ''), 'base64');
     if (png.length > 3e6 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') fail(400, 'Captions must be PNG pictures');
-    const from = num(c.start, 0, duration, 'caption start');
-    return { png, from, to: num(c.end, from, duration, 'caption end') };
+    const from = num(c.start, lastTo, duration, 'caption start (captions must be in order, not overlapping)');
+    return { png, from, to: (lastTo = num(c.end, from, duration, 'caption end')) };
   });
   // Where it goes: a folder you can add to, named after the clip unless you say otherwise
   const out = file({ space: input.out?.space, path: input.out?.dir ?? '' }, { '': true }, 'upload');
@@ -9934,28 +9945,41 @@ async function videoApi(req, res, url) {
     const tmp = await mkdtemp(join(os.tmpdir(), 'sk-render-'));
     const part = join(out.abs, `.sk-render-${job.id}.mp4`);
     try {
-      const caps = [];
-      for (const [i, c] of captions.entries()) {
-        const p = join(tmp, `c${i}.png`);
-        await writeFile(p, c.png);
-        caps.push({ ...c, p });
+      // The captions become one picture track: a concat list of the pictures and how long each shows, with a
+      // see-through picture for the gaps between them
+      if (captions.length) {
+        await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+          .png()
+          .toFile(join(tmp, 'gap.png'));
+        const list = ['ffconcat version 1.0'];
+        let at = 0;
+        for (const [i, c] of captions.entries()) {
+          await writeFile(join(tmp, `c${i}.png`), c.png);
+          if (c.from > at) list.push('file gap.png', `duration ${(c.from - at).toFixed(3)}`);
+          list.push(`file c${i}.png`, `duration ${(c.to - c.from).toFixed(3)}`);
+          at = c.to;
+        }
+        list.push('file gap.png', `duration ${Math.max(0.1, duration - at).toFixed(3)}`, 'file gap.png'); // the last entry needs repeating
+        await writeFile(join(tmp, 'captions.txt'), list.join('\n'));
       }
       const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', '-protocol_whitelist', 'file'];
       args.push('-ss', String(start), '-t', String(duration), '-f', clip.fmt, '-i', clip.abs);
       if (song) args.push('-ss', String(songAt), '-t', String(duration), '-f', song.fmt, '-i', song.abs);
-      for (const c of caps) args.push('-f', 'image2', '-loop', '1', '-t', String(duration), '-i', c.p);
+      if (captions.length) args.push('-f', 'concat', '-i', join(tmp, 'captions.txt'));
+      const [bw, bh] = fit === 'film' || fit === 'scope' ? videoBox(W, H, fit === 'film' ? 4 / 3 : 2.39) : [W, H];
       const fitChain =
-        fit === 'crop'
-          ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
-          : fit === 'fit'
-            ? `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`
-            : fit === 'stretch'
-              ? `scale=${W}:${H}`
-              : `scale=${W / 2}:${H},setsar=1,split[d1][d2];[d1][d2]hstack=inputs=2`; // the "stretch duo"
+        fit === 'film' || fit === 'scope'
+          ? `scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`
+          : fit === 'crop'
+            ? `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`
+            : fit === 'fit'
+              ? `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`
+              : fit === 'stretch'
+                ? `scale=${W}:${H}`
+                : `scale=${W / 2}:${H},setsar=1,split[d1][d2];[d1][d2]hstack=inputs=2`; // the "stretch duo"
       const graph = [`[0:v]${fitChain}[f]`, `[f]setsar=1,fps=30,${look}[v0]`];
-      const first = song ? 2 : 1;
-      caps.forEach((c, i) => graph.push(`[v${i}][${first + i}:v]overlay=0:0:enable='between(t,${c.from},${c.to})'[v${i + 1}]`));
-      graph.push(`[v${caps.length}]format=yuv420p[vout]`);
+      if (captions.length) graph.push(`[v0][${song ? 2 : 1}:v]overlay=0:0:eof_action=pass[v1]`);
+      graph.push(`[v${captions.length ? 1 : 0}]format=yuv420p[vout]`);
       args.push('-filter_complex', graph.join(';'), '-map', '[vout]', '-map', song ? '1:a:0' : '0:a:0?');
       args.push('-af', `afade=t=out:st=${Math.max(0, duration - 1)}:d=1`);
       args.push('-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-b:a', '192k');
