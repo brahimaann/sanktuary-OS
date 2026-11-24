@@ -22,6 +22,7 @@ import Campaign from './Campaign';
 import OpenVerses, { takeVersesWish, Verse, VerseSlot } from './OpenVerses';
 import { openSession, takeSongWish } from '../utils/songNav';
 import { ContentBoard, ContentItem, ContentList } from './ShotContent';
+import { Comment, Comments } from '../components/FileComments';
 
 interface Release {
   id: string;
@@ -1667,6 +1668,7 @@ const TrackPage: React.FC<{
   const [picking, setPicking] = useState<null | 'bounce' | 'project' | 'stems'>(null);
   const [token, setToken] = useState('');
   const [versions, setVersions] = useState<{ name: string; modified: string }[]>([]);
+  const [notes, setNotes] = useState<Comment[]>([]); // the notesheet of the version playing
   const [comparing, setComparing] = useState<string | null>(null); // the earlier bounce playing in place of the current one
   // A/B: swap what the player plays, keeping the moment in the song and whether it was playing
   const abSwitch = (src: string) => {
@@ -1911,6 +1913,32 @@ const TrackPage: React.FC<{
               <>
                 <audio ref={(el) => void (media.current = el)} src={bounceSrc} preload="metadata" />
                 <MediaControls media={media} src={bounceSrc} />
+                {/* The notesheet follows the version playing: A/B to an earlier one and its notes come up */}
+                {(() => {
+                  const on = t.earlier?.find((e) => e.path === comparing) || t.bounce;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #000', marginTop: 4 }}>
+                      <div style={{ padding: '2px 4px', fontWeight: 700 }}>
+                        Notes on {on.path.split('/').pop()}
+                        {on === t.bounce ? '' : ' (earlier version)'}
+                      </div>
+                      <Comments
+                        key={on.space + on.path}
+                        app={on.space}
+                        path={on.path}
+                        comments={notes}
+                        setComments={setNotes}
+                        media={media}
+                        timed
+                        onSeek={(at) => {
+                          if (!media.current) return;
+                          media.current.currentTime = at;
+                          media.current.play();
+                        }}
+                      />
+                    </div>
+                  );
+                })()}
               </>
             )}
             {!!t.earlier?.length && (
@@ -2154,7 +2182,7 @@ const TrackPage: React.FC<{
           {...text('credits')}
         />
       </Section>
-      <Section title="Notes">
+      <Section title="Ideas">
         <textarea
           rows={4}
           style={{ ...input, width: '100%', resize: 'vertical' }}
