@@ -43,15 +43,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
       onClick={handleComplete}
       role="status"
       aria-label="Welcome to Sanktuary"
-      style={{
-        width: '100%',
-        height: '100%',
-        background: '#000',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-      }}
+      className="sk-boot" /* full-bleed black, src/styles/classic.css */
     >
       <video
         autoPlay
@@ -59,7 +51,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onComplete }) => {
         playsInline
         onEnded={handleComplete}
         onError={handleComplete}
-        style={{ width: 'min(100%, 1280px)', imageRendering: 'pixelated' }}
+        style={{ width: 'min(100%, 1280px)', maxHeight: '100%', imageRendering: 'pixelated' }}
       >
         <source src="/intro/sanktuary-intro.webm" type="video/webm" />
         <source src="/intro/sanktuary-intro.mp4" type="video/mp4" onError={handleComplete} />

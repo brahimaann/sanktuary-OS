@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Sanktuary OS</title>
     <link rel="icon" href="/icons/favicon-32.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -11,7 +11,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Sanktuary" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- viewport-fit=cover + black-translucent: the screen runs under the status bar and home indicator; src/styles/classic.css keeps the controls inside the safe area -->
     <link rel="stylesheet" href="/font/fixedsys-excelsior/fsex300.css" />
     <!-- Warm the CITIES magazine (cover + flip library) while the desktop idles, so opening it is instant -->
     <link rel="prefetch" href="/magazine/pages/cover.webp" />

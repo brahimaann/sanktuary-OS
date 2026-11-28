@@ -478,3 +478,39 @@
   border-top: 0;
   margin-top: 0;
 }
+
+/* ── iPhones: the screen runs edge to edge (viewport-fit=cover in index.html), under the status bar,
+   the rounded corners and the home indicator. Backgrounds bleed to the edges; the controls keep to the
+   safe area. Every env() is 0 on screens without one, so nothing moves elsewhere. ── */
+.crt-wrapper .desktop.folder-view {
+  height: calc(100% - 30px - env(safe-area-inset-bottom));
+}
+.crt-wrapper .taskbar {
+  height: calc(30px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  /* A little in from the sides where the bottom corners curve (only when there's a home indicator) */
+  padding-left: max(env(safe-area-inset-left), calc(env(safe-area-inset-bottom) / 4));
+  padding-right: max(env(safe-area-inset-right), calc(env(safe-area-inset-bottom) / 4));
+}
+.os-window.maximized {
+  /* The window fills the status bar area in its own colour; the title bar and its buttons start below it */
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* The intro: black from edge to edge, status bar included. The dark theme inverts the whole page,
+   so there the boot screen is painted white to come out black. */
+.sk-boot {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+html[data-theme='dark'] .sk-boot,
+html[data-theme='dark'] .crt-wrapper {
+  background: #fff;
+}

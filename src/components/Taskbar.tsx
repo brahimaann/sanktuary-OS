@@ -204,7 +204,7 @@ export const Taskbar: React.FC = () => {
   };
 
   return (
-    <div className="taskbar absolute bottom-0 left-0 right-0 h-[30px] flex items-center bg-white border-t-2 border-black select-none z-[99999]">
+    <div className="taskbar absolute bottom-0 left-0 right-0 flex items-center bg-white border-t-2 border-black select-none z-[99999]">
       {/* Start Button */}
       <button
         ref={startButtonRef}
