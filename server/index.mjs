@@ -8029,7 +8029,7 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
       const before = await readFile(gotFile, 'utf8').catch(() => ''); // chunks that landed before a restart
       for (const c of before.split('\n')) if (c) entry.got.add(Number(c));
     })();
-    const entry = { got: new Set(), done: false, ready };
+    const entry = { got: new Set(), done: false, ready, writes: Promise.resolve() };
     uploads.set(id, entry);
     ready.catch(() => uploads.delete(id)); // refused: a retry starts fresh
   }
@@ -8044,11 +8044,14 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   await pipeline(req, capped, createWriteStream(part, { flags: 'r+', start: chunk * chunkSize, ...BIG_BUFFER }));
   up.got.add(chunk);
   if (up.got.size < chunks || up.done) {
-    await appendFile(gotFile, chunk + '\n');
+    // One write at a time, so the last chunk can wait for them: a write still going when the .got file is removed
+    // would make it again and leave it behind (Windows' slower disk and antivirus make that race likely)
+    await (up.writes = up.writes.catch(() => {}).then(() => appendFile(gotFile, chunk + '\n')));
     return json(res, { ok: true });
   }
   up.done = true;
   uploads.delete(id);
+  await up.writes.catch(() => {});
   await rm(gotFile, { force: true });
 
   let name = target.split(sep).pop();
