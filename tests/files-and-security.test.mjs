@@ -1832,6 +1832,28 @@ try {
   check('older Illustrator file shows its embedded preview', old.src.endsWith('.webp'));
   const gif = JSON.parse((await call('alice', `/api/boards/${board.id}/assets?name=spin.gif`, 'PUT', 'GIF89a', true)).text);
   check('GIFs stay as they are (animation)', gif.src.endsWith('.gif'));
+  // Export for an AI: originals at full size (not the 1600 px copies), AI files as JPEGs, and board.md in reading order
+  await call('alice', `/api/boards/${board.id}/ops`, 'POST', {
+    ops: [
+      { put: { id: 'pic', type: 'image', x: 0, y: 0, w: 300, h: 200, z: 1, src: asset.src, name: 'cover.png' } },
+      { put: { id: 'logo', type: 'image', x: 400, y: 0, w: 300, h: 200, z: 1, src: ai.src, name: 'logo.ai' } },
+      { put: { id: 'nt', type: 'note', x: 0, y: 300, w: 200, h: 100, z: 1, text: 'warm, late night' } },
+      { put: { id: 'ar', type: 'edge', from: 'nt', to: 'pic', x: 0, y: 0, w: 0, h: 0, z: 1 } },
+    ],
+  });
+  const ex = await fetch(B + `/api/boards/${board.id}/export`, { headers: { cookie: cookie('alice') } });
+  const exBytes = Buffer.from(await ex.arrayBuffer());
+  check(
+    'moodboard exports as a zip with full-size originals and board.md',
+    ex.status === 200 &&
+      exBytes.subarray(0, 2).toString() === 'PK' &&
+      exBytes.includes(bigPng) &&
+      exBytes.includes('02-logo.jpg') &&
+      exBytes.includes('01. Picture: 01-cover.png') &&
+      exBytes.includes('03. Note: warm, late night') &&
+      exBytes.includes('03 → 01'),
+  );
+  check('export needs a member', (await call(null, `/api/boards/${board.id}/export`)).status === 401);
 
   // CITIES (the blog): public reading, members' drafts, admin publishing, drafts hidden, feeds limited to public websites
   check('blog reads without an account', (await fetch(B + '/api/blog')).status === 200);
