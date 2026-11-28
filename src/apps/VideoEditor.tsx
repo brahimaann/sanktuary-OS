@@ -442,17 +442,17 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     setTap(null);
     setMsg(`${out.length} lines timed. Play it back; drag a line's times to fix it, or tap again.`);
   };
-  // Auto timing: the server listens to the song under the edit. With lyrics pasted, they get the times; without,
+  // Auto timing: the server listens to the song under the edit (or, with no song, the clip's own sound). With lyrics pasted, they get the times; without,
   // what it heard becomes the lyrics (a new line at each pause or every seven words).
   const [hearing, setHearing] = useState(false);
   const autoTime = async () => {
-    if (!song) return;
+    if (!song && !clip) return;
     setHearing(true);
-    setMsg('Listening to the song for the lyrics (the first time on the server can take a few minutes)...');
+    setMsg(`Listening to the ${song ? 'song' : "clip's sound"} for the words (the first time on the server can take a few minutes)...`);
     try {
       const r: { heard: { w: string; t: number }[]; times: number[] | null } = await api('/api/video/words', {
         method: 'POST',
-        body: JSON.stringify({ song, songAt, duration, lyrics }),
+        body: JSON.stringify({ song, songAt, clip, clipAt: start, duration, lyrics }),
       });
       let lines = lyricLines;
       let times = r.times;
@@ -1063,9 +1063,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
               ) : (
                 <button
                   style={button}
-                  disabled={!song || hearing}
+                  disabled={(!song && !clip) || hearing}
                   onClick={autoTime}
-                  title="The server listens to the song and times every word (paste the lyrics first for the right spelling)"
+                  title="The server listens to the song (or the clip itself when there is no song) and times every word. Paste the lyrics first for your spelling, or leave them empty to write down what it hears"
                 >
                   {hearing ? 'Listening...' : 'Auto timing'}
                 </button>
