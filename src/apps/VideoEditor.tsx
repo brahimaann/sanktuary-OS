@@ -170,7 +170,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [lengths, setLengths] = useState<Record<string, number>>({});
   const [grid, setGrid] = useState<{ bpm: number; beats: number[]; loud: number[] } | null>(null);
   const vids = useRef<Record<string, HTMLVideoElement | null>>({});
-  const [token, setToken] = useState('');
+  const [token, setToken] = useState<string | null>(null); // null until asked; '' when signed in by cookie
   const [clipLength, setClipLength] = useState(0);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -192,7 +192,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [W, H] = SIZES[format];
   const src = (r: FileRef) => {
     const parts = r.path.split('/');
-    return `${fileUrl(r.space, parts)}?t=${token}`;
+    return `${fileUrl(r.space, parts)}?t=${token ?? ''}`;
   };
 
   useEffect(() => {
@@ -200,8 +200,10 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   }, [getToken, clip, song]);
   // A draft per clip in this browser, so closing the window doesn't lose the captions and settings
   const draftKey = clip && `sk_video_${clip.space}/${clip.path}`;
+  const loadingDraft = useRef(false); // the first save after a load would write the empty state over the draft
   useEffect(() => {
     if (!clip) return;
+    loadingDraft.current = true;
     setName(
       `${clip.path
         .split('/')
@@ -229,6 +231,10 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     }
   }, [clip]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (loadingDraft.current) {
+      loadingDraft.current = false;
+      return;
+    }
     try {
       if (draftKey)
         localStorage.setItem(
@@ -244,7 +250,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   useEffect(() => {
     setSongPeaks(null);
     setGrid(null);
-    if (!song || !token) return;
+    if (!song || token === null) return;
     const abort = new AbortController();
     fetch(src(song) + (lightAudio(song.path) ? '&preview' : ''), { signal: abort.signal })
       .then((r) => r.arrayBuffer())
@@ -461,7 +467,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         setLyrics(lines.join('\n'));
       }
       const out = timeLines(lines, times, true);
-      setMsg(`${out.length} lines timed by ear. Play it back and fix any word's line times, or tap instead.`);
+      setMsg(`${out.length} line${out.length === 1 ? '' : 's'} timed by ear. Play it back and fix any word's line times, or tap instead.`);
     } catch (e) {
       setMsg((e as Error).message);
     }
@@ -794,7 +800,16 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
               ref={frameCv}
               width={W}
               height={H}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', filter: LOOKS.find((l) => l[0] === look)![2] }}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                filter:
+                  // the look first, then flipped back like every other picture in the dark (inverted) theme
+                  LOOKS.find((l) => l[0] === look)![2] +
+                  (document.documentElement.dataset.theme === 'dark' ? ' invert(1) hue-rotate(180deg)' : ''),
+              }}
             />
             <canvas ref={capCv} width={W} height={H} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
             {!clip && (
@@ -829,7 +844,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             />
             <span style={{ fontFamily: 'monospace' }}>{t.toFixed(1)}s</span>
           </div>
-          {clip && token && (
+          {clip && token !== null && (
             <video
               ref={video}
               src={src(clip) + (proxy ? '&preview' : '')}
@@ -849,10 +864,10 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
               style={{ display: 'none' }}
             />
           )}
-          {song && token && <audio ref={audio} src={src(song)} preload="auto" />}
+          {song && token !== null && <audio ref={audio} src={src(song)} preload="auto" />}
           {/* beat cuts: a player per clip (the main clip too), kept at the right point by the preview */}
           {multi &&
-            token &&
+            token !== null &&
             clips.map((c) => (
               <video
                 key={keyOf(c.ref)}
@@ -867,7 +882,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
                 style={{ display: 'none' }}
               />
             ))}
-          {token &&
+          {token !== null &&
             more.map((c) => (
               <video
                 key={'len' + keyOf(c.ref)}
@@ -1006,7 +1021,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
               {!song
                 ? 'Add a song: the cuts land on its beat.'
                 : !grid
-                  ? 'Finding the beat...'
+                  ? songPeaks
+                    ? 'No steady beat found in this song, so there is nothing to cut on.'
+                    : 'Finding the beat...'
                   : `${grid.bpm} BPM${multi ? ` · ${pieces.length} cuts across ${clips.length} clips` : ''}`}
             </div>
           </fieldset>
@@ -1219,7 +1236,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
                     >
                       {j.status === 'Done' && decided[j.id] !== 'dropped' ? (
                         <video
-                          src={`${fileUrl(j.space, j.path.split('/'))}?t=${token}`}
+                          src={`${fileUrl(j.space, j.path.split('/'))}?t=${token ?? ''}`}
                           muted
                           loop
                           autoPlay
