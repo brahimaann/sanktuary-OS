@@ -3,7 +3,7 @@
 
 /**
  * How a caption is laid out (from lyric videos and 2012-era edits):
- * plain: one line; grid: words spaced out in even columns, row by row; stacked: one huge word per line filling
+ * plain: one line; grid: a narrow centred column of big words, each row spread to its width; stacked: one huge word per line filling
  * the width; soft: a small, slightly blurred line (white on black cards); brat: the lime "brat" cover card.
  * From the team's lyric references: word: one bold yellow word at a time; sub / serif: a small film subtitle line;
  * build: words add one by one until the line is full; stack: one word per line, a cream left-hand column.
@@ -122,25 +122,46 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
     ctx.scale(1.25, 1);
     ctx.fillText(t, 0, 0);
   } else if (style === 'grid') {
-    // rows of up to three words spread edge to edge (justified), a "/" starting a new row early; the block is
-    // centred on the chosen height and the words appear in place, row by row
+    // A narrow column of big, tightly set, slightly condensed words, centred (from the team's reference): the widest
+    // row sets the column's width and the rows are justified to it like a paragraph (the last row keeps normal
+    // spaces), a single word sits on the left.
+    // Rows break at a "/" in the line, or after three words or when a row gets too wide. The whole caption is laid
+    // out first, so the words appear in place, row by row, and the column doesn't move.
+    ctx.font = `500 ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    ctx.letterSpacing = `${-0.03 * size}px`;
+    ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.shadowBlur = size / 6;
+    ctx.fillStyle = '#fff';
+    const squeeze = 0.88; // drawn 88% wide: a condensed look from any sans
+    const width = (w: string) => ctx.measureText(w).width * squeeze;
+    const space = width(' ');
+    const natural = (row: string[]) => row.reduce((a, w) => a + width(w), 0) + space * (row.length - 1);
     const rows: string[][] = [[]];
     for (const w of tokens) {
-      if (w === '/' || rows[rows.length - 1].length === 3) rows.push([]);
+      const row = rows[rows.length - 1];
+      if (w === '/' || row.length === 3 || (row.length && natural([...row, w]) > W * 0.62)) rows.push([]);
       if (w !== '/') rows[rows.length - 1].push(w);
     }
     const full = rows.filter((r) => r.length);
-    const lineH = size * 1.12;
-    ctx.font = `${size}px "${txt.fontFamily}", Arial, sans-serif`;
-    ctx.textAlign = 'left';
+    const colW = Math.max(W * 0.44, ...full.map(natural));
+    const left = Math.max(W * 0.04, tx - colW / 2);
+    const lineH = size * 1.22;
     let n = 0;
     full.forEach((row, r) => {
-      const widths = row.map((w) => ctx.measureText(w).width);
-      const gap = row.length > 1 ? (W * 0.84 - widths.reduce((a, b) => a + b, 0)) / (row.length - 1) : 0;
-      let x = W * 0.08;
+      const widths = row.map(width);
+      const last = r === full.length - 1 && full.length > 1;
+      const gap = row.length > 1 && !last ? (colW - widths.reduce((a, b) => a + b, 0)) / (row.length - 1) : space * 1.6;
+      let x = left;
       row.forEach((w, i) => {
-        if (n++ < shown) put(w, x, ty + (r - (full.length - 1) / 2) * lineH);
-        x += widths[i] + Math.max(gap, size * 0.3);
+        if (n++ < shown) {
+          ctx.save();
+          ctx.translate(x, ty + (r - (full.length - 1) / 2) * lineH);
+          ctx.scale(squeeze, 1);
+          ctx.fillText(w, 0, 0);
+          ctx.restore();
+        }
+        x += widths[i] + gap;
       });
     });
   } else if (style === 'stacked') {

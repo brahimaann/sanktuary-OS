@@ -63,7 +63,7 @@ const LYRIC_TEMPLATES: { label: string; fit: Fit; look: Look; style: TextStyle; 
   { label: 'Centre line', fit: 'film', look: 'bw', style: 'sub', size: 34, y: 50 },
   { label: 'Build-up', fit: 'crop', look: 'none', style: 'build', size: 52, y: 50 },
   { label: 'Stack', fit: 'film', look: 'vhs', style: 'stack', size: 80, y: 50 },
-  { label: 'Spread grid', fit: 'crop', look: 'none', style: 'grid', size: 60, y: 30 },
+  { label: 'Spread grid', fit: 'film', look: 'faded', style: 'grid', size: 90, y: 49 },
 ];
 const styleSize = (st: TextStyle) => LYRIC_TEMPLATES.find((x) => x.style === st)?.size ?? (st === 'grid' ? 110 : 60);
 const VIDEO = /\.(mp4|m4v|mov|webm)$/i;
