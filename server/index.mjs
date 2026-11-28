@@ -8888,6 +8888,74 @@ async function boardsApi(req, res, url) {
       return thumb(res, asset, 1600);
     return stream(req, res, url.searchParams, asset);
   }
+  // ?export: the board for an AI to look at: every picture at full size (originals, never the 1600 px copies), numbered
+  // in reading order, plus board.md with its notes, links, songs and arrows. Formats an AI can't open (RAW, PSD, AI,
+  // TIFF, HEIC) go in as full-size JPEGs.
+  if (sub === 'export' && req.method === 'GET') {
+    const tmp = await mkdtemp(join(os.tmpdir(), 'sk-board-'));
+    const assets = join(DATA, 'boards', id, 'assets');
+    const all = [...b.items.values()];
+    const cards = all.filter((i) => i.type !== 'edge').sort((p, q) => p.y - q.y || p.x - q.x);
+    const num = new Map(cards.map((c, n) => [c.id, String(n + 1).padStart(2, '0')]));
+    const lines = [
+      `# ${b.meta.name}`,
+      '',
+      `Moodboard exported ${new Date().toISOString().slice(0, 10)}. Cards are numbered top to bottom, left to right; each picture is in this zip under its number.`,
+      '',
+    ];
+    const files = [];
+    try {
+      for (const c of cards) {
+        const n = num.get(c.id);
+        const label = c.name || basename((c.src || '').split('?')[0]);
+        if (c.type === 'image' && c.src) {
+          let src;
+          if (c.src.startsWith(`/api/boards/${id}/assets/`)) {
+            const file = safeName(decodeURIComponent(c.src.split('?')[0].split('/').pop()));
+            const uuid = file.replace(/\.webp$/i, '');
+            const orig = (await readdir(assets).catch(() => [])).find((f) => f.startsWith(`${uuid}-original.`));
+            src = join(assets, orig || file);
+          } else if (c.src.startsWith('/api/files/')) {
+            // A team file: fetched as this member, so their rights on that space still apply
+            src = join(tmp, `.src-${n}${extname(c.src.split('?')[0])}`);
+            const r = await liteApi(req, c.src.split('?')[0]).catch(() => null);
+            if (!r) {
+              lines.push(`${n}. Picture "${label}" (couldn't be read: drive offline or no access)`, '');
+              continue;
+            }
+            await pipeline(Readable.fromWeb(r.body), createWriteStream(src));
+          } else continue;
+          const ext = extname(src).toLowerCase();
+          const base = `${n}-${(c.name || 'picture')
+            .replace(/\.\w+$/, '')
+            .replace(/[^\w.-]+/g, '-')
+            .slice(0, 40)}`;
+          let out = base + ext;
+          if (['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(ext)) await cp(src, join(tmp, out));
+          else {
+            out = base + '.jpg';
+            await (await imageInput(src, (await stat(src)).size)).rotate().jpeg({ quality: 95 }).toFile(join(tmp, out));
+          }
+          files.push(out);
+          lines.push(`${n}. Picture: ${out}${c.name ? ` (originally ${c.name})` : ''}`);
+        } else if (c.type === 'note' || c.type === 'text')
+          lines.push(`${n}. ${c.type === 'note' ? 'Note' : 'Heading'}: ${(c.text || '').trim()}`);
+        else if (c.type === 'link') lines.push(`${n}. Link: ${c.text || c.name || ''} ${c.url}`.replace(/  +/g, ' '));
+        else if (c.type === 'file')
+          lines.push(`${n}. ${/\.(mp3|wav|m4a|aac|flac|ogg|aiff?)$/i.test(label) ? 'Song' : 'File'}: ${label} (not included)`);
+        else continue;
+        if (c.text && (c.type === 'image' || c.type === 'file')) lines.push(`   Caption: ${c.text.trim()}`);
+        lines.push('');
+      }
+      const edges = all.filter((e) => e.type === 'edge' && num.has(e.from) && num.has(e.to));
+      if (edges.length) lines.push('## Arrows', '', ...edges.map((e) => `- ${num.get(e.from)} → ${num.get(e.to)}`), '');
+      await writeFile(join(tmp, 'board.md'), lines.join('\n'));
+    } catch (err) {
+      await rm(tmp, { recursive: true, force: true });
+      throw err;
+    }
+    return sendZip(res, b.meta.name, 0, Promise.resolve(0), () => {}, '', tmp, [{ cd: tmp }, 'board.md', ...files]);
+  }
   if (sub === 'shares') {
     if (b.meta.owner !== user.username && !user.admin) fail(403, 'Only the creator or an admin can share a board outside the team');
     const all = await loadBoardLinks();

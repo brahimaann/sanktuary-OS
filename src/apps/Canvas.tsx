@@ -521,6 +521,14 @@ const Board: React.FC<{ boardId: string }> = ({ boardId }) => {
         <button style={button} onClick={fit}>
           Fit
         </button>
+        <a
+          style={{ ...button, textDecoration: 'none', color: 'inherit' }}
+          href={`/api/boards/${boardId}/export`}
+          download
+          title="Download a .zip of every picture at full size, plus board.md with the notes, links and songs, to give an AI"
+        >
+          Export
+        </a>
         <div style={{ display: 'flex', marginLeft: 6 }} title={['you', ...others.map(([, p]) => p.user)].join(', ')}>
           {[me.current && { user: me.current.user, color: me.current.color }, ...others.map(([, p]) => p)].filter(Boolean).map((p, i) => (
             <span
