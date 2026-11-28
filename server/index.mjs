@@ -8046,7 +8046,7 @@ async function upload(req, res, q, { status, space, root, target, need, log, use
   if (up.got.size < chunks || up.done) {
     // One write at a time, so the last chunk can wait for them: a write still going when the .got file is removed
     // would make it again and leave it behind (Windows' slower disk and antivirus make that race likely)
-    await (up.writes = up.writes.then(() => appendFile(gotFile, chunk + '\n')));
+    await (up.writes = up.writes.catch(() => {}).then(() => appendFile(gotFile, chunk + '\n')));
     return json(res, { ok: true });
   }
   up.done = true;
