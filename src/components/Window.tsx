@@ -127,7 +127,7 @@ export const Window: React.FC<WindowProps> = ({
         left: 0,
         top: 0,
         width: '100%',
-        height: 'calc(100% - 30px)',
+        height: 'calc(100% - 30px - env(safe-area-inset-bottom))', // the taskbar grows by the home indicator's inset
         zIndex,
         display: isMinimized ? 'none' : undefined,
       }

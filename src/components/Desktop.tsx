@@ -10,6 +10,18 @@ import LeadOffer from './LeadOffer';
 type Cell = [col: number, row: number];
 const GRID = 82; // Win98 desktop spacing
 const PAD = 16;
+
+// The safe-area insets (iPhone status bar, notch, home indicator) in px, all 0 on other screens
+const safeInsets = () => {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  document.body.appendChild(el);
+  const cs = getComputedStyle(el);
+  const r = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+  el.remove();
+  return r;
+};
 const toPx = ([c, r]: Cell) => ({ x: PAD + c * GRID, y: PAD + r * GRID });
 
 interface DesktopIconDef {
@@ -327,7 +339,7 @@ export const Desktop: React.FC = () => {
   // Icons sit in grid cells, one icon per cell. Each person's arrangement is kept in this browser (per user).
   const layoutKey = `sk_desktop_${me?.username || 'guest'}`;
   const [cells, setCells] = useState<Record<string, Cell>>({});
-  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight, ...safeInsets() });
   const [drag, setDrag] = useState<{ ids: string[]; sx: number; sy: number; dx: number; dy: number; moved: boolean } | null>(null);
 
   // Custom right click context menu state
@@ -503,7 +515,11 @@ export const Desktop: React.FC = () => {
   useEffect(() => {
     const el = desktopRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    // The desktop runs under an iPhone's status bar and rounded corners; icons keep to the safe area inside it
+    const ro = new ResizeObserver(() => {
+      const s = safeInsets();
+      setSize({ w: el.clientWidth - s.left - s.right, h: el.clientHeight - s.top, ...s });
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -707,7 +723,7 @@ export const Desktop: React.FC = () => {
       onContextMenu={handleContextMenu}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="desktop folder-view absolute left-0 top-0 w-full h-[calc(100%-30px)] select-none overflow-hidden isolate"
+      className="desktop folder-view absolute left-0 top-0 w-full select-none overflow-hidden isolate"
       style={{
         backgroundColor: bgColor,
         // No wallpaper on white = the S machine's dotted desktop
@@ -756,8 +772,8 @@ export const Desktop: React.FC = () => {
             }`}
             style={{
               position: 'absolute',
-              left: `${pos.x}px`,
-              top: `${pos.y}px`,
+              left: `${pos.x + size.left}px`,
+              top: `${pos.y + size.top}px`,
               zIndex: isDragging ? 50 : 1,
               opacity: isDragging ? 0.7 : 1,
               touchAction: 'none',
