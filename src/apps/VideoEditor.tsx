@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { useApi } from '../utils/api';
-import { drawText, TEXT_STYLES, TextOverlayItem, TextStyle, WORD_STYLES } from '../utils/captions';
+import { drawText, lyricWords, TEXT_STYLES, TextOverlayItem, TextStyle, WORD_STYLES } from '../utils/captions';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { sharedAudio } from '../utils/sound';
 import { waveformPeaks } from '../utils/audioAnalysis';
@@ -63,7 +63,7 @@ const LYRIC_TEMPLATES: { label: string; fit: Fit; look: Look; style: TextStyle; 
   { label: 'Centre line', fit: 'film', look: 'bw', style: 'sub', size: 34, y: 50 },
   { label: 'Build-up', fit: 'crop', look: 'none', style: 'build', size: 52, y: 50 },
   { label: 'Stack', fit: 'film', look: 'vhs', style: 'stack', size: 80, y: 50 },
-  { label: 'Spread grid', fit: 'crop', look: 'none', style: 'grid', size: 44, y: 50 },
+  { label: 'Spread grid', fit: 'crop', look: 'none', style: 'grid', size: 60, y: 30 },
 ];
 const styleSize = (st: TextStyle) => LYRIC_TEMPLATES.find((x) => x.style === st)?.size ?? (st === 'grid' ? 110 : 60);
 const VIDEO = /\.(mp4|m4v|mov|webm)$/i;
@@ -73,7 +73,7 @@ const newId = () => Math.random().toString(36).slice(2, 9);
 const wordTimes = (c: Cap) => {
   if (c.words?.length) return c.words;
   if (!WORD_STYLES.includes(c.style)) return [];
-  const n = c.text.trim().split(/\s+/).length;
+  const n = lyricWords(c.text).length;
   return Array.from({ length: n }, (_, i) => c.start + ((c.end - c.start) * i) / n);
 };
 const asItem = (c: Cap, now = Infinity): TextOverlayItem => ({
@@ -304,10 +304,10 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [tap, setTap] = useState<null | { byWord: boolean; times: number[] }>(null);
   const lyricLines = lyrics
     .split('\n')
-    .map((l) => l.trim().split(/\s+/).filter(Boolean))
-    .filter((l) => l.length)
+    .map((l) => l.trim())
+    .filter((l) => lyricWords(l).length)
     .slice(0, 80);
-  const tapUnits = tap ? (tap.byWord ? lyricLines.flat() : lyricLines.map((l) => l.join(' '))) : [];
+  const tapUnits = tap ? (tap.byWord ? lyricLines.flatMap(lyricWords) : lyricLines.map((l) => l.replace(/\s+\/(?=\s|$)/g, ''))) : [];
   const startTap = () => {
     const byWord = WORD_STYLES.includes(capStyle);
     setTap({ byWord, times: [] });
@@ -323,14 +323,15 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     const out: Cap[] = [];
     let k = 0;
     lyricLines.forEach((line, i) => {
-      const own = tap.byWord ? times.slice(k, k + line.length) : times.slice(i, i + 1);
-      k += line.length;
+      const count = lyricWords(line).length;
+      const own = tap.byWord ? times.slice(k, k + count) : times.slice(i, i + 1);
+      k += count;
       if (!own.length) return;
       const next = tap.byWord ? times[k] : times[i + 1];
       const end = Math.min(duration, next ?? Infinity, own[own.length - 1] + (tap.byWord ? 2 : 5));
       out.push({
         id: newId(),
-        text: line.join(' '),
+        text: line,
         start: own[0],
         end: Math.max(end, own[0] + 0.2),
         style: capStyle,

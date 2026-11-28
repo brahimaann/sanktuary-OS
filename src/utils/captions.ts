@@ -21,6 +21,8 @@ export const TEXT_STYLES: [TextStyle, string][] = [
   ['build', 'Build-up'],
   ['stack', 'Stack'],
 ];
+/** The sung words of a caption: a lone "/" only breaks a Word grid row, so it isn't one */
+export const lyricWords = (t: string) => t.split(/\s+/).filter((w) => w && w !== '/');
 /** Styles that show the words one at a time (word timing matters for these) */
 export const WORD_STYLES: TextStyle[] = ['word', 'build', 'grid'];
 
@@ -56,7 +58,9 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
   ctx.save();
   ctx.textBaseline = 'middle';
   const style = txt.style || 'plain';
-  const words = txt.text.trim().split(/\s+/);
+  const tokens = txt.text.trim().split(/\s+/);
+  const words = lyricWords(txt.text);
+  if (!words.length) return;
   const shown = Math.max(1, Math.min(words.length, txt.shown ?? words.length));
   if (style === 'word') {
     // one bold condensed yellow word at a time, in the middle
@@ -118,14 +122,27 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
     ctx.scale(1.25, 1);
     ctx.fillText(t, 0, 0);
   } else if (style === 'grid') {
-    // three even columns, words left-aligned in them, the block centred on the chosen height
-    const cols = 3;
-    const colW = (W * 0.84) / cols;
+    // rows of up to three words spread edge to edge (justified), a "/" starting a new row early; the block is
+    // centred on the chosen height and the words appear in place, row by row
+    const rows: string[][] = [[]];
+    for (const w of tokens) {
+      if (w === '/' || rows[rows.length - 1].length === 3) rows.push([]);
+      if (w !== '/') rows[rows.length - 1].push(w);
+    }
+    const full = rows.filter((r) => r.length);
     const lineH = size * 1.12;
-    const rows = Math.ceil(words.length / cols);
     ctx.font = `${size}px "${txt.fontFamily}", Arial, sans-serif`;
     ctx.textAlign = 'left';
-    words.slice(0, shown).forEach((w, i) => put(w, W * 0.08 + (i % cols) * colW, ty + (Math.floor(i / cols) - (rows - 1) / 2) * lineH));
+    let n = 0;
+    full.forEach((row, r) => {
+      const widths = row.map((w) => ctx.measureText(w).width);
+      const gap = row.length > 1 ? (W * 0.84 - widths.reduce((a, b) => a + b, 0)) / (row.length - 1) : 0;
+      let x = W * 0.08;
+      row.forEach((w, i) => {
+        if (n++ < shown) put(w, x, ty + (r - (full.length - 1) / 2) * lineH);
+        x += widths[i] + Math.max(gap, size * 0.3);
+      });
+    });
   } else if (style === 'stacked') {
     // one word per line, as big as the widest word allows across 90% of the width
     ctx.font = `bold 100px "${txt.fontFamily}", Arial, sans-serif`;
