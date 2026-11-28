@@ -10065,9 +10065,14 @@ async function videoApi(req, res, url) {
   const out = file({ space: input.out?.space, path: input.out?.dir ?? '' }, { '': true }, 'upload');
   if (!(await stat(out.abs).catch(() => null))?.isDirectory()) fail(404, 'That folder is gone');
   // a batch's versions go together in a new folder inside it
-  const sub = input.out?.folder ? safeName(String(input.out.folder).slice(0, 80)) : '';
-  if (sub) {
-    out.abs = join(out.abs, sub);
+  const sub = String(input.out?.folder || '')
+    .slice(0, 120)
+    .split('/')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => safeName(x));
+  if (sub.length) {
+    out.abs = join(out.abs, ...sub);
     if (!existsSync(out.abs)) {
       await mkdir(out.abs, { recursive: true });
       await setOwner(out.space, out.abs, user);

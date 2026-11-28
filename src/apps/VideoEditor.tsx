@@ -6,6 +6,7 @@ import FilePicker, { FileRef } from '../components/FilePicker';
 import { sharedAudio } from '../utils/sound';
 import { beatGrid, estimateTempo, waveformPeaks } from '../utils/audioAnalysis';
 import { lightAudio } from './fileTypes';
+import type { ContentItem } from './ShotContent';
 import { fileUrl, LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 
 /**
@@ -112,6 +113,12 @@ function beatPieces(
     return { ref: c.ref, key: keyOf(c.ref), at, from, len };
   });
 }
+interface ProjectHome {
+  id: string;
+  title: string;
+  folder: FileRef;
+  content?: ContentItem[];
+}
 const VIDEO = /\.(mp4|m4v|mov|webm)$/i;
 const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
 const newId = () => Math.random().toString(36).slice(2, 9);
@@ -168,7 +175,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [proxy, setProxy] = useState(false); // the server's H.264 copy, for clips the browser can't decode (HEVC / ProRes)
-  const [jobs, setJobs] = useState<{ id: string; name: string; status: string; pct: number; error: string | null }[]>([]);
+  const [jobs, setJobs] = useState<
+    { id: string; name: string; status: string; pct: number; error: string | null; space: string; path: string; batch: string | null }[]
+  >([]);
   const [name, setName] = useState('');
   const [msg, setMsg] = useState('');
   const [songPeaks, setSongPeaks] = useState<number[] | null>(null);
@@ -477,6 +486,46 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     setCaps(caps.map((c) => ({ ...c, text: c.text.toLowerCase(), style: tp.style, size: tp.size, y: tp.y })));
     if (!caps.length) setMsg(`${tp.label}: paste the lyrics (one line each), then Tap timing or Spread over clip.`);
   };
+  // Promo presets, from the formats that keep coming back on TikTok / Reels: each sets the length, look, pace and a
+  // starting caption to change (hook first, words in the top or middle, out of the bottom third the apps cover)
+  const promo = (k: 'pov' | 'foryou' | 'hook' | 'performance' | 'bts' | 'canvas') => {
+    const d = { pov: 15, foryou: 20, hook: 20, performance: 20, bts: 20, canvas: 8 }[k];
+    const cap = (text: string, from: number, to: number, style: TextStyle, size: number, y: number): Cap => ({
+      id: newId(),
+      text,
+      start: from,
+      end: Math.min(d, to),
+      style,
+      size,
+      y,
+    });
+    setFormat('9:16');
+    setDuration(d);
+    setFit('crop');
+    setLook(({ pov: 'faded', foryou: 'film', hook: 'tungsten', performance: 'none', bts: 'tungsten', canvas: 'none' } as const)[k]);
+    setPace(more.length ? ({ performance: 'off', canvas: 'steady' } as Record<string, Pace>)[k] || 'smart' : 'off');
+    if (k === 'pov') setCaps([cap('pov: you just got home and this comes on', 0, d, 'sub', 40, 22)]);
+    else if (k === 'foryou') {
+      const lines = lyrics.trim() ? lyricLines.slice(0, 5) : ['you still text them first', 'you play it at 2am', 'you already know'];
+      const each = (d - 2) / lines.length;
+      setCaps([
+        cap('this song is for you if...', 0, d, 'sub', 40, 22),
+        ...lines.map((l, i) => cap(l.toLowerCase(), 2 + i * each, 2 + (i + 1) * each, 'build', 52, 50)),
+      ]);
+    } else if (k === 'hook') setCaps([cap('i wrote this song about...', 0, 3, 'serif', 60, 50)]);
+    else if (k === 'bts') setCaps([cap('in the studio', 0, d, 'sub', 34, 15)]);
+    else setCaps([]);
+    setMsg(
+      {
+        pov: 'POV: change the line to your own. Start the song on its hook.',
+        foryou: '"For you if": paste 3-5 short lines as the lyrics, then press the preset again.',
+        hook: 'Story hook: the line, then the chorus drops. Start the song just before the chorus.',
+        performance: 'Performance: one raw take, no cuts. Pick the best 20 seconds.',
+        bts: 'BTS: add session clips under Beat cuts for quick cuts between them.',
+        canvas: 'Canvas: an 8 second loop for Spotify. Pick a part that loops cleanly.',
+      }[k],
+    );
+  };
   const template = (k: 'lyric' | 'stretch' | 'brat' | 'card' | 'stacked') => {
     setFormat('9:16');
     if (k === 'lyric') {
@@ -510,12 +559,10 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     return () => clearInterval(i);
   }, [jobs.map((j) => j.status + j.pct).join()]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const render = async () => {
-    if (!clip) return;
-    setMsg('Preparing captions...');
-    // The captions as a run of full-size transparent pictures, one for each stretch where what's on screen
-    // doesn't change (a new word, a new line), drawn exactly like the preview: the server lays them over the video
-    const live = caps.filter((c) => c.text.trim() && c.end > c.start);
+  // The captions as a run of full-size transparent pictures, one for each stretch where what's on screen doesn't
+  // change (a new word, a new line), drawn exactly like the preview: the server lays them over the video
+  const captionPngs = (list: Cap[]) => {
+    const live = list.filter((c) => c.text.trim() && c.end > c.start);
     const cuts = [...new Set([0, duration, ...live.flatMap((c) => [c.start, c.end, ...wordTimes(c)])])]
       .filter((x) => x >= 0 && x <= duration)
       .sort((a, b) => a - b);
@@ -536,31 +583,134 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
       if (prev && prev.png === png && Math.abs(prev.end - a) < 0.001) prev.end = b;
       else pngs.push({ start: a, end: b, png });
     }
-    if (pngs.length > 600) return setMsg('Too many caption changes for one video (600 at most): shorten it or use fewer words.');
-    const parts = clip.path.split('/');
+    if (pngs.length > 600) throw new Error('Too many caption changes for one video (600 at most): shorten it or use fewer words.');
+    return pngs;
+  };
+  const renderOne = (o: {
+    fit: Fit;
+    look: Look;
+    caps: Cap[];
+    pieces: Piece[];
+    name: string;
+    out: { space: string; dir: string; folder?: string };
+    batch?: string;
+  }) =>
+    api('/api/video/render', {
+      method: 'POST',
+      body: JSON.stringify({
+        clip,
+        song,
+        songAt,
+        start,
+        duration,
+        format,
+        fit: o.fit,
+        look: o.look,
+        captions: captionPngs(o.caps),
+        segments: o.pieces.length > 1 ? o.pieces.map((p) => ({ clip: p.ref, from: p.from, len: p.len })) : undefined,
+        out: o.out,
+        name: o.name,
+        batch: o.batch,
+      }),
+    });
+  const render = async () => {
+    if (!clip) return;
+    setMsg('Preparing captions...');
     try {
-      await api('/api/video/render', {
-        method: 'POST',
-        body: JSON.stringify({
-          clip,
-          song,
-          songAt,
-          start,
-          duration,
-          format,
-          fit,
-          look,
-          captions: pngs,
-          segments: multi ? pieces.map((p) => ({ clip: p.ref, from: p.from, len: p.len })) : undefined,
-          out: { space: clip.space, dir: parts.slice(0, -1).join('/') },
-          name,
-        }),
-      });
+      await renderOne({ fit, look, caps, pieces, name, out: { space: clip.space, dir: clip.path.split('/').slice(0, -1).join('/') } });
       setMsg('Rendering on the server. You get a notification when it is ready (it goes next to the clip).');
       loadJobs();
     } catch (e) {
       setMsg((e as Error).message);
     }
+  };
+
+  // ── Batch: many versions at once (clip order, pace, look and lyric template varied), then a wall of them to keep
+  // or drop. Inside a project they render into its Edits folder, and keepers become Edited footage on it, each
+  // with a post day (one a day from the next free day), so they line up on the Board's calendar.
+  const [batchN, setBatchN] = useState(6);
+  const [vary, setVary] = useState<{ paces: Pace[]; looks: Look[]; templates: string[] }>({ paces: [], looks: [], templates: [] });
+  const [batch, setBatch] = useState<null | { id: string; project: ProjectHome | null }>(null);
+  const [decided, setDecided] = useState<Record<string, string>>({}); // job id -> 'kept · Tue' / 'dropped'
+  const toggle = <K extends keyof typeof vary>(k: K, v: (typeof vary)[K][number]) =>
+    setVary({ ...vary, [k]: (vary[k] as string[]).includes(v) ? (vary[k] as string[]).filter((x) => x !== v) : [...vary[k], v] });
+  const renderBatch = async () => {
+    if (!clip) return;
+    setMsg('Setting up the batch...');
+    try {
+      const home = await projectOf(clip);
+      const id = Math.random().toString(36).slice(2, 10);
+      const out = home
+        ? { space: home.folder.space, dir: home.folder.path, folder: `Edits/Batch ${name}` }
+        : { space: clip.space, dir: clip.path.split('/').slice(0, -1).join('/'), folder: `Batch ${name}` };
+      let seed = Date.now() % 2147483647;
+      const rnd = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+      const pick = <T,>(xs: T[], fallback: T) => (xs.length ? xs[Math.floor(rnd() * xs.length)] : fallback);
+      for (let v = 0; v < batchN; v++) {
+        const order = clips.map((_, i) => i).sort(() => rnd() - 0.5);
+        const tp = LYRIC_TEMPLATES.find((x) => x.label === pick(vary.templates, ''));
+        const vPace = more.length ? pick(vary.paces, pace) : 'off';
+        const vCaps = tp ? caps.map((c) => ({ ...c, style: tp.style, size: tp.size, y: tp.y })) : caps;
+        setMsg(`Sending version ${v + 1} of ${batchN}...`);
+        await renderOne({
+          fit: tp?.fit ?? fit,
+          look: pick(vary.looks, tp?.look ?? look),
+          caps: vCaps,
+          pieces: beatPieces(clips, song ? grid : null, songAt, duration, vPace, order),
+          name: `${name} v${String(v + 1).padStart(2, '0')}`,
+          out,
+          batch: id,
+        });
+      }
+      setBatch({ id, project: home });
+      setDecided({});
+      setMsg(`${batchN} versions rendering on the server. They show up below as they finish: keep or drop each one.`);
+      loadJobs();
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const decide = async (j: { id: string; space: string; path: string; name: string }, keepIt: boolean) => {
+    try {
+      if (!keepIt) {
+        await api(fileUrl(j.space, j.path.split('/')), { method: 'DELETE' });
+        return setDecided({ ...decided, [j.id]: 'dropped' });
+      }
+      const home = batch?.project;
+      if (!home) return setDecided({ ...decided, [j.id]: 'kept' });
+      const now: { releases: ProjectHome[]; tracks: { id: string; release: string; content?: ContentItem[] }[] } = await api('/api/tracks');
+      const songs = now.tracks.filter((x) => x.release === home.id);
+      const owner = songs.length === 1 ? songs[0] : now.releases.find((r) => r.id === home.id);
+      const content = owner?.content || [];
+      // its post day: the day after the last footage already lined up (or tomorrow)
+      const tomorrow = new Date(Date.now() + 864e5).toLocaleDateString('en-CA');
+      const last = content.filter((c) => c.due && c.status !== 'Posted').reduce((m, c) => (c.due! > m ? c.due! : m), '');
+      const day = last >= tomorrow ? new Date(Date.parse(`${last}T12:00:00`) + 864e5).toLocaleDateString('en-CA') : tomorrow;
+      const file = { space: j.space, path: j.path };
+      const item: ContentItem = {
+        id: Math.random().toString(36).slice(2, 10),
+        kind: 'Video',
+        title: j.name.replace(/\.mp4$/, ''),
+        status: 'Edited',
+        file,
+        edit: file,
+        due: day,
+      };
+      await api(songs.length === 1 ? `/api/tracks/track/${songs[0].id}` : `/api/tracks/release/${home.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ content: [...content, item] }),
+      });
+      setDecided({
+        ...decided,
+        [j.id]: `kept · posts ${new Date(`${day}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}`,
+      });
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+  };
+  const projectOf = async (c: FileRef): Promise<ProjectHome | null> => {
+    const r: { releases: ProjectHome[] } = await api('/api/tracks');
+    return r.releases.find((x) => x.folder && x.folder.space === c.space && c.path.startsWith(x.folder.path + '/')) || null;
   };
 
   const num = (v: string, min: number, max: number) => Math.min(max, Math.max(min, Number(v) || 0));
@@ -604,6 +754,23 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
           ] as const
         ).map(([k, label]) => (
           <button key={k} style={button} onClick={() => template(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ ...toolbar, flexWrap: 'wrap' }}>
+        <span>Promo presets:</span>
+        {(
+          [
+            ['pov', 'POV text'],
+            ['foryou', 'For you if...'],
+            ['hook', 'Story hook'],
+            ['performance', 'Performance'],
+            ['bts', 'BTS'],
+            ['canvas', 'Canvas 8s'],
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} style={button} onClick={() => promo(k)}>
             {label}
           </button>
         ))}
@@ -977,12 +1144,128 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
                 Render MP4
               </button>
             </div>
-            {jobs.map((j) => (
-              <div key={j.id}>
-                {j.name}: {j.status === 'Rendering' ? `${j.pct}%` : j.status}
-                {j.error && <span style={{ color: '#a00000' }}> {j.error}</span>}
+            {jobs
+              .filter((j) => !j.batch)
+              .map((j) => (
+                <div key={j.id}>
+                  {j.name}: {j.status === 'Rendering' ? `${j.pct}%` : j.status}
+                  {j.error && <span style={{ color: '#a00000' }}> {j.error}</span>}
+                </div>
+              ))}
+          </fieldset>
+          <fieldset style={fs}>
+            <legend>Batch</legend>
+            <div style={rowS}>
+              Make
+              <select style={inp} value={batchN} onChange={(e) => setBatchN(+e.target.value)}>
+                {[3, 6, 12, 24].map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+              versions, mixing the clip order and:
+            </div>
+            {more.length > 0 && (
+              <div style={rowS}>
+                Pace:
+                {PACES.filter(([p]) => p !== 'off').map(([p, label]) => (
+                  <label key={p} style={rowS}>
+                    <input type="checkbox" checked={vary.paces.includes(p)} onChange={() => toggle('paces', p)} />
+                    {label.split(' ')[0]}
+                  </label>
+                ))}
               </div>
-            ))}
+            )}
+            <div style={rowS}>
+              Look:
+              {LOOKS.filter(([l]) => l !== 'none').map(([l, label]) => (
+                <label key={l} style={rowS}>
+                  <input type="checkbox" checked={vary.looks.includes(l)} onChange={() => toggle('looks', l)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+            {caps.length > 0 && (
+              <div style={rowS}>
+                Lyrics:
+                {LYRIC_TEMPLATES.map((tp) => (
+                  <label key={tp.label} style={rowS}>
+                    <input type="checkbox" checked={vary.templates.includes(tp.label)} onChange={() => toggle('templates', tp.label)} />
+                    {tp.label}
+                  </label>
+                ))}
+              </div>
+            )}
+            <div style={rowS}>
+              <button style={{ ...button, fontWeight: 700 }} disabled={!clip} onClick={renderBatch}>
+                Render batch
+              </button>
+              <span style={{ color: '#555' }}>Inside a project they go to its Edits folder.</span>
+            </div>
+            {batch && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {jobs
+                  .filter((j) => j.batch === batch.id)
+                  .reverse()
+                  .map((j) => (
+                    <div
+                      key={j.id}
+                      style={{
+                        width: 110,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 2,
+                        opacity: decided[j.id] === 'dropped' ? 0.35 : 1,
+                      }}
+                    >
+                      {j.status === 'Done' && decided[j.id] !== 'dropped' ? (
+                        <video
+                          src={`${fileUrl(j.space, j.path.split('/'))}?t=${token}`}
+                          muted
+                          loop
+                          autoPlay
+                          playsInline
+                          style={{ width: 110, aspectRatio: `${W} / ${H}`, background: '#000', border: '2px inset #808080' }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 110,
+                            aspectRatio: `${W} / ${H}`,
+                            background: '#000',
+                            color: '#aaa',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            textAlign: 'center',
+                          }}
+                        >
+                          {decided[j.id] === 'dropped' ? 'Dropped' : j.status === 'Rendering' ? `${j.pct}%` : j.status}
+                        </div>
+                      )}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {j.name.replace(/\.mp4$/, '')}
+                      </span>
+                      {j.status === 'Done' &&
+                        (decided[j.id] ? (
+                          <b>{decided[j.id] === 'dropped' ? '' : decided[j.id]}</b>
+                        ) : (
+                          <div style={rowS}>
+                            <button
+                              style={{ ...button, fontWeight: 700 }}
+                              onClick={() => decide(j, true)}
+                              title={batch.project ? `Becomes Edited footage on ${batch.project.title}, with a post day` : 'Keep it'}
+                            >
+                              Keep
+                            </button>
+                            <button style={button} onClick={() => decide(j, false)}>
+                              Drop
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  ))}
+              </div>
+            )}
           </fieldset>
         </div>
       </div>

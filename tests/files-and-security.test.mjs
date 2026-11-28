@@ -3695,6 +3695,22 @@ ${thisYear}-03;Comma Song;0,456`,
     cutStatus?.status === 'Done' && /Duration: 00:00:0(1\.9|2\.0)/.test(cutInfo) && /Audio: aac/.test(cutInfo),
     cutStatus?.error || cutInfo.slice(-300),
   );
+  // A batch: versions go together into a new folder (Edits/Batch ...), and the job says where each landed
+  const batchJob = await renderJob('bob', { name: 'promo v01', batch: 'b1', out: { space: 'up', dir: '', folder: 'Edits/Batch promo' } });
+  check('a batch version starts', batchJob.status === 202, batchJob.text);
+  let batchStatus;
+  for (let i = 0; i < 300; i++) {
+    batchStatus = JSON.parse((await call('bob', '/api/video')).text).find((j) => j.batch === 'b1');
+    if (!['Waiting', 'Rendering'].includes(batchStatus?.status)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  check(
+    'a batch version lands in its batch folder',
+    batchStatus?.status === 'Done' &&
+      batchStatus.path === 'Edits/Batch promo/promo v01.mp4' &&
+      existsSync(join(drive, 'team', 'Edits', 'Batch promo', 'promo v01.mp4')),
+    JSON.stringify(batchStatus),
+  );
   check('no half-finished files are left behind', !readdirSync(join(drive, 'team')).some((n) => n.startsWith('.sk-render-')));
   check(
     'the editor is told where it is',
