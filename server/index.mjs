@@ -9991,14 +9991,16 @@ async function hear(pcm) {
 }
 
 async function songWords(file, input) {
-  const song = input.song ? file(input.song, CLIP_FORMATS) : fail(400, 'Add a song first');
-  if (!song.fmt) fail(400, 'Pick a song (WAV, AIFF, FLAC, MP3, M4A or OGG)');
-  if (!(await stat(song.abs).catch(() => null))?.isFile()) fail(404, 'That song is gone');
+  // the added song, or else the clip's own sound (someone talking or singing on camera)
+  const fromClip = !input.song;
+  const song = fromClip ? file(input.clip || fail(400, 'Pick a clip or add a song'), VIDEO_IN) : file(input.song, CLIP_FORMATS);
+  if (!song.fmt) fail(400, fromClip ? 'Pick a video (MP4, MOV, M4V or WebM)' : 'Pick a song (WAV, AIFF, FLAC, MP3, M4A or OGG)');
+  if (!(await stat(song.abs).catch(() => null))?.isFile()) fail(404, fromClip ? 'That video is gone' : 'That song is gone');
   const num = (v, min, max, name) => {
     const n = Number(v);
     return Number.isFinite(n) && n >= min && n <= max ? n : fail(400, `Bad ${name}`);
   };
-  const songAt = num(input.songAt ?? 0, 0, 36000, 'song start');
+  const songAt = num((fromClip ? input.clipAt : input.songAt) ?? 0, 0, 36000, 'start');
   const duration = num(input.duration, 1, 180, 'length');
   const lyrics = String(input.lyrics || '')
     .split(/\s+/)
@@ -10023,6 +10025,7 @@ async function songWords(file, input) {
           song.fmt,
           '-i',
           song.abs,
+          '-vn',
           '-ac',
           '1',
           '-ar',
@@ -10038,7 +10041,7 @@ async function songWords(file, input) {
       ff.on('error', bad);
       ff.on('close', (c) => {
         const buf = Buffer.concat(parts);
-        if (c) return bad(new Error("Couldn't read the song"));
+        if (c) return bad(new Error(fromClip ? "Couldn't read the clip's sound (does it have any?)" : "Couldn't read the song"));
         done(new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 4)));
       });
     });
@@ -10046,9 +10049,13 @@ async function songWords(file, input) {
   });
   wordsQueue = job.catch(() => {});
   const heard = (await job).filter((h) => h.t >= 0 && h.t <= duration);
-  if (!heard.length) fail(422, 'No singing heard in that part of the song. Tap the timing instead.');
+  if (!heard.length) fail(422, `No words heard in that part of the ${fromClip ? 'clip' : 'song'}. Tap the timing instead.`);
   const times = lyrics.length ? alignLyrics(lyrics, heard, duration) : null;
-  if (lyrics.length && !times) fail(422, "The words heard don't match the lyrics. Check the song part, or tap the timing instead.");
+  if (lyrics.length && !times)
+    fail(
+      422,
+      `The words heard don't match the lyrics. Check the ${fromClip ? 'clip' : 'song'} part, or clear the lyrics to write down what is said.`,
+    );
   return { heard, times };
 }
 

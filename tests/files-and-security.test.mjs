@@ -3671,6 +3671,17 @@ ${thisYear}-03;Comma Song;0,456`,
     lyrics: 'nothing like what was sung here at all today',
   });
   check('lyrics that were not heard are refused, not guessed', offLyrics.status === 422);
+  // No song: the clip's own sound is heard, and with no lyrics what was said comes back to become the captions
+  const spoken = await call('bob', '/api/video/words', 'POST', { clip: { space: 'up', path: 'clip.mp4' }, clipAt: 0, duration: 2 });
+  check(
+    "with no song, the clip's own words are heard",
+    spoken.status === 200 && JSON.parse(spoken.text).heard.length === 5 && JSON.parse(spoken.text).times === null,
+    spoken.text,
+  );
+  check(
+    'clip timing reads only clips you can see',
+    (await call('carol', '/api/video/words', 'POST', { clip: { space: 'up', path: 'clip.mp4' }, duration: 2 })).status >= 403,
+  );
   check(
     'lyric timing reads only songs you can see',
     (await call('carol', '/api/video/words', 'POST', { song: { space: 'up', path: 'beat.wav' }, duration: 2 })).status >= 403,
