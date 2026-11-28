@@ -3,17 +3,28 @@
 
 /**
  * How a caption is laid out (from lyric videos and 2012-era edits):
- * plain: one line; grid: words spaced out in even columns, row by row; stacked: one huge word per line filling
+ * plain: one line; grid: a narrow centred column of big words, each row spread to its width; stacked: one huge word per line filling
  * the width; soft: a small, slightly blurred line (white on black cards); brat: the lime "brat" cover card.
+ * From the team's lyric references: word: one bold yellow word at a time; sub / serif: a small film subtitle line;
+ * build: words add one by one until the line is full; stack: one word per line, a cream left-hand column.
  */
-export type TextStyle = 'plain' | 'grid' | 'stacked' | 'soft' | 'brat';
+export type TextStyle = 'plain' | 'grid' | 'stacked' | 'soft' | 'brat' | 'word' | 'sub' | 'serif' | 'build' | 'stack';
 export const TEXT_STYLES: [TextStyle, string][] = [
   ['plain', 'Plain'],
   ['grid', 'Word grid'],
   ['stacked', 'Big stacked'],
   ['soft', 'Soft'],
   ['brat', 'brat card'],
+  ['word', 'One word'],
+  ['sub', 'Subtitle'],
+  ['serif', 'Serif subtitle'],
+  ['build', 'Build-up'],
+  ['stack', 'Stack'],
 ];
+/** The sung words of a caption: a lone "/" only breaks a Word grid row, so it isn't one */
+export const lyricWords = (t: string) => t.split(/\s+/).filter((w) => w && w !== '/');
+/** Styles that show the words one at a time (word timing matters for these) */
+export const WORD_STYLES: TextStyle[] = ['word', 'build', 'grid'];
 
 export interface TextOverlayItem {
   id: string;
@@ -26,6 +37,7 @@ export interface TextOverlayItem {
   yPercent: number;
   shadow: boolean;
   style?: TextStyle; // how the words are laid out (plain line if missing)
+  shown?: number; // word styles: how many words are showing so far (all if missing)
 }
 
 /** Draws one caption onto a W×H canvas (sizes are relative, so it looks the same at any resolution). */
@@ -46,8 +58,55 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
   ctx.save();
   ctx.textBaseline = 'middle';
   const style = txt.style || 'plain';
-  const words = txt.text.trim().split(/\s+/);
-  if (style === 'brat') {
+  const tokens = txt.text.trim().split(/\s+/);
+  const words = lyricWords(txt.text);
+  if (!words.length) return;
+  const shown = Math.max(1, Math.min(words.length, txt.shown ?? words.length));
+  if (style === 'word') {
+    // one bold condensed yellow word at a time, in the middle
+    ctx.font = `bold ${size}px "Arial Narrow", "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = size / 6;
+    ctx.fillStyle = '#f5d90a';
+    ctx.fillText(words[shown - 1], tx, ty);
+  } else if (style === 'sub' || style === 'serif' || style === 'build') {
+    // film subtitles: a small line, wrapped to 80% of the width; build-up lays the whole line out and shows the
+    // words said so far, so nothing jumps as they appear
+    ctx.font = style === 'serif' ? `${size}px Georgia, "Times New Roman", serif` : `${size}px "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+    ctx.shadowBlur = size / 4;
+    ctx.fillStyle = style === 'serif' ? '#f1e2b3' : '#fff';
+    const space = ctx.measureText(' ').width;
+    const lines: { w: string; x: number }[][] = [[]];
+    let lineW = 0;
+    for (const w of words) {
+      const ww = ctx.measureText(w).width;
+      if (lineW && lineW + space + ww > W * 0.8) {
+        lines.push([]);
+        lineW = 0;
+      }
+      lines[lines.length - 1].push({ w, x: lineW + (lineW ? space : 0) });
+      lineW += (lineW ? space : 0) + ww;
+    }
+    const lineH = size * 1.2;
+    let n = 0;
+    lines.forEach((line, i) => {
+      const last = line[line.length - 1];
+      const left = tx - (last.x + ctx.measureText(last.w).width) / 2;
+      const y = ty + (i - (lines.length - 1) / 2) * lineH;
+      for (const { w, x } of line) if (n++ < (style === 'build' ? shown : words.length)) ctx.fillText(w, left + x, y);
+    });
+  } else if (style === 'stack') {
+    // one word per line down a left-hand column, bold and cream
+    ctx.font = `bold ${size}px "Arial Rounded MT Bold", "Helvetica Neue", Arial, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = size / 5;
+    ctx.fillStyle = '#f3ead2';
+    words.forEach((w, i) => ctx.fillText(w, W * 0.28, ty + (i - (words.length - 1) / 2) * size * 0.95));
+  } else if (style === 'brat') {
     // the brat cover: the whole frame lime green, lowercase narrow type, stretched wide and a little out of focus
     ctx.fillStyle = '#8ace00';
     ctx.fillRect(0, 0, W, H);
@@ -63,14 +122,48 @@ export function drawText(ctx: CanvasRenderingContext2D, txt: TextOverlayItem, W:
     ctx.scale(1.25, 1);
     ctx.fillText(t, 0, 0);
   } else if (style === 'grid') {
-    // three even columns, words left-aligned in them, the block centred on the chosen height
-    const cols = 3;
-    const colW = (W * 0.84) / cols;
-    const lineH = size * 1.12;
-    const rows = Math.ceil(words.length / cols);
-    ctx.font = `${size}px "${txt.fontFamily}", Arial, sans-serif`;
+    // A narrow column of big, tightly set, slightly condensed words, centred (from the team's reference): the widest
+    // row sets the column's width and the rows are justified to it like a paragraph (the last row keeps normal
+    // spaces), a single word sits on the left.
+    // Rows break at a "/" in the line, or after three words or when a row gets too wide. The whole caption is laid
+    // out first, so the words appear in place, row by row, and the column doesn't move.
+    ctx.font = `500 ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    ctx.letterSpacing = `${-0.03 * size}px`;
     ctx.textAlign = 'left';
-    words.forEach((w, i) => put(w, W * 0.08 + (i % cols) * colW, ty + (Math.floor(i / cols) - (rows - 1) / 2) * lineH));
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.shadowBlur = size / 6;
+    ctx.fillStyle = '#fff';
+    const squeeze = 0.88; // drawn 88% wide: a condensed look from any sans
+    const width = (w: string) => ctx.measureText(w).width * squeeze;
+    const space = width(' ');
+    const natural = (row: string[]) => row.reduce((a, w) => a + width(w), 0) + space * (row.length - 1);
+    const rows: string[][] = [[]];
+    for (const w of tokens) {
+      const row = rows[rows.length - 1];
+      if (w === '/' || row.length === 3 || (row.length && natural([...row, w]) > W * 0.62)) rows.push([]);
+      if (w !== '/') rows[rows.length - 1].push(w);
+    }
+    const full = rows.filter((r) => r.length);
+    const colW = Math.max(W * 0.44, ...full.map(natural));
+    const left = Math.max(W * 0.04, tx - colW / 2);
+    const lineH = size * 1.22;
+    let n = 0;
+    full.forEach((row, r) => {
+      const widths = row.map(width);
+      const last = r === full.length - 1 && full.length > 1;
+      const gap = row.length > 1 && !last ? (colW - widths.reduce((a, b) => a + b, 0)) / (row.length - 1) : space * 1.6;
+      let x = left;
+      row.forEach((w, i) => {
+        if (n++ < shown) {
+          ctx.save();
+          ctx.translate(x, ty + (r - (full.length - 1) / 2) * lineH);
+          ctx.scale(squeeze, 1);
+          ctx.fillText(w, 0, 0);
+          ctx.restore();
+        }
+        x += widths[i] + gap;
+      });
+    });
   } else if (style === 'stacked') {
     // one word per line, as big as the widest word allows across 90% of the width
     ctx.font = `bold 100px "${txt.fontFamily}", Arial, sans-serif`;

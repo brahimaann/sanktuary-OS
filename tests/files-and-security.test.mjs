@@ -223,6 +223,14 @@ const env = {
   // browser left behind there kept the tests (and so the deploy) waiting for hours
   ...(process.env.CI ? {} : { DARKROOM_BROWSER: 'off' }),
   YOUTUBE_UPLOAD_URL: 'http://127.0.0.1:3192/upload',
+  // what the lyric listener "hears" (the real speech model downloads on the server PC): one word misheard
+  SK_FAKE_WORDS: JSON.stringify([
+    { w: 'I', t: 0.2 },
+    { w: 'just', t: 0.5 },
+    { w: 'sleep', t: 0.8 },
+    { w: 'on', t: 1.1 },
+    { w: 'laughing.', t: 1.4 },
+  ]),
 };
 const srv = spawn(process.execPath, [SERVER], { env });
 let srvOut = '';
@@ -3608,9 +3616,14 @@ ${thisYear}-03;Comma Song;0,456`,
       start: 0,
       duration: 2,
       format: '9:16',
-      fit: 'duo',
-      look: 'lux',
-      captions: [{ start: 0, end: 1, png: PNG1 }],
+      fit: 'film',
+      look: 'vhs',
+      // word-by-word lyrics: a run of pictures in order, with a gap between them
+      captions: [
+        { start: 0, end: 0.4, png: PNG1 },
+        { start: 0.4, end: 1, png: PNG1 },
+        { start: 1.5, end: 2, png: PNG1 },
+      ],
       out: { space: 'up', dir: '' },
       name: 'drill edit',
       ...over,
@@ -3622,12 +3635,45 @@ ${thisYear}-03;Comma Song;0,456`,
     'captions must be PNG pictures',
     (await renderJob('bob', { captions: [{ start: 0, end: 1, png: 'data:image/png;base64,PHN2Zz4=' }] })).status === 400,
   );
+  check(
+    'caption pictures must be in order, not overlapping',
+    (
+      await renderJob('bob', {
+        captions: [
+          { start: 0, end: 1, png: PNG1 },
+          { start: 0.5, end: 2, png: PNG1 },
+        ],
+      })
+    ).status === 400,
+  );
   check('only videos as clips', (await renderJob('bob', { clip: { space: 'up', path: 'notes.txt' } })).status === 400);
   check('paths stay inside the space', (await renderJob('bob', { clip: { space: 'up', path: '../../x.mp4' } })).status === 400);
   check('three minutes at most', (await renderJob('bob', { duration: 500 })).status === 400);
   check(
     'the result needs a folder you can add to',
     (await renderJob('carol', { clip: { space: 'view', path: 'clip.mp4' }, song: null, out: { space: 'view', dir: '' } })).status === 403,
+  );
+  // Lyric timing: what's heard is lined up with the pasted lyrics, a misheard word placed between its neighbours
+  const words = await call('bob', '/api/video/words', 'POST', {
+    song: { space: 'up', path: 'beat.wav' },
+    songAt: 0,
+    duration: 2,
+    lyrics: 'i just keep / on laughing',
+  });
+  check(
+    'lyric words get the times they are sung',
+    words.status === 200 && JSON.stringify(JSON.parse(words.text).times) === '[0.2,0.5,0.8,1.1,1.4]',
+    words.text,
+  );
+  const offLyrics = await call('bob', '/api/video/words', 'POST', {
+    song: { space: 'up', path: 'beat.wav' },
+    duration: 2,
+    lyrics: 'nothing like what was sung here at all today',
+  });
+  check('lyrics that were not heard are refused, not guessed', offLyrics.status === 422);
+  check(
+    'lyric timing reads only songs you can see',
+    (await call('carol', '/api/video/words', 'POST', { song: { space: 'up', path: 'beat.wav' }, duration: 2 })).status >= 403,
   );
   check('a render starts', (await renderJob('bob')).status === 202);
   let renderStatus;
@@ -3642,6 +3688,50 @@ ${thisYear}-03;Comma Song;0,456`,
     'the video renders at 1080x1920 with sound',
     renderStatus?.status === 'Done' && /1080x1920/.test(renderInfo) && /Audio: aac/.test(renderInfo),
     renderStatus?.error || renderInfo.slice(-300),
+  );
+  // Beat cuts: pieces of clips, one after another, that add up to the length
+  check(
+    "cuts that don't add up to the length are refused",
+    (await renderJob('bob', { segments: [{ clip: { space: 'up', path: 'clip.mp4' }, from: 0, len: 0.5 }] })).status === 400,
+  );
+  const cutJob = await renderJob('bob', {
+    name: 'cut edit',
+    fit: 'duo',
+    segments: [
+      { clip: { space: 'up', path: 'clip.mp4' }, from: 0, len: 0.7 },
+      { clip: { space: 'up', path: 'phone.mov' }, from: 0, len: 0.6 },
+      { clip: { space: 'up', path: 'clip.mp4' }, from: 0.7, len: 0.7 },
+    ],
+  });
+  check('a beat-cut render starts', cutJob.status === 202, cutJob.text);
+  let cutStatus;
+  for (let i = 0; i < 300; i++) {
+    cutStatus = JSON.parse((await call('bob', '/api/video')).text).find((j) => j.name === 'cut edit.mp4');
+    if (!['Waiting', 'Rendering'].includes(cutStatus?.status)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const cutFile = join(drive, 'team', 'cut edit.mp4');
+  const cutInfo = existsSync(cutFile) ? spawnSync(ffmpegBin, ['-hide_banner', '-i', cutFile]).stderr.toString() : '';
+  check(
+    'the cuts render into one video of the full length',
+    cutStatus?.status === 'Done' && /Duration: 00:00:0(1\.9|2\.0)/.test(cutInfo) && /Audio: aac/.test(cutInfo),
+    cutStatus?.error || cutInfo.slice(-300),
+  );
+  // A batch: versions go together into a new folder (Edits/Batch ...), and the job says where each landed
+  const batchJob = await renderJob('bob', { name: 'promo v01', batch: 'b1', out: { space: 'up', dir: '', folder: 'Edits/Batch promo' } });
+  check('a batch version starts', batchJob.status === 202, batchJob.text);
+  let batchStatus;
+  for (let i = 0; i < 300; i++) {
+    batchStatus = JSON.parse((await call('bob', '/api/video')).text).find((j) => j.batch === 'b1');
+    if (!['Waiting', 'Rendering'].includes(batchStatus?.status)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  check(
+    'a batch version lands in its batch folder',
+    batchStatus?.status === 'Done' &&
+      batchStatus.path === 'Edits/Batch promo/promo v01.mp4' &&
+      existsSync(join(drive, 'team', 'Edits', 'Batch promo', 'promo v01.mp4')),
+    JSON.stringify(batchStatus),
   );
   check('no half-finished files are left behind', !readdirSync(join(drive, 'team')).some((n) => n.startsWith('.sk-render-')));
   check(
