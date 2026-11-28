@@ -9938,6 +9938,7 @@ const videoBox = (W, H, aspect) => {
 // of the song is sung. Pasted lyrics are lined up with what it heard, so a misheard word still gets the right time.
 let asr = null; // the model, loading or loaded (downloaded once into data/models)
 let asrError = '';
+let asrSince = 0; // when the current load started, so a load that stalls (a dropped download) is started over
 let wordsQueue = Promise.resolve();
 const WHISPER = process.env.SK_WHISPER_MODEL || 'onnx-community/whisper-base_timestamped';
 const plainWord = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
@@ -9970,30 +9971,40 @@ function alignLyrics(lyrics, heard, duration) {
 
 async function hear(pcm) {
   if (process.env.SK_FAKE_WORDS) return JSON.parse(process.env.SK_FAKE_WORDS); // the tests' stand-in for the model
+  if (asr && asrSince && Date.now() - asrSince > 10 * 60e3) {
+    console.error('Lyric listener: the load stalled for 10 minutes, starting it over');
+    asr = null;
+  }
   if (!asr) {
     asrError = '';
     const began = Date.now();
+    asrSince = began;
     console.log(`Lyric listener: loading ${WHISPER}`);
-    asr = import('@huggingface/transformers')
+    const load = import('@huggingface/transformers')
       .then(({ pipeline, env }) => {
         env.cacheDir = join(DATA, 'models');
         return pipeline('automatic-speech-recognition', WHISPER);
       })
       .then((m) => {
+        if (asr === load) asrSince = 0;
         console.log(`Lyric listener: ready in ${Math.round((Date.now() - began) / 1000)} s`);
         return m;
       })
       .catch((e) => {
-        asr = null;
-        asrError = String(e.message || e).slice(0, 200);
         console.error('Lyric listener failed to load:', e);
+        if (asr === load) {
+          asr = null; // a stale load that gave up doesn't undo the newer one
+          asrError = String(e.message || e).slice(0, 200);
+        }
         throw e;
       });
-    asr.catch(() => {}); // a failed load is reported on the next try, not as an unhandled rejection
-    fail(503, 'The lyric listener is downloading its model (first time only, a few minutes). Try again shortly.');
+    asr = load;
+    load.catch(() => {}); // a failed load is reported on the next try, not as an unhandled rejection
   }
-  const model = await Promise.race([asr, new Promise((r) => setTimeout(r, 200, null))]);
-  if (!model) fail(503, asrError || 'The lyric listener is still getting ready. Try again shortly.');
+  // From the files already on this PC the model is ready in seconds, so wait a little before saying "not yet"
+  const model = await Promise.race([asr.catch(() => null), new Promise((r) => setTimeout(r, 20e3, null))]);
+  if (!model)
+    fail(503, asrError || 'The lyric listener is getting ready (the first time it downloads its model, a few minutes). Try again shortly.');
   const out = await model(pcm, { return_timestamps: 'word', chunk_length_s: 30, stride_length_s: 5 });
   return (out.chunks || []).filter((c) => c.text.trim()).map((c) => ({ w: c.text.trim(), t: c.timestamp[0] ?? 0 }));
 }
