@@ -4,7 +4,7 @@ import { useApi } from '../utils/api';
 import { drawText, lyricWords, TEXT_STYLES, TextOverlayItem, TextStyle, WORD_STYLES } from '../utils/captions';
 import FilePicker, { FileRef } from '../components/FilePicker';
 import { sharedAudio } from '../utils/sound';
-import { waveformPeaks } from '../utils/audioAnalysis';
+import { beatGrid, estimateTempo, waveformPeaks } from '../utils/audioAnalysis';
 import { lightAudio } from './fileTypes';
 import { fileUrl, LogOn, shell, toolbar, button, statusBar } from './TeamFiles';
 
@@ -66,6 +66,52 @@ const LYRIC_TEMPLATES: { label: string; fit: Fit; look: Look; style: TextStyle; 
   { label: 'Spread grid', fit: 'film', look: 'faded', style: 'grid', size: 90, y: 49 },
 ];
 const styleSize = (st: TextStyle) => LYRIC_TEMPLATES.find((x) => x.style === st)?.size ?? (st === 'grid' ? 110 : 60);
+// Beat cuts: how often the edit cuts to the next clip. steady: every bar (4 beats); smart: every 2 beats; energy: every
+// beat where the song is loud, every bar elsewhere.
+type Pace = 'off' | 'steady' | 'smart' | 'energy';
+const PACES: [Pace, string][] = [
+  ['off', 'No cuts'],
+  ['steady', 'Steady (every bar)'],
+  ['smart', 'Smart (every 2 beats)'],
+  ['energy', 'Energy (faster when loud)'],
+];
+interface Piece {
+  ref: FileRef;
+  key: string;
+  at: number; // where it starts in the edit
+  from: number; // where it starts in its clip
+  len: number;
+}
+const keyOf = (r: FileRef) => `${r.space}/${r.path}`;
+/** The edit as pieces of the clips, cut on the beats (song times) for the pace; the clips take turns in `order`,
+ * each carrying on from where it left off (back to its start when it runs out). */
+function beatPieces(
+  clips: { ref: FileRef; from: number; length: number }[],
+  grid: { beats: number[]; loud: number[] } | null,
+  songAt: number,
+  duration: number,
+  pace: Pace,
+  order: number[] = clips.map((_, i) => i),
+): Piece[] {
+  const cuts: number[] = [];
+  if (grid && pace !== 'off' && clips.length)
+    grid.beats.forEach((b, i) => {
+      const t = b - songAt;
+      const on = pace === 'steady' ? i % 4 === 0 : pace === 'smart' ? i % 2 === 0 : grid.loud[i] >= 0.75 || i % 4 === 0;
+      if (on && t > 0.3 && t < duration - 0.3 && t - (cuts[cuts.length - 1] ?? 0) >= 0.3) cuts.push(Math.round(t * 1000) / 1000);
+    });
+  const bounds = [0, ...cuts, duration];
+  const cursor = clips.map((c) => c.from);
+  return bounds.slice(0, -1).map((at, i) => {
+    const k = order[i % order.length];
+    const c = clips[k];
+    const len = Math.round((bounds[i + 1] - at) * 1000) / 1000;
+    if (c.length && cursor[k] + len > c.length) cursor[k] = Math.min(c.from, Math.max(0, c.length - len));
+    const from = Math.round(cursor[k] * 1000) / 1000;
+    cursor[k] += len;
+    return { ref: c.ref, key: keyOf(c.ref), at, from, len };
+  });
+}
 const VIDEO = /\.(mp4|m4v|mov|webm)$/i;
 const AUDIO = /\.(wav|aiff?|flac|mp3|m4a|ogg)$/i;
 const newId = () => Math.random().toString(36).slice(2, 9);
@@ -111,7 +157,12 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   const [caps, setCaps] = useState<Cap[]>([]);
   const [lyrics, setLyrics] = useState('');
   const [capStyle, setCapStyle] = useState<TextStyle>('grid');
-  const [picking, setPicking] = useState<null | 'clip' | 'song'>(null);
+  const [picking, setPicking] = useState<null | 'clip' | 'song' | 'more'>(null);
+  const [more, setMore] = useState<{ ref: FileRef; from: number }[]>([]); // the other clips the beat cuts use
+  const [pace, setPace] = useState<Pace>('off');
+  const [lengths, setLengths] = useState<Record<string, number>>({});
+  const [grid, setGrid] = useState<{ bpm: number; beats: number[]; loud: number[] } | null>(null);
+  const vids = useRef<Record<string, HTMLVideoElement | null>>({});
   const [token, setToken] = useState('');
   const [clipLength, setClipLength] = useState(0);
   const [t, setT] = useState(0);
@@ -161,6 +212,8 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
       setCaps(d.caps);
       setLyrics(d.lyrics);
       setCapStyle(d.capStyle);
+      setMore(d.more || []);
+      setPace(d.pace || 'off');
       setName(d.name);
     } catch {
       // no draft or storage blocked: start fresh
@@ -169,15 +222,19 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   useEffect(() => {
     try {
       if (draftKey)
-        localStorage.setItem(draftKey, JSON.stringify({ song, songAt, start, duration, format, fit, look, caps, lyrics, capStyle, name }));
+        localStorage.setItem(
+          draftKey,
+          JSON.stringify({ song, songAt, start, duration, format, fit, look, caps, lyrics, capStyle, name, more, pace }),
+        );
     } catch {
       // storage full or blocked: the draft just isn't kept
     }
-  }, [draftKey, song, songAt, start, duration, format, fit, look, caps, lyrics, capStyle, name]);
+  }, [draftKey, song, songAt, start, duration, format, fit, look, caps, lyrics, capStyle, name, more, pace]);
 
   // The song's waveform, to pick where it starts (the light MP3 copy for WAV / AIFF / FLAC)
   useEffect(() => {
     setSongPeaks(null);
+    setGrid(null);
     if (!song || !token) return;
     const abort = new AbortController();
     fetch(src(song) + (lightAudio(song.path) ? '&preview' : ''), { signal: abort.signal })
@@ -186,6 +243,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
       .then((a) => {
         if (abort.signal.aborted) return;
         setSongPeaks(waveformPeaks(a.getChannelData(0)));
+        // the beat, for cutting between clips on it
+        const tempo = estimateTempo(a.getChannelData(0), a.sampleRate);
+        setGrid(tempo ? { bpm: tempo.bpm, ...beatGrid(a.getChannelData(0), a.sampleRate, tempo.bpm) } : null);
         setSongLength(a.duration);
       })
       .catch(() => {});
@@ -212,20 +272,38 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     g.fillRect(x(songAt + t), 0, 1, h);
   }, [songPeaks, songLength, songAt, duration, t]);
 
+  // Beat cuts: the clips, the pieces the edit is cut into, and whether there's more than one
+  const clips = clip
+    ? [{ ref: clip, from: start }, ...more].map((c) => ({
+        ...c,
+        length: keyOf(c.ref) === keyOf(clip) ? clipLength : lengths[keyOf(c.ref)] || 0,
+      }))
+    : [];
+  const pieces = beatPieces(clips, song ? grid : null, songAt, duration, more.length ? pace : 'off');
+  const multi = pieces.length > 1;
+
   // The live preview: the clip drawn into the frame the way the render will (the look as a CSS filter on this
   // layer), captions on a second layer on top, exactly as they'll be burned in
   useEffect(() => {
     let raf = 0;
     const draw = () => {
-      const v = video.current;
+      const a = audio.current;
+      // Beat cuts play on the song's clock: the clip of the piece under it is kept at the right point
+      let v = video.current;
+      let now = Math.max(0, (v?.currentTime ?? 0) - start);
+      if (multi && a) {
+        now = Math.max(0, a.currentTime - songAt);
+        const p = pieces.find((x) => now >= x.at && now < x.at + x.len) ?? pieces[pieces.length - 1];
+        v = vids.current[p.key] ?? null;
+        const want = p.from + (now - p.at);
+        if (v && !v.seeking && Math.abs(v.currentTime - want) > (playing ? 0.25 : 0.04)) v.currentTime = want;
+        if (v && playing && v.paused) v.play().catch(() => {});
+        for (const o of Object.values(vids.current)) if (o && o !== v && !o.paused) o.pause();
+      }
       const fc = frameCv.current?.getContext('2d');
       const cc = capCv.current?.getContext('2d');
       if (v && fc && cc) {
-        const now = Math.max(0, v.currentTime - start);
-        if (playing && now >= duration) {
-          v.currentTime = start;
-          if (audio.current) audio.current.currentTime = songAt;
-        }
+        if (playing && now >= duration) seek(0);
         fc.fillStyle = '#000';
         fc.fillRect(0, 0, W, H);
         if (v.videoWidth) {
@@ -247,8 +325,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
           }
         }
         // Two players drift apart: keep the song on the video's clock
-        const a = audio.current;
-        if (playing && a && !a.paused && !a.seeking && Math.abs(a.currentTime - songAt - now) > 0.1) a.currentTime = songAt + now;
+        if (!multi && playing && a && !a.paused && !a.seeking && Math.abs(a.currentTime - songAt - now) > 0.1) a.currentTime = songAt + now;
         cc.clearRect(0, 0, W, H);
         for (const c of caps) if (now >= c.start && now < c.end) drawText(cc, asItem(c, now), W, H);
         if (Math.abs(now - shown.current) > 0.04) setT((shown.current = now)); // the time readout, not every frame
@@ -257,10 +334,10 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [W, H, fit, caps, start, duration, playing, songAt]);
+  }, [W, H, fit, caps, start, duration, playing, songAt, pieces]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seek = (s: number) => {
-    if (video.current) video.current.currentTime = start + s;
+    if (video.current && !multi) video.current.currentTime = start + s;
     if (audio.current) audio.current.currentTime = songAt + s;
   };
   const play = () => {
@@ -268,11 +345,12 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     if (playing) {
       video.current.pause();
       audio.current?.pause();
+      for (const o of Object.values(vids.current)) o?.pause();
       return setPlaying(false);
     }
     seek(t >= duration ? 0 : t);
     video.current.muted = !!song; // the song replaces the clip's own sound, like the render
-    video.current.play().catch(() => {});
+    if (!multi) video.current.play().catch(() => {});
     audio.current?.play().catch(() => {});
     setPlaying(true);
   };
@@ -316,19 +394,18 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
     setTimeout(play, 50);
     setMsg(`Tap on every ${byWord ? 'word' : 'line'} as it's sung: the button, T or Enter.`);
   };
-  const finishTap = (times: number[]) => {
-    if (!tap) return;
-    if (playing) play();
+  // Lyric lines + when each word (or each line) starts -> captions that hold until the next line
+  const timeLines = (lines: string[], times: number[], byWord: boolean) => {
     const y = caps[0]?.y ?? 50;
     const out: Cap[] = [];
     let k = 0;
-    lyricLines.forEach((line, i) => {
+    lines.forEach((line, i) => {
       const count = lyricWords(line).length;
-      const own = tap.byWord ? times.slice(k, k + count) : times.slice(i, i + 1);
+      const own = byWord ? times.slice(k, k + count) : times.slice(i, i + 1);
       k += count;
       if (!own.length) return;
-      const next = tap.byWord ? times[k] : times[i + 1];
-      const end = Math.min(duration, next ?? Infinity, own[own.length - 1] + (tap.byWord ? 2 : 5));
+      const next = byWord ? times[k] : times[i + 1];
+      const end = Math.min(duration, next ?? Infinity, own[own.length - 1] + (byWord ? 2 : 5));
       out.push({
         id: newId(),
         text: line,
@@ -337,12 +414,49 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
         style: capStyle,
         size: styleSize(capStyle),
         y,
-        words: tap.byWord ? own : undefined,
+        words: byWord ? own : undefined,
       });
     });
     setCaps(out);
+    return out;
+  };
+  const finishTap = (times: number[]) => {
+    if (!tap) return;
+    if (playing) play();
+    const out = timeLines(lyricLines, times, tap.byWord);
     setTap(null);
     setMsg(`${out.length} lines timed. Play it back; drag a line's times to fix it, or tap again.`);
+  };
+  // Auto timing: the server listens to the song under the edit. With lyrics pasted, they get the times; without,
+  // what it heard becomes the lyrics (a new line at each pause or every seven words).
+  const [hearing, setHearing] = useState(false);
+  const autoTime = async () => {
+    if (!song) return;
+    setHearing(true);
+    setMsg('Listening to the song for the lyrics (the first time on the server can take a few minutes)...');
+    try {
+      const r: { heard: { w: string; t: number }[]; times: number[] | null } = await api('/api/video/words', {
+        method: 'POST',
+        body: JSON.stringify({ song, songAt, duration, lyrics }),
+      });
+      let lines = lyricLines;
+      let times = r.times;
+      if (!times) {
+        const rows: string[][] = [];
+        r.heard.forEach((h, i) => {
+          if (!i || h.t - r.heard[i - 1].t > 0.7 || rows[rows.length - 1].length >= 7) rows.push([]);
+          rows[rows.length - 1].push(h.w.toLowerCase().replace(/[.,!?]+$/, ''));
+        });
+        lines = rows.map((x) => x.join(' '));
+        times = r.heard.map((h) => h.t);
+        setLyrics(lines.join('\n'));
+      }
+      const out = timeLines(lines, times, true);
+      setMsg(`${out.length} lines timed by ear. Play it back and fix any word's line times, or tap instead.`);
+    } catch (e) {
+      setMsg((e as Error).message);
+    }
+    setHearing(false);
   };
   const tapNow = () => {
     if (!tap) return;
@@ -437,6 +551,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
           fit,
           look,
           captions: pngs,
+          segments: multi ? pieces.map((p) => ({ clip: p.ref, from: p.from, len: p.len })) : undefined,
           out: { space: clip.space, dir: parts.slice(0, -1).join('/') },
           name,
         }),
@@ -568,6 +683,36 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             />
           )}
           {song && token && <audio ref={audio} src={src(song)} preload="auto" />}
+          {/* beat cuts: a player per clip (the main clip too), kept at the right point by the preview */}
+          {multi &&
+            token &&
+            clips.map((c) => (
+              <video
+                key={keyOf(c.ref)}
+                ref={(el) => {
+                  vids.current[keyOf(c.ref)] = el;
+                }}
+                src={src(c.ref)}
+                muted
+                playsInline
+                preload="auto"
+                crossOrigin="anonymous"
+                style={{ display: 'none' }}
+              />
+            ))}
+          {token &&
+            more.map((c) => (
+              <video
+                key={'len' + keyOf(c.ref)}
+                src={src(c.ref)}
+                preload="metadata"
+                onLoadedMetadata={(e) => {
+                  const d = e.currentTarget.duration || 0;
+                  setLengths((l) => ({ ...l, [keyOf(c.ref)]: d }));
+                }}
+                style={{ display: 'none' }}
+              />
+            ))}
         </div>
 
         <div style={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -654,6 +799,51 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             )}
           </fieldset>
           <fieldset style={fs}>
+            <legend>Beat cuts</legend>
+            <div style={rowS}>
+              Cut between this clip and
+              {more.map((c, i) => (
+                <span key={keyOf(c.ref)} style={{ ...rowS, border: '1px solid #808080', padding: '0 3px' }}>
+                  {c.ref.path.split('/').pop()} from
+                  <input
+                    type="number"
+                    style={{ ...inp, width: 44 }}
+                    min={0}
+                    step={0.5}
+                    value={c.from}
+                    onChange={(e) => setMore(more.map((x, k) => (k === i ? { ...x, from: num(e.target.value, 0, 36000) } : x)))}
+                  />
+                  s
+                  <button style={button} onClick={() => setMore(more.filter((_, k) => k !== i))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button style={button} disabled={!clip || more.length >= 11} onClick={() => setPicking('more')}>
+                + Clip...
+              </button>
+            </div>
+            <div style={rowS}>
+              {PACES.map(([p, label]) => (
+                <button
+                  key={p}
+                  style={{ ...button, fontWeight: pace === p ? 700 : 400 }}
+                  disabled={!more.length && p !== 'off'}
+                  onClick={() => setPace(p)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div>
+              {!song
+                ? 'Add a song: the cuts land on its beat.'
+                : !grid
+                  ? 'Finding the beat...'
+                  : `${grid.bpm} BPM${multi ? ` · ${pieces.length} cuts across ${clips.length} clips` : ''}`}
+            </div>
+          </fieldset>
+          <fieldset style={fs}>
             <legend>Captions</legend>
             <textarea
               rows={3}
@@ -687,6 +877,16 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
                   </button>
                 </>
               ) : (
+                <button
+                  style={button}
+                  disabled={!song || hearing}
+                  onClick={autoTime}
+                  title="The server listens to the song and times every word (paste the lyrics first for the right spelling)"
+                >
+                  {hearing ? 'Listening...' : 'Auto timing'}
+                </button>
+              )}
+              {!tap && (
                 <button
                   style={button}
                   disabled={!clip || !lyrics.trim()}
@@ -791,9 +991,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
       </div>
       {picking && (
         <FilePicker
-          title={picking === 'clip' ? 'Pick a video clip' : 'Pick a song'}
+          title={picking === 'song' ? 'Pick a song' : 'Pick a video clip'}
           mode="file"
-          accept={(n) => (picking === 'clip' ? VIDEO : AUDIO).test(n)}
+          accept={(n) => (picking === 'song' ? AUDIO : VIDEO).test(n)}
           onPick={(r) => {
             setPicking(null);
             if (!r) return;
@@ -802,6 +1002,9 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
               setStart(0);
               setProxy(false);
               setPlaying(false); // the new clip loads paused
+            } else if (picking === 'more') {
+              if (keyOf(r) !== keyOf(clip!) && !more.some((c) => keyOf(c.ref) === keyOf(r))) setMore([...more, { ref: r, from: 0 }]);
+              if (pace === 'off') setPace('smart');
             } else setSong(r);
           }}
         />

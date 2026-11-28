@@ -505,3 +505,39 @@ export async function analyzeAudio(data: ArrayBuffer, onStep: (s: string) => voi
     bands: bandBalance(mono, sr),
   };
 }
+
+/** Beat times (seconds) through a song at a known tempo: the phase whose beats land on the strongest rises in level,
+ * and how loud each beat is (0-1, against the loudest), for cutting video on the beat. */
+export function beatGrid(x: Float32Array, sr: number, bpm: number) {
+  const hop = Math.round(sr / 100); // 10 ms frames
+  const n = Math.floor(x.length / hop);
+  const rise = new Float32Array(n);
+  const level = new Float32Array(n);
+  let prev = 0;
+  for (let f = 0; f < n; f++) {
+    let e = 0;
+    for (let i = f * hop; i < (f + 1) * hop; i++) e += x[i] * x[i];
+    level[f] = Math.sqrt(e / hop);
+    rise[f] = Math.max(0, level[f] - prev);
+    prev = level[f];
+  }
+  const period = 6000 / bpm; // frames per beat
+  let phase = 0;
+  let best = -1;
+  for (let p = 0; p < period; p++) {
+    let s = 0;
+    for (let b = p; b < n; b += period) s += rise[Math.round(b)] || 0;
+    if (s > best) [best, phase] = [s, p];
+  }
+  const beats: number[] = [];
+  const loud: number[] = [];
+  for (let b = phase; b < n; b += period) {
+    beats.push(Math.round(b) / 100);
+    let e = 0;
+    let c = 0;
+    for (let f = Math.round(b); f < Math.min(n, Math.round(b + period)); f++, c++) e += level[f];
+    loud.push(c ? e / c : 0);
+  }
+  const top = Math.max(...loud) || 1;
+  return { beats, loud: loud.map((e) => e / top) };
+}

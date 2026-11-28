@@ -9863,6 +9863,124 @@ const videoBox = (W, H, aspect) => {
   const w = Math.min(W, H * aspect);
   return [2 * Math.round(w / 2), 2 * Math.round(w / aspect / 2)];
 };
+// ── Lyric timing: a speech model on this PC (Whisper, run locally, nothing leaves the server) hears when each word
+// of the song is sung. Pasted lyrics are lined up with what it heard, so a misheard word still gets the right time.
+let asr = null; // the model, loading or loaded (downloaded once into data/models)
+let asrError = '';
+let wordsQueue = Promise.resolve();
+const WHISPER = process.env.SK_WHISPER_MODEL || 'onnx-community/whisper-base_timestamped';
+const plainWord = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+/** When each lyric word is sung: lyric words matched in order to the heard words (longest common run), the
+ * unmatched ones placed evenly between their matched neighbours. Null if almost nothing matched. */
+function alignLyrics(lyrics, heard, duration) {
+  const a = lyrics.map(plainWord);
+  const b = heard.map((h) => plainWord(h.w));
+  const L = Array.from({ length: a.length + 1 }, () => new Int32Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--) L[i][j] = a[i] && a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const times = new Array(a.length).fill(null);
+  for (let i = 0, j = 0; i < a.length && j < b.length;)
+    if (a[i] && a[i] === b[j] && L[i][j] === L[i + 1][j + 1] + 1) times[i++] = heard[j++].t;
+    else if (L[i + 1][j] >= L[i][j + 1]) i++;
+    else j++;
+  const known = times.map((t, i) => (t === null ? -1 : i)).filter((i) => i >= 0);
+  if (known.length < Math.max(2, a.length * 0.2)) return null;
+  const first = known[0];
+  const last = known[known.length - 1];
+  for (let i = 0; i < first; i++) times[i] = Math.max(0, times[first] - (first - i) * 0.3);
+  for (let i = last + 1; i < a.length; i++) times[i] = Math.min(duration, times[last] + (i - last) * 0.3);
+  for (let k = 0; k + 1 < known.length; k++) {
+    const [p, q] = [known[k], known[k + 1]];
+    for (let i = p + 1; i < q; i++) times[i] = times[p] + ((times[q] - times[p]) * (i - p)) / (q - p);
+  }
+  return times.map((t) => Math.round(t * 100) / 100);
+}
+
+async function hear(pcm) {
+  if (process.env.SK_FAKE_WORDS) return JSON.parse(process.env.SK_FAKE_WORDS); // the tests' stand-in for the model
+  if (!asr) {
+    asrError = '';
+    asr = import('@huggingface/transformers')
+      .then(({ pipeline, env }) => {
+        env.cacheDir = join(DATA, 'models');
+        return pipeline('automatic-speech-recognition', WHISPER);
+      })
+      .catch((e) => {
+        asr = null;
+        asrError = String(e.message || e).slice(0, 200);
+        throw e;
+      });
+    fail(503, 'The lyric listener is downloading its model (first time only, a few minutes). Try again shortly.');
+  }
+  const model = await Promise.race([asr, new Promise((r) => setTimeout(r, 200, null))]);
+  if (!model) fail(503, asrError || 'The lyric listener is still getting ready. Try again shortly.');
+  const out = await model(pcm, { return_timestamps: 'word', chunk_length_s: 30, stride_length_s: 5 });
+  return (out.chunks || []).filter((c) => c.text.trim()).map((c) => ({ w: c.text.trim(), t: c.timestamp[0] ?? 0 }));
+}
+
+async function songWords(file, input) {
+  const song = input.song ? file(input.song, CLIP_FORMATS) : fail(400, 'Add a song first');
+  if (!song.fmt) fail(400, 'Pick a song (WAV, AIFF, FLAC, MP3, M4A or OGG)');
+  if (!(await stat(song.abs).catch(() => null))?.isFile()) fail(404, 'That song is gone');
+  const num = (v, min, max, name) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? n : fail(400, `Bad ${name}`);
+  };
+  const songAt = num(input.songAt ?? 0, 0, 36000, 'song start');
+  const duration = num(input.duration, 1, 180, 'length');
+  const lyrics = String(input.lyrics || '')
+    .split(/\s+/)
+    .filter((w) => w && w !== '/')
+    .slice(0, 2000);
+  const job = wordsQueue.then(async () => {
+    // the part under the edit, as 16 kHz mono samples: what the model listens to
+    const pcm = await new Promise((done, bad) => {
+      const ff = spawn(
+        ffmpegPath,
+        [
+          '-nostdin',
+          '-v',
+          'error',
+          '-protocol_whitelist',
+          'file',
+          '-ss',
+          String(songAt),
+          '-t',
+          String(duration),
+          '-f',
+          song.fmt,
+          '-i',
+          song.abs,
+          '-ac',
+          '1',
+          '-ar',
+          '16000',
+          '-f',
+          'f32le',
+          'pipe:1',
+        ],
+        { windowsHide: true },
+      );
+      const parts = [];
+      ff.stdout.on('data', (d) => parts.push(d));
+      ff.on('error', bad);
+      ff.on('close', (c) => {
+        const buf = Buffer.concat(parts);
+        if (c) return bad(new Error("Couldn't read the song"));
+        done(new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 4)));
+      });
+    });
+    return hear(new Float32Array(pcm));
+  });
+  wordsQueue = job.catch(() => {});
+  const heard = (await job).filter((h) => h.t >= 0 && h.t <= duration);
+  if (!heard.length) fail(422, 'No singing heard in that part of the song. Tap the timing instead.');
+  const times = lyrics.length ? alignLyrics(lyrics, heard, duration) : null;
+  if (lyrics.length && !times) fail(422, "The words heard don't match the lyrics. Check the song part, or tap the timing instead.");
+  return { heard, times };
+}
+
 const videoJobs = new Map(); // id -> job (until the server restarts)
 let videoQueue = Promise.resolve();
 
@@ -9875,10 +9993,10 @@ async function videoApi(req, res, url) {
       res,
       [...videoJobs.values()]
         .filter((j) => j.by === user.username)
-        .slice(-10)
+        .slice(-40)
         .reverse(),
     );
-  if (!(req.method === 'POST' && what === 'render')) fail(404, 'Unknown video action');
+  if (!(req.method === 'POST' && (what === 'render' || what === 'words'))) fail(404, 'Unknown video action');
 
   // captions come as pictures: a bigger request than usual
   const raw = await body(req, 40e6);
@@ -9897,6 +10015,7 @@ async function videoApi(req, res, url) {
     const fmt = kinds[extname(abs).toLowerCase()];
     return { space, abs, fmt };
   };
+  if (what === 'words') return json(res, await songWords(file, input));
   const clip = file(input.clip, VIDEO_IN);
   if (!clip.fmt) fail(400, 'Pick a video (MP4, MOV, M4V or WebM)');
   if (!(await stat(clip.abs).catch(() => null))?.isFile()) fail(404, 'That video is gone');
@@ -9910,6 +10029,25 @@ async function videoApi(req, res, url) {
   const start = num(input.start ?? 0, 0, 36000, 'start');
   const duration = num(input.duration, 1, 180, 'length (up to 3 minutes)');
   const songAt = song ? num(input.songAt ?? 0, 0, 36000, 'song start') : 0;
+  // Beat cuts: the edit is a run of pieces from several clips (each from a point, for a length) that add up to it.
+  // Without them it is one piece of the one clip.
+  let pieces = [{ src: clip, from: start, len: duration }];
+  if (Array.isArray(input.segments) && input.segments.length) {
+    if (input.segments.length > 200) fail(400, 'Too many cuts (200 at most)');
+    const seen = new Map();
+    pieces = [];
+    for (const g of input.segments) {
+      const key = `${g?.clip?.space}/${g?.clip?.path}`;
+      if (!seen.has(key)) {
+        const f = file(g.clip, VIDEO_IN);
+        if (!f.fmt) fail(400, 'Every cut needs a video (MP4, MOV, M4V or WebM)');
+        if (!(await stat(f.abs).catch(() => null))?.isFile()) fail(404, 'One of the clips is gone');
+        seen.set(key, f);
+      }
+      pieces.push({ src: seen.get(key), from: num(g.from, 0, 36000, 'cut start'), len: num(g.len, 0.05, 180, 'cut length') });
+    }
+    if (Math.abs(pieces.reduce((a, g) => a + g.len, 0) - duration) > 0.1) fail(400, "The cuts don't add up to the length");
+  }
   const [W, H] = own(VIDEO_FORMATS, input.format) || fail(400, 'Pick a format');
   const fit = ['crop', 'fit', 'stretch', 'duo', 'film', 'scope'].includes(input.fit)
     ? input.fit
@@ -9926,6 +10064,15 @@ async function videoApi(req, res, url) {
   // Where it goes: a folder you can add to, named after the clip unless you say otherwise
   const out = file({ space: input.out?.space, path: input.out?.dir ?? '' }, { '': true }, 'upload');
   if (!(await stat(out.abs).catch(() => null))?.isDirectory()) fail(404, 'That folder is gone');
+  // a batch's versions go together in a new folder inside it
+  const sub = input.out?.folder ? safeName(String(input.out.folder).slice(0, 80)) : '';
+  if (sub) {
+    out.abs = join(out.abs, sub);
+    if (!existsSync(out.abs)) {
+      await mkdir(out.abs, { recursive: true });
+      await setOwner(out.space, out.abs, user);
+    }
+  }
   const name = freeName(
     out.abs,
     `${safeName(
@@ -9934,12 +10081,24 @@ async function videoApi(req, res, url) {
         .slice(0, 100),
     )}.mp4`,
   );
-  if ([...videoJobs.values()].filter((j) => j.by === user.username && ['Waiting', 'Rendering'].includes(j.status)).length >= 3)
-    fail(429, 'You already have 3 videos rendering. Wait for one to finish.');
+  // a batch of versions queues up to 24 at once; single renders 3
+  const most = input.batch ? 24 : 3;
+  if ([...videoJobs.values()].filter((j) => j.by === user.username && ['Waiting', 'Rendering'].includes(j.status)).length >= most)
+    fail(429, `You already have ${most} videos rendering. Wait for one to finish.`);
 
-  const job = { id: randomUUID().slice(0, 10), by: user.username, name, status: 'Waiting', pct: 0, error: null, space: out.space.id };
-  videoJobs.set(job.id, job);
   const outDir = relative(resolve(out.space.root), out.abs).split(sep).filter(Boolean);
+  const job = {
+    id: randomUUID().slice(0, 10),
+    by: user.username,
+    name,
+    status: 'Waiting',
+    pct: 0,
+    error: null,
+    space: out.space.id,
+    path: [...outDir, name].join('/'), // where the video lands, for the batch's keep wall
+    batch: /^[\w-]{1,20}$/.test(String(input.batch || '')) ? String(input.batch) : null,
+  };
+  videoJobs.set(job.id, job);
   videoQueue = videoQueue.then(async () => {
     job.status = 'Rendering';
     const tmp = await mkdtemp(join(os.tmpdir(), 'sk-render-'));
@@ -9963,9 +10122,11 @@ async function videoApi(req, res, url) {
         await writeFile(join(tmp, 'captions.txt'), list.join('\n'));
       }
       const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', '-protocol_whitelist', 'file'];
-      args.push('-ss', String(start), '-t', String(duration), '-f', clip.fmt, '-i', clip.abs);
+      for (const g of pieces) args.push('-ss', String(g.from), '-t', String(g.len), '-f', g.src.fmt, '-i', g.src.abs);
       if (song) args.push('-ss', String(songAt), '-t', String(duration), '-f', song.fmt, '-i', song.abs);
       if (captions.length) args.push('-f', 'concat', '-i', join(tmp, 'captions.txt'));
+      const songIn = pieces.length;
+      const capsIn = pieces.length + (song ? 1 : 0);
       const [bw, bh] = fit === 'film' || fit === 'scope' ? videoBox(W, H, fit === 'film' ? 4 / 3 : 2.39) : [W, H];
       const fitChain =
         fit === 'film' || fit === 'scope'
@@ -9976,11 +10137,18 @@ async function videoApi(req, res, url) {
               ? `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`
               : fit === 'stretch'
                 ? `scale=${W}:${H}`
-                : `scale=${W / 2}:${H},setsar=1,split[d1][d2];[d1][d2]hstack=inputs=2`; // the "stretch duo"
-      const graph = [`[0:v]${fitChain}[f]`, `[f]setsar=1,fps=30,${look}[v0]`];
-      if (captions.length) graph.push(`[v0][${song ? 2 : 1}:v]overlay=0:0:eof_action=pass[v1]`);
+                : `scale=${W / 2}:${H},setsar=1,split[dA][dB];[dA][dB]hstack=inputs=2`; // the "stretch duo"
+      // each piece fills the frame the same way and is cut to its exact length, then they play one after another
+      const graph = pieces.map(
+        (g, i) =>
+          `[${i}:v]${fitChain.replace(/\[d([AB])\]/g, `[d$1${i}]`)},setsar=1,fps=30,trim=duration=${g.len},setpts=PTS-STARTPTS[p${i}]`,
+      );
+      graph.push(`${pieces.map((_, i) => `[p${i}]`).join('')}concat=n=${pieces.length}:v=1:a=0,${look}[v0]`);
+      if (captions.length) graph.push(`[v0][${capsIn}:v]overlay=0:0:eof_action=pass[v1]`);
       graph.push(`[v${captions.length ? 1 : 0}]format=yuv420p[vout]`);
-      args.push('-filter_complex', graph.join(';'), '-map', '[vout]', '-map', song ? '1:a:0' : '0:a:0?');
+      args.push('-filter_complex', graph.join(';'), '-map', '[vout]');
+      if (song) args.push('-map', `${songIn}:a:0`);
+      else if (pieces.length === 1) args.push('-map', '0:a:0?');
       args.push('-af', `afade=t=out:st=${Math.max(0, duration - 1)}:d=1`);
       args.push('-t', String(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-b:a', '192k');
       args.push('-movflags', '+faststart', '-f', 'mp4', '-y', part);
