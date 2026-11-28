@@ -421,36 +421,11 @@ const TracksApp: React.FC = () => {
   /** Clips and pictures dropped into Shoots (or a shoot's folder) become Shot footage; into Edits, Edited footage with
    * the file as its edit. A one-song project keeps them on the song's page, a bigger one on the whole project. */
   const addFootage = async (items: UploadItem[], saved: string[], target: Release) => {
-    const made: ContentItem[] = [];
-    items.forEach((i, n) => {
-      const kind = fileKind(saved[n]);
-      const top = i.sub?.[0];
-      if (!['video', 'image'].includes(kind) || (top !== 'Shoots' && top !== 'Edits')) return;
-      const file = { space: target.folder!.space, path: [target.folder!.path, ...i.sub!, saved[n]].join('/') };
-      const edited = top === 'Edits';
-      made.push({
-        id: Math.random().toString(36).slice(2, 10),
-        kind: kind === 'image' ? 'Photos' : edited ? 'Video' : 'Clip',
-        title: saved[n].replace(/\.[^.]+$/, ''),
-        status: edited ? 'Edited' : 'Shot',
-        file,
-        edit: edited ? file : null,
-        due: null,
-      });
-    });
-    if (!made.length) return 0;
-    const now: { releases: Release[]; tracks: Track[] } = await api('/api/tracks');
-    const songs = now.tracks.filter((t) => t.release === target.id);
-    const owner = songs.length === 1 ? songs[0] : now.releases.find((r) => r.id === target.id);
-    const have = new Set((owner?.content || []).map((x) => x.file && `${x.file.space}/${x.file.path}`));
-    const fresh = made.filter((x) => !have.has(`${x.file!.space}/${x.file!.path}`));
-    if (!fresh.length) return 0;
-    const content = [...(owner?.content || []), ...fresh];
-    await api(songs.length === 1 ? `/api/tracks/track/${songs[0].id}` : `/api/tracks/release/${target.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ content }),
-    });
-    return fresh.length;
+    const made = items
+      .map((i, n) => [i.sub?.[0], [target.folder!.path, ...(i.sub || []), saved[n]].join('/')] as const)
+      .filter(([top, path]) => (top === 'Shoots' || top === 'Edits') && isFootage(path))
+      .map(([, path]) => footageItem({ space: target.folder!.space, path }));
+    return saveFootage(api, made, target);
   };
   const uploadSpace = () => {
     const spaces = (me?.spaces || []).filter((s) => s.online && s.id !== 'me' && ['upload', 'edit'].includes(s.rights));
@@ -1021,6 +996,16 @@ const TracksApp: React.FC = () => {
                 )}
               </tbody>
             </table>
+            {!isPlaylist && (
+              <ProjectFootage
+                release={release}
+                tracks={tracks}
+                canEdit={!listenOnly}
+                canApprove={!!me && (me.admin || release.owner === me.username || !!release.owners?.includes(me.username))}
+                onChange={load}
+                onOpenSong={setTrackId}
+              />
+            )}
           </div>
         )}
         {track && (
@@ -1283,6 +1268,142 @@ const Library: React.FC<{
           </button>
         );
       })}
+    </div>
+  );
+};
+
+/** Footage in a project folder: any video, and pictures from a shoot or an edit (not the cover or artwork). */
+const isFootage = (path: string) => {
+  const kind = fileKind(path);
+  return kind === 'video' || (kind === 'image' && /(^|\/)(Shoots|Edits|Posted)\//.test(path));
+};
+/** One footage item for a file: anything in Edits or Posted counts as Edited (the file is the edit), the rest as Shot. */
+const footageItem = (file: FileRef): ContentItem => {
+  const edited = /(^|\/)(Edits|Posted)\//.test(file.path);
+  const image = fileKind(file.path) === 'image';
+  return {
+    id: Math.random().toString(36).slice(2, 10),
+    kind: image ? 'Photos' : edited ? 'Video' : 'Clip',
+    title: file.path
+      .split('/')
+      .pop()!
+      .replace(/\.[^.]+$/, ''),
+    status: edited ? 'Edited' : 'Shot',
+    file,
+    edit: edited ? file : null,
+    due: null,
+  };
+};
+const fileKey = (f: FileRef | null | undefined) => (f ? `${f.space}/${f.path}` : '');
+/** Saves new footage on the project: on its song when it has just one, else on the whole project. Skips files it has. */
+const saveFootage = async (api: ReturnType<typeof useApi>, made: ContentItem[], target: Release) => {
+  if (!made.length) return 0;
+  const now: { releases: Release[]; tracks: Track[] } = await api('/api/tracks');
+  const songs = now.tracks.filter((t) => t.release === target.id);
+  const r = now.releases.find((x) => x.id === target.id);
+  const have = new Set([...(r?.content || []), ...songs.flatMap((t) => t.content || [])].map((x) => fileKey(x.file)));
+  const fresh = made.filter((x) => !have.has(fileKey(x.file)));
+  if (!fresh.length) return 0;
+  const owner = songs.length === 1 ? songs[0] : r;
+  await api(songs.length === 1 ? `/api/tracks/track/${songs[0].id}` : `/api/tracks/release/${target.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content: [...(owner?.content || []), ...fresh] }),
+  });
+  return fresh.length;
+};
+
+/** Under a project's songs: its whole-project footage, and any videos sitting in its folder that Footage doesn't list
+ * yet (added from Files, dropped as a folder, or uploaded before footage was tracked), with one click to add them. */
+const ProjectFootage: React.FC<{
+  release: Release;
+  tracks: Track[];
+  canEdit: boolean;
+  canApprove: boolean;
+  onChange: () => void;
+  onOpenSong: (id: string) => void;
+}> = ({ release, tracks, canEdit, canApprove, onChange, onOpenSong }) => {
+  const api = useApi();
+  const [loose, setLoose] = useState<FileRef[]>([]);
+  const [note, setNote] = useState('');
+  const listed = [...(release.content || []), ...tracks.flatMap((t) => t.content || [])].map((x) => fileKey(x.file));
+  const listedKey = listed.join('|');
+  useEffect(() => {
+    const f = release.folder;
+    if (!f) return setLoose([]);
+    let gone = false;
+    const have = new Set(listedKey.split('|'));
+    const found: FileRef[] = [];
+    // The project folder and three levels down (Shoots/<day>/<camera>), skipping where songs and sessions live
+    const walk = async (path: string, depth: number): Promise<void> => {
+      const d: { entries: { name: string; isDir: boolean }[] } = await api(
+        `/api/files/${f.space}/${path.split('/').map(encodeURIComponent).join('/')}?list`,
+      ).catch(() => ({ entries: [] }));
+      for (const e of d.entries) {
+        const p = `${path}/${e.name}`;
+        if (e.isDir) {
+          if (depth < 3 && !/^(Bounces|Stems|Projects|Artwork|\.)/.test(e.name)) await walk(p, depth + 1);
+        } else if (isFootage(p.slice(f.path.length + 1)) && !have.has(`${f.space}/${p}`)) found.push({ space: f.space, path: p });
+      }
+    };
+    walk(f.path, 0).then(() => !gone && setLoose(found));
+    return () => {
+      gone = true;
+    };
+  }, [api, release.folder, listedKey]);
+  const addLoose = async () => {
+    try {
+      const n = await saveFootage(api, loose.map(footageItem), release);
+      setNote(`${n} added to Footage${tracks.length === 1 ? ` on ${tracks[0].title}` : ''}.`);
+      onChange();
+    } catch (e) {
+      setNote((e as Error).message);
+    }
+  };
+  const songsWith = tracks.filter((t) => t.content?.length);
+  if (!loose.length && !release.content?.length && !songsWith.length && !note) return null;
+  return (
+    <div style={{ borderTop: '1px solid #000', padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <b>Footage</b>
+      {!!loose.length && canEdit && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>
+            {loose.length} {loose.length === 1 ? 'file' : 'files'} in the project folder {loose.length === 1 ? "isn't" : "aren't"} in
+            Footage yet (
+            {loose
+              .slice(0, 3)
+              .map((x) => x.path.split('/').pop())
+              .join(', ')}
+            {loose.length > 3 ? ', ...' : ''}).
+          </span>
+          <button style={{ ...button, fontWeight: 700 }} onClick={addLoose}>
+            Add {loose.length === 1 ? 'it' : 'them'}
+          </button>
+        </div>
+      )}
+      {note && <span>{note}</span>}
+      {songsWith.map((t) => (
+        <div key={t.id}>
+          <button style={button} onClick={() => onOpenSong(t.id)} title="Open the song's page, where its footage is">
+            {t.title}: {t.content!.length} in Footage
+          </button>
+        </div>
+      ))}
+      {(!!release.content?.length || tracks.length !== 1) && (
+        <>
+          <i>Whole project</i>
+          <ContentList
+            items={release.content || []}
+            readOnly={!canEdit}
+            folder={release.folder}
+            canApprove={canApprove}
+            onSave={(content) =>
+              api(`/api/tracks/release/${release.id}`, { method: 'PATCH', body: JSON.stringify({ content }) }).then(onChange, (e) =>
+                setNote((e as Error).message),
+              )
+            }
+          />
+        </>
+      )}
     </div>
   );
 };
