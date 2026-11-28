@@ -15,7 +15,10 @@ function Save($ok, $commit, $msg) {
 function Run($what, [scriptblock]$cmd) {
   $out = & $cmd 2>&1 | Out-String
   Set-Content (Join-Path $data 'deploy-output.log') $out # the whole output: the last 15 lines below can be all warnings
-  if ($LASTEXITCODE -ne 0) { throw "$what failed:`n$($out.Trim() -split "`n" | Select-Object -Last 15 | Out-String)" }
+  # The tests' "745 passed, 2 failed: <names>" line goes first: it's what the alert shows, and the last 15 lines are
+  # often only the server log
+  $summary = ($out -split "`n" | Where-Object { $_ -match '^\d+ passed, [1-9]\d* failed' } | ForEach-Object { $_.Trim() }) -join ' | '
+  if ($LASTEXITCODE -ne 0) { throw "$what failed: $summary`n$($out.Trim() -split "`n" | Select-Object -Last 15 | Out-String)" }
 }
 
 # The watcher and backup scripts run from C:\homeserver\nextcloud; keep those copies in step with the repo
