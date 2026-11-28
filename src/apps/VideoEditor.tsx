@@ -720,9 +720,42 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   };
 
   const num = (v: string, min: number, max: number) => Math.min(max, Math.max(min, Number(v) || 0));
-  const scale = Math.min(360 / W, 520 / H);
+  // Phones (or a narrow window): preview first, one tool panel at a time, picked from a tab bar at the bottom
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [box2, setBox2] = useState({ w: 1000, h: 800 });
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBox2({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const narrow = box2.w < 600;
+  const [tab, setTab] = useState<Tab>('templates');
+  const show = (k: Tab) => !narrow || tab === k;
+  const scale = narrow ? Math.min((box2.w - 16) / W, (box2.h * 0.42) / H) : Math.min(360 / W, 520 / H);
+  const templateRows = (
+    <>
+      <span style={{ marginLeft: narrow ? 0 : 6 }}>Templates:</span>
+      {BASIC_TEMPLATES.map(([k, label]) => (
+        <button key={k} style={button} onClick={() => template(k)}>
+          {label}
+        </button>
+      ))}
+    </>
+  );
+  // the same three rows as swipeable chips, for the phone's Templates tab
+  const chips = (label: string, kids: React.ReactNode) => (
+    <div>
+      <div style={{ fontWeight: 700, margin: '2px 0 4px' }}>{label}</div>
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>{kids}</div>
+    </div>
+  );
+  const chip: React.CSSProperties = { ...button, whiteSpace: 'nowrap', flex: 'none', minHeight: 32 };
+
   return (
     <div
+      ref={shellRef}
       style={shell}
       tabIndex={0}
       onKeyDown={(e) => {
@@ -749,52 +782,40 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             ×
           </button>
         )}
-        <span style={{ marginLeft: 6 }}>Templates:</span>
-        {(
-          [
-            ['lyric', 'Lyric video'],
-            ['stretch', 'Stretch edit'],
-            ['brat', 'brat promo'],
-            ['card', 'Black card intro'],
-            ['stacked', 'Big words'],
-          ] as const
-        ).map(([k, label]) => (
-          <button key={k} style={button} onClick={() => template(k)}>
-            {label}
-          </button>
-        ))}
+        {!narrow && templateRows}
       </div>
-      <div style={{ ...toolbar, flexWrap: 'wrap' }}>
-        <span>Promo presets:</span>
-        {(
-          [
-            ['pov', 'POV text'],
-            ['foryou', 'For you if...'],
-            ['hook', 'Story hook'],
-            ['performance', 'Performance'],
-            ['bts', 'BTS'],
-            ['canvas', 'Canvas 8s'],
-          ] as const
-        ).map(([k, label]) => (
-          <button key={k} style={button} onClick={() => promo(k)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      <div style={{ ...toolbar, flexWrap: 'wrap' }}>
-        <span>Lyric templates:</span>
-        {LYRIC_TEMPLATES.map((tp) => (
-          <button
-            key={tp.label}
-            style={{ ...button, fontWeight: capStyle === tp.style && fit === tp.fit && look === tp.look ? 700 : 400 }}
-            onClick={() => lyricTemplate(tp)}
-          >
-            {tp.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 8, padding: 6, overflow: 'auto', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+      {!narrow && (
+        <>
+          <div style={{ ...toolbar, flexWrap: 'wrap' }}>
+            <span>Promo presets:</span>
+            {PROMOS.map(([k, label]) => (
+              <button key={k} style={button} onClick={() => promo(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ ...toolbar, flexWrap: 'wrap' }}>
+            <span>Lyric templates:</span>
+            {LYRIC_TEMPLATES.map((tp) => (
+              <button
+                key={tp.label}
+                style={{ ...button, fontWeight: capStyle === tp.style && fit === tp.fit && look === tp.look ? 700 : 400 }}
+                onClick={() => lyricTemplate(tp)}
+              >
+                {tp.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div
+        style={
+          narrow
+            ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: 6, overflow: 'hidden' }
+            : { flex: 1, minHeight: 0, display: 'flex', gap: 8, padding: 6, overflow: 'auto', flexWrap: 'wrap' }
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', flex: 'none' }}>
           <div style={{ position: 'relative', width: W * scale, height: H * scale, background: '#000', border: '2px inset #808080' }}>
             <canvas
               ref={frameCv}
@@ -830,7 +851,7 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             )}
           </div>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center', width: W * scale }}>
-            <button style={button} disabled={!clip} onClick={play}>
+            <button style={narrow ? { ...button, minWidth: 40, minHeight: 32 } : button} disabled={!clip} onClick={play}>
               {playing ? '❚❚' : '▶'}
             </button>
             <input
@@ -897,398 +918,479 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
             ))}
         </div>
 
-        <div style={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <fieldset style={fs}>
-            <legend>Shape</legend>
-            <div style={rowS}>
-              {(Object.keys(SIZES) as Format[]).map((f) => (
-                <button key={f} style={{ ...button, fontWeight: format === f ? 700 : 400 }} onClick={() => setFormat(f)}>
-                  {f}
-                </button>
-              ))}
-            </div>
-            <div style={rowS}>
-              {FITS.map(([f, label]) => (
-                <button key={f} style={{ ...button, fontWeight: fit === f ? 700 : 400 }} onClick={() => setFit(f)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-          <fieldset style={fs}>
-            <legend>Look</legend>
-            <div style={rowS}>
-              {LOOKS.map(([l, label]) => (
-                <button key={l} style={{ ...button, fontWeight: look === l ? 700 : 400 }} onClick={() => setLook(l)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-          <fieldset style={fs}>
-            <legend>Time</legend>
-            <label style={rowS}>
-              Clip from
-              <input
-                type="number"
-                style={inp}
-                min={0}
-                max={clipLength || 36000}
-                step={0.5}
-                value={start}
-                onChange={(e) => setStart(num(e.target.value, 0, clipLength || 36000))}
-              />
-              s, length
-              <input
-                type="number"
-                style={inp}
-                min={1}
-                max={180}
-                step={0.5}
-                value={duration}
-                onChange={(e) => setDuration(num(e.target.value, 1, 180))}
-              />
-              s {clipLength ? `(clip is ${clipLength.toFixed(1)}s)` : ''}
-            </label>
-            {song && (
+        <div
+          style={
+            narrow
+              ? { flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }
+              : { flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column', gap: 6 }
+          }
+        >
+          {narrow && tab === 'templates' && (
+            <>
+              {chips(
+                'Lyric templates',
+                LYRIC_TEMPLATES.map((tp) => (
+                  <button
+                    key={tp.label}
+                    style={{ ...chip, fontWeight: capStyle === tp.style && fit === tp.fit && look === tp.look ? 700 : 400 }}
+                    onClick={() => lyricTemplate(tp)}
+                  >
+                    {tp.label}
+                  </button>
+                )),
+              )}
+              {chips(
+                'Promo presets',
+                PROMOS.map(([k, label]) => (
+                  <button key={k} style={chip} onClick={() => promo(k)}>
+                    {label}
+                  </button>
+                )),
+              )}
+              {chips(
+                'Starters',
+                BASIC_TEMPLATES.map(([k, label]) => (
+                  <button key={k} style={chip} onClick={() => template(k)}>
+                    {label}
+                  </button>
+                )),
+              )}
+            </>
+          )}
+          {show('frame') && (
+            <fieldset style={fs}>
+              <legend>Shape</legend>
+              <div style={rowS}>
+                {(Object.keys(SIZES) as Format[]).map((f) => (
+                  <button key={f} style={{ ...button, fontWeight: format === f ? 700 : 400 }} onClick={() => setFormat(f)}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+              <div style={rowS}>
+                {FITS.map(([f, label]) => (
+                  <button key={f} style={{ ...button, fontWeight: fit === f ? 700 : 400 }} onClick={() => setFit(f)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          {show('frame') && (
+            <fieldset style={fs}>
+              <legend>Look</legend>
+              <div style={rowS}>
+                {LOOKS.map(([l, label]) => (
+                  <button key={l} style={{ ...button, fontWeight: look === l ? 700 : 400 }} onClick={() => setLook(l)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          {show('frame') && (
+            <fieldset style={fs}>
+              <legend>Time</legend>
               <label style={rowS}>
-                Song from
+                Clip from
                 <input
                   type="number"
                   style={inp}
                   min={0}
+                  max={clipLength || 36000}
                   step={0.5}
-                  value={songAt}
-                  onChange={(e) => setSongAt(num(e.target.value, 0, 36000))}
+                  value={start}
+                  onChange={(e) => setStart(num(e.target.value, 0, clipLength || 36000))}
                 />
-                s (the song replaces the clip's sound)
+                s, length
+                <input
+                  type="number"
+                  style={inp}
+                  min={1}
+                  max={180}
+                  step={0.5}
+                  value={duration}
+                  onChange={(e) => setDuration(num(e.target.value, 1, 180))}
+                />
+                s {clipLength ? `(clip is ${clipLength.toFixed(1)}s)` : ''}
               </label>
-            )}
-            {song && songPeaks && (
-              <canvas
-                ref={songCv}
-                width={600}
-                height={40}
-                title="Click where the song should start"
-                style={{ width: '100%', height: 40, border: '2px inset #808080', cursor: 'pointer' }}
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  const at = Math.round(((e.clientX - r.left) / r.width) * songLength * 10) / 10;
-                  setSongAt(at);
-                  if (audio.current) audio.current.currentTime = at + t;
-                }}
-              />
-            )}
-          </fieldset>
-          <fieldset style={fs}>
-            <legend>Beat cuts</legend>
-            <div style={rowS}>
-              Cut between this clip and
-              {more.map((c, i) => (
-                <span key={keyOf(c.ref)} style={{ ...rowS, border: '1px solid #808080', padding: '0 3px' }}>
-                  {c.ref.path.split('/').pop()} from
+              {song && (
+                <label style={rowS}>
+                  Song from
                   <input
                     type="number"
-                    style={{ ...inp, width: 44 }}
+                    style={inp}
                     min={0}
                     step={0.5}
-                    value={c.from}
-                    onChange={(e) => setMore(more.map((x, k) => (k === i ? { ...x, from: num(e.target.value, 0, 36000) } : x)))}
+                    value={songAt}
+                    onChange={(e) => setSongAt(num(e.target.value, 0, 36000))}
                   />
-                  s
-                  <button style={button} onClick={() => setMore(more.filter((_, k) => k !== i))}>
-                    ×
-                  </button>
-                </span>
-              ))}
-              <button style={button} disabled={!clip || more.length >= 11} onClick={() => setPicking('more')}>
-                + Clip...
-              </button>
-            </div>
-            <div style={rowS}>
-              {PACES.map(([p, label]) => (
-                <button
-                  key={p}
-                  style={{ ...button, fontWeight: pace === p ? 700 : 400 }}
-                  disabled={!more.length && p !== 'off'}
-                  onClick={() => setPace(p)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div>
-              {!song
-                ? 'Add a song: the cuts land on its beat.'
-                : !grid
-                  ? songPeaks
-                    ? 'No steady beat found in this song, so there is nothing to cut on.'
-                    : 'Finding the beat...'
-                  : `${grid.bpm} BPM${multi ? ` · ${pieces.length} cuts across ${clips.length} clips` : ''}`}
-            </div>
-          </fieldset>
-          <fieldset style={fs}>
-            <legend>Captions</legend>
-            <textarea
-              rows={3}
-              value={lyrics}
-              onChange={(e) => setLyrics(e.target.value)}
-              placeholder="Paste lyrics or lines here, one per line"
-              style={{ ...inp, width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
-            />
-            <div style={rowS}>
-              Style
-              <select style={inp} value={capStyle} onChange={(e) => setCapStyle(e.target.value as TextStyle)}>
-                {TEXT_STYLES.map(([s, label]) => (
-                  <option key={s} value={s}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <button style={button} disabled={!lyrics.trim()} onClick={spread}>
-                Spread over clip
-              </button>
-              {tap ? (
-                <>
-                  <button style={{ ...button, fontWeight: 700, minWidth: 140 }} onClick={tapNow} title="T or Enter">
-                    TAP: {tapUnits[tap.times.length]}
-                  </button>
-                  <span>
-                    {tap.times.length}/{tapUnits.length}
-                  </span>
-                  <button style={button} onClick={() => finishTap(tap.times)}>
-                    Stop
-                  </button>
-                </>
-              ) : (
-                <button
-                  style={button}
-                  disabled={(!song && !clip) || hearing}
-                  onClick={autoTime}
-                  title="The server listens to the song (or the clip itself when there is no song) and times every word. Paste the lyrics first for your spelling, or leave them empty to write down what it hears"
-                >
-                  {hearing ? 'Listening...' : 'Auto timing'}
-                </button>
-              )}
-              {!tap && (
-                <button
-                  style={button}
-                  disabled={!clip || !lyrics.trim()}
-                  onClick={startTap}
-                  title="Play the edit and tap along to time the lyrics"
-                >
-                  Tap timing
-                </button>
-              )}
-              <button
-                style={button}
-                onClick={() =>
-                  setCaps([
-                    ...caps,
-                    {
-                      id: newId(),
-                      text: 'text',
-                      start: Math.round(t * 10) / 10,
-                      end: Math.min(duration, Math.round(t * 10) / 10 + 2),
-                      style: capStyle,
-                      size: 60,
-                      y: 50,
-                    },
-                  ])
-                }
-              >
-                + Caption at {t.toFixed(1)}s
-              </button>
-            </div>
-            <div style={{ maxHeight: 180, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {caps.map((c) => (
-                <div key={c.id} style={{ ...rowS, background: t >= c.start && t < c.end ? '#ffffe1' : undefined }}>
-                  <input style={{ ...inp, flex: 1, minWidth: 90 }} value={c.text} onChange={(e) => setCap(c.id, 'text', e.target.value)} />
-                  <input
-                    type="number"
-                    style={{ ...inp, width: 52 }}
-                    step={0.1}
-                    value={c.start}
-                    onChange={(e) => setCap(c.id, 'start', num(e.target.value, 0, duration))}
-                  />
-                  –
-                  <input
-                    type="number"
-                    style={{ ...inp, width: 52 }}
-                    step={0.1}
-                    value={c.end}
-                    onChange={(e) => setCap(c.id, 'end', num(e.target.value, 0, duration))}
-                  />
-                  <select style={inp} value={c.style} onChange={(e) => setCap(c.id, 'style', e.target.value)}>
-                    {TEXT_STYLES.map(([s, label]) => (
-                      <option key={s} value={s}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="range"
-                    min={20}
-                    max={200}
-                    value={c.size}
-                    title="Size"
-                    onChange={(e) => setCap(c.id, 'size', +e.target.value)}
-                    style={{ width: 60 }}
-                  />
-                  <input
-                    type="range"
-                    min={5}
-                    max={95}
-                    value={c.y}
-                    title="Height"
-                    onChange={(e) => setCap(c.id, 'y', +e.target.value)}
-                    style={{ width: 60 }}
-                  />
-                  <button style={button} onClick={() => setCaps(caps.filter((x) => x.id !== c.id))}>
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          </fieldset>
-          <fieldset style={fs}>
-            <legend>Render</legend>
-            <div style={rowS}>
-              Name
-              <input style={{ ...inp, flex: 1 }} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
-              .mp4
-              <button style={{ ...button, fontWeight: 700 }} disabled={!clip} onClick={render}>
-                Render MP4
-              </button>
-            </div>
-            {jobs
-              .filter((j) => !j.batch)
-              .map((j) => (
-                <div key={j.id}>
-                  {j.name}: {j.status === 'Rendering' ? `${j.pct}%` : j.status}
-                  {j.error && <span style={{ color: '#a00000' }}> {j.error}</span>}
-                </div>
-              ))}
-          </fieldset>
-          <fieldset style={fs}>
-            <legend>Batch</legend>
-            <div style={rowS}>
-              Make
-              <select style={inp} value={batchN} onChange={(e) => setBatchN(+e.target.value)}>
-                {[3, 6, 12, 24].map((n) => (
-                  <option key={n}>{n}</option>
-                ))}
-              </select>
-              versions, mixing the clip order and:
-            </div>
-            {more.length > 0 && (
-              <div style={rowS}>
-                Pace:
-                {PACES.filter(([p]) => p !== 'off').map(([p, label]) => (
-                  <label key={p} style={rowS}>
-                    <input type="checkbox" checked={vary.paces.includes(p)} onChange={() => toggle('paces', p)} />
-                    {label.split(' ')[0]}
-                  </label>
-                ))}
-              </div>
-            )}
-            <div style={rowS}>
-              Look:
-              {LOOKS.filter(([l]) => l !== 'none').map(([l, label]) => (
-                <label key={l} style={rowS}>
-                  <input type="checkbox" checked={vary.looks.includes(l)} onChange={() => toggle('looks', l)} />
-                  {label}
+                  s (the song replaces the clip's sound)
                 </label>
-              ))}
-            </div>
-            {caps.length > 0 && (
+              )}
+              {song && songPeaks && (
+                <canvas
+                  ref={songCv}
+                  width={600}
+                  height={40}
+                  title="Click where the song should start"
+                  style={{ width: '100%', height: 40, border: '2px inset #808080', cursor: 'pointer' }}
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const at = Math.round(((e.clientX - r.left) / r.width) * songLength * 10) / 10;
+                    setSongAt(at);
+                    if (audio.current) audio.current.currentTime = at + t;
+                  }}
+                />
+              )}
+            </fieldset>
+          )}
+          {show('cuts') && (
+            <fieldset style={fs}>
+              <legend>Beat cuts</legend>
               <div style={rowS}>
-                Lyrics:
-                {LYRIC_TEMPLATES.map((tp) => (
-                  <label key={tp.label} style={rowS}>
-                    <input type="checkbox" checked={vary.templates.includes(tp.label)} onChange={() => toggle('templates', tp.label)} />
-                    {tp.label}
+                Cut between this clip and
+                {more.map((c, i) => (
+                  <span key={keyOf(c.ref)} style={{ ...rowS, border: '1px solid #808080', padding: '0 3px' }}>
+                    {c.ref.path.split('/').pop()} from
+                    <input
+                      type="number"
+                      style={{ ...inp, width: 44 }}
+                      min={0}
+                      step={0.5}
+                      value={c.from}
+                      onChange={(e) => setMore(more.map((x, k) => (k === i ? { ...x, from: num(e.target.value, 0, 36000) } : x)))}
+                    />
+                    s
+                    <button style={button} onClick={() => setMore(more.filter((_, k) => k !== i))}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <button style={button} disabled={!clip || more.length >= 11} onClick={() => setPicking('more')}>
+                  + Clip...
+                </button>
+              </div>
+              <div style={rowS}>
+                {PACES.map(([p, label]) => (
+                  <button
+                    key={p}
+                    style={{ ...button, fontWeight: pace === p ? 700 : 400 }}
+                    disabled={!more.length && p !== 'off'}
+                    onClick={() => setPace(p)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div>
+                {!song
+                  ? 'Add a song: the cuts land on its beat.'
+                  : !grid
+                    ? songPeaks
+                      ? 'No steady beat found in this song, so there is nothing to cut on.'
+                      : 'Finding the beat...'
+                    : `${grid.bpm} BPM${multi ? ` · ${pieces.length} cuts across ${clips.length} clips` : ''}`}
+              </div>
+            </fieldset>
+          )}
+          {show('lyrics') && (
+            <fieldset style={fs}>
+              <legend>Captions</legend>
+              <textarea
+                rows={3}
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value)}
+                placeholder="Paste lyrics or lines here, one per line"
+                style={{ ...inp, width: '100%', resize: 'vertical', boxSizing: 'border-box' }}
+              />
+              <div style={rowS}>
+                Style
+                <select style={inp} value={capStyle} onChange={(e) => setCapStyle(e.target.value as TextStyle)}>
+                  {TEXT_STYLES.map(([s, label]) => (
+                    <option key={s} value={s}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <button style={button} disabled={!lyrics.trim()} onClick={spread}>
+                  Spread over clip
+                </button>
+                {tap ? (
+                  <>
+                    <button style={{ ...button, fontWeight: 700, minWidth: 140 }} onClick={tapNow} title="T or Enter">
+                      TAP: {tapUnits[tap.times.length]}
+                    </button>
+                    <span>
+                      {tap.times.length}/{tapUnits.length}
+                    </span>
+                    <button style={button} onClick={() => finishTap(tap.times)}>
+                      Stop
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    style={button}
+                    disabled={(!song && !clip) || hearing}
+                    onClick={autoTime}
+                    title="The server listens to the song (or the clip itself when there is no song) and times every word. Paste the lyrics first for your spelling, or leave them empty to write down what it hears"
+                  >
+                    {hearing ? 'Listening...' : 'Auto timing'}
+                  </button>
+                )}
+                {!tap && (
+                  <button
+                    style={button}
+                    disabled={!clip || !lyrics.trim()}
+                    onClick={startTap}
+                    title="Play the edit and tap along to time the lyrics"
+                  >
+                    Tap timing
+                  </button>
+                )}
+                <button
+                  style={button}
+                  onClick={() =>
+                    setCaps([
+                      ...caps,
+                      {
+                        id: newId(),
+                        text: 'text',
+                        start: Math.round(t * 10) / 10,
+                        end: Math.min(duration, Math.round(t * 10) / 10 + 2),
+                        style: capStyle,
+                        size: 60,
+                        y: 50,
+                      },
+                    ])
+                  }
+                >
+                  + Caption at {t.toFixed(1)}s
+                </button>
+              </div>
+              <div style={{ maxHeight: 180, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {caps.map((c) => (
+                  <div key={c.id} style={{ ...rowS, background: t >= c.start && t < c.end ? '#ffffe1' : undefined }}>
+                    <input
+                      style={{ ...inp, flex: 1, minWidth: 90 }}
+                      value={c.text}
+                      onChange={(e) => setCap(c.id, 'text', e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      style={{ ...inp, width: 52 }}
+                      step={0.1}
+                      value={c.start}
+                      onChange={(e) => setCap(c.id, 'start', num(e.target.value, 0, duration))}
+                    />
+                    –
+                    <input
+                      type="number"
+                      style={{ ...inp, width: 52 }}
+                      step={0.1}
+                      value={c.end}
+                      onChange={(e) => setCap(c.id, 'end', num(e.target.value, 0, duration))}
+                    />
+                    <select style={inp} value={c.style} onChange={(e) => setCap(c.id, 'style', e.target.value)}>
+                      {TEXT_STYLES.map(([s, label]) => (
+                        <option key={s} value={s}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="range"
+                      min={20}
+                      max={200}
+                      value={c.size}
+                      title="Size"
+                      onChange={(e) => setCap(c.id, 'size', +e.target.value)}
+                      style={{ width: 60 }}
+                    />
+                    <input
+                      type="range"
+                      min={5}
+                      max={95}
+                      value={c.y}
+                      title="Height"
+                      onChange={(e) => setCap(c.id, 'y', +e.target.value)}
+                      style={{ width: 60 }}
+                    />
+                    <button style={button} onClick={() => setCaps(caps.filter((x) => x.id !== c.id))}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          {show('export') && (
+            <fieldset style={fs}>
+              <legend>Render</legend>
+              <div style={rowS}>
+                Name
+                <input style={{ ...inp, flex: 1 }} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+                .mp4
+                <button style={{ ...button, fontWeight: 700 }} disabled={!clip} onClick={render}>
+                  Render MP4
+                </button>
+              </div>
+              {jobs
+                .filter((j) => !j.batch)
+                .map((j) => (
+                  <div key={j.id}>
+                    {j.name}: {j.status === 'Rendering' ? `${j.pct}%` : j.status}
+                    {j.error && <span style={{ color: '#a00000' }}> {j.error}</span>}
+                  </div>
+                ))}
+            </fieldset>
+          )}
+          {show('export') && (
+            <fieldset style={fs}>
+              <legend>Batch</legend>
+              <div style={rowS}>
+                Make
+                <select style={inp} value={batchN} onChange={(e) => setBatchN(+e.target.value)}>
+                  {[3, 6, 12, 24].map((n) => (
+                    <option key={n}>{n}</option>
+                  ))}
+                </select>
+                versions, mixing the clip order and:
+              </div>
+              {more.length > 0 && (
+                <div style={rowS}>
+                  Pace:
+                  {PACES.filter(([p]) => p !== 'off').map(([p, label]) => (
+                    <label key={p} style={rowS}>
+                      <input type="checkbox" checked={vary.paces.includes(p)} onChange={() => toggle('paces', p)} />
+                      {label.split(' ')[0]}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div style={rowS}>
+                Look:
+                {LOOKS.filter(([l]) => l !== 'none').map(([l, label]) => (
+                  <label key={l} style={rowS}>
+                    <input type="checkbox" checked={vary.looks.includes(l)} onChange={() => toggle('looks', l)} />
+                    {label}
                   </label>
                 ))}
               </div>
-            )}
-            <div style={rowS}>
-              <button style={{ ...button, fontWeight: 700 }} disabled={!clip} onClick={renderBatch}>
-                Render batch
-              </button>
-              <span style={{ color: '#555' }}>Inside a project they go to its Edits folder.</span>
-            </div>
-            {batch && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {jobs
-                  .filter((j) => j.batch === batch.id)
-                  .reverse()
-                  .map((j) => (
-                    <div
-                      key={j.id}
-                      style={{
-                        width: 110,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                        opacity: decided[j.id] === 'dropped' ? 0.35 : 1,
-                      }}
-                    >
-                      {j.status === 'Done' && decided[j.id] !== 'dropped' ? (
-                        <video
-                          src={`${fileUrl(j.space, j.path.split('/'))}?t=${token ?? ''}`}
-                          muted
-                          loop
-                          autoPlay
-                          playsInline
-                          style={{ width: 110, aspectRatio: `${W} / ${H}`, background: '#000', border: '2px inset #808080' }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 110,
-                            aspectRatio: `${W} / ${H}`,
-                            background: '#000',
-                            color: '#aaa',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            textAlign: 'center',
-                          }}
-                        >
-                          {decided[j.id] === 'dropped' ? 'Dropped' : j.status === 'Rendering' ? `${j.pct}%` : j.status}
-                        </div>
-                      )}
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {j.name.replace(/\.mp4$/, '')}
-                      </span>
-                      {j.status === 'Done' &&
-                        (decided[j.id] ? (
-                          <b>{decided[j.id] === 'dropped' ? '' : decided[j.id]}</b>
-                        ) : (
-                          <div style={rowS}>
-                            <button
-                              style={{ ...button, fontWeight: 700 }}
-                              onClick={() => decide(j, true)}
-                              title={batch.project ? `Becomes Edited footage on ${batch.project.title}, with a post day` : 'Keep it'}
-                            >
-                              Keep
-                            </button>
-                            <button style={button} onClick={() => decide(j, false)}>
-                              Drop
-                            </button>
-                          </div>
-                        ))}
-                    </div>
+              {caps.length > 0 && (
+                <div style={rowS}>
+                  Lyrics:
+                  {LYRIC_TEMPLATES.map((tp) => (
+                    <label key={tp.label} style={rowS}>
+                      <input type="checkbox" checked={vary.templates.includes(tp.label)} onChange={() => toggle('templates', tp.label)} />
+                      {tp.label}
+                    </label>
                   ))}
+                </div>
+              )}
+              <div style={rowS}>
+                <button style={{ ...button, fontWeight: 700 }} disabled={!clip} onClick={renderBatch}>
+                  Render batch
+                </button>
+                <span style={{ color: '#555' }}>Inside a project they go to its Edits folder.</span>
               </div>
-            )}
-          </fieldset>
+              {batch && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {jobs
+                    .filter((j) => j.batch === batch.id)
+                    .reverse()
+                    .map((j) => (
+                      <div
+                        key={j.id}
+                        style={{
+                          width: 110,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                          opacity: decided[j.id] === 'dropped' ? 0.35 : 1,
+                        }}
+                      >
+                        {j.status === 'Done' && decided[j.id] !== 'dropped' ? (
+                          <video
+                            src={`${fileUrl(j.space, j.path.split('/'))}?t=${token ?? ''}`}
+                            muted
+                            loop
+                            autoPlay
+                            playsInline
+                            style={{ width: 110, aspectRatio: `${W} / ${H}`, background: '#000', border: '2px inset #808080' }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 110,
+                              aspectRatio: `${W} / ${H}`,
+                              background: '#000',
+                              color: '#aaa',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              textAlign: 'center',
+                            }}
+                          >
+                            {decided[j.id] === 'dropped' ? 'Dropped' : j.status === 'Rendering' ? `${j.pct}%` : j.status}
+                          </div>
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {j.name.replace(/\.mp4$/, '')}
+                        </span>
+                        {j.status === 'Done' &&
+                          (decided[j.id] ? (
+                            <b>{decided[j.id] === 'dropped' ? '' : decided[j.id]}</b>
+                          ) : (
+                            <div style={rowS}>
+                              <button
+                                style={{ ...button, fontWeight: 700 }}
+                                onClick={() => decide(j, true)}
+                                title={batch.project ? `Becomes Edited footage on ${batch.project.title}, with a post day` : 'Keep it'}
+                              >
+                                Keep
+                              </button>
+                              <button style={button} onClick={() => decide(j, false)}>
+                                Drop
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </fieldset>
+          )}
         </div>
       </div>
-      <div style={statusBar}>
-        {msg || 'The preview is close to the final look; captions are exact. Space play/pause · ←/→ a frame (Shift: 1 s)'}
-      </div>
+      {(!narrow || msg) && (
+        <div style={narrow ? { ...statusBar, whiteSpace: 'normal' } : statusBar}>
+          {msg || 'The preview is close to the final look; captions are exact. Space play/pause · ←/→ a frame (Shift: 1 s)'}
+        </div>
+      )}
+      {narrow && (
+        <div style={{ display: 'flex', borderTop: '2px solid currentColor', flex: 'none' }}>
+          {TABS.map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              style={{
+                flex: 1,
+                minHeight: 44,
+                fontFamily: 'inherit',
+                fontSize: 12,
+                fontWeight: tab === k ? 700 : 400,
+                background: tab === k ? '#000' : '#fff',
+                color: tab === k ? '#fff' : '#000',
+                border: 'none',
+                borderLeft: k === 'templates' ? 'none' : '1px solid #000',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {picking && (
         <FilePicker
           title={picking === 'song' ? 'Pick a song' : 'Pick a video clip'}
@@ -1313,6 +1415,29 @@ const Editor: React.FC<{ initial?: FileRef }> = ({ initial }) => {
   );
 };
 
+const BASIC_TEMPLATES = [
+  ['lyric', 'Lyric video'],
+  ['stretch', 'Stretch edit'],
+  ['brat', 'brat promo'],
+  ['card', 'Black card intro'],
+  ['stacked', 'Big words'],
+] as const;
+const PROMOS = [
+  ['pov', 'POV text'],
+  ['foryou', 'For you if...'],
+  ['hook', 'Story hook'],
+  ['performance', 'Performance'],
+  ['bts', 'BTS'],
+  ['canvas', 'Canvas 8s'],
+] as const;
+type Tab = 'templates' | 'frame' | 'cuts' | 'lyrics' | 'export';
+const TABS: [Tab, string][] = [
+  ['templates', 'Templates'],
+  ['frame', 'Frame'],
+  ['cuts', 'Cuts'],
+  ['lyrics', 'Lyrics'],
+  ['export', 'Export'],
+];
 const fs: React.CSSProperties = {
   border: '2px groove #fff',
   margin: 0,

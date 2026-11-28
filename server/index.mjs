@@ -9972,16 +9972,24 @@ async function hear(pcm) {
   if (process.env.SK_FAKE_WORDS) return JSON.parse(process.env.SK_FAKE_WORDS); // the tests' stand-in for the model
   if (!asr) {
     asrError = '';
+    const began = Date.now();
+    console.log(`Lyric listener: loading ${WHISPER}`);
     asr = import('@huggingface/transformers')
       .then(({ pipeline, env }) => {
         env.cacheDir = join(DATA, 'models');
         return pipeline('automatic-speech-recognition', WHISPER);
       })
+      .then((m) => {
+        console.log(`Lyric listener: ready in ${Math.round((Date.now() - began) / 1000)} s`);
+        return m;
+      })
       .catch((e) => {
         asr = null;
         asrError = String(e.message || e).slice(0, 200);
+        console.error('Lyric listener failed to load:', e);
         throw e;
       });
+    asr.catch(() => {}); // a failed load is reported on the next try, not as an unhandled rejection
     fail(503, 'The lyric listener is downloading its model (first time only, a few minutes). Try again shortly.');
   }
   const model = await Promise.race([asr, new Promise((r) => setTimeout(r, 200, null))]);
